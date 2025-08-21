@@ -1,0 +1,421 @@
+[
+    {
+        "provider": "openai",
+        "models": [
+            {"name":"gpt-5", "web_search": "optional"},
+            {"name":"gpt-4.1", "web_search": "optional"},
+            {"name":"gpt-4o", "web_search": "optional"},
+            {"name":"o1", "web_search": "unsupported"},
+            {"name":"o1-pro", "web_search": "unsupported"},
+            {"name":"o3", "web_search": "optional"},
+            {"name":"o4-mini", "web_search": "optional"},
+            {"name":"o4-mini-deep-research", "web_search": "required"}
+        ],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://api.openai.com/v1/responses",
+            "headers": {
+                "Authorization": "Bearer {OPENAI_API_KEY_HERE}",
+                "Content-Type": "application/json"
+            },
+            "body": {
+                "model": "{model_name}",
+                "tools": [
+                    {
+                        "type": "web_search_preview"
+                    }
+                ],
+                "input": [
+                    {
+                        "role": "system",
+                        "content": "{system_prompt}"
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "{user_first_prompt}"
+                            },
+                            {
+                                "type": "input_image",
+                                "file_id": "{file_ID}"
+                            }
+                        ]
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "{model_first_response}"
+                    },
+                    {
+                        "role": "user",
+                        "content": "{user_second_prompt}"
+                    }
+                ]
+            }
+        },
+        "response_important_fields": {
+            "id": "{response_id}",
+            "model": "{model_name}",
+            "output": [
+                {
+                    "id": "{web_search_call_id}",
+                    "type": "web_search_call",
+                    "status": "completed",
+                    "action": {
+                        "type": "search",
+                        "query": "{web_search_query}"
+                    }
+                }
+                {
+                    "id": "{reasoning_id}",
+                    "type": "reasoning",
+                    "summary": []
+                },
+                {
+                    "id": "{message_id}",
+                    "type": "message",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "annotations": [
+                                {
+                                    "type": "url_citation",
+                                    "end_index": "{end_index}",
+                                    "start_index": "{start_index}",
+                                    "title": "{title}",
+                                    "url": "{url}"
+                                }
+                            ],
+                            "text": "{model_response}"
+                        }
+                    ],
+                    "role": "assistant"
+                }
+            ],
+            "usage": {
+                "input_tokens": "{input_tokens_count}",
+                "output_tokens": "{output_tokens_count}",
+                "output_tokens_details": {
+                    "reasoning_tokens": "{reasoning_tokens_count}"
+                },
+                "total_tokens": "{total_tokens_count}"
+            }
+        },
+        "upload_files_request": {
+            "request_type": "POST",
+            "base_url": "https://api.openai.com/v1/files",
+            "headers": {
+                "Authorization": "Bearer {OPENAI_API_KEY_HERE}",
+                "Content-Type": "multipart/form-data"
+            },
+            "data": {
+                "purpose": "{`assistants` for general use/`vision` for images}"
+            },
+            "files": {
+                "file": {open(file_path, "rb")}
+            }
+        },
+        "upload_files_response_important_fields": {
+            "id": "{file_ID}"
+        }
+    },
+    {
+        "provider": "poe",
+        "models": [
+            {
+                "name": "GPT-5",
+                "min_points": 250,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "GPT-4.1",
+                "min_points": 206,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "o3",
+                "min_points": 401,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "o4-mini",
+                "min_points": 243,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "Claude-Sonnet-4-Search",
+                "min_points": 870,
+                "web_search": "required"
+            },
+            {
+                "name": "Claude-Sonnet-4-Reasoning",
+                "min_points": 1628,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "Claude-Sonnet-3.5",
+                "min_points": 270,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "GLM-4.5",
+                "min_points": 180,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "Gemini-2.5-Pro",
+                "min_points": 335,
+                "web_search": "required"
+            },
+            {
+                "name": "Grok-3",
+                "min_points": 856,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "Grok-4",
+                "min_points": 773,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "GPT-OSS-120B-T",
+                "min_points": 50,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "DeepSeek-V3-FW",
+                "min_points": 300,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "DeepSeek-R1",
+                "min_points": 600,
+                "web_search": "unsupported"
+            },
+            {
+                "name": "Kimi-K2",
+                "min_points": 200,
+                "web_search": "unsupported"
+            }
+        ],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://api.poe.com/bot/{model_name}",
+            "headers": {
+                "Authorization": "Bearer {POE_API_KEY_HERE}",
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            "body": {
+                "version": "1.2",
+                "type": "query",
+                "query": [
+                    {
+                        "role": "system",
+                        "content": "{system_prompt}",
+                        "content_type": "text/markdown"
+                    },
+                    {
+                        "role": "user",
+                        "content": "{user_first_prompt}",
+                        "content_type": "text/markdown",
+                        "attachments": [
+                            {
+                                "url": "{file_URL}",
+                                "content_type": "{mime_type, e.g. image/png}",
+                                "name": "{file_name}",
+                                "inline_ref": None,
+                                "parsed_content": None
+                            }
+                        ]
+                    },
+                    {
+                        "role": "bot",
+                        "content": "{model_first_response}",
+                        "content_type": "text/markdown"
+                    },
+                    {
+                        "role": "user",
+                        "content": "{user_second_prompt}",
+                        "content_type": "text/markdown"
+                    }
+                ],
+                "user_id": "",
+                "conversation_id": "",
+                "message_id": ""
+            }
+        },
+        "response_important_fields": {
+            "response_format": "server_sent_events",
+            "events": [
+                {
+                    "event": "text",
+                    "data": {
+                        "text": "{model_response_partial_chunk}"
+                    }
+                },
+                {
+                    "event": "replace_response", 
+                    "data": {
+                        "text": "{replacement_text}"
+                    },
+                    "description": "Replaces all previous text content"
+                },
+                {
+                    "event": "error",
+                    "data": {
+                        "text": "{error_message}",
+                        "error_type": "{error_category}"
+                    }
+                },
+                {
+                    "event": "done",
+                    "data": {},
+                    "description": "Indicates end of response stream"
+                }
+            ]
+        },
+        "upload_files_request": {
+            "request_type": "POST",
+            "base_url": "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST",
+            "headers": {
+                "Authorization": "{POE_API_KEY_HERE}"
+            },
+            "files": {
+                "file": ("{file_name}", {open(file_path, "rb")}, "{mime_type, e.g. image/png}")
+            }
+        },
+        "upload_files_response_important_fields": {
+            "file_id": "{file_ID}",
+            "attachment_url": "{file_URL}",
+            "mime_type": "{mime_type, e.g. image/png}"
+        }
+    },
+    {
+        "provider": "google",
+        "models": [
+            {"name": "gemini-2.5-pro", "web_search": "optional"},
+            {"name": "gemini-2.5-flash", "web_search": "optional"},
+            {"name": "gemini-1.5-pro-latest", "web_search": "optional"},
+            {"name": "gemini-1.5-flash-latest", "web_search": "optional"}
+        ],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+            "params": {
+                "key": "{GOOGLE_API_KEY_HERE}"
+            },
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": {
+                "systemInstruction": {
+                    "parts": [
+                        {"text": "{system_prompt}"}
+                    ]
+                },
+                "tools": [
+                    {
+                        "google_search": {}
+                    }
+                ],
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": "{user_first_prompt}"},
+                            {
+                                "file_data": {
+                                    "mime_type": "{mime_type, e.g. image/png}",
+                                    "file_uri": "{file_URI}"
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "role": "model",
+                        "parts": [
+                            {"text": "{model_first_response}"}
+                        ]
+                    },
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": "{user_second_prompt}"}
+                        ]
+                    }
+                ]
+            }
+        },
+        "response_important_fields": {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "text": "{model_response}"
+                            }
+                        ],
+                        "role": "model"
+                    },
+                    "finishReason": "STOP",
+                    "groundingMetadata": {
+                        "searchEntryPoint": {
+                            "renderedContent": "{rendered_content_as_html_css}"
+                        },
+                        "groundingChunks": [
+                            {
+                                "web": {
+                                    "uri": "{web_search_uri}",
+                                    "title": "{web_search_title}"
+                                }
+                            }
+                        ],
+                        "groundingSupports": [
+                            {
+                                "segment": {
+                                    "startIndex": "{start_index}",
+                                    "endIndex": "{end_index}",
+                                    "text": "{relevant_segment}"
+                                },
+                                "groundingChunkIndices": ["{grounding_chunk_indices}"]
+                            }
+                        ],
+                        "webSearchQueries": [
+                            "{web_search_query}"
+                        ]
+                    }
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": "{input_tokens_count}",
+                "candidatesTokenCount": "{output_tokens_count}",
+                "totalTokenCount": "{total_tokens_count}",
+                "thoughtsTokenCount": "{reasoning_tokens_count}"
+            },
+            "modelVersion": "{model_name}",
+            "responseId": "{response_id}"
+        },
+        "upload_files_request": {
+            "request_type": "POST",
+            "base_url": "https://generativelanguage.googleapis.com/upload/v1beta/files",
+            "params": {
+                "key": "{GOOGLE_API_KEY_HERE}"
+            },
+            "headers": {
+                "Content-Type": "{mime_type, e.g. image/png}"
+            },
+            "data": {
+                {open(file_path, "rb").read()}
+            }
+        },
+        "upload_files_response_important_fields": {
+            "file": {
+                "expirationTime": "{expiration_time}",
+                "uri": "{file_URI}"
+            }
+        }
+    }
+]

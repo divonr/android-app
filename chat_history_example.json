@@ -1,0 +1,32 @@
+[
+    {
+        "user_name": "{user_name}",
+        "chat_history": [
+            {
+                "chat_id": "{chat_id}",
+                "preview_name": "{preview_name}",
+                "messages": [
+                    {
+                        "role": "{role}",
+                        "text": "{text}",
+                        "attachments": [
+                            {
+                                "local_file_path": "{local_file_path}",
+                                "file_name": "{file_name}",
+                                "mime_type": "{mime_type}",
+                                "file_OPENAI_id": "{file_ID}",
+                                "file_POE_url": "{file_URL}",
+                                "file_GOOGLE_uri": "{file_URI}"
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "user_name": "{user_name_2}",
+        "chat_history": [
+        ]
+    }
+]

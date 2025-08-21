@@ -1,0 +1,68 @@
+<resources>
+    <string name="app_name">ApI</string>
+    
+    <!-- Main screen Hebrew strings -->
+    <string name="system_prompt">System Prompt</string>
+    <string name="approve">אישור</string>
+    <string name="cancel">ביטול</string>
+    <string name="new_chat">שיחה חדשה</string>
+    <string name="settings">הגדרות</string>
+    <string name="user_settings">הגדרות משתמש</string>
+    <string name="api_keys">מפתחות API</string>
+    <string name="export_chat_history">יצוא היסטוריית צ\'אט</string>
+    <string name="add_api_key">הוסף מפתח API</string>
+    <string name="take_photo">צילום תמונה</string>
+    <string name="upload_file">העלאת קובץ</string>
+    <string name="select_file_option">בחר אפשרות</string>
+    <string name="remove_file">הסר קובץ</string>
+    <string name="via">via</string>
+    <string name="send_message">שלח הודעה</string>
+    <string name="type_message">הקלד הודעה...</string>
+    <string name="copy">העתק</string>
+    <string name="edit">ערוך</string>
+    <string name="resend">שלח שוב</string>
+    <string name="delete">מחק</string>
+    
+    <!-- Provider names -->
+    <string name="provider_openai">OpenAI</string>
+    <string name="provider_poe">Poe</string>
+    <string name="provider_google">Google</string>
+    
+    <!-- Permissions and errors -->
+    <string name="camera_permission_required">נדרשת הרשאת מצלמה</string>
+    <string name="storage_permission_required">נדרשת הרשאת אחסון</string>
+    <string name="error_loading_providers">שגיאה בטעינת ספקי השירות</string>
+    <string name="error_sending_message">שגיאה בשליחת ההודעה</string>
+    
+    <!-- User Settings strings -->
+    <string name="auto_generate_title">קבע את שם התצוגה לשיחה חדשה באמצעות AI</string>
+    <string name="ai_api_call_note">תבוצע קריאת API למודל קטן וזול</string>
+    <string name="select_model">בחר מודל</string>
+    <string name="auto_mode">אוטומטי</string>
+    <string name="update_title_on_extension">עדכן את השם אם השיחה מתארכת</string>
+    <string name="after_3_responses">לאחר 3 תגובות מהמודל</string>
+    <string name="openai_gpt5_nano">gpt-5-nano via OpenAI</string>
+    <string name="poe_gpt5_nano">gpt-5-nano via POE</string>
+    <string name="google_gemini_flash_lite">gemini-2.5-flash-lite via Google</string>
+    
+    <!-- Import chat history -->
+    <string name="import_chat_history">ייבוא היסטוריית צ\'אט מקובץ...</string>
+    <string name="beta">beta</string>
+    <string name="import_warning">שימו לב! בשלב זה שיחות נטענות ללא הקבצים המצורפים</string>
+    
+    <!-- Chat Context Menu strings -->
+    <string name="update_chat_name">עדכן שם שיחה</string>
+    <string name="update_chat_name_ai">עדכן שם שיחה באמצעות AI</string>
+    <string name="delete_chat">מחק</string>
+    <string name="delete_confirmation_title">מחיקת שיחה</string>
+    <string name="delete_confirmation_message">השיחה תימחק ולא תהיה אפשרות לשחזר אותה!</string>
+    <string name="enter_new_chat_name">הכנס שם חדש לשיחה</string>
+    <string name="chat_name">שם השיחה</string>
+    <string name="confirm">אישור</string>
+    <string name="rename_success">השם עודכן בהצלחה</string>
+
+    <!-- Multi-message mode -->
+    <string name="multi_message_mode">מצב הודעות מרובות</string>
+    <string name="multi_message_mode_explainer">במצב זה, ניתן לשלוח כמה הודעות ברצף לאותו הצ\'אט ורק לאחר לחיצה על כפתור \"השב\" המודל יענה ויתייחס לכולן ביחד.\nלא יחולו חיובים נוספים במצב זה, כי השאילתה נשלחת פעם אחת למודל עם כל ההודעות במקביל</string>
+    <string name="reply_now">השב</string>
+</resources>
