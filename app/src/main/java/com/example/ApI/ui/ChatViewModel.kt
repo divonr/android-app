@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.InputStream
 import java.nio.charset.Charset
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+import java.time.ZoneId
 
 class ChatViewModel(
     private val repository: DataRepository,
@@ -42,6 +45,10 @@ class ChatViewModel(
         )
         
         loadInitialData()
+    }
+    
+    private fun getCurrentDateTimeISO(): String {
+        return Instant.now().toString()
     }
 
     private fun loadInitialData() {
@@ -144,7 +151,9 @@ class ChatViewModel(
                         file_name = file.name,
                         mime_type = file.mimeType
                     )
-                }
+                },
+                model = null, // User messages don't have a model
+                datetime = getCurrentDateTimeISO()
             )
 
             var updatedChat = repository.addMessageToChat(
@@ -237,7 +246,9 @@ class ChatViewModel(
                                 val assistantMessage = Message(
                                     role = "assistant",
                                     text = fullText,
-                                    attachments = emptyList()
+                                    attachments = emptyList(),
+                                    model = currentModel,
+                                    datetime = getCurrentDateTimeISO()
                                 )
 
                                 val finalUpdatedChat = repository.addMessageToChat(
@@ -267,7 +278,9 @@ class ChatViewModel(
                                 val errorMessage = Message(
                                     role = "assistant",
                                     text = "שגיאה: $error",
-                                    attachments = emptyList()
+                                    attachments = emptyList(),
+                                    model = currentModel,
+                                    datetime = getCurrentDateTimeISO()
                                 )
 
                                 val finalUpdatedChat = repository.addMessageToChat(
@@ -317,7 +330,9 @@ class ChatViewModel(
                     val errorMessage = Message(
                         role = "assistant",
                         text = "שגיאה לא צפויה: ${e.message}",
-                        attachments = emptyList()
+                        attachments = emptyList(),
+                        model = currentModel,
+                        datetime = getCurrentDateTimeISO()
                     )
 
                     val finalUpdatedChat = repository.addMessageToChat(
@@ -378,7 +393,9 @@ class ChatViewModel(
                                 val assistantMessage = Message(
                                     role = "assistant",
                                     text = fullText,
-                                    attachments = emptyList()
+                                    attachments = emptyList(),
+                                    model = currentModel,
+                                    datetime = getCurrentDateTimeISO()
                                 )
 
                                 val finalUpdatedChat = repository.addMessageToChat(
@@ -407,7 +424,9 @@ class ChatViewModel(
                                 val errorMessage = Message(
                                     role = "assistant",
                                     text = "שגיאה: $error",
-                                    attachments = emptyList()
+                                    attachments = emptyList(),
+                                    model = currentModel,
+                                    datetime = getCurrentDateTimeISO()
                                 )
 
                                 val finalUpdatedChat = repository.addMessageToChat(
@@ -856,7 +875,9 @@ class ChatViewModel(
                                 val assistantMessage = Message(
                                     role = "assistant",
                                     text = fullText,
-                                    attachments = emptyList()
+                                    attachments = emptyList(),
+                                    model = currentModel,
+                                    datetime = getCurrentDateTimeISO()
                                 )
 
                                 val finalUpdatedChat = repository.addMessageToChat(
@@ -882,7 +903,9 @@ class ChatViewModel(
                                 val errorMessage = Message(
                                     role = "assistant",
                                     text = "שגיאה: $error",
-                                    attachments = emptyList()
+                                    attachments = emptyList(),
+                                    model = currentModel,
+                                    datetime = getCurrentDateTimeISO()
                                 )
 
                                 val finalUpdatedChat = repository.addMessageToChat(

@@ -49,6 +49,11 @@ import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import kotlin.math.min
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -685,6 +690,20 @@ fun MessageBubble(
     val alignment = if (isUser) Alignment.End else Alignment.Start
     var showContextMenu by remember { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
+    
+    // Format timestamp for display
+    val timeString = remember(message.datetime) {
+        message.datetime?.let {
+            try {
+                val instant = Instant.parse(it)
+                val formatter = DateTimeFormatter.ofPattern("HH:mm")
+                    .withZone(ZoneId.systemDefault())
+                formatter.format(instant)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -692,8 +711,33 @@ fun MessageBubble(
             .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalAlignment = alignment
     ) {
-        // Message bubble with modern design
-        Surface(
+        Row(
+            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.Bottom,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Model avatar (only for assistant messages)
+            if (!isUser && message.model != null) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = Primary.copy(alpha = 0.15f),
+                    modifier = Modifier
+                        .size(32.dp)
+                        .padding(end = 8.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = message.model.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                            color = Primary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+            
+            // Message bubble with modern design
+            Surface(
             shape = RoundedCornerShape(
                 topStart = if (isUser) 20.dp else 6.dp,
                 topEnd = if (isUser) 6.dp else 20.dp,
@@ -722,6 +766,17 @@ fun MessageBubble(
                     vertical = 12.dp
                 )
             ) {
+                // Show model name for assistant messages (like WhatsApp group sender name)
+                if (!isUser && message.model != null) {
+                    Text(
+                        text = message.model,
+                        color = Primary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+                
                 MarkdownText(
                     markdown = message.text,
                     style = TextStyle(
@@ -760,7 +815,20 @@ fun MessageBubble(
                         }
                     }
                 }
+                
+                // Show timestamp at the bottom (like WhatsApp)
+                if (timeString != null) {
+                    Text(
+                        text = timeString,
+                        color = if (isUser) Color.White.copy(alpha = 0.7f) else OnSurfaceVariant,
+                        fontSize = 11.sp,
+                        modifier = Modifier
+                            .align(if (isUser) Alignment.End else Alignment.Start)
+                            .padding(top = 4.dp)
+                    )
+                }
             }
+        }
         }
 
         // Context menu
@@ -829,6 +897,33 @@ fun MessageBubble(
                     }
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun DateDivider(
+    dateString: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = SurfaceVariant.copy(alpha = 0.8f),
+            shadowElevation = 1.dp
+        ) {
+            Text(
+                text = dateString,
+                color = OnSurfaceVariant,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            )
         }
     }
 }

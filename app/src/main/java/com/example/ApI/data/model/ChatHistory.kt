@@ -20,7 +20,9 @@ data class Chat(
 data class Message(
     val role: String, // "user", "assistant", "system"
     val text: String,
-    val attachments: List<Attachment> = emptyList()
+    val attachments: List<Attachment> = emptyList(),
+    val model: String? = null, // Model name that generated this response (for assistant messages)
+    val datetime: String? = null // ISO 8601 format timestamp when message was sent/received
 )
 
 @Serializable
