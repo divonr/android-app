@@ -7,6 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -319,15 +320,23 @@ fun ChatScreen(
                     }
                     
                     uiState.currentChat?.messages?.let { messages ->
-                                            items(messages.reversed()) { message ->
-                        MessageBubble(
-                            message = message,
-                            viewModel = viewModel,
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            isEditMode = uiState.isEditMode,
-                            isBeingEdited = uiState.editingMessage == message
-                        )
-                    }
+                        val reversedMessages = messages.reversed()
+                        itemsIndexed(reversedMessages) { index, message ->
+                            val isFirstMessage = index == 0
+                            val previousMessage = if (index > 0) reversedMessages[index - 1] else null
+                            val isSameSpeaker = previousMessage?.role == message.role
+                            
+                            val topPadding = if (isFirstMessage || !isSameSpeaker) 4.dp else 1.dp
+                            val bottomPadding = 4.dp
+                            
+                            MessageBubble(
+                                message = message,
+                                viewModel = viewModel,
+                                modifier = Modifier.padding(top = topPadding, bottom = bottomPadding),
+                                isEditMode = uiState.isEditMode,
+                                isBeingEdited = uiState.editingMessage == message
+                            )
+                        }
                     }
                 }
 
@@ -732,17 +741,25 @@ fun MessageBubble(
                 }
                 
                 imageAttachments.forEach { attachment ->
-                    AsyncImage(
-                        model = java.io.File(attachment.local_file_path!!),
-                        contentDescription = attachment.file_name,
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.Transparent,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 120.dp, max = 200.dp)
-                            .clickable {
-                                // TODO: Open full screen image viewer
-                            },
-                        contentScale = ContentScale.Crop
-                    )
+                            .padding(8.dp)
+                    ) {
+                        AsyncImage(
+                            model = java.io.File(attachment.local_file_path!!),
+                            contentDescription = attachment.file_name,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 120.dp, max = 200.dp)
+                                .clickable {
+                                    // TODO: Open image in system gallery
+                                },
+                            contentScale = ContentScale.Crop
+                        )
+                    }
                 }
                 
                 // Text and non-image content with padding
@@ -761,7 +778,7 @@ fun MessageBubble(
                                 style = TextStyle(
                                     color = if (isUser) Color.White else OnSurface,
                                     fontSize = 15.sp,
-                                    lineHeight = 22.sp,
+                                    lineHeight = 18.sp,
                                     letterSpacing = 0.sp
                                 )
                             )
@@ -1037,7 +1054,7 @@ fun StreamingMessageBubble(
                     style = TextStyle(
                         color = OnSurface,
                         fontSize = 15.sp,
-                        lineHeight = 22.sp,
+                        lineHeight = 18.sp,
                         letterSpacing = 0.sp
                     )
                 )
