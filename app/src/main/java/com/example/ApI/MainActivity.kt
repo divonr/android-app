@@ -1,5 +1,7 @@
 package com.example.ApI
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,18 +26,25 @@ class MainActivity : ComponentActivity() {
                 Surface(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    LLMChatApp()
+                    LLMChatApp(
+                        sharedIntent = intent
+                    )
                 }
             }
         }
     }
+    
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
 }
 
 @Composable
-fun LLMChatApp() {
+fun LLMChatApp(sharedIntent: Intent? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val repository = remember { DataRepository(context) }
-    val viewModel: ChatViewModel = viewModel { ChatViewModel(repository, context) }
+    val viewModel: ChatViewModel = viewModel { ChatViewModel(repository, context, sharedIntent) }
     
     val currentScreen by viewModel.currentScreen.collectAsState()
     val uiState by viewModel.uiState.collectAsState()

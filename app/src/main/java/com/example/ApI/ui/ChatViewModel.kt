@@ -3,7 +3,9 @@ package com.example.ApI.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.network.StreamingCallback
@@ -19,7 +21,8 @@ import java.time.ZoneId
 
 class ChatViewModel(
     private val repository: DataRepository,
-    private val context: Context
+    private val context: Context,
+    private val sharedIntent: Intent? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -45,6 +48,7 @@ class ChatViewModel(
         )
         
         loadInitialData()
+        handleSharedFiles()
     }
     
     private fun getCurrentDateTimeISO(): String {
@@ -118,12 +122,18 @@ class ChatViewModel(
 
     fun sendMessage() {
         val message = _uiState.value.currentMessage.trim()
-        if (message.isEmpty()) return
+        val hasFiles = _uiState.value.selectedFiles.isNotEmpty()
+        if (message.isEmpty() && !hasFiles) return
 
         val currentUser = _appSettings.value.current_user
         val currentChat = _uiState.value.currentChat ?: createNewChat(
-            // Generate preview name from first part of message
-            if (message.length > 30) "${message.take(30)}..." else message
+            // Generate preview name from first part of message or file name
+            when {
+                message.length > 30 -> "${message.take(30)}..."
+                message.isNotEmpty() -> message
+                hasFiles -> _uiState.value.selectedFiles.firstOrNull()?.name ?: "קובץ מצורף"
+                else -> "שיחה חדשה"
+            }
         )
 
         viewModelScope.launch {
@@ -144,7 +154,7 @@ class ChatViewModel(
 
             val userMessage = Message(
                 role = "user",
-                text = message,
+                text = if (message.isNotEmpty()) message else "[קובץ מצורף]",
                 attachments = _uiState.value.selectedFiles.map { file ->
                     Attachment(
                         local_file_path = file.localPath,
@@ -1204,4 +1214,43 @@ class ChatViewModel(
             else -> WebSearchSupport.UNSUPPORTED
         }
     }
+    
+    private fun handleSharedFiles() {
+        sharedIntent?.let { intent ->
+            when (intent.action) {
+                Intent.ACTION_SEND -> {
+                    // Handle shared text
+                    intent.getStringExtra(Intent.EXTRA_TEXT)?.let { sharedText ->
+                        _uiState.value = _uiState.value.copy(currentMessage = sharedText)
+                    }
+                    // Handle single file sharing
+                    intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { uri ->
+                        val fileName = getFileName(context, uri) ?: "shared_file"
+                        val mimeType = intent.type ?: context.contentResolver.getType(uri) ?: "application/octet-stream"
+                        addFileFromUri(uri, fileName, mimeType)
+                    }
+                }
+                Intent.ACTION_SEND_MULTIPLE -> {
+                    // Multiple files sharing
+                    intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.forEach { uri ->
+                        val fileName = getFileName(context, uri) ?: "shared_file"
+                        val mimeType = intent.type ?: context.contentResolver.getType(uri) ?: "application/octet-stream"
+                        addFileFromUri(uri, fileName, mimeType)
+                    }
+                }
+            }
+        }
+    }
+    
+    private fun getFileName(context: Context, uri: Uri): String? {
+        var fileName: String? = null
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (cursor.moveToFirst() && nameIndex >= 0) {
+                fileName = cursor.getString(nameIndex)
+            }
+        }
+        return fileName
+    }
+
 }

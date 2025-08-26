@@ -65,60 +65,6 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
     
-    // Track if user manually scrolled away from bottom
-    var userScrolledUp by remember { mutableStateOf(false) }
-    var lastScrollTime by remember { mutableStateOf(0L) }
-    
-    // Check if user is at the bottom of the chat
-    val isAtBottom by remember(listState) {
-        derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val firstVisibleIndex = listState.firstVisibleItemIndex
-            val firstVisibleOffset = listState.firstVisibleItemScrollOffset
-            
-            // With reverseLayout=true, bottom means first item (index 0) with small scroll offset tolerance
-            firstVisibleIndex == 0 && firstVisibleOffset <= 5
-        }
-    }
-    
-    // Detect when user manually scrolls during streaming
-    LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
-        if (uiState.isStreaming) {
-            // If user scrolled away from bottom during streaming, mark it
-            if (!isAtBottom) {
-                userScrolledUp = true
-            }
-        }
-    }
-    
-    // Reset scroll tracking when streaming starts/stops
-    LaunchedEffect(uiState.isStreaming) {
-        if (uiState.isStreaming) {
-            // When streaming starts, reset if user is at bottom
-            if (isAtBottom) {
-                userScrolledUp = false
-            }
-        } else {
-            // Reset when streaming stops
-            userScrolledUp = false
-        }
-    }
-    
-    // Handle streaming text updates with smooth scrolling
-    LaunchedEffect(uiState.streamingText) {
-        if (uiState.isStreaming && !userScrolledUp && uiState.streamingText.isNotEmpty()) {
-            val currentTime = System.currentTimeMillis()
-            // Throttle scrolling to every 100ms for smoother experience
-            if (currentTime - lastScrollTime >= 100) {
-                // Only scroll if still at bottom
-                if (isAtBottom) {
-                    listState.animateScrollToItem(0, scrollOffset = 0)
-                }
-                lastScrollTime = currentTime
-            }
-        }
-    }
-    
     LaunchedEffect(uiState.snackbarMessage) {
         uiState.snackbarMessage?.let {
             snackbarHostState.showSnackbar(
@@ -514,12 +460,12 @@ fun ChatScreen(
                                 // Send Button
                                 Surface(
                                     shape = RoundedCornerShape(20.dp),
-                                    color = if (uiState.currentMessage.isNotEmpty() && !uiState.isLoading && !uiState.isStreaming) 
+                                    color = if ((uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty()) && !uiState.isLoading && !uiState.isStreaming) 
                                         Primary else Primary.copy(alpha = 0.3f),
                                     modifier = Modifier
                                         .size(40.dp)
                                                                         .clickable(
-                                    enabled = uiState.currentMessage.isNotEmpty() && !uiState.isLoading && !uiState.isStreaming
+                                    enabled = (uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty()) && !uiState.isLoading && !uiState.isStreaming
                                 ) { 
                                     if (uiState.isEditMode) {
                                         viewModel.finishEditingMessage()
@@ -760,12 +706,7 @@ fun MessageBubble(
                     }
                 )
         ) {
-            Column(
-                modifier = Modifier.padding(
-                    horizontal = 16.dp,
-                    vertical = 12.dp
-                )
-            ) {
+            Column {
                 // Show model name for assistant messages (like WhatsApp group sender name)
                 if (!isUser && message.model != null) {
                     Text(
@@ -773,59 +714,102 @@ fun MessageBubble(
                         color = Primary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        modifier = Modifier.padding(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 12.dp,
+                            bottom = 4.dp
+                        )
                     )
                 }
                 
-                MarkdownText(
-                    markdown = message.text,
-                    style = TextStyle(
-                        color = if (isUser) Color.White else OnSurface,
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp,
-                        letterSpacing = 0.sp
+                // Show image attachments first (like WhatsApp) - fill the bubble
+                val imageAttachments = message.attachments.filter { 
+                    it.mime_type.startsWith("image/") && it.local_file_path != null 
+                }
+                val nonImageAttachments = message.attachments.filter { 
+                    !it.mime_type.startsWith("image/") || it.local_file_path == null 
+                }
+                
+                imageAttachments.forEach { attachment ->
+                    AsyncImage(
+                        model = java.io.File(attachment.local_file_path!!),
+                        contentDescription = attachment.file_name,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 120.dp, max = 200.dp)
+                            .clickable {
+                                // TODO: Open full screen image viewer
+                            },
+                        contentScale = ContentScale.Crop
                     )
-                )
-
-                // Show attachments with modern design
-                message.attachments.forEach { attachment ->
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isUser) Color.White.copy(alpha = 0.1f) else SurfaceVariant,
-                        modifier = Modifier.fillMaxWidth()
+                }
+                
+                // Text and non-image content with padding
+                val hasText = message.text.isNotEmpty() && message.text != "[קובץ מצורף]"
+                if (hasText || nonImageAttachments.isNotEmpty() || timeString != null) {
+                    Column(
+                        modifier = Modifier.padding(
+                            horizontal = 16.dp,
+                            vertical = if (imageAttachments.isNotEmpty()) 8.dp else 12.dp
+                        )
                     ) {
-                        Row(
-                            modifier = Modifier.padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add, // Use as attachment icon
-                                contentDescription = "Attachment",
-                                tint = if (isUser) Color.White.copy(alpha = 0.8f) else OnSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                        // Show text if exists and is not just placeholder
+                        if (hasText) {
+                            MarkdownText(
+                                markdown = message.text,
+                                style = TextStyle(
+                                    color = if (isUser) Color.White else OnSurface,
+                                    fontSize = 15.sp,
+                                    lineHeight = 22.sp,
+                                    letterSpacing = 0.sp
+                                )
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+
+                        // Show non-image attachments
+                        nonImageAttachments.forEach { attachment ->
+                            if (hasText || imageAttachments.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isUser) Color.White.copy(alpha = 0.1f) else SurfaceVariant,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add, // Use as attachment icon
+                                        contentDescription = "Attachment",
+                                        tint = if (isUser) Color.White.copy(alpha = 0.8f) else OnSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = attachment.file_name,
+                                        color = if (isUser) Color.White.copy(alpha = 0.9f) else OnSurfaceVariant,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                        
+                        // Show timestamp at the bottom (like WhatsApp)
+                        if (timeString != null) {
                             Text(
-                                text = attachment.file_name,
-                                color = if (isUser) Color.White.copy(alpha = 0.9f) else OnSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1
+                                text = timeString,
+                                color = if (isUser) Color.White.copy(alpha = 0.7f) else OnSurfaceVariant,
+                                fontSize = 11.sp,
+                                modifier = Modifier
+                                    .align(if (isUser) Alignment.End else Alignment.Start)
+                                    .padding(top = if (hasText || nonImageAttachments.isNotEmpty()) 4.dp else 0.dp)
                             )
                         }
                     }
-                }
-                
-                // Show timestamp at the bottom (like WhatsApp)
-                if (timeString != null) {
-                    Text(
-                        text = timeString,
-                        color = if (isUser) Color.White.copy(alpha = 0.7f) else OnSurfaceVariant,
-                        fontSize = 11.sp,
-                        modifier = Modifier
-                            .align(if (isUser) Alignment.End else Alignment.Start)
-                            .padding(top = 4.dp)
-                    )
                 }
             }
         }
