@@ -1,6 +1,13 @@
 package com.example.ApI.ui.screen
 
+import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -9,52 +16,51 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
+import androidx.core.view.drawToBitmap
+import coil.compose.AsyncImage
 import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.components.*
 import com.example.ApI.ui.theme.*
-import coil.compose.AsyncImage
 import dev.jeziellago.compose.markdowntext.MarkdownText
-import androidx.compose.foundation.Image
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.platform.LocalDensity
-import androidx.core.view.drawToBitmap
-import android.graphics.Bitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import kotlin.math.min
+import kotlinx.coroutines.launch
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlin.math.min
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +71,7 @@ fun ChatScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
     
     LaunchedEffect(uiState.snackbarMessage) {
         uiState.snackbarMessage?.let {
@@ -292,49 +299,106 @@ fun ChatScreen(
                 }
 
                 // Chat Messages
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    reverseLayout = true
-                ) {
-                    // Show streaming text if currently streaming
-                    if (uiState.isStreaming && uiState.streamingText.isNotEmpty()) {
-                        item {
-                            StreamingMessageBubble(
-                                text = uiState.streamingText,
-                                modifier = Modifier.padding(vertical = 4.dp)
-                            )
+                Box(modifier = Modifier.weight(1f)) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        reverseLayout = true
+                    ) {
+                        // Show streaming text if currently streaming
+                        if (uiState.isStreaming && uiState.streamingText.isNotEmpty()) {
+                            item {
+                                StreamingMessageBubble(
+                                    text = uiState.streamingText,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                            }
+                        }
+                        // Show temporary reply button bubble when multi-message mode is active
+                        if (uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading) {
+                            item {
+                                ReplyPromptBubble(
+                                    onClick = { viewModel.sendBufferedBatch() },
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                            }
+                        }
+                        
+                        uiState.currentChat?.messages?.let { messages ->
+                            val reversedMessages = messages.reversed()
+                            itemsIndexed(reversedMessages) { index, message ->
+                                val isFirstMessage = index == 0
+                                val previousMessage = if (index > 0) reversedMessages[index - 1] else null
+                                val isSameSpeaker = previousMessage?.role == message.role
+                                
+                                val topPadding = if (isFirstMessage || !isSameSpeaker) 4.dp else 1.dp
+                                val bottomPadding = 4.dp
+                                
+                                MessageBubble(
+                                    message = message,
+                                    viewModel = viewModel,
+                                    modifier = Modifier.padding(top = topPadding, bottom = bottomPadding),
+                                    isEditMode = uiState.isEditMode,
+                                    isBeingEdited = uiState.editingMessage == message
+                                )
+                            }
                         }
                     }
-                    // Show temporary reply button bubble when multi-message mode is active
-                    if (uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading) {
-                        item {
-                            ReplyPromptBubble(
-                                onClick = { viewModel.sendBufferedBatch() },
-                                modifier = Modifier.padding(vertical = 4.dp)
-                            )
-                        }
-                    }
+
+                    // Scroll-to-bottom button state management
+                    var showScrollButton by remember { mutableStateOf(false) }
+                    var hideButtonJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                     
-                    uiState.currentChat?.messages?.let { messages ->
-                        val reversedMessages = messages.reversed()
-                        itemsIndexed(reversedMessages) { index, message ->
-                            val isFirstMessage = index == 0
-                            val previousMessage = if (index > 0) reversedMessages[index - 1] else null
-                            val isSameSpeaker = previousMessage?.role == message.role
+                    // Detect scroll state - show button when user scrolls away from bottom
+                    LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
+                        val isAtBottom = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                        
+                        if (!isAtBottom && !showScrollButton) {
+                            // User scrolled away from bottom, show button
+                            showScrollButton = true
                             
-                            val topPadding = if (isFirstMessage || !isSameSpeaker) 4.dp else 1.dp
-                            val bottomPadding = 4.dp
-                            
-                            MessageBubble(
-                                message = message,
-                                viewModel = viewModel,
-                                modifier = Modifier.padding(top = topPadding, bottom = bottomPadding),
-                                isEditMode = uiState.isEditMode,
-                                isBeingEdited = uiState.editingMessage == message
+                            // Start auto-hide timer
+                            hideButtonJob?.cancel()
+                            hideButtonJob = launch {
+                                kotlinx.coroutines.delay(3000) // Hide after 3 seconds
+                                showScrollButton = false
+                            }
+                        } else if (isAtBottom) {
+                            // User is at bottom, hide button immediately
+                            hideButtonJob?.cancel()
+                            showScrollButton = false
+                        }
+                    }
+
+                    // Animated floating scroll button
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showScrollButton,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    ) {
+                        FloatingActionButton(
+                            onClick = { 
+                                coroutineScope.launch {
+                                    listState.animateScrollToItem(0) // Scroll to bottom (newest messages)
+                                }
+                                // Cancel auto-hide timer when button is clicked
+                                hideButtonJob?.cancel()
+                                showScrollButton = false
+                            },
+                            shape = CircleShape,
+                            containerColor = Primary,
+                            contentColor = Color.White,
+                            modifier = Modifier
+                                .padding(bottom = 16.dp)
+                                .size(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Scroll to bottom",
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                     }
@@ -645,6 +709,7 @@ fun MessageBubble(
     val alignment = if (isUser) Alignment.End else Alignment.Start
     var showContextMenu by remember { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     
     // Format timestamp for display
     val timeString = remember(message.datetime) {
@@ -755,7 +820,19 @@ fun MessageBubble(
                                 .fillMaxWidth()
                                 .heightIn(min = 120.dp, max = 200.dp)
                                 .clickable {
-                                    // TODO: Open image in system gallery
+                                    attachment.local_file_path?.let { path ->
+                                        val file = File(path)
+                                        try {
+                                            val uri = FileProvider.getUriForFile(context, context.applicationContext.packageName + ".fileprovider", file)
+                                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                setDataAndType(uri, attachment.mime_type)
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            // Handle exception if file provider fails or no app can handle the intent
+                                        }
+                                    }
                                 },
                             contentScale = ContentScale.Crop
                         )
@@ -792,7 +869,23 @@ fun MessageBubble(
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = if (isUser) Color.White.copy(alpha = 0.1f) else SurfaceVariant,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        attachment.local_file_path?.let { path ->
+                                            val file = File(path)
+                                            try {
+                                                val uri = FileProvider.getUriForFile(context, context.applicationContext.packageName + ".fileprovider", file)
+                                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                    setDataAndType(uri, attachment.mime_type)
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
+                                                context.startActivity(intent)
+                                            } catch (e: Exception) {
+                                                // Handle exception
+                                            }
+                                        }
+                                    }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(8.dp),
