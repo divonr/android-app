@@ -773,34 +773,45 @@ class ApiService(private val context: Context) {
             when (message.role) {
                 "user" -> {
                     val parts = mutableListOf<JsonElement>()
-                    parts.add(buildJsonObject {
-                        put("text", message.text)
-                    })
                     
-                    // Add file attachments
-                    message.attachments.forEach { attachment ->
+                    // Only add text if not empty
+                    if (message.text.isNotBlank()) {
                         parts.add(buildJsonObject {
-                            put("file_data", buildJsonObject {
-                                put("mime_type", attachment.mime_type)
-                                put("file_uri", attachment.file_GOOGLE_uri ?: "{file_URI}")
-                            })
+                            put("text", message.text)
                         })
                     }
                     
-                    conversationContents.add(buildJsonObject {
-                        put("role", "user")
-                        put("parts", JsonArray(parts))
-                    })
+                    // Add file attachments
+                    message.attachments.forEach { attachment ->
+                        if (!attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}") {
+                            parts.add(buildJsonObject {
+                                put("file_data", buildJsonObject {
+                                    put("mime_type", attachment.mime_type)
+                                    put("file_uri", attachment.file_GOOGLE_uri)
+                                })
+                            })
+                        }
+                    }
+                    
+                    // Only add if there are parts
+                    if (parts.isNotEmpty()) {
+                        conversationContents.add(buildJsonObject {
+                            put("role", "user")
+                            put("parts", JsonArray(parts))
+                        })
+                    }
                 }
                 "assistant" -> {
-                    conversationContents.add(buildJsonObject {
-                        put("role", "model")
-                        put("parts", buildJsonArray {
-                            add(buildJsonObject {
-                                put("text", message.text)
+                    if (message.text.isNotBlank()) {
+                        conversationContents.add(buildJsonObject {
+                            put("role", "model")
+                            put("parts", buildJsonArray {
+                                add(buildJsonObject {
+                                    put("text", message.text)
+                                })
                             })
                         })
-                    })
+                    }
                 }
             }
         }
@@ -830,9 +841,14 @@ class ApiService(private val context: Context) {
             put("contents", JsonArray(conversationContents))
         }
         
+        val requestBodyJson = json.encodeToString(requestBodyBuilder)
+        
+        // Log request for debugging (remove in production)
+        println("[DEBUG] Google API Request: $requestBodyJson")
+        
         // Send request
         val writer = OutputStreamWriter(connection.outputStream)
-        writer.write(json.encodeToString(requestBodyBuilder))
+        writer.write(requestBodyJson)
         writer.flush()
         writer.close()
         
@@ -848,6 +864,10 @@ class ApiService(private val context: Context) {
         reader.close()
         connection.disconnect()
         
+        // Log response for debugging (remove in production)
+        println("[DEBUG] Google API Response Code: $responseCode")
+        println("[DEBUG] Google API Response: $response")
+        
         if (responseCode >= 400) {
             return ApiResponse.Error("HTTP $responseCode: $response")
         }
@@ -855,23 +875,50 @@ class ApiService(private val context: Context) {
         // Parse response according to providers.json format
         try {
             val responseJson = json.parseToJsonElement(response).jsonObject
-            val candidates = responseJson["candidates"]?.jsonArray
             
-            if (candidates != null && candidates.isNotEmpty()) {
-                val firstCandidate = candidates[0].jsonObject
-                val content = firstCandidate["content"]?.jsonObject
-                val parts = content?.get("parts")?.jsonArray
-                
-                if (parts != null && parts.isNotEmpty()) {
-                    val firstPart = parts[0].jsonObject
-                    val responseText = firstPart["text"]?.jsonPrimitive?.content ?: ""
-                    return ApiResponse.Success(responseText)
-                }
+            // Check for error in response
+            val error = responseJson["error"]?.jsonObject
+            if (error != null) {
+                val errorMessage = error["message"]?.jsonPrimitive?.content ?: "Unknown Google API error"
+                val errorCode = error["code"]?.jsonPrimitive?.int
+                return ApiResponse.Error("Google API error ($errorCode): $errorMessage")
             }
             
-            return ApiResponse.Error("No valid response found in Google API response")
+            val candidates = responseJson["candidates"]?.jsonArray
+            
+            // Check if candidates exist and are not empty
+            if (candidates.isNullOrEmpty()) {
+                return ApiResponse.Error("No candidates returned from Google API. Possible content filtering or safety block.")
+            }
+            
+            val firstCandidate = candidates[0].jsonObject
+            
+            // Check finish reason for safety blocks
+            val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.content
+            if (finishReason != null && finishReason != "STOP") {
+                return ApiResponse.Error("Google API blocked response due to: $finishReason")
+            }
+            
+            val content = firstCandidate["content"]?.jsonObject
+            if (content == null) {
+                return ApiResponse.Error("No content in Google API candidate")
+            }
+            
+            val parts = content["parts"]?.jsonArray
+            if (parts.isNullOrEmpty()) {
+                return ApiResponse.Error("No parts in Google API content")
+            }
+            
+            val firstPart = parts[0].jsonObject
+            val responseText = firstPart["text"]?.jsonPrimitive?.content
+            
+            if (responseText.isNullOrBlank()) {
+                return ApiResponse.Error("Empty text response from Google API")
+            }
+            
+            return ApiResponse.Success(responseText)
         } catch (e: Exception) {
-            return ApiResponse.Error("Failed to parse Google response: ${e.message}")
+            return ApiResponse.Error("Failed to parse Google response: ${e.message}. Raw response: $response")
         }
     }
 
@@ -909,34 +956,45 @@ class ApiService(private val context: Context) {
                 when (message.role) {
                     "user" -> {
                         val parts = mutableListOf<JsonElement>()
-                        parts.add(buildJsonObject {
-                            put("text", message.text)
-                        })
                         
-                        // Add file attachments
-                        message.attachments.forEach { attachment ->
+                        // Only add text if not empty
+                        if (message.text.isNotBlank()) {
                             parts.add(buildJsonObject {
-                                put("file_data", buildJsonObject {
-                                    put("mime_type", attachment.mime_type)
-                                    put("file_uri", attachment.file_GOOGLE_uri ?: "{file_URI}")
-                                })
+                                put("text", message.text)
                             })
                         }
                         
-                        conversationContents.add(buildJsonObject {
-                            put("role", "user")
-                            put("parts", JsonArray(parts))
-                        })
+                        // Add file attachments
+                        message.attachments.forEach { attachment ->
+                            if (!attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}") {
+                                parts.add(buildJsonObject {
+                                    put("file_data", buildJsonObject {
+                                        put("mime_type", attachment.mime_type)
+                                        put("file_uri", attachment.file_GOOGLE_uri)
+                                    })
+                                })
+                            }
+                        }
+                        
+                        // Only add if there are parts
+                        if (parts.isNotEmpty()) {
+                            conversationContents.add(buildJsonObject {
+                                put("role", "user")
+                                put("parts", JsonArray(parts))
+                            })
+                        }
                     }
                     "assistant" -> {
-                        conversationContents.add(buildJsonObject {
-                            put("role", "model")
-                            put("parts", buildJsonArray {
-                                add(buildJsonObject {
-                                    put("text", message.text)
+                        if (message.text.isNotBlank()) {
+                            conversationContents.add(buildJsonObject {
+                                put("role", "model")
+                                put("parts", buildJsonArray {
+                                    add(buildJsonObject {
+                                        put("text", message.text)
+                                    })
                                 })
                             })
-                        })
+                        }
                     }
                 }
             }
@@ -966,22 +1024,44 @@ class ApiService(private val context: Context) {
                 put("contents", JsonArray(conversationContents))
             }
             
+            val requestBodyJson = json.encodeToString(requestBodyBuilder)
+            
+            // Log request for debugging (remove in production)
+            println("[DEBUG] Google Streaming API Request: $requestBodyJson")
+            
             // Send request
             val writer = OutputStreamWriter(connection.outputStream)
-            writer.write(json.encodeToString(requestBodyBuilder))
+            writer.write(requestBodyJson)
             writer.flush()
             writer.close()
             
             // Read streaming response
             val responseCode = connection.responseCode
-            val reader = if (responseCode >= 400) {
-                BufferedReader(InputStreamReader(connection.errorStream))
-                callback.onError("HTTP $responseCode")
+            
+            if (responseCode >= 400) {
+                if (responseCode == 400) {
+                    // Fallback for 400 Bad Request - try non-streaming version
+                    connection.disconnect()
+                    
+                    println("[DEBUG] Streaming failed with 400, trying fallback")
+                    val fallbackResponse = sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled)
+                    
+                    when (fallbackResponse) {
+                        is ApiResponse.Success -> {
+                            callback.onComplete(fallbackResponse.message)
+                        }
+                        is ApiResponse.Error -> {
+                            callback.onError("Streaming failed (400), fallback also failed: ${fallbackResponse.error}")
+                        }
+                    }
+                } else {
+                    val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                    callback.onError("HTTP $responseCode: $errorBody")
+                }
                 return
-            } else {
-                BufferedReader(InputStreamReader(connection.inputStream))
             }
             
+            val reader = BufferedReader(InputStreamReader(connection.inputStream))
             val fullResponse = StringBuilder()
             var line: String?
             
@@ -999,10 +1079,27 @@ class ApiService(private val context: Context) {
                     
                     try {
                         val chunkJson = json.parseToJsonElement(dataContent).jsonObject
+                        
+                        // Check for error in streaming response
+                        val error = chunkJson["error"]?.jsonObject
+                        if (error != null) {
+                            val errorMessage = error["message"]?.jsonPrimitive?.content ?: "Unknown Google API streaming error"
+                            callback.onError("Google API streaming error: $errorMessage")
+                            return
+                        }
+                        
                         val candidates = chunkJson["candidates"]?.jsonArray
                         
                         if (candidates != null && candidates.isNotEmpty()) {
                             val firstCandidate = candidates[0].jsonObject
+                            
+                            // Check for safety blocks in streaming
+                            val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.content
+                            if (finishReason != null && finishReason != "STOP") {
+                                callback.onError("Google API streaming blocked due to: $finishReason")
+                                return
+                            }
+                            
                             val content = firstCandidate["content"]?.jsonObject
                             val parts = content?.get("parts")?.jsonArray
                             
@@ -1017,6 +1114,9 @@ class ApiService(private val context: Context) {
                             }
                         }
                     } catch (jsonException: Exception) {
+                        // Log parsing errors for debugging
+                        println("[DEBUG] Error parsing streaming chunk: ${jsonException.message}")
+                        println("[DEBUG] Problematic chunk: $dataContent")
                         // Continue reading other chunks on JSON parsing error
                         continue
                     }
@@ -1026,7 +1126,12 @@ class ApiService(private val context: Context) {
             reader.close()
             connection.disconnect()
             
-            callback.onComplete(fullResponse.toString())
+            // Check if we got any response
+            if (fullResponse.isEmpty()) {
+                callback.onError("Google API streaming returned empty response")
+            } else {
+                callback.onComplete(fullResponse.toString())
+            }
         } catch (e: Exception) {
             callback.onError("Failed to send Google streaming message: ${e.message}")
         }
@@ -1043,4 +1148,11 @@ interface StreamingCallback {
 sealed class ApiResponse {
     data class Success(val message: String) : ApiResponse()
     data class Error(val error: String) : ApiResponse()
+}
+
+// Debug helper function to log HTTP request details
+private fun logHttpRequest(connection: HttpURLConnection, requestBody: String) {
+    println("[DEBUG] HTTP ${connection.requestMethod} ${connection.url}")
+    println("[DEBUG] Headers: ${connection.requestProperties}")
+    println("[DEBUG] Request Body: $requestBody")
 }
