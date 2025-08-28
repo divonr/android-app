@@ -28,7 +28,7 @@ class ChatViewModel(
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
-    private val _currentScreen = MutableStateFlow<Screen>(Screen.Chat)
+    private val _currentScreen = MutableStateFlow<Screen>(Screen.ChatHistory)
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
 
     private val _appSettings = MutableStateFlow(AppSettings("default", "openai", "gpt-4o"))
@@ -504,6 +504,10 @@ class ChatViewModel(
         }
     }
 
+    fun createNewChat(): Chat {
+        return createNewChat("שיחה חדשה")
+    }
+    
     fun createNewChat(previewName: String = "שיחה חדשה"): Chat {
         val currentUser = _appSettings.value.current_user
         val newChat = repository.createNewChat(currentUser, previewName, "")  // Reset system prompt
@@ -515,6 +519,10 @@ class ChatViewModel(
             chatHistory = updatedChatHistory,
             showChatHistory = false
         )
+        
+        // Navigate to the Chat screen to start the new chat
+        navigateToScreen(Screen.Chat)
+        
         return newChat
     }
     
@@ -815,6 +823,39 @@ class ChatViewModel(
             chatHistory = updatedChatHistory
         )
     }
+
+    // Confirm the edit and immediately resend from the edited message
+    fun confirmEditAndResend() {
+        val editingMessage = _uiState.value.editingMessage ?: return
+        val currentChat = _uiState.value.currentChat ?: return
+        val currentUser = _appSettings.value.current_user
+        val newText = _uiState.value.currentMessage.trim()
+        if (newText.isEmpty()) return
+
+        // Create the updated message
+        val updatedMessage = editingMessage.copy(text = newText)
+
+        // Replace the message in the repository
+        val updatedChat = repository.replaceMessageInChat(
+            currentUser,
+            currentChat.chat_id,
+            editingMessage,
+            updatedMessage
+        ) ?: return
+
+        // Update chat history in UI
+        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+        _uiState.value = _uiState.value.copy(
+            editingMessage = null,
+            isEditMode = false,
+            currentMessage = "",
+            currentChat = updatedChat,
+            chatHistory = updatedChatHistory
+        )
+
+        // Immediately resend from the updated message
+        resendFromMessage(updatedMessage)
+    }
     
     // Cancel editing without saving changes
     fun cancelEditingMessage() {
@@ -1094,12 +1135,14 @@ class ChatViewModel(
         )
     }
     
-    suspend fun renameChatManually(chat: Chat, newName: String) {
+    fun renameChat(chat: Chat, newName: String) {
         if (newName.isBlank()) return
         
-        val currentUser = _appSettings.value.current_user
-        updateChatPreviewName(chat.chat_id, newName.trim())
-        hideRenameDialog()
+        viewModelScope.launch {
+            val currentUser = _appSettings.value.current_user
+            updateChatPreviewName(chat.chat_id, newName.trim())
+            hideRenameDialog()
+        }
     }
     
     fun renameChatWithAI(chat: Chat) {

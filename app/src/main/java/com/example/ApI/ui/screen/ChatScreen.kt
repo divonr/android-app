@@ -20,11 +20,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -89,6 +92,10 @@ fun ChatScreen(
                 .fillMaxSize()
                 .background(Background)
         ) {
+            // Back cancels edit mode if active
+            BackHandler(enabled = uiState.isEditMode) {
+                viewModel.cancelEditingMessage()
+            }
             // Semi-transparent overlay for edit mode
             if (uiState.isEditMode) {
                 Box(
@@ -125,113 +132,11 @@ fun ChatScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Left side - Menu and settings
+                        // Left side - System Prompt only
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            var showSettingsDropdown by remember { mutableStateOf(false) }
-                            
-                            Box {
-                                Surface(
-                                    shape = MaterialTheme.shapes.medium,
-                                    color = SurfaceVariant,
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clickable { showSettingsDropdown = true }
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Settings,
-                                            contentDescription = stringResource(R.string.settings),
-                                            tint = OnSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                                
-                                DropdownMenu(
-                                    expanded = showSettingsDropdown,
-                                    onDismissRequest = { showSettingsDropdown = false },
-                                    modifier = Modifier.background(
-                                        Surface,
-                                        MaterialTheme.shapes.medium
-                                    )
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { 
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Settings,
-                                                    contentDescription = null,
-                                                    tint = OnSurfaceVariant,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                                Text(
-                                                    text = "הגדרות מתקדמות", 
-                                                    color = OnSurface,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                            }
-                                        },
-                                        onClick = {
-                                            viewModel.navigateToScreen(Screen.UserSettings)
-                                            showSettingsDropdown = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { 
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Build,
-                                                    contentDescription = null,
-                                                    tint = OnSurfaceVariant,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                                Text(
-                                                    text = stringResource(R.string.api_keys), 
-                                                    color = OnSurface,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                            }
-                                        },
-                                        onClick = {
-                                            viewModel.navigateToScreen(Screen.ApiKeys)
-                                            showSettingsDropdown = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { 
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                            ) {
-                                                Text(
-                                                    text = "⬇",
-                                                    color = OnSurfaceVariant,
-                                                    fontSize = 18.sp
-                                                )
-                                                Text(
-                                                    text = stringResource(R.string.export_chat_history), 
-                                                    color = OnSurface,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                            }
-                                        },
-                                        onClick = {
-                                            viewModel.exportChatHistory()
-                                            showSettingsDropdown = false
-                                        }
-                                    )
-                                }
-                            }
-                            
                             Surface(
                                 shape = MaterialTheme.shapes.medium,
                                 color = SurfaceVariant,
@@ -278,18 +183,18 @@ fun ChatScreen(
                             )
                         }
                         
-                        // Right side - Chat history
+                        // Right side - Back to chat history (arrow points outward)
                         Surface(
                             shape = MaterialTheme.shapes.medium,
                             color = SurfaceVariant,
                             modifier = Modifier
                                 .size(36.dp)
-                                .clickable { viewModel.showChatHistory() }
+                                .clickable { viewModel.navigateToScreen(Screen.ChatHistory) }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.List,
-                                    contentDescription = stringResource(R.string.new_chat),
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "Back to chat history",
                                     tint = OnSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -530,45 +435,69 @@ fun ChatScreen(
                                     }
                                 }
 
-                                // Send Button
-                                Surface(
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = if ((uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty()) && !uiState.isLoading && !uiState.isStreaming) 
-                                        Primary else Primary.copy(alpha = 0.3f),
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                                                        .clickable(
-                                    enabled = (uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty()) && !uiState.isLoading && !uiState.isStreaming
-                                ) { 
-                                    if (uiState.isEditMode) {
-                                        viewModel.finishEditingMessage()
-                                    } else {
-                                        viewModel.sendMessage()
-                                    }
-                                }
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        if (uiState.isLoading || uiState.isStreaming) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(20.dp),
-                                                color = Color.White,
-                                                strokeWidth = 2.dp
-                                            )
-                                        } else {
+                                // Edit-confirm and Send buttons
+                                if (uiState.isEditMode) {
+                                    // Confirm edit (check)
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = if (uiState.currentMessage.isNotEmpty() && !uiState.isLoading && !uiState.isStreaming) Primary else Primary.copy(alpha = 0.3f),
+                                        modifier = Modifier.size(40.dp).clickable(
+                                            enabled = uiState.currentMessage.isNotEmpty() && !uiState.isLoading && !uiState.isStreaming
+                                        ) { viewModel.finishEditingMessage() }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
                                             Icon(
-                                                imageVector = if (uiState.isEditMode) {
-                                                    Icons.Filled.Check
-                                                } else {
-                                                    Icons.AutoMirrored.Filled.Send
-                                                },
-                                                contentDescription = if (uiState.isEditMode) {
-                                                    "עדכן הודעה"
-                                                } else {
-                                                    stringResource(R.string.send_message)
-                                                },
+                                                imageVector = Icons.Filled.Check,
+                                                contentDescription = "עדכן הודעה",
                                                 tint = Color.White,
                                                 modifier = Modifier.size(18.dp)
                                             )
+                                        }
+                                    }
+                                    // Small gap
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    // Send after edit (check + resend)
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = if (uiState.currentMessage.isNotEmpty() && !uiState.isLoading && !uiState.isStreaming) Primary else Primary.copy(alpha = 0.3f),
+                                        modifier = Modifier.size(40.dp).clickable(
+                                            enabled = uiState.currentMessage.isNotEmpty() && !uiState.isLoading && !uiState.isStreaming
+                                        ) { viewModel.confirmEditAndResend() }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                                contentDescription = stringResource(R.string.send_message),
+                                                tint = Color.White,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    // Regular send
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = if ((uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty()) && !uiState.isLoading && !uiState.isStreaming) 
+                                            Primary else Primary.copy(alpha = 0.3f),
+                                        modifier = Modifier.size(40.dp).clickable(
+                                            enabled = (uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty()) && !uiState.isLoading && !uiState.isStreaming
+                                        ) { viewModel.sendMessage() }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            if (uiState.isLoading || uiState.isStreaming) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(20.dp),
+                                                    color = Color.White,
+                                                    strokeWidth = 2.dp
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                                    contentDescription = stringResource(R.string.send_message),
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }

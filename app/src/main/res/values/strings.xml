@@ -65,4 +65,9 @@
     <string name="multi_message_mode">מצב הודעות מרובות</string>
     <string name="multi_message_mode_explainer">במצב זה, ניתן לשלוח כמה הודעות ברצף לאותו הצ\'אט ורק לאחר לחיצה על כפתור \"השב\" המודל יענה ויתייחס לכולן ביחד.\nלא יחולו חיובים נוספים במצב זה, כי השאילתה נשלחת פעם אחת למודל עם כל ההודעות במקביל</string>
     <string name="reply_now">השב</string>
+    
+    <!-- Chat History Screen -->
+    <string name="rename">שנה שם</string>
+    <string name="chat_title">כותרת השיחה</string>
+    <string name="save">שמור</string>
 </resources>

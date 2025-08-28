@@ -41,3 +41,10 @@ val Gray600 = Color(0xFF495057)
 val Gray700 = Color(0xFF343A40)
 val Gray800 = Color(0xFF212529)
 val Gray900 = Color(0xFF0F1419)
+
+// Text colors for consistency
+val TextPrimary = OnSurface
+val TextSecondary = OnSurfaceVariant
+val Border = Gray500
+val ChatBubbleOutline = Gray400
+val ChatBubble = Gray600

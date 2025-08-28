@@ -55,6 +55,7 @@ data class ApiKeysUiState(
 )
 
 sealed class Screen {
+    object ChatHistory : Screen()
     object Chat : Screen()
     object ApiKeys : Screen()
     object UserSettings : Screen()

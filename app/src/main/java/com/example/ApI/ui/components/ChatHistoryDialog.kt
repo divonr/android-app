@@ -53,7 +53,7 @@ fun ChatHistoryDialog(
             onDismiss = { viewModel.hideRenameDialog() },
             onConfirm = { newName ->
                 coroutineScope.launch {
-                    viewModel.renameChatManually(chat, newName)
+                    viewModel.renameChat(chat, newName)
                 }
             }
         )
@@ -180,7 +180,7 @@ fun ChatHistoryPanel(
             onDismiss = { viewModel.hideRenameDialog() },
             onConfirm = { newName ->
                 coroutineScope.launch {
-                    viewModel.renameChatManually(chat, newName)
+                    viewModel.renameChat(chat, newName)
                 }
             }
         )

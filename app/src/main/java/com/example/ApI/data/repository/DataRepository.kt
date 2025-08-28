@@ -901,42 +901,26 @@ class DataRepository(private val context: Context) {
         availableProviders: List<Provider>,
         apiKeys: Map<String, String>
     ): Pair<Provider, String>? {
-        
-        // If preferred provider is specified, try to use it
-        if (preferredProvider != null) {
+        // Helper to pick the first model name defined for a provider
+        fun firstModelName(p: Provider): String? = p.models.firstOrNull()?.name
+
+        // If preferred provider is specified, try to use it when key exists
+        if (preferredProvider != null && apiKeys.containsKey(preferredProvider)) {
             val provider = availableProviders.find { it.provider == preferredProvider }
-            if (provider != null && apiKeys.containsKey(preferredProvider)) {
-                val model = getModelForProvider(preferredProvider)
-                if (model != null) return Pair(provider, model)
-            }
+            val model = provider?.let { firstModelName(it) }
+            if (provider != null && model != null) return Pair(provider, model)
         }
-        
+
         // Priority order: OpenAI > Google > POE
         val priorityOrder = listOf("openai", "google", "poe")
-        
         for (providerName in priorityOrder) {
-            if (apiKeys.containsKey(providerName)) {
-                val provider = availableProviders.find { it.provider == providerName }
-                if (provider != null) {
-                    val model = getModelForProvider(providerName)
-                    if (model != null) return Pair(provider, model)
-                }
-            }
+            if (!apiKeys.containsKey(providerName)) continue
+            val provider = availableProviders.find { it.provider == providerName } ?: continue
+            val model = firstModelName(provider) ?: continue
+            return Pair(provider, model)
         }
-        
+
         return null
-    }
-    
-    /**
-     * Get the appropriate model for each provider based on requirements
-     */
-    private fun getModelForProvider(providerName: String): String? {
-        return when (providerName) {
-            "openai" -> "gpt-5-nano"
-            "poe" -> "GPT-5-nano"
-            "google" -> "gemini-2.5-flash-lite"
-            else -> null
-        }
     }
     
     /**

@@ -52,6 +52,8 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    // Material Icons Extended (needed for Icons.Default.Key, Icons.Default.Forum)
+    implementation("androidx.compose.material:material-icons-extended")
     
     // ViewModel
     implementation(libs.androidx.lifecycle.viewmodel.compose)

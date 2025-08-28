@@ -14,7 +14,20 @@ data class Chat(
     val preview_name: String,
     val messages: List<Message>,
     val systemPrompt: String = ""
-)
+) {
+    // Convenience properties
+    val title: String get() = preview_name
+    // Keep timestamp for compatibility, but do not fake current time when missing
+    val timestamp: Long? get() = messages.lastOrNull()?.datetime?.let {
+        try {
+            java.time.Instant.parse(it).toEpochMilli()
+        } catch (e: Exception) {
+            null
+        }
+    }
+    val model: String get() = messages.lastOrNull { it.role == "assistant" }?.model ?: "gpt-4o"
+    val id: String get() = chat_id
+}
 
 @Serializable
 data class Message(
@@ -23,7 +36,10 @@ data class Message(
     val attachments: List<Attachment> = emptyList(),
     val model: String? = null, // Model name that generated this response (for assistant messages)
     val datetime: String? = null // ISO 8601 format timestamp when message was sent/received
-)
+) {
+    // Convenience property
+    val content: String get() = text
+}
 
 @Serializable
 data class Attachment(
