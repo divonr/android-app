@@ -218,13 +218,32 @@ class DataRepository(private val context: Context) {
             messages = emptyList(),
             systemPrompt = systemPrompt
         )
-        
+
         val chatHistory = loadChatHistory(username)
         val updatedHistory = chatHistory.copy(
             chat_history = chatHistory.chat_history + newChat
         )
         saveChatHistory(updatedHistory)
-        
+
+        return newChat
+    }
+
+    fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat {
+        val chatId = UUID.randomUUID().toString()
+        val newChat = Chat(
+            chat_id = chatId,
+            preview_name = previewName,
+            messages = emptyList(),
+            systemPrompt = systemPrompt,
+            group = groupId
+        )
+
+        val chatHistory = loadChatHistory(username)
+        val updatedHistory = chatHistory.copy(
+            chat_history = chatHistory.chat_history + newChat
+        )
+        saveChatHistory(updatedHistory)
+
         return newChat
     }
     

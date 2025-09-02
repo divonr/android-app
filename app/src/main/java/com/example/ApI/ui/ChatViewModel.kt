@@ -526,7 +526,31 @@ class ChatViewModel(
         
         return newChat
     }
-    
+
+    fun createNewChatInGroup(groupId: String): Chat {
+        return createNewChatInGroup(groupId, "שיחה חדשה")
+    }
+
+    fun createNewChatInGroup(groupId: String, previewName: String = "שיחה חדשה"): Chat {
+        val currentUser = _appSettings.value.current_user
+
+        // Create new chat with empty system prompt (group system prompt will be handled separately)
+        val newChat = repository.createNewChatInGroup(currentUser, previewName, groupId, "")
+        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+
+        _uiState.value = _uiState.value.copy(
+            currentChat = newChat,
+            systemPrompt = "",  // Start with empty system prompt
+            chatHistory = updatedChatHistory,
+            showChatHistory = false
+        )
+
+        // Navigate to the Chat screen to start the new chat
+        navigateToScreen(Screen.Chat)
+
+        return newChat
+    }
+
     fun selectChat(chat: Chat) {
         _uiState.value = _uiState.value.copy(
             currentChat = chat,

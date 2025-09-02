@@ -81,11 +81,35 @@ fun GroupScreen(
     }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        Box(
+        Scaffold(
             modifier = modifier
                 .fillMaxSize()
-                .background(Background)
+                .background(Background),
+            floatingActionButton = {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        uiState.currentGroup?.let { group ->
+                            viewModel.createNewChatInGroup(group.group_id)
+                        }
+                    },
+                    containerColor = Primary,
+                    contentColor = Color.White,
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "New Chat in Group",
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            },
+            containerColor = Background
         ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(it)
+            ) {
             // Back handler for Android back button
             BackHandler {
                 viewModel.navigateToScreen(Screen.ChatHistory)
@@ -417,13 +441,14 @@ fun GroupScreen(
                 )
             }
 
-            // System Prompt Dialog
-            if (uiState.showSystemPromptDialog) {
-                SystemPromptDialog(
-                    currentPrompt = uiState.systemPrompt,
-                    onConfirm = { viewModel.updateGroupSystemPrompt(it) },
-                    onDismiss = { viewModel.hideSystemPromptDialog() }
-                )
+                // System Prompt Dialog
+                if (uiState.showSystemPromptDialog) {
+                    SystemPromptDialog(
+                        currentPrompt = uiState.systemPrompt,
+                        onConfirm = { viewModel.updateGroupSystemPrompt(it) },
+                        onDismiss = { viewModel.hideSystemPromptDialog() }
+                    )
+                }
             }
         }
     }

@@ -173,70 +173,64 @@ fun ChatHistoryScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
-                    // Organize chats by groups
-                    val (groupedChats, ungroupedChats) = organizeChatsByGroups(uiState.chatHistory, uiState.groups)
+                    // Organize and sort all items (groups and individual chats) by most recent activity
+                    val sortedItems = organizeAndSortAllItems(uiState.chatHistory, uiState.groups)
 
-                    // Display groups first
-                    groupedChats.forEach { (group, chats) ->
-                        val isExpanded = uiState.expandedGroups.contains(group.group_id)
+                    sortedItems.forEach { item ->
+                        when (item) {
+                            is ChatListItem.GroupItem -> {
+                                val isExpanded = uiState.expandedGroups.contains(item.group.group_id)
 
-                        item(key = "group_${group.group_id}") {
-                            GroupItem(
-                                group = group,
-                                isExpanded = isExpanded,
-                                chatCount = chats.size,
-                                onGroupClick = { viewModel.navigateToGroup(group.group_id) },
-                                onToggleExpansion = { viewModel.toggleGroupExpansion(group.group_id) }
-                            )
-                        }
-
-                        if (isExpanded) {
-                            // Sort chats within group by last message timestamp
-                            val sortedGroupChats = chats.sortedWith(
-                                compareByDescending<com.example.ApI.data.model.Chat> { getLastTimestampOrNull(it) != null }
-                                    .thenByDescending { getLastTimestampOrNull(it) ?: Long.MIN_VALUE }
-                            )
-
-                            items(
-                                items = sortedGroupChats,
-                                key = { "grouped_chat_${it.id}" }
-                            ) { chat ->
-                                ChatHistoryItem(
-                                    chat = chat,
-                                    onClick = {
-                                        viewModel.selectChat(chat)
-                                        viewModel.navigateToScreen(Screen.Chat)
-                                    },
-                                    onLongClick = { offset ->
-                                        viewModel.showChatContextMenu(chat, offset)
-                                    },
-                                    modifier = Modifier.padding(start = 32.dp) // Indent grouped chats
-                                )
-                            }
-                        }
-                    }
-
-                    // Display ungrouped chats
-                    if (ungroupedChats.isNotEmpty()) {
-                        val sortedUngroupedChats = ungroupedChats.sortedWith(
-                            compareByDescending<com.example.ApI.data.model.Chat> { getLastTimestampOrNull(it) != null }
-                                .thenByDescending { getLastTimestampOrNull(it) ?: Long.MIN_VALUE }
-                        )
-
-                        items(
-                            items = sortedUngroupedChats,
-                            key = { "ungrouped_chat_${it.id}" }
-                        ) { chat ->
-                            ChatHistoryItem(
-                                chat = chat,
-                                onClick = {
-                                    viewModel.selectChat(chat)
-                                    viewModel.navigateToScreen(Screen.Chat)
-                                },
-                                onLongClick = { offset ->
-                                    viewModel.showChatContextMenu(chat, offset)
+                                item(key = "group_${item.group.group_id}") {
+                                    GroupItem(
+                                        group = item.group,
+                                        isExpanded = isExpanded,
+                                        chatCount = item.chats.size,
+                                        onGroupClick = { viewModel.navigateToGroup(item.group.group_id) },
+                                        onToggleExpansion = { viewModel.toggleGroupExpansion(item.group.group_id) }
+                                    )
                                 }
-                            )
+
+                                if (isExpanded) {
+                                    // Sort chats within group by last message timestamp
+                                    val sortedGroupChats = item.chats.sortedWith(
+                                        compareByDescending<com.example.ApI.data.model.Chat> { getLastTimestampOrNull(it) != null }
+                                            .thenByDescending { getLastTimestampOrNull(it) ?: Long.MIN_VALUE }
+                                    )
+
+                                    items(
+                                        items = sortedGroupChats,
+                                        key = { "grouped_chat_${it.id}" }
+                                    ) { chat ->
+                                        ChatHistoryItem(
+                                            chat = chat,
+                                            onClick = {
+                                                viewModel.selectChat(chat)
+                                                viewModel.navigateToScreen(Screen.Chat)
+                                            },
+                                            onLongClick = { offset ->
+                                                viewModel.showChatContextMenu(chat, offset)
+                                            },
+                                            modifier = Modifier.padding(start = 32.dp) // Indent grouped chats
+                                        )
+                                    }
+                                }
+                            }
+
+                            is ChatListItem.ChatItem -> {
+                                item(key = "chat_${item.chat.id}") {
+                                    ChatHistoryItem(
+                                        chat = item.chat,
+                                        onClick = {
+                                            viewModel.selectChat(item.chat)
+                                            viewModel.navigateToScreen(Screen.Chat)
+                                        },
+                                        onLongClick = { offset ->
+                                            viewModel.showChatContextMenu(item.chat, offset)
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -907,41 +901,44 @@ fun getLastTimestampOrNull(chat: Chat): Long? {
     }
 }
 
-// Helper: organize chats by groups and sort groups by last message timestamp
-private fun organizeChatsByGroups(
+// Data class to represent either a group or an individual chat
+private sealed class ChatListItem {
+    abstract val timestamp: Long
+
+    data class GroupItem(val group: ChatGroup, val chats: List<Chat>) : ChatListItem() {
+        override val timestamp: Long = chats.maxOfOrNull { getLastTimestampOrNull(it) ?: Long.MIN_VALUE } ?: Long.MIN_VALUE
+    }
+
+    data class ChatItem(val chat: Chat) : ChatListItem() {
+        override val timestamp: Long = getLastTimestampOrNull(chat) ?: Long.MIN_VALUE
+    }
+}
+
+// Helper: organize and sort all items (groups and individual chats) by most recent activity
+private fun organizeAndSortAllItems(
     chats: List<Chat>,
     groups: List<ChatGroup>
-): Pair<List<Pair<ChatGroup, List<Chat>>>, List<Chat>> {
-    val groupedChats = mutableListOf<Pair<ChatGroup, List<Chat>>>()
-    val ungroupedChats = mutableListOf<Chat>()
+): List<ChatListItem> {
+    val items = mutableListOf<ChatListItem>()
 
     // Separate chats by group
     val chatsByGroup = chats.groupBy { it.group }
 
-    // Process groups
-    val sortedGroups = groups.sortedWith { g1, g2 ->
-        // Sort groups by the latest message timestamp in their chats
-        val g1LatestTimestamp = chatsByGroup[g1.group_id]?.maxOfOrNull {
-            getLastTimestampOrNull(it) ?: Long.MIN_VALUE
-        } ?: Long.MIN_VALUE
-
-        val g2LatestTimestamp = chatsByGroup[g2.group_id]?.maxOfOrNull {
-            getLastTimestampOrNull(it) ?: Long.MIN_VALUE
-        } ?: Long.MIN_VALUE
-
-        g2LatestTimestamp.compareTo(g1LatestTimestamp) // Descending order
-    }
-
-    // Add grouped chats
-    sortedGroups.forEach { group ->
+    // Add groups with their chats
+    groups.forEach { group ->
         val groupChats = chatsByGroup[group.group_id] ?: emptyList()
         if (groupChats.isNotEmpty()) {
-            groupedChats.add(group to groupChats)
+            items.add(ChatListItem.GroupItem(group, groupChats))
         }
     }
 
     // Add ungrouped chats
-    chatsByGroup[null]?.let { ungroupedChats.addAll(it) }
+    chatsByGroup[null]?.forEach { chat ->
+        items.add(ChatListItem.ChatItem(chat))
+    }
 
-    return Pair(groupedChats, ungroupedChats)
+    // Sort all items by timestamp (descending order - newest first)
+    return items.sortedWith { a, b ->
+        b.timestamp.compareTo(a.timestamp)
+    }
 }
