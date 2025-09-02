@@ -32,10 +32,10 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.ChatViewModel
-import com.example.ApI.ui.components.ContextMenu
 import com.example.ApI.ui.theme.*
 import java.time.Instant
 import java.time.LocalDate
@@ -194,18 +194,19 @@ fun ChatHistoryScreen(
             
             // Context menu for chat actions
             uiState.chatContextMenu?.let { menuState ->
-                ContextMenu(
-                    expanded = true,
+                ChatContextMenu(
+                    chat = menuState.chat,
+                    position = menuState.position,
                     onDismiss = { viewModel.hideChatContextMenu() },
-                    offset = menuState.position,
-                    items = listOf(
-                        stringResource(R.string.rename) to {
-                            viewModel.showRenameDialog(menuState.chat)
-                        },
-                        stringResource(R.string.delete) to {
-                            viewModel.showDeleteConfirmation(menuState.chat)
-                        }
-                    )
+                    onRename = {
+                        viewModel.showRenameDialog(it)
+                    },
+                    onAIRename = {
+                        viewModel.renameChatWithAI(it)
+                    },
+                    onDelete = {
+                        viewModel.showDeleteConfirmation(it)
+                    }
                 )
             }
             
@@ -453,6 +454,97 @@ fun formatTimestamp(timestamp: Long): String {
             dayOfWeek
         }
         else -> date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+    }
+}
+
+@Composable
+private fun ChatContextMenu(
+    chat: Chat,
+    position: DpOffset,
+    onDismiss: () -> Unit,
+    onRename: (Chat) -> Unit,
+    onAIRename: (Chat) -> Unit,
+    onDelete: (Chat) -> Unit
+) {
+    DropdownMenu(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        offset = position,
+        properties = PopupProperties(focusable = true),
+        modifier = Modifier
+            .background(
+                Surface,
+                RoundedCornerShape(16.dp)
+            )
+            .width(200.dp)
+    ) {
+        DropdownMenuItem(
+            text = {
+                Text(
+                    stringResource(R.string.update_chat_name),
+                    color = OnSurface,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            onClick = {
+                onRename(chat)
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = null,
+                    tint = Primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        )
+
+        DropdownMenuItem(
+            text = {
+                Text(
+                    stringResource(R.string.update_chat_name_ai),
+                    color = OnSurface,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            onClick = {
+                onAIRename(chat)
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Build,
+                    contentDescription = null,
+                    tint = AccentBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        )
+
+        HorizontalDivider(
+            color = OnSurface.copy(alpha = 0.1f),
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+
+        DropdownMenuItem(
+            text = {
+                Text(
+                    stringResource(R.string.delete_chat),
+                    color = AccentRed,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            onClick = {
+                onDelete(chat)
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = AccentRed,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        )
     }
 }
 
