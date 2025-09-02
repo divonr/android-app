@@ -5,7 +5,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class UserChatHistory(
     val user_name: String,
-    val chat_history: List<Chat>
+    val chat_history: List<Chat>,
+    val groups: List<ChatGroup> = emptyList()
 )
 
 @Serializable
@@ -13,7 +14,8 @@ data class Chat(
     val chat_id: String,
     val preview_name: String,
     val messages: List<Message>,
-    val systemPrompt: String = ""
+    val systemPrompt: String = "",
+    val group: String? = null
 ) {
     // Convenience properties
     val title: String get() = preview_name
@@ -49,4 +51,12 @@ data class Attachment(
     val file_OPENAI_id: String? = null,
     val file_POE_url: String? = null,
     val file_GOOGLE_uri: String? = null
+)
+
+@Serializable
+data class ChatGroup(
+    val group_id: String,
+    val group_name: String,
+    val system_prompt: String? = null,
+    val group_attachments: List<Attachment> = emptyList()
 )

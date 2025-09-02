@@ -93,6 +93,7 @@ class ChatViewModel(
                 systemPrompt = currentChat?.systemPrompt ?: "",
                 currentChat = currentChat,
                 chatHistory = chatHistory.chat_history,
+                groups = chatHistory.groups,
                 webSearchSupport = webSearchSupport,
                 webSearchEnabled = webSearchEnabled
             )
@@ -539,7 +540,8 @@ class ChatViewModel(
             val currentUser = _appSettings.value.current_user
             val chatHistory = repository.loadChatHistory(currentUser)
             _uiState.value = _uiState.value.copy(
-                chatHistory = chatHistory.chat_history
+                chatHistory = chatHistory.chat_history,
+                groups = chatHistory.groups
             )
         }
     }
@@ -708,6 +710,7 @@ class ChatViewModel(
                     val currentChat = chatHistory.chat_history.lastOrNull()
                     _uiState.value = _uiState.value.copy(
                         chatHistory = chatHistory.chat_history,
+                        groups = chatHistory.groups,
                         currentChat = currentChat
                     )
                 }
@@ -1198,6 +1201,7 @@ class ChatViewModel(
             
             _uiState.value = _uiState.value.copy(
                 chatHistory = finalChatHistory,
+                groups = chatHistory.groups,
                 currentChat = newCurrentChat,
                 showDeleteConfirmation = null
             )
@@ -1294,6 +1298,124 @@ class ChatViewModel(
             }
         }
         return fileName
+    }
+
+    // Group Management Methods
+
+    fun createNewGroup(groupName: String) {
+        if (groupName.isBlank()) return
+
+        viewModelScope.launch {
+            val currentUser = _appSettings.value.current_user
+            val newGroup = repository.createNewGroup(currentUser, groupName.trim())
+
+            // If there's a pending chat, add it to the new group
+            val pendingChat = _uiState.value.pendingChatForGroup
+            if (pendingChat != null) {
+                repository.addChatToGroup(currentUser, pendingChat.chat_id, newGroup.group_id)
+            }
+
+            // Update UI state with new group
+            val chatHistory = repository.loadChatHistory(currentUser)
+            _uiState.value = _uiState.value.copy(
+                groups = chatHistory.groups,
+                chatHistory = chatHistory.chat_history,
+                expandedGroups = _uiState.value.expandedGroups + newGroup.group_id,
+                pendingChatForGroup = null
+            )
+
+            hideGroupDialog()
+            val message = if (pendingChat != null) {
+                "קבוצה חדשה נוצרה והשיחה נוספה אליה: ${newGroup.group_name}"
+            } else {
+                "קבוצה חדשה נוצרה: ${newGroup.group_name}"
+            }
+            _uiState.value = _uiState.value.copy(
+                snackbarMessage = message
+            )
+        }
+    }
+
+    fun addChatToGroup(chatId: String, groupId: String) {
+        viewModelScope.launch {
+            val currentUser = _appSettings.value.current_user
+            val success = repository.addChatToGroup(currentUser, chatId, groupId)
+
+            if (success) {
+                // Update UI state
+                val chatHistory = repository.loadChatHistory(currentUser)
+                _uiState.value = _uiState.value.copy(
+                    chatHistory = chatHistory.chat_history,
+                    groups = chatHistory.groups
+                )
+
+                hideChatContextMenu()
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "השיחה נוספה לקבוצה"
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "שגיאה בהוספת השיחה לקבוצה"
+                )
+            }
+        }
+    }
+
+    fun removeChatFromGroup(chatId: String) {
+        viewModelScope.launch {
+            val currentUser = _appSettings.value.current_user
+            val success = repository.removeChatFromGroup(currentUser, chatId)
+
+            if (success) {
+                // Update UI state
+                val chatHistory = repository.loadChatHistory(currentUser)
+                _uiState.value = _uiState.value.copy(
+                    chatHistory = chatHistory.chat_history,
+                    groups = chatHistory.groups
+                )
+
+                hideChatContextMenu()
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "השיחה הוסרה מהקבוצה"
+                )
+            }
+        }
+    }
+
+    fun toggleGroupExpansion(groupId: String) {
+        val currentExpanded = _uiState.value.expandedGroups
+        val newExpanded = if (currentExpanded.contains(groupId)) {
+            currentExpanded - groupId
+        } else {
+            currentExpanded + groupId
+        }
+
+        _uiState.value = _uiState.value.copy(expandedGroups = newExpanded)
+    }
+
+    fun showGroupDialog(chat: Chat? = null) {
+        _uiState.value = _uiState.value.copy(
+            showGroupDialog = true,
+            pendingChatForGroup = chat
+        )
+    }
+
+    fun hideGroupDialog() {
+        _uiState.value = _uiState.value.copy(
+            showGroupDialog = false,
+            pendingChatForGroup = null
+        )
+    }
+
+    fun refreshChatHistoryAndGroups() {
+        viewModelScope.launch {
+            val currentUser = _appSettings.value.current_user
+            val chatHistory = repository.loadChatHistory(currentUser)
+            _uiState.value = _uiState.value.copy(
+                chatHistory = chatHistory.chat_history,
+                groups = chatHistory.groups
+            )
+        }
     }
 
 }

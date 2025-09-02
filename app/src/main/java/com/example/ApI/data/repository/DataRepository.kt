@@ -175,10 +175,10 @@ class DataRepository(private val context: Context) {
                 val content = file.readText()
                 json.decodeFromString<UserChatHistory>(content)
             } catch (e: Exception) {
-                UserChatHistory(username, emptyList())
+                UserChatHistory(username, emptyList(), emptyList())
             }
         } else {
-            UserChatHistory(username, emptyList())
+            UserChatHistory(username, emptyList(), emptyList())
         }
     }
     
@@ -237,11 +237,105 @@ class DataRepository(private val context: Context) {
                 chat
             }
         }
-        
+
         val updatedHistory = chatHistory.copy(chat_history = updatedChats)
         saveChatHistory(updatedHistory)
-        
+
         return updatedChats.find { it.chat_id == chatId }
+    }
+
+    // Group Management
+    fun createNewGroup(username: String, groupName: String): ChatGroup {
+        val chatHistory = loadChatHistory(username)
+        val groupId = UUID.randomUUID().toString()
+        val newGroup = ChatGroup(
+            group_id = groupId,
+            group_name = groupName
+        )
+
+        val updatedHistory = chatHistory.copy(groups = chatHistory.groups + newGroup)
+        saveChatHistory(updatedHistory)
+
+        return newGroup
+    }
+
+    fun addChatToGroup(username: String, chatId: String, groupId: String): Boolean {
+        val chatHistory = loadChatHistory(username)
+
+        // Check if group exists
+        val groupExists = chatHistory.groups.any { it.group_id == groupId }
+        if (!groupExists) return false
+
+        val updatedChats = chatHistory.chat_history.map { chat ->
+            if (chat.chat_id == chatId) {
+                chat.copy(group = groupId)
+            } else {
+                chat
+            }
+        }
+
+        val updatedHistory = chatHistory.copy(chat_history = updatedChats)
+        saveChatHistory(updatedHistory)
+
+        return true
+    }
+
+    fun removeChatFromGroup(username: String, chatId: String): Boolean {
+        val chatHistory = loadChatHistory(username)
+
+        val updatedChats = chatHistory.chat_history.map { chat ->
+            if (chat.chat_id == chatId) {
+                chat.copy(group = null)
+            } else {
+                chat
+            }
+        }
+
+        val updatedHistory = chatHistory.copy(chat_history = updatedChats)
+        saveChatHistory(updatedHistory)
+
+        return true
+    }
+
+    fun deleteGroup(username: String, groupId: String): Boolean {
+        val chatHistory = loadChatHistory(username)
+
+        // Remove all chats from this group
+        val updatedChats = chatHistory.chat_history.map { chat ->
+            if (chat.group == groupId) {
+                chat.copy(group = null)
+            } else {
+                chat
+            }
+        }
+
+        // Remove the group
+        val updatedGroups = chatHistory.groups.filter { it.group_id != groupId }
+
+        val updatedHistory = chatHistory.copy(
+            chat_history = updatedChats,
+            groups = updatedGroups
+        )
+        saveChatHistory(updatedHistory)
+
+        return true
+    }
+
+    fun renameGroup(username: String, groupId: String, newName: String): Boolean {
+        val chatHistory = loadChatHistory(username)
+
+        val updatedGroups = chatHistory.groups.map { group ->
+            if (group.group_id == groupId) {
+                group.copy(group_name = newName)
+            } else {
+                group
+            }
+        }
+
+        val updatedHistory = chatHistory.copy(groups = updatedGroups)
+        saveChatHistory(updatedHistory)
+
+        return true
     }
     
     // API Keys

@@ -5,6 +5,7 @@
             {
                 "chat_id": "{chat_id}",
                 "preview_name": "{preview_name}",
+                "group": "{group_id}",
                 "messages": [
                     {
                         "role": "{role}",
@@ -19,6 +20,23 @@
                                 "file_GOOGLE_uri": "{file_URI}"
                             }
                         ]
+                    }
+                ]
+            }
+        ],
+        "groups": [
+            {
+                "group_id": "{group_uuid}",
+                "group_name": "{group_name}",
+                "system_prompt": null,
+                "group_attachments": [
+                    {
+                        "local_file_path": "{local_file_path}",
+                        "file_name": "{file_name}",
+                        "mime_type": "{mime_type}",
+                        "file_OPENAI_id": "{file_ID}",
+                        "file_POE_url": "{file_URL}",
+                        "file_GOOGLE_uri": "{file_URI}"
                     }
                 ]
             }

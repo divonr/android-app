@@ -7,6 +7,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,7 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.SpanStyle
@@ -30,6 +33,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
@@ -169,25 +173,70 @@ fun ChatHistoryScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
-                    // Sort: chats with timestamp first (desc), then those without timestamp last
-                    val sortedChats = uiState.chatHistory.sortedWith(
-                        compareByDescending<com.example.ApI.data.model.Chat> { getLastTimestampOrNull(it) != null }
-                            .thenByDescending { getLastTimestampOrNull(it) ?: Long.MIN_VALUE }
-                    )
-                    items(
-                        items = sortedChats,
-                        key = { it.id }
-                    ) { chat ->
-                        ChatHistoryItem(
-                            chat = chat,
-                            onClick = {
-                                viewModel.selectChat(chat)
-                                viewModel.navigateToScreen(Screen.Chat)
-                            },
-                            onLongClick = { offset ->
-                                viewModel.showChatContextMenu(chat, offset)
+                    // Organize chats by groups
+                    val (groupedChats, ungroupedChats) = organizeChatsByGroups(uiState.chatHistory, uiState.groups)
+
+                    // Display groups first
+                    groupedChats.forEach { (group, chats) ->
+                        val isExpanded = uiState.expandedGroups.contains(group.group_id)
+
+                        item(key = "group_${group.group_id}") {
+                            GroupItem(
+                                group = group,
+                                isExpanded = isExpanded,
+                                chatCount = chats.size,
+                                onToggleExpansion = { viewModel.toggleGroupExpansion(group.group_id) }
+                            )
+                        }
+
+                        if (isExpanded) {
+                            // Sort chats within group by last message timestamp
+                            val sortedGroupChats = chats.sortedWith(
+                                compareByDescending<com.example.ApI.data.model.Chat> { getLastTimestampOrNull(it) != null }
+                                    .thenByDescending { getLastTimestampOrNull(it) ?: Long.MIN_VALUE }
+                            )
+
+                            items(
+                                items = sortedGroupChats,
+                                key = { "grouped_chat_${it.id}" }
+                            ) { chat ->
+                                ChatHistoryItem(
+                                    chat = chat,
+                                    onClick = {
+                                        viewModel.selectChat(chat)
+                                        viewModel.navigateToScreen(Screen.Chat)
+                                    },
+                                    onLongClick = { offset ->
+                                        viewModel.showChatContextMenu(chat, offset)
+                                    },
+                                    modifier = Modifier.padding(start = 32.dp) // Indent grouped chats
+                                )
                             }
+                        }
+                    }
+
+                    // Display ungrouped chats
+                    if (ungroupedChats.isNotEmpty()) {
+                        val sortedUngroupedChats = ungroupedChats.sortedWith(
+                            compareByDescending<com.example.ApI.data.model.Chat> { getLastTimestampOrNull(it) != null }
+                                .thenByDescending { getLastTimestampOrNull(it) ?: Long.MIN_VALUE }
                         )
+
+                        items(
+                            items = sortedUngroupedChats,
+                            key = { "ungrouped_chat_${it.id}" }
+                        ) { chat ->
+                            ChatHistoryItem(
+                                chat = chat,
+                                onClick = {
+                                    viewModel.selectChat(chat)
+                                    viewModel.navigateToScreen(Screen.Chat)
+                                },
+                                onLongClick = { offset ->
+                                    viewModel.showChatContextMenu(chat, offset)
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -206,6 +255,16 @@ fun ChatHistoryScreen(
                     },
                     onDelete = {
                         viewModel.showDeleteConfirmation(it)
+                    },
+                    groups = uiState.groups,
+                    onAddToGroup = { groupId ->
+                        viewModel.addChatToGroup(menuState.chat.chat_id, groupId)
+                    },
+                    onCreateNewGroup = { chat ->
+                        viewModel.showGroupDialog(chat)
+                    },
+                    onRemoveFromGroup = {
+                        viewModel.removeChatFromGroup(menuState.chat.chat_id)
                     }
                 )
             }
@@ -245,11 +304,11 @@ fun ChatHistoryScreen(
                     tonalElevation = 0.dp
                 )
             }
-            
+
             // Rename dialog
             uiState.showRenameDialog?.let { chat ->
                 var newTitle by remember { mutableStateOf(chat.title) }
-                
+
                 AlertDialog(
                     onDismissRequest = { viewModel.hideRenameDialog() },
                     title = {
@@ -295,6 +354,56 @@ fun ChatHistoryScreen(
                     tonalElevation = 0.dp
                 )
             }
+
+            // Group creation dialog
+            if (uiState.showGroupDialog) {
+                var groupName by remember { mutableStateOf("") }
+
+                AlertDialog(
+                    onDismissRequest = { viewModel.hideGroupDialog() },
+                    title = {
+                        Text(
+                            "צור קבוצה חדשה",
+                            color = OnSurface
+                        )
+                    },
+                    text = {
+                        OutlinedTextField(
+                            value = groupName,
+                            onValueChange = { groupName = it },
+                            label = { Text("שם הקבוצה", color = OnSurfaceVariant) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = OnSurface,
+                                unfocusedTextColor = OnSurface,
+                                focusedBorderColor = Primary,
+                                unfocusedBorderColor = Gray500,
+                                focusedLabelColor = Primary,
+                                unfocusedLabelColor = OnSurfaceVariant,
+                                cursorColor = Primary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.createNewGroup(groupName.trim())
+                            },
+                            enabled = groupName.isNotBlank()
+                        ) {
+                            Text("צור", color = if (groupName.isNotBlank()) Primary else OnSurfaceVariant)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { viewModel.hideGroupDialog() }) {
+                            Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
+                        }
+                    },
+                    containerColor = Surface,
+                    tonalElevation = 0.dp
+                )
+            }
         }
     }
 }
@@ -308,6 +417,9 @@ fun ChatHistoryItem(
     modifier: Modifier = Modifier
 ) {
     var itemPosition by remember { mutableStateOf(DpOffset.Zero) }
+    var itemTopLeft by remember { mutableStateOf(Offset.Zero) }
+    var itemSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+    val density = LocalDensity.current
     
     Card(
         onClick = onClick,
@@ -315,10 +427,13 @@ fun ChatHistoryItem(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 2.dp)
             .onGloballyPositioned { coordinates ->
-                itemPosition = DpOffset(
-                    x = coordinates.size.width.dp / 2,
-                    y = coordinates.size.height.dp / 2
-                )
+                // Capture item bounds and approximate center in window coordinates
+                val pos = coordinates.localToWindow(Offset.Zero)
+                itemTopLeft = pos
+                itemSize = coordinates.size.run { androidx.compose.ui.geometry.Size(width.toFloat(), height.toFloat()) }
+                val centerX = pos.x + itemSize.width - 16f
+                val centerY = pos.y + itemSize.height / 2f
+                itemPosition = with(density) { DpOffset(centerX.toDp(), centerY.toDp()) }
             },
         colors = CardDefaults.cardColors(
             containerColor = Surface
@@ -328,10 +443,20 @@ fun ChatHistoryItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = { onLongClick(itemPosition) }
-                )
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = { pressOffset ->
+                            // Position menu to the right of the item, vertically at press Y
+                            val anchor = with(density) {
+                                val anchorX = (itemTopLeft.x + itemSize.width - 8f).toDp()
+                                val anchorY = (itemTopLeft.y + pressOffset.y).toDp()
+                                DpOffset(anchorX, anchorY)
+                            }
+                            onLongClick(anchor)
+                        },
+                        onTap = { onClick() }
+                    )
+                }
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -423,6 +548,84 @@ fun ChatHistoryItem(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun GroupItem(
+    group: ChatGroup,
+    isExpanded: Boolean,
+    chatCount: Int,
+    onToggleExpansion: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Surface
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggleExpansion)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Group icon
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Secondary.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Folder,
+                    contentDescription = null,
+                    tint = Secondary,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Group content
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = group.group_name,
+                    color = OnSurface,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 16.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "$chatCount שיחות",
+                    color = OnSurfaceVariant,
+                    fontSize = 14.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Expansion arrow
+            Icon(
+                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (isExpanded) "כווץ קבוצה" else "הרחב קבוצה",
+                tint = OnSurfaceVariant,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+}
+
 fun getModelInitial(model: String): String {
     return when {
         model.contains("gpt-4", ignoreCase = true) -> "G4"
@@ -464,8 +667,14 @@ private fun ChatContextMenu(
     onDismiss: () -> Unit,
     onRename: (Chat) -> Unit,
     onAIRename: (Chat) -> Unit,
-    onDelete: (Chat) -> Unit
+    onDelete: (Chat) -> Unit,
+    groups: List<ChatGroup>,
+    onAddToGroup: (String) -> Unit,
+    onCreateNewGroup: (Chat) -> Unit,
+    onRemoveFromGroup: () -> Unit
 ) {
+    var showGroupSubmenu by remember { mutableStateOf(false) }
+
     DropdownMenu(
         expanded = true,
         onDismissRequest = onDismiss,
@@ -525,6 +734,67 @@ private fun ChatContextMenu(
             modifier = Modifier.padding(horizontal = 8.dp)
         )
 
+        // Group management section
+        if (chat.group != null) {
+            // Remove from group option
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "הסר מקבוצה",
+                        color = OnSurface,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                },
+                onClick = {
+                    onRemoveFromGroup()
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Remove,
+                        contentDescription = null,
+                        tint = OnSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            )
+        } else {
+            // Add to group option with submenu
+            val addToGroupItemHeight = 40.dp
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "הוסף לקבוצה",
+                        color = OnSurface,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                },
+                onClick = {
+                    showGroupSubmenu = true
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        tint = OnSurface,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                trailingIcon = {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = null,
+                        tint = OnSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            )
+        }
+
+        HorizontalDivider(
+            color = OnSurface.copy(alpha = 0.1f),
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+
         DropdownMenuItem(
             text = {
                 Text(
@@ -546,6 +816,80 @@ private fun ChatContextMenu(
             }
         )
     }
+
+    // Group submenu
+    if (showGroupSubmenu) {
+        // Align submenu to the left of the main menu and vertically align with the "הוסף לקבוצה" row
+        val submenuX = position.x - 200.dp
+        val submenuY = position.y + 0.dp
+        DropdownMenu(
+            expanded = true,
+            onDismissRequest = { showGroupSubmenu = false },
+            offset = DpOffset(submenuX, submenuY),
+            properties = PopupProperties(focusable = true),
+            modifier = Modifier
+                .background(
+                    Surface,
+                    RoundedCornerShape(16.dp)
+                )
+                .width(200.dp)
+        ) {
+            // Existing groups
+            groups.forEach { group ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            group.group_name,
+                            color = OnSurface,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    },
+                    onClick = {
+                        onAddToGroup(group.group_id)
+                        showGroupSubmenu = false
+                        onDismiss()
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Folder,
+                            contentDescription = null,
+                            tint = Secondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                )
+            }
+
+            // Create new group option
+            HorizontalDivider(
+                color = OnSurface.copy(alpha = 0.1f),
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "צור קבוצה חדשה",
+                        color = Primary,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                },
+                onClick = {
+                    onCreateNewGroup(chat)
+                    showGroupSubmenu = false
+                    onDismiss()
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        tint = Primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            )
+        }
+    }
 }
 
 // Helper: returns epoch millis of last message if present, otherwise null
@@ -556,4 +900,43 @@ private fun getLastTimestampOrNull(chat: Chat): Long? {
     } catch (_: Exception) {
         null
     }
+}
+
+// Helper: organize chats by groups and sort groups by last message timestamp
+private fun organizeChatsByGroups(
+    chats: List<Chat>,
+    groups: List<ChatGroup>
+): Pair<List<Pair<ChatGroup, List<Chat>>>, List<Chat>> {
+    val groupedChats = mutableListOf<Pair<ChatGroup, List<Chat>>>()
+    val ungroupedChats = mutableListOf<Chat>()
+
+    // Separate chats by group
+    val chatsByGroup = chats.groupBy { it.group }
+
+    // Process groups
+    val sortedGroups = groups.sortedWith { g1, g2 ->
+        // Sort groups by the latest message timestamp in their chats
+        val g1LatestTimestamp = chatsByGroup[g1.group_id]?.maxOfOrNull {
+            getLastTimestampOrNull(it) ?: Long.MIN_VALUE
+        } ?: Long.MIN_VALUE
+
+        val g2LatestTimestamp = chatsByGroup[g2.group_id]?.maxOfOrNull {
+            getLastTimestampOrNull(it) ?: Long.MIN_VALUE
+        } ?: Long.MIN_VALUE
+
+        g2LatestTimestamp.compareTo(g1LatestTimestamp) // Descending order
+    }
+
+    // Add grouped chats
+    sortedGroups.forEach { group ->
+        val groupChats = chatsByGroup[group.group_id] ?: emptyList()
+        if (groupChats.isNotEmpty()) {
+            groupedChats.add(group to groupChats)
+        }
+    }
+
+    // Add ungrouped chats
+    chatsByGroup[null]?.let { ungroupedChats.addAll(it) }
+
+    return Pair(groupedChats, ungroupedChats)
 }
