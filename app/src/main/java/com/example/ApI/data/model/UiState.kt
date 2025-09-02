@@ -26,6 +26,7 @@ data class ChatUiState(
     val systemPrompt: String = "",
     val chatHistory: List<Chat> = emptyList(),
     val groups: List<ChatGroup> = emptyList(),
+    val currentGroup: ChatGroup? = null,
     val expandedGroups: Set<String> = emptySet(),
     val chatContextMenu: ChatContextMenuState? = null,
     val showDeleteConfirmation: Chat? = null,
@@ -63,4 +64,5 @@ sealed class Screen {
     object Chat : Screen()
     object ApiKeys : Screen()
     object UserSettings : Screen()
+    data class Group(val groupId: String) : Screen()
 }

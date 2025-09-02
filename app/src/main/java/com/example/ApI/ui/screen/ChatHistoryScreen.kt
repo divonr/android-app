@@ -185,6 +185,7 @@ fun ChatHistoryScreen(
                                 group = group,
                                 isExpanded = isExpanded,
                                 chatCount = chats.size,
+                                onGroupClick = { viewModel.navigateToGroup(group.group_id) },
                                 onToggleExpansion = { viewModel.toggleGroupExpansion(group.group_id) }
                             )
                         }
@@ -554,6 +555,7 @@ fun GroupItem(
     group: ChatGroup,
     isExpanded: Boolean,
     chatCount: Int,
+    onGroupClick: () -> Unit,
     onToggleExpansion: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -569,7 +571,6 @@ fun GroupItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onToggleExpansion)
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -591,9 +592,11 @@ fun GroupItem(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Group content
+            // Group content (clickable to open group screen)
             Column(
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onGroupClick)
             ) {
                 Text(
                     text = group.group_name,
@@ -615,12 +618,14 @@ fun GroupItem(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Expansion arrow
+            // Expansion arrow (only this toggles expansion)
             Icon(
                 imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                 contentDescription = if (isExpanded) "כווץ קבוצה" else "הרחב קבוצה",
                 tint = OnSurfaceVariant,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable(onClick = onToggleExpansion)
             )
         }
     }
@@ -661,7 +666,7 @@ fun formatTimestamp(timestamp: Long): String {
 }
 
 @Composable
-private fun ChatContextMenu(
+fun ChatContextMenu(
     chat: Chat,
     position: DpOffset,
     onDismiss: () -> Unit,
@@ -893,7 +898,7 @@ private fun ChatContextMenu(
 }
 
 // Helper: returns epoch millis of last message if present, otherwise null
-private fun getLastTimestampOrNull(chat: Chat): Long? {
+fun getLastTimestampOrNull(chat: Chat): Long? {
     val iso = chat.messages.lastOrNull()?.datetime ?: return null
     return try {
         Instant.parse(iso).toEpochMilli()

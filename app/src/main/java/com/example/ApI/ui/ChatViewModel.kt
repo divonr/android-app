@@ -1418,4 +1418,42 @@ class ChatViewModel(
         }
     }
 
+    fun navigateToGroup(groupId: String) {
+        val group = _uiState.value.groups.find { it.group_id == groupId }
+        if (group != null) {
+            _uiState.value = _uiState.value.copy(
+                currentGroup = group,
+                systemPrompt = group.system_prompt ?: ""
+            )
+            navigateToScreen(Screen.Group(groupId))
+        }
+    }
+
+    fun updateGroupSystemPrompt(systemPrompt: String) {
+        val currentGroup = _uiState.value.currentGroup ?: return
+        val currentUser = _appSettings.value.current_user
+
+        // Update system prompt in repository
+        val updatedGroups = _uiState.value.groups.map { group ->
+            if (group.group_id == currentGroup.group_id) {
+                group.copy(system_prompt = systemPrompt)
+            } else {
+                group
+            }
+        }
+
+        // Update chat history JSON
+        val chatHistory = repository.loadChatHistory(currentUser)
+        val updatedHistory = chatHistory.copy(groups = updatedGroups)
+        repository.saveChatHistory(updatedHistory)
+
+        // Update UI state
+        _uiState.value = _uiState.value.copy(
+            groups = updatedGroups,
+            currentGroup = updatedGroups.find { it.group_id == currentGroup.group_id },
+            systemPrompt = systemPrompt,
+            showSystemPromptDialog = false
+        )
+    }
+
 }

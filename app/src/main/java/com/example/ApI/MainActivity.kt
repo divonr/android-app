@@ -20,6 +20,7 @@ import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.screen.ApiKeysScreen
 import com.example.ApI.ui.screen.ChatHistoryScreen
+import com.example.ApI.ui.screen.GroupScreen
 import com.example.ApI.ui.screen.ChatScreen
 import com.example.ApI.ui.screen.UserSettingsScreen
 import com.example.ApI.ui.theme.LLMApiTheme
@@ -101,6 +102,12 @@ fun LLMChatApp(sharedIntent: Intent? = null) {
                 viewModel = viewModel,
                 appSettings = appSettings,
                 onBackClick = { viewModel.navigateToScreen(Screen.ChatHistory) }
+            )
+        }
+        is Screen.Group -> {
+            GroupScreen(
+                viewModel = viewModel,
+                uiState = uiState
             )
         }
     }
