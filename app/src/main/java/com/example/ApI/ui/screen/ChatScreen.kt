@@ -132,7 +132,7 @@ fun ChatScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Left side - System Prompt only
+                        // Left side - Back arrow
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -142,12 +142,12 @@ fun ChatScreen(
                                 color = SurfaceVariant,
                                 modifier = Modifier
                                     .size(36.dp)
-                                    .clickable { viewModel.showSystemPromptDialog() }
+                                    .clickable { viewModel.navigateToScreen(Screen.ChatHistory) }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        imageVector = Icons.Default.Build,
-                                        contentDescription = "System Prompt",
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back to chat history",
                                         tint = OnSurfaceVariant,
                                         modifier = Modifier.size(18.dp)
                                     )
@@ -183,18 +183,18 @@ fun ChatScreen(
                             )
                         }
                         
-                        // Right side - Back to chat history (arrow points outward)
+                        // Right side - System Prompt
                         Surface(
                             shape = MaterialTheme.shapes.medium,
                             color = SurfaceVariant,
                             modifier = Modifier
                                 .size(36.dp)
-                                .clickable { viewModel.navigateToScreen(Screen.ChatHistory) }
+                                .clickable { viewModel.showSystemPromptDialog() }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = "Back to chat history",
+                                    imageVector = Icons.Default.Build,
+                                    contentDescription = "System Prompt",
                                     tint = OnSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
