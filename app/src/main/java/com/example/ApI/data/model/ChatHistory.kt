@@ -58,5 +58,6 @@ data class ChatGroup(
     val group_id: String,
     val group_name: String,
     val system_prompt: String? = null,
-    val group_attachments: List<Attachment> = emptyList()
+    val group_attachments: List<Attachment> = emptyList(),
+    val is_project: Boolean = false
 )

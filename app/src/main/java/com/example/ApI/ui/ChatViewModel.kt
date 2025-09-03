@@ -191,7 +191,7 @@ class ChatViewModel(
             // Send API request and handle response (single-message mode)
             val currentProvider = _uiState.value.currentProvider
             val currentModel = _uiState.value.currentModel
-            val systemPrompt = _uiState.value.systemPrompt
+            val systemPrompt = getEffectiveSystemPrompt()
 
             if (currentProvider != null && currentModel.isNotEmpty()) {
                 try {
@@ -386,7 +386,7 @@ class ChatViewModel(
 
             val currentProvider = _uiState.value.currentProvider
             val currentModel = _uiState.value.currentModel
-            val systemPrompt = _uiState.value.systemPrompt
+            val systemPrompt = getEffectiveSystemPrompt()
 
             if (currentProvider != null && currentModel.isNotEmpty()) {
                 try {
@@ -675,6 +675,56 @@ class ChatViewModel(
         _uiState.value = _uiState.value.copy(showSystemPromptDialog = false)
     }
 
+    fun toggleSystemPromptOverride() {
+        _uiState.value = _uiState.value.copy(
+            systemPromptOverrideEnabled = !_uiState.value.systemPromptOverrideEnabled
+        )
+    }
+
+    fun setSystemPromptOverride(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            systemPromptOverrideEnabled = enabled
+        )
+    }
+
+    /**
+     * Get the project group for the current chat if it belongs to a project group
+     */
+    fun getCurrentChatProjectGroup(): ChatGroup? {
+        val currentChat = _uiState.value.currentChat
+        val groups = _uiState.value.groups
+
+        return currentChat?.group?.let { groupId ->
+            groups.find { it.group_id == groupId && it.is_project }
+        }
+    }
+
+    /**
+     * Get the effective system prompt based on project settings and override switch
+     */
+    fun getEffectiveSystemPrompt(): String {
+        val currentChat = _uiState.value.currentChat ?: return ""
+        val projectGroup = getCurrentChatProjectGroup()
+
+        return when {
+            // If chat belongs to a project group
+            projectGroup != null -> {
+                val projectPrompt = projectGroup.system_prompt ?: ""
+                val chatPrompt = currentChat.systemPrompt
+
+                when {
+                    // If override is enabled, concatenate both prompts
+                    _uiState.value.systemPromptOverrideEnabled && chatPrompt.isNotEmpty() ->
+                        "$projectPrompt\n\n$chatPrompt"
+                    // Otherwise, use only project prompt
+                    else -> projectPrompt
+                }
+            }
+            // If not in project, use regular chat system prompt
+            else -> currentChat.systemPrompt
+        }
+    }
+
     fun showChatHistory() {
         _uiState.value = _uiState.value.copy(showChatHistory = true)
     }
@@ -936,7 +986,7 @@ class ChatViewModel(
             // Send API request for the resent message
             val currentProvider = _uiState.value.currentProvider
             val currentModel = _uiState.value.currentModel
-            val systemPrompt = _uiState.value.systemPrompt
+            val systemPrompt = getEffectiveSystemPrompt()
 
             if (currentProvider != null && currentModel.isNotEmpty()) {
                 try {
@@ -1160,6 +1210,54 @@ class ChatViewModel(
         _uiState.value = _uiState.value.copy(
             showDeleteConfirmation = null
         )
+    }
+
+    fun showDeleteChatConfirmation() {
+        _uiState.value = _uiState.value.copy(
+            showDeleteChatConfirmation = _uiState.value.currentChat
+        )
+    }
+
+    fun hideDeleteChatConfirmation() {
+        _uiState.value = _uiState.value.copy(
+            showDeleteChatConfirmation = null
+        )
+    }
+
+    fun deleteCurrentChat() {
+        val currentChat = _uiState.value.currentChat ?: return
+        val currentUser = _appSettings.value.current_user
+
+        viewModelScope.launch {
+            val chatHistory = repository.loadChatHistory(currentUser)
+
+            // Remove the chat from history
+            val updatedChats = chatHistory.chat_history.filter { it.chat_id != currentChat.chat_id }
+            val updatedHistory = chatHistory.copy(chat_history = updatedChats)
+
+            // Save updated history
+            repository.saveChatHistory(updatedHistory)
+
+            // Update UI
+            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+
+            // If we're deleting the current chat, switch to the most recent one or null
+            val newCurrentChat = if (finalChatHistory.isNotEmpty()) {
+                finalChatHistory.last() // Load the most recent chat
+            } else {
+                null
+            }
+
+            _uiState.value = _uiState.value.copy(
+                chatHistory = finalChatHistory,
+                currentChat = null, // Always set to null when deleting current chat
+                systemPrompt = "",
+                showDeleteChatConfirmation = null
+            )
+
+            // Always navigate back to chat history screen when deleting current chat
+            navigateToScreen(Screen.ChatHistory)
+        }
     }
     
     fun renameChat(chat: Chat, newName: String) {
@@ -1439,6 +1537,123 @@ class ChatViewModel(
                 chatHistory = chatHistory.chat_history,
                 groups = chatHistory.groups
             )
+        }
+    }
+
+    fun toggleGroupProjectStatus(groupId: String) {
+        viewModelScope.launch {
+            val currentUser = _appSettings.value.current_user
+            val currentGroup = _uiState.value.groups.find { it.group_id == groupId }
+            val newProjectStatus = !(currentGroup?.is_project ?: false)
+
+            repository.updateGroupProjectStatus(currentUser, groupId, newProjectStatus)
+
+            // Update UI state
+            val updatedGroups = _uiState.value.groups.map { group ->
+                if (group.group_id == groupId) {
+                    group.copy(is_project = newProjectStatus)
+                } else {
+                    group
+                }
+            }
+
+            _uiState.value = _uiState.value.copy(groups = updatedGroups)
+
+            // Update current group if it's the one being modified
+            if (_uiState.value.currentGroup?.group_id == groupId) {
+                val updatedCurrentGroup = updatedGroups.find { it.group_id == groupId }
+                _uiState.value = _uiState.value.copy(currentGroup = updatedCurrentGroup)
+            }
+        }
+    }
+
+    fun addFileToProject(groupId: String, uri: Uri, fileName: String, mimeType: String) {
+        viewModelScope.launch {
+            val currentUser = _appSettings.value.current_user
+
+            try {
+                // Copy file to internal storage
+                val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
+                inputStream?.use { stream ->
+                    val fileData = stream.readBytes()
+                    val localPath = repository.saveFileLocally(fileName, fileData)
+
+                    if (localPath != null) {
+                        val attachment = Attachment(
+                            local_file_path = localPath,
+                            file_name = fileName,
+                            mime_type = mimeType
+                        )
+
+                        repository.addAttachmentToGroup(currentUser, groupId, attachment)
+
+                        // Update UI state
+                        val updatedGroups = _uiState.value.groups.map { group ->
+                            if (group.group_id == groupId) {
+                                group.copy(group_attachments = group.group_attachments + attachment)
+                            } else {
+                                group
+                            }
+                        }
+
+                        _uiState.value = _uiState.value.copy(groups = updatedGroups)
+
+                        // Update current group if it's the one being modified
+                        if (_uiState.value.currentGroup?.group_id == groupId) {
+                            val updatedCurrentGroup = updatedGroups.find { it.group_id == groupId }
+                            _uiState.value = _uiState.value.copy(currentGroup = updatedCurrentGroup)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "שגיאה בהעלאת הקובץ: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun openProjectInstructionsDialog() {
+        _uiState.value = _uiState.value.copy(showSystemPromptDialog = true)
+    }
+
+    fun removeFileFromProject(groupId: String, attachmentIndex: Int) {
+        viewModelScope.launch {
+            val currentUser = _appSettings.value.current_user
+
+            // Get the attachment before removing it (to delete the file)
+            val chatHistory = repository.loadChatHistory(currentUser)
+            val group = chatHistory.groups.find { it.group_id == groupId }
+            val attachmentToRemove = group?.group_attachments?.getOrNull(attachmentIndex)
+
+            // Remove from JSON registry
+            repository.removeAttachmentFromGroup(currentUser, groupId, attachmentIndex)
+
+            // Delete the actual file from internal storage
+            attachmentToRemove?.local_file_path?.let { path ->
+                repository.deleteFile(path)
+            }
+
+            // Update UI state
+            val updatedGroups = _uiState.value.groups.map { groupItem ->
+                if (groupItem.group_id == groupId) {
+                    val updatedAttachments = groupItem.group_attachments.toMutableList()
+                    if (attachmentIndex >= 0 && attachmentIndex < updatedAttachments.size) {
+                        updatedAttachments.removeAt(attachmentIndex)
+                    }
+                    groupItem.copy(group_attachments = updatedAttachments)
+                } else {
+                    groupItem
+                }
+            }
+
+            _uiState.value = _uiState.value.copy(groups = updatedGroups)
+
+            // Update current group if it's the one being modified
+            if (_uiState.value.currentGroup?.group_id == groupId) {
+                val updatedCurrentGroup = updatedGroups.find { it.group_id == groupId }
+                _uiState.value = _uiState.value.copy(currentGroup = updatedCurrentGroup)
+            }
         }
     }
 

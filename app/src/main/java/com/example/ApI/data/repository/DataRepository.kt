@@ -356,6 +356,59 @@ class DataRepository(private val context: Context) {
 
         return true
     }
+
+    fun updateGroupProjectStatus(username: String, groupId: String, isProject: Boolean): Boolean {
+        val chatHistory = loadChatHistory(username)
+
+        val updatedGroups = chatHistory.groups.map { group ->
+            if (group.group_id == groupId) {
+                group.copy(is_project = isProject)
+            } else {
+                group
+            }
+        }
+
+        val updatedHistory = chatHistory.copy(groups = updatedGroups)
+        saveChatHistory(updatedHistory)
+
+        return true
+    }
+
+    fun addAttachmentToGroup(username: String, groupId: String, attachment: Attachment): Boolean {
+        val chatHistory = loadChatHistory(username)
+
+        val updatedGroups = chatHistory.groups.map { group ->
+            if (group.group_id == groupId) {
+                group.copy(group_attachments = group.group_attachments + attachment)
+            } else {
+                group
+            }
+        }
+
+        val updatedHistory = chatHistory.copy(groups = updatedGroups)
+        saveChatHistory(updatedHistory)
+
+        return true
+    }
+
+    fun removeAttachmentFromGroup(username: String, groupId: String, attachmentIndex: Int): Boolean {
+        val chatHistory = loadChatHistory(username)
+
+        val updatedGroups = chatHistory.groups.map { group ->
+            if (group.group_id == groupId && attachmentIndex >= 0 && attachmentIndex < group.group_attachments.size) {
+                val updatedAttachments = group.group_attachments.toMutableList()
+                updatedAttachments.removeAt(attachmentIndex)
+                group.copy(group_attachments = updatedAttachments)
+            } else {
+                group
+            }
+        }
+
+        val updatedHistory = chatHistory.copy(groups = updatedGroups)
+        saveChatHistory(updatedHistory)
+
+        return true
+    }
     
     // API Keys
     fun loadApiKeys(username: String): List<ApiKey> {

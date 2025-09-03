@@ -32,13 +32,15 @@ data class ChatUiState(
     val showDeleteConfirmation: Chat? = null,
     val showRenameDialog: Chat? = null,
     val showGroupDialog: Boolean = false,
+    val showDeleteChatConfirmation: Chat? = null,
     val pendingChatForGroup: Chat? = null,
     val snackbarMessage: String? = null,
     val editingMessage: Message? = null,
     val isEditMode: Boolean = false,
     val webSearchEnabled: Boolean = false,
     val webSearchSupport: WebSearchSupport = WebSearchSupport.UNSUPPORTED,
-    val showReplyButton: Boolean = false
+    val showReplyButton: Boolean = false,
+    val systemPromptOverrideEnabled: Boolean = false
 )
 
 data class ChatContextMenuState(

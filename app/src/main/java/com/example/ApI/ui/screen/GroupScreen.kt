@@ -9,6 +9,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -19,6 +22,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,6 +31,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -69,6 +76,20 @@ fun GroupScreen(
     modifier: Modifier = Modifier
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+
+    // File picker launcher
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            val fileName = getFileNameFromUri(context, it) ?: "unknown_file"
+            val mimeType = context.contentResolver.getType(it) ?: "application/octet-stream"
+            uiState.currentGroup?.let { group ->
+                viewModel.addFileToProject(group.group_id, it, fileName, mimeType)
+            }
+        }
+    }
 
     LaunchedEffect(uiState.snackbarMessage) {
         uiState.snackbarMessage?.let {
@@ -171,23 +192,44 @@ fun GroupScreen(
                             )
                         }
 
-                        // Right side - System Prompt
-                        Surface(
-                            shape = MaterialTheme.shapes.medium,
-                            color = SurfaceVariant,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clickable { viewModel.showSystemPromptDialog() }
+                        // Right side - Project Switch
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Build,
-                                    contentDescription = "System Prompt",
-                                    tint = OnSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
+                            Text(
+                                text = "פרויקט",
+                                color = OnSurfaceVariant,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Switch(
+                                checked = uiState.currentGroup?.is_project ?: false,
+                                onCheckedChange = { isChecked ->
+                                    uiState.currentGroup?.let { group ->
+                                        viewModel.toggleGroupProjectStatus(group.group_id)
+                                    }
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Primary,
+                                    checkedTrackColor = Primary.copy(alpha = 0.5f)
                                 )
-                            }
+                            )
                         }
+                    }
+                }
+
+                // Project Area (shown when group is marked as project)
+                uiState.currentGroup?.let { group ->
+                    if (group.is_project) {
+                        ProjectArea(
+                            group = group,
+                            viewModel = viewModel,
+                            onInstructionsClick = { viewModel.openProjectInstructionsDialog() },
+                            onAddFileClick = { filePickerLauncher.launch("*/*") },
+                            onFileClick = { attachment ->
+                                openAttachmentFile(context, attachment)
+                            }
+                        )
                     }
                 }
 
@@ -441,14 +483,15 @@ fun GroupScreen(
                 )
             }
 
-                // System Prompt Dialog
-                if (uiState.showSystemPromptDialog) {
-                    SystemPromptDialog(
-                        currentPrompt = uiState.systemPrompt,
-                        onConfirm = { viewModel.updateGroupSystemPrompt(it) },
-                        onDismiss = { viewModel.hideSystemPromptDialog() }
-                    )
-                }
+                            // System Prompt Dialog
+            if (uiState.showSystemPromptDialog) {
+                SystemPromptDialog(
+                    currentPrompt = uiState.systemPrompt,
+                    onConfirm = { viewModel.updateGroupSystemPrompt(it) },
+                    onDismiss = { viewModel.hideSystemPromptDialog() },
+                    title = "הוראות"
+                )
+            }
             }
         }
     }
@@ -587,6 +630,247 @@ fun GroupChatHistoryItem(
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProjectArea(
+    group: ChatGroup,
+    viewModel: ChatViewModel,
+    onInstructionsClick: () -> Unit,
+    onAddFileClick: () -> Unit,
+    onFileClick: (Attachment) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showFileMenu by remember { mutableStateOf(false) }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        color = Surface,
+        shadowElevation = 2.dp,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            // Instructions section - Entire row is clickable
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onInstructionsClick),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Pen icon (visual indicator, not separately clickable)
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Primary.copy(alpha = 0.1f),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "הוראות",
+                            tint = Primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                // Instructions text
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "הוראות",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = OnSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = group.system_prompt ?: "לא הוגדרו הוראות",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Files section
+            Text(
+                text = "קבצים",
+                style = MaterialTheme.typography.titleSmall,
+                color = OnSurface,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            if (group.group_attachments.isEmpty()) {
+                // Empty files area
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = SurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(80.dp)
+                        .clickable(onClick = onAddFileClick)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "הוסיפו קבצים...",
+                            color = OnSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            } else {
+                // Files grid
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 100.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Add file button
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = SurfaceVariant,
+                            modifier = Modifier
+                                .size(100.dp)
+                                .clickable(onClick = onAddFileClick)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "הוסף קובץ",
+                                    tint = OnSurfaceVariant,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // File thumbnails with delete functionality
+                    group.group_attachments.forEachIndexed { index, attachment ->
+                        item {
+                            FileThumbnail(
+                                attachment = attachment,
+                                onClick = { onFileClick(attachment) },
+                                onDelete = { viewModel.removeFileFromProject(group.group_id, index) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FileThumbnail(
+    attachment: Attachment,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = SurfaceVariant,
+        modifier = modifier
+            .size(100.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // File icon based on type
+                val icon = when {
+                    attachment.mime_type.startsWith("image/") -> Icons.Default.Image
+                    attachment.mime_type.startsWith("video/") -> Icons.Default.VideoFile
+                    attachment.mime_type.startsWith("audio/") -> Icons.Default.AudioFile
+                    attachment.mime_type.contains("pdf") -> Icons.Default.PictureAsPdf
+                    else -> Icons.Default.InsertDriveFile
+                }
+
+                Icon(
+                    imageVector = icon,
+                    contentDescription = attachment.file_name,
+                    tint = OnSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                )
+
+                Text(
+                    text = attachment.file_name,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant,
+                    maxLines = 2,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Delete button (X) in top-right corner
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .size(24.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 4.dp, y = (-4).dp)
+                    .clickable(onClick = onDelete)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "מחק קובץ",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// Helper function to get file name from URI
+private fun getFileNameFromUri(context: android.content.Context, uri: android.net.Uri): String? {
+    var fileName: String? = null
+    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+        if (cursor.moveToFirst() && nameIndex >= 0) {
+            fileName = cursor.getString(nameIndex)
+        }
+    }
+    return fileName
+}
+
+// Helper function to open attachment file
+private fun openAttachmentFile(context: android.content.Context, attachment: Attachment) {
+    attachment.local_file_path?.let { path ->
+        val file = java.io.File(path)
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                context.applicationContext.packageName + ".fileprovider",
+                file
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, attachment.mime_type)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            // Handle file opening error
         }
     }
 }

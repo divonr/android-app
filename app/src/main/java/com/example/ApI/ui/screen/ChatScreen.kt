@@ -183,21 +183,45 @@ fun ChatScreen(
                             )
                         }
                         
-                        // Right side - System Prompt
-                        Surface(
-                            shape = MaterialTheme.shapes.medium,
-                            color = SurfaceVariant,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clickable { viewModel.showSystemPromptDialog() }
+                        // Right side - System Prompt and Delete icons
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Build,
-                                    contentDescription = "System Prompt",
-                                    tint = OnSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                            // System Prompt icon
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = SurfaceVariant,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clickable { viewModel.showSystemPromptDialog() }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Build,
+                                        contentDescription = "System Prompt",
+                                        tint = OnSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            // Delete Chat
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = SurfaceVariant,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clickable { viewModel.showDeleteChatConfirmation() }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete Chat",
+                                        tint = OnSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -237,10 +261,10 @@ fun ChatScreen(
                                 val isFirstMessage = index == 0
                                 val previousMessage = if (index > 0) reversedMessages[index - 1] else null
                                 val isSameSpeaker = previousMessage?.role == message.role
-                                
-                                val topPadding = if (isFirstMessage || !isSameSpeaker) 4.dp else 1.dp
-                                val bottomPadding = 4.dp
-                                
+
+                                val topPadding = if (isFirstMessage || !isSameSpeaker) 4.dp else 0.dp
+                                val bottomPadding = if (!isSameSpeaker) 4.dp else 0.dp
+
                                 MessageBubble(
                                     message = message,
                                     viewModel = viewModel,
@@ -509,10 +533,18 @@ fun ChatScreen(
 
             // System Prompt Dialog
             if (uiState.showSystemPromptDialog) {
+                val projectGroup = viewModel.getCurrentChatProjectGroup()
+
                 SystemPromptDialog(
                     currentPrompt = uiState.systemPrompt,
                     onConfirm = { viewModel.updateSystemPrompt(it) },
-                    onDismiss = { viewModel.hideSystemPromptDialog() }
+                    onDismiss = { viewModel.hideSystemPromptDialog() },
+                    projectPrompt = projectGroup?.system_prompt,
+                    projectName = projectGroup?.group_name,
+                    initialOverrideEnabled = uiState.systemPromptOverrideEnabled,
+                    onOverrideToggle = { enabled ->
+                        viewModel.setSystemPromptOverride(enabled)
+                    }
                 )
             }
 
@@ -531,6 +563,42 @@ fun ChatScreen(
                     models = uiState.currentProvider?.models ?: emptyList(),
                     onModelSelected = { viewModel.selectModel(it) },
                     onDismiss = { viewModel.hideModelSelector() }
+                )
+            }
+
+            // Delete Chat Confirmation Dialog
+            uiState.showDeleteChatConfirmation?.let { chat ->
+                AlertDialog(
+                    onDismissRequest = { viewModel.hideDeleteChatConfirmation() },
+                    title = {
+                        Text(
+                            stringResource(R.string.delete_confirmation_title),
+                            color = OnSurface
+                        )
+                    },
+                    text = {
+                        Text(
+                            stringResource(R.string.delete_confirmation_message),
+                            color = OnSurfaceVariant
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.deleteCurrentChat()
+                                viewModel.hideDeleteChatConfirmation()
+                            }
+                        ) {
+                            Text(stringResource(R.string.delete), color = Color.Red)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { viewModel.hideDeleteChatConfirmation() }) {
+                            Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
+                        }
+                    },
+                    containerColor = Surface,
+                    tonalElevation = 0.dp
                 )
             }
 
