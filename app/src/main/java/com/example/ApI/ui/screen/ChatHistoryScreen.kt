@@ -187,7 +187,10 @@ fun ChatHistoryScreen(
                                         isExpanded = isExpanded,
                                         chatCount = item.chats.size,
                                         onGroupClick = { viewModel.navigateToGroup(item.group.group_id) },
-                                        onToggleExpansion = { viewModel.toggleGroupExpansion(item.group.group_id) }
+                                        onToggleExpansion = { viewModel.toggleGroupExpansion(item.group.group_id) },
+                                        onLongPress = { offset ->
+                                            viewModel.showGroupContextMenu(item.group, offset)
+                                        }
                                     )
                                 }
 
@@ -260,6 +263,27 @@ fun ChatHistoryScreen(
                     },
                     onRemoveFromGroup = {
                         viewModel.removeChatFromGroup(menuState.chat.chat_id)
+                    }
+                )
+            }
+
+            // Context menu for group actions
+            uiState.groupContextMenu?.let { menuState ->
+                GroupContextMenu(
+                    group = menuState.group,
+                    position = menuState.position,
+                    onDismiss = { viewModel.hideGroupContextMenu() },
+                    onRename = { group ->
+                        viewModel.showGroupRenameDialog(group)
+                    },
+                    onMakeProject = { group ->
+                        viewModel.makeGroupProject(group)
+                    },
+                    onNewConversation = { group ->
+                        viewModel.createNewConversationInGroup(group)
+                    },
+                    onDelete = { group ->
+                        viewModel.showGroupDeleteConfirmation(group)
                     }
                 )
             }
@@ -392,6 +416,96 @@ fun ChatHistoryScreen(
                     },
                     dismissButton = {
                         TextButton(onClick = { viewModel.hideGroupDialog() }) {
+                            Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
+                        }
+                    },
+                    containerColor = Surface,
+                    tonalElevation = 0.dp
+                )
+            }
+
+            // Group rename dialog
+            uiState.showGroupRenameDialog?.let { group ->
+                var newGroupName by remember(group.group_id) { mutableStateOf(group.group_name) }
+
+                // Reset the name when dialog opens with a new group
+                LaunchedEffect(group.group_id, group.group_name) {
+                    newGroupName = group.group_name
+                }
+
+                AlertDialog(
+                    onDismissRequest = { viewModel.hideGroupRenameDialog() },
+                    title = {
+                        Text(
+                            "שנה שם קבוצה",
+                            color = OnSurface
+                        )
+                    },
+                    text = {
+                        OutlinedTextField(
+                            value = newGroupName,
+                            onValueChange = { newGroupName = it },
+                            label = { Text("שם הקבוצה החדש", color = OnSurfaceVariant) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = OnSurface,
+                                unfocusedTextColor = OnSurface,
+                                focusedBorderColor = Primary,
+                                unfocusedBorderColor = Gray500,
+                                focusedLabelColor = Primary,
+                                unfocusedLabelColor = OnSurfaceVariant,
+                                cursorColor = Primary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.renameGroup(group, newGroupName)
+                            },
+                            enabled = newGroupName.isNotBlank() && newGroupName != group.group_name
+                        ) {
+                            Text("שמור", color = if (newGroupName.isNotBlank() && newGroupName != group.group_name) Primary else OnSurfaceVariant)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { viewModel.hideGroupRenameDialog() }) {
+                            Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
+                        }
+                    },
+                    containerColor = Surface,
+                    tonalElevation = 0.dp
+                )
+            }
+
+            // Group delete confirmation dialog
+            uiState.showDeleteGroupConfirmation?.let { group ->
+                AlertDialog(
+                    onDismissRequest = { viewModel.hideGroupDeleteConfirmation() },
+                    title = {
+                        Text(
+                            "מחיקת קבוצה",
+                            color = OnSurface
+                        )
+                    },
+                    text = {
+                        Text(
+                            "האם אתה בטוח שברצונך למחוק את הקבוצה \"${group.group_name}\"? כל השיחות בקבוצה זו יפוזרו ויתבטלו מהקבוצה.",
+                            color = OnSurfaceVariant
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.deleteGroup(group)
+                            }
+                        ) {
+                            Text("מחק", color = Color.Red)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { viewModel.hideGroupDeleteConfirmation() }) {
                             Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
                         }
                     },
@@ -551,12 +665,27 @@ fun GroupItem(
     chatCount: Int,
     onGroupClick: () -> Unit,
     onToggleExpansion: () -> Unit,
+    onLongPress: (DpOffset) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var itemPosition by remember { mutableStateOf(DpOffset.Zero) }
+    var itemTopLeft by remember { mutableStateOf(Offset.Zero) }
+    var itemSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+    val density = LocalDensity.current
+
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 2.dp),
+            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .onGloballyPositioned { coordinates ->
+                // Capture item bounds and approximate center in window coordinates
+                val pos = coordinates.localToWindow(Offset.Zero)
+                itemTopLeft = pos
+                itemSize = coordinates.size.run { androidx.compose.ui.geometry.Size(width.toFloat(), height.toFloat()) }
+                val centerX = pos.x + itemSize.width - 16f
+                val centerY = pos.y + itemSize.height / 2f
+                itemPosition = with(density) { DpOffset(centerX.toDp(), centerY.toDp()) }
+            },
         colors = CardDefaults.cardColors(
             containerColor = Surface
         ),
@@ -565,6 +694,20 @@ fun GroupItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = { pressOffset ->
+                            // Position menu to the right of the item, vertically at press Y
+                            val anchor = with(density) {
+                                val anchorX = (itemTopLeft.x + itemSize.width - 8f).toDp()
+                                val anchorY = (itemTopLeft.y + pressOffset.y).toDp()
+                                DpOffset(anchorX, anchorY)
+                            }
+                            onLongPress(anchor)
+                        },
+                        onTap = { onGroupClick() }
+                    )
+                }
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -622,6 +765,133 @@ fun GroupItem(
                     .clickable(onClick = onToggleExpansion)
             )
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun GroupContextMenu(
+    group: ChatGroup,
+    position: DpOffset,
+    onDismiss: () -> Unit,
+    onRename: (ChatGroup) -> Unit,
+    onMakeProject: (ChatGroup) -> Unit,
+    onNewConversation: (ChatGroup) -> Unit,
+    onDelete: (ChatGroup) -> Unit
+) {
+    DropdownMenu(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        offset = position,
+        properties = PopupProperties(focusable = true),
+        modifier = Modifier
+            .background(
+                Surface,
+                RoundedCornerShape(16.dp)
+            )
+            .width(220.dp)
+    ) {
+        // Rename group
+        DropdownMenuItem(
+            text = {
+                Text(
+                    "שנה שם קבוצה",
+                    color = OnSurface,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            onClick = {
+                onRename(group)
+                onDismiss()
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = null,
+                    tint = Primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        )
+
+        // Make project
+        DropdownMenuItem(
+            text = {
+                Text(
+                    "הפוך לפרויקט",
+                    color = OnSurface,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            onClick = {
+                onMakeProject(group)
+                onDismiss()
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Star,
+                    contentDescription = null,
+                    tint = AccentBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        )
+
+        HorizontalDivider(
+            color = OnSurface.copy(alpha = 0.1f),
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+
+        // New conversation
+        DropdownMenuItem(
+            text = {
+                Text(
+                    "שיחה חדשה",
+                    color = OnSurface,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            onClick = {
+                onNewConversation(group)
+                onDismiss()
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    tint = OnSurface,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        )
+
+        HorizontalDivider(
+            color = OnSurface.copy(alpha = 0.1f),
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+
+        // Delete group
+        DropdownMenuItem(
+            text = {
+                Text(
+                    "מחק קבוצה ופזר שיחות",
+                    color = AccentRed,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            onClick = {
+                onDelete(group)
+                onDismiss()
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = AccentRed,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        )
     }
 }
 

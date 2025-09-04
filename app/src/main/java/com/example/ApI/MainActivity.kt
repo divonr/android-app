@@ -23,25 +23,25 @@ import com.example.ApI.ui.screen.ChatHistoryScreen
 import com.example.ApI.ui.screen.GroupScreen
 import com.example.ApI.ui.screen.ChatScreen
 import com.example.ApI.ui.screen.UserSettingsScreen
-import com.example.ApI.ui.theme.LLMApiTheme
+import com.example.ApI.ui.theme.ApITheme
+import com.example.ApI.ui.theme.Background
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.light(
-                AndroidColor.TRANSPARENT,
-                AndroidColor.TRANSPARENT
+            statusBarStyle = SystemBarStyle.dark(
+                android.graphics.Color.parseColor("#0D0E14")
             ),
-            navigationBarStyle = SystemBarStyle.light(
-                AndroidColor.TRANSPARENT,
-                AndroidColor.TRANSPARENT
+            navigationBarStyle = SystemBarStyle.dark(
+                android.graphics.Color.parseColor("#0D0E14")
             )
         )
         setContent {
-            LLMApiTheme {
+            ApITheme {
                 Surface(
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    color = Background
                 ) {
                     LLMChatApp(
                         sharedIntent = intent

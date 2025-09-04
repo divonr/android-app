@@ -1,10 +1,15 @@
 package com.example.ApI.ui.screen
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -14,21 +19,29 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.ui.components.AddApiKeyDialog
 import com.example.ApI.ui.components.DeleteApiKeyConfirmationDialog
 import com.example.ApI.ui.theme.*
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ApiKeysScreen(
     repository: DataRepository,
@@ -41,6 +54,14 @@ fun ApiKeysScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var keyToDelete by remember { mutableStateOf<ApiKey?>(null) }
+    
+    // Drag and drop state
+    var draggedItemIndex by remember { mutableStateOf<Int?>(null) }
+    var targetIndex by remember { mutableStateOf<Int?>(null) }
+    var isDragging by remember { mutableStateOf(false) }
+    var dragOffset by remember { mutableStateOf(0f) }
+    val coroutineScope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
     
     // Helper functions to handle operations and update state
     val onAddApiKey = { provider: String, key: String, customName: String? ->
@@ -63,6 +84,21 @@ fun ApiKeysScreen(
     val onDeleteApiKey = { keyId: String ->
         repository.deleteApiKey(currentUser, keyId)
         apiKeys = repository.loadApiKeys(currentUser) // Refresh the state
+    }
+    
+    val onReorderApiKeys = { fromIndex: Int, toIndex: Int ->
+        if (fromIndex != toIndex) {
+            // Perform the reordering in the list
+            val mutableList = apiKeys.toMutableList()
+            val item = mutableList.removeAt(fromIndex)
+            mutableList.add(toIndex, item)
+            apiKeys = mutableList
+            
+            // Save the new order
+            coroutineScope.launch {
+                repository.reorderApiKeys(currentUser, fromIndex, toIndex)
+            }
+        }
     }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -147,17 +183,69 @@ fun ApiKeysScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // API Keys List with modern design
+                // API Keys List with drag and drop
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(apiKeys) { apiKey ->
-                        ApiKeyItem(
+                    itemsIndexed(
+                        items = apiKeys,
+                        key = { _, item -> item.id }
+                    ) { index, apiKey ->
+                        val actualIndex = if (isDragging && draggedItemIndex != null && targetIndex != null) {
+                            when {
+                                index == draggedItemIndex -> targetIndex!!
+                                draggedItemIndex!! < targetIndex!! && index > draggedItemIndex!! && index <= targetIndex!! -> index - 1
+                                draggedItemIndex!! > targetIndex!! && index >= targetIndex!! && index < draggedItemIndex!! -> index + 1
+                                else -> index
+                            }
+                        } else {
+                            index
+                        }
+                        
+                        DraggableApiKeyItem(
                             apiKey = apiKey,
+                            index = index,
+                            actualIndex = actualIndex,
+                            totalItems = apiKeys.size,
+                            isDragged = draggedItemIndex == index,
+                            dragOffset = if (draggedItemIndex == index) dragOffset else 0f,
                             onToggleActive = { onToggleApiKey(apiKey.id) },
                             onDelete = { 
                                 keyToDelete = apiKey
                                 showDeleteDialog = true
+                            },
+                            onDragStart = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                draggedItemIndex = index
+                                targetIndex = index
+                                isDragging = true
+                                dragOffset = 0f
+                            },
+                            onDrag = { offset ->
+                                dragOffset = offset
+                                
+                                // Calculate which item we're hovering over
+                                val itemHeight = 112 // Approximate height in dp
+                                val itemsOffset = (offset / itemHeight).toInt()
+                                val newTargetIndex = (index + itemsOffset)
+                                    .coerceIn(0, apiKeys.size - 1)
+                                
+                                if (newTargetIndex != targetIndex) {
+                                    targetIndex = newTargetIndex
+                                }
+                            },
+                            onDragEnd = {
+                                val fromIndex = draggedItemIndex
+                                val toIndex = targetIndex
+                                
+                                if (fromIndex != null && toIndex != null) {
+                                    onReorderApiKeys(fromIndex, toIndex)
+                                }
+                                
+                                draggedItemIndex = null
+                                targetIndex = null
+                                isDragging = false
+                                dragOffset = 0f
                             }
                         )
                     }
@@ -195,10 +283,102 @@ fun ApiKeysScreen(
 }
 
 @Composable
+private fun DraggableApiKeyItem(
+    apiKey: ApiKey,
+    index: Int,
+    actualIndex: Int,
+    totalItems: Int,
+    isDragged: Boolean,
+    dragOffset: Float,
+    onToggleActive: () -> Unit,
+    onDelete: () -> Unit,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    var localDragOffset by remember { mutableStateOf(0f) }
+    
+    // Animation for smooth position transitions
+    val animatedOffset by animateDpAsState(
+        targetValue = with(density) {
+            val itemHeight = 112.dp.toPx()
+            ((actualIndex - index) * itemHeight).toDp()
+        },
+        label = "position",
+        animationSpec = spring(
+            dampingRatio = 0.8f,
+            stiffness = 400f
+        )
+    )
+    
+    // Animation states
+    val elevation by animateDpAsState(
+        targetValue = if (isDragged) 12.dp else 1.dp,
+        label = "elevation"
+    )
+    
+    val scale by animateFloatAsState(
+        targetValue = if (isDragged) 1.03f else 1f,
+        label = "scale",
+        animationSpec = spring(
+            dampingRatio = 0.8f,
+            stiffness = 400f
+        )
+    )
+    
+    val opacity = if (isDragged) 0.9f else 1f
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .zIndex(if (isDragged) 1f else 0f)
+            .graphicsLayer {
+                // Apply animation offset for non-dragged items
+                translationY = if (isDragged) {
+                    localDragOffset
+                } else {
+                    animatedOffset.toPx()
+                }
+                scaleX = scale
+                scaleY = scale
+                alpha = opacity
+                shadowElevation = elevation.toPx()
+            }
+            .pointerInput(apiKey.id) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { _ ->
+                        onDragStart()
+                        localDragOffset = 0f
+                    },
+                    onDragEnd = {
+                        onDragEnd()
+                        localDragOffset = 0f
+                    },
+                    onDrag = { _, dragAmount ->
+                        localDragOffset += dragAmount.y
+                        onDrag(localDragOffset)
+                    }
+                )
+            }
+    ) {
+        ApiKeyItem(
+            apiKey = apiKey,
+            onToggleActive = onToggleActive,
+            onDelete = onDelete,
+            elevation = elevation,
+            modifier = Modifier
+        )
+    }
+}
+
+@Composable
 private fun ApiKeyItem(
     apiKey: ApiKey,
     onToggleActive: () -> Unit,
     onDelete: () -> Unit,
+    elevation: androidx.compose.ui.unit.Dp = 1.dp,
     modifier: Modifier = Modifier
 ) {
     // Provider-specific background colors
@@ -224,9 +404,11 @@ private fun ApiKeyItem(
     }
     
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .shadow(elevation, RoundedCornerShape(20.dp)),
         shape = RoundedCornerShape(20.dp),
-        shadowElevation = 1.dp
+        shadowElevation = elevation
     ) {
         Box(
             modifier = Modifier

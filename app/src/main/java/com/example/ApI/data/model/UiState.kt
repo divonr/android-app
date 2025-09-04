@@ -29,10 +29,13 @@ data class ChatUiState(
     val currentGroup: ChatGroup? = null,
     val expandedGroups: Set<String> = emptySet(),
     val chatContextMenu: ChatContextMenuState? = null,
+    val groupContextMenu: GroupContextMenuState? = null,
     val showDeleteConfirmation: Chat? = null,
     val showRenameDialog: Chat? = null,
+    val showGroupRenameDialog: ChatGroup? = null,
     val showGroupDialog: Boolean = false,
     val showDeleteChatConfirmation: Chat? = null,
+    val showDeleteGroupConfirmation: ChatGroup? = null,
     val pendingChatForGroup: Chat? = null,
     val snackbarMessage: String? = null,
     val editingMessage: Message? = null,
@@ -45,6 +48,11 @@ data class ChatUiState(
 
 data class ChatContextMenuState(
     val chat: Chat,
+    val position: androidx.compose.ui.unit.DpOffset
+)
+
+data class GroupContextMenuState(
+    val group: ChatGroup,
     val position: androidx.compose.ui.unit.DpOffset
 )
 

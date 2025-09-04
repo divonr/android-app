@@ -31,7 +31,7 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 @Composable
-fun LLMApiTheme(
+fun ApITheme(
     content: @Composable () -> Unit
 ) {
     // Always use dark theme as specified in requirements

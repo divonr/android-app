@@ -482,6 +482,15 @@ class DataRepository(private val context: Context) {
         saveApiKeys(username, updatedKeys)
     }
     
+    fun reorderApiKeys(username: String, fromIndex: Int, toIndex: Int) {
+        val currentKeys = loadApiKeys(username).toMutableList()
+        if (fromIndex in currentKeys.indices && toIndex in currentKeys.indices) {
+            val item = currentKeys.removeAt(fromIndex)
+            currentKeys.add(toIndex, item)
+            saveApiKeys(username, currentKeys)
+        }
+    }
+    
     // App Settings
     fun loadAppSettings(): AppSettings {
         val file = File(internalDir, "app_settings.json")
@@ -589,21 +598,38 @@ class DataRepository(private val context: Context) {
         systemPrompt: String,
         username: String,
         chatId: String? = null,
+        projectAttachments: List<Attachment> = emptyList(),
         webSearchEnabled: Boolean = false
     ): ApiResponse {
         val apiKeys = loadApiKeys(username)
             .filter { it.isActive }
             .associate { it.provider to it.key }
-        
+
         // Check and re-upload files if needed when provider has changed
         val (updatedMessages, hasUpdates) = ensureFilesUploadedForProvider(provider, messages, username)
-        
+
         // If files were re-uploaded, update the chat history
         if (hasUpdates && chatId != null) {
             updateChatWithNewAttachments(username, chatId, updatedMessages)
         }
-        
-        return apiService.sendMessage(provider, modelName, updatedMessages, systemPrompt, apiKeys, webSearchEnabled)
+
+        // Handle project files - upload them for current provider if needed
+        val updatedProjectAttachments = ensureProjectFilesUploadedForProvider(provider, projectAttachments, username)
+
+        // Create final messages list with project files attached to a user message if needed
+        val finalMessages = if (updatedProjectAttachments.isNotEmpty()) {
+            // Create a user message with project attachments at the beginning
+            val projectFilesMessage = Message(
+                role = "user",
+                text = "General files belonging to the project of which this conversation is a part are attached:",
+                attachments = updatedProjectAttachments
+            )
+            listOf(projectFilesMessage) + updatedMessages
+        } else {
+            updatedMessages
+        }
+
+        return apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled)
     }
 
     suspend fun sendMessageStreaming(
@@ -613,24 +639,91 @@ class DataRepository(private val context: Context) {
         systemPrompt: String,
         username: String,
         chatId: String? = null,
+        projectAttachments: List<Attachment> = emptyList(),
         webSearchEnabled: Boolean = false,
         callback: com.example.ApI.data.network.StreamingCallback
     ) {
         val apiKeys = loadApiKeys(username)
             .filter { it.isActive }
             .associate { it.provider to it.key }
-        
+
         // Check and re-upload files if needed when provider has changed
         val (updatedMessages, hasUpdates) = ensureFilesUploadedForProvider(provider, messages, username)
-        
+
         // If files were re-uploaded, update the chat history
         if (hasUpdates && chatId != null) {
             updateChatWithNewAttachments(username, chatId, updatedMessages)
         }
-        
-        apiService.sendMessageStreaming(provider, modelName, updatedMessages, systemPrompt, apiKeys, webSearchEnabled, callback)
+
+        // Handle project files - upload them for current provider if needed
+        val updatedProjectAttachments = ensureProjectFilesUploadedForProvider(provider, projectAttachments, username)
+
+        // Create final messages list with project files attached to a user message if needed
+        val finalMessages = if (updatedProjectAttachments.isNotEmpty()) {
+            // Create a user message with project attachments at the beginning
+            val projectFilesMessage = Message(
+                role = "user",
+                text = "General files belonging to the project of which this conversation is a part are attached:",
+                attachments = updatedProjectAttachments
+            )
+            listOf(projectFilesMessage) + updatedMessages
+        } else {
+            updatedMessages
+        }
+
+        apiService.sendMessageStreaming(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, callback)
     }
-    
+
+    // Check and upload project files for current provider
+    private suspend fun ensureProjectFilesUploadedForProvider(
+        provider: Provider,
+        projectAttachments: List<Attachment>,
+        username: String
+    ): List<Attachment> {
+        if (projectAttachments.isEmpty()) return emptyList()
+
+        val updatedAttachments = mutableListOf<Attachment>()
+
+        for (attachment in projectAttachments) {
+            val needsUpload = when (provider.provider) {
+                "openai" -> attachment.file_OPENAI_id == null
+                "poe" -> attachment.file_POE_url == null
+                "google" -> attachment.file_GOOGLE_uri == null
+                else -> false
+            }
+
+            if (needsUpload && attachment.local_file_path != null) {
+                // Need to upload file for current provider
+                val uploadedAttachment = uploadFile(
+                    provider = provider,
+                    filePath = attachment.local_file_path,
+                    fileName = attachment.file_name,
+                    mimeType = attachment.mime_type,
+                    username = username
+                )
+
+                if (uploadedAttachment != null) {
+                    // Merge the new ID with existing attachment data
+                    val mergedAttachment = when (provider.provider) {
+                        "openai" -> attachment.copy(file_OPENAI_id = uploadedAttachment.file_OPENAI_id)
+                        "poe" -> attachment.copy(file_POE_url = uploadedAttachment.file_POE_url)
+                        "google" -> attachment.copy(file_GOOGLE_uri = uploadedAttachment.file_GOOGLE_uri)
+                        else -> attachment
+                    }
+                    updatedAttachments.add(mergedAttachment)
+                } else {
+                    // Upload failed, keep original attachment
+                    updatedAttachments.add(attachment)
+                }
+            } else {
+                // File already uploaded for this provider or no local path
+                updatedAttachments.add(attachment)
+            }
+        }
+
+        return updatedAttachments
+    }
+
     // Check and re-upload files if provider has changed
     private suspend fun ensureFilesUploadedForProvider(
         provider: Provider, 

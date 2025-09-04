@@ -313,6 +313,9 @@ class ChatViewModel(
                         }
                     }
 
+                    // Get project attachments if this chat belongs to a project
+                    val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
+
                     repository.sendMessageStreaming(
                         provider = currentProvider,
                         modelName = currentModel,
@@ -320,6 +323,7 @@ class ChatViewModel(
                         systemPrompt = systemPrompt,
                         username = currentUser,
                         chatId = updatedChat.chat_id,
+                        projectAttachments = projectAttachments,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
                         callback = streamingCallback
                     )
@@ -459,6 +463,9 @@ class ChatViewModel(
                         }
                     }
 
+                    // Get project attachments if this chat belongs to a project
+                    val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
+
                     repository.sendMessageStreaming(
                         provider = currentProvider,
                         modelName = currentModel,
@@ -466,6 +473,7 @@ class ChatViewModel(
                         systemPrompt = systemPrompt,
                         username = currentUser,
                         chatId = currentChat.chat_id,
+                        projectAttachments = projectAttachments,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
                         callback = streamingCallback
                     )
@@ -1055,6 +1063,9 @@ class ChatViewModel(
                         }
                     }
 
+                    // Get project attachments if this chat belongs to a project
+                    val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
+
                     repository.sendMessageStreaming(
                         provider = currentProvider,
                         modelName = currentModel,
@@ -1062,6 +1073,7 @@ class ChatViewModel(
                         systemPrompt = systemPrompt,
                         username = currentUser,
                         chatId = resendUpdatedChat.chat_id,
+                        projectAttachments = projectAttachments,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
                         callback = streamingCallback
                     )
@@ -1693,6 +1705,155 @@ class ChatViewModel(
             systemPrompt = systemPrompt,
             showSystemPromptDialog = false
         )
+    }
+
+    // Group context menu functions
+    fun showGroupContextMenu(group: ChatGroup, position: androidx.compose.ui.unit.DpOffset) {
+        _uiState.value = _uiState.value.copy(
+            groupContextMenu = GroupContextMenuState(group, position)
+        )
+    }
+
+    fun hideGroupContextMenu() {
+        _uiState.value = _uiState.value.copy(
+            groupContextMenu = null
+        )
+    }
+
+    fun showGroupRenameDialog(group: ChatGroup) {
+        _uiState.value = _uiState.value.copy(
+            showGroupRenameDialog = group,
+            groupContextMenu = null
+        )
+    }
+
+    fun hideGroupRenameDialog() {
+        _uiState.value = _uiState.value.copy(
+            showGroupRenameDialog = null
+        )
+    }
+
+    fun renameGroup(group: ChatGroup, newName: String) {
+        if (newName.isBlank()) return
+
+        val currentUser = _appSettings.value.current_user
+        val success = repository.renameGroup(currentUser, group.group_id, newName.trim())
+
+        if (success) {
+            // Update local state
+            val updatedGroups = _uiState.value.groups.map {
+                if (it.group_id == group.group_id) {
+                    it.copy(group_name = newName.trim())
+                } else {
+                    it
+                }
+            }
+
+            _uiState.value = _uiState.value.copy(
+                groups = updatedGroups,
+                currentGroup = if (_uiState.value.currentGroup?.group_id == group.group_id) {
+                    _uiState.value.currentGroup?.copy(group_name = newName.trim())
+                } else {
+                    _uiState.value.currentGroup
+                },
+                showGroupRenameDialog = null
+            )
+        } else {
+            _uiState.value = _uiState.value.copy(
+                showGroupRenameDialog = null
+            )
+        }
+    }
+
+    fun makeGroupProject(group: ChatGroup) {
+        val currentUser = _appSettings.value.current_user
+        val success = repository.updateGroupProjectStatus(currentUser, group.group_id, true)
+
+        if (success) {
+            // Update local state
+            val updatedGroups = _uiState.value.groups.map {
+                if (it.group_id == group.group_id) {
+                    it.copy(is_project = true)
+                } else {
+                    it
+                }
+            }
+
+            _uiState.value = _uiState.value.copy(
+                groups = updatedGroups,
+                currentGroup = if (_uiState.value.currentGroup?.group_id == group.group_id) {
+                    _uiState.value.currentGroup?.copy(is_project = true)
+                } else {
+                    _uiState.value.currentGroup
+                }
+            )
+
+            // Navigate to group screen with project mode enabled
+            navigateToGroup(group.group_id)
+        } else {
+            // No action needed for error case
+        }
+    }
+
+    fun createNewConversationInGroup(group: ChatGroup) {
+        val currentUser = _appSettings.value.current_user
+        val newChat = repository.createNewChatInGroup(currentUser, "שיחה חדשה", group.group_id)
+
+        // Update local state
+        val updatedChatHistory = _uiState.value.chatHistory + newChat
+        _uiState.value = _uiState.value.copy(
+            chatHistory = updatedChatHistory,
+            currentChat = newChat
+        )
+
+        // Navigate to the new chat
+        navigateToScreen(Screen.Chat)
+    }
+
+    fun showGroupDeleteConfirmation(group: ChatGroup) {
+        _uiState.value = _uiState.value.copy(
+            showDeleteGroupConfirmation = group,
+            groupContextMenu = null
+        )
+    }
+
+    fun hideGroupDeleteConfirmation() {
+        _uiState.value = _uiState.value.copy(
+            showDeleteGroupConfirmation = null
+        )
+    }
+
+    fun deleteGroup(group: ChatGroup) {
+        val currentUser = _appSettings.value.current_user
+        val success = repository.deleteGroup(currentUser, group.group_id)
+
+        if (success) {
+            // Update local state - remove group and unassign chats
+            val updatedGroups = _uiState.value.groups.filter { it.group_id != group.group_id }
+            val updatedChatHistory = _uiState.value.chatHistory.map { chat ->
+                if (chat.group == group.group_id) {
+                    chat.copy(group = null)
+                } else {
+                    chat
+                }
+            }
+
+            _uiState.value = _uiState.value.copy(
+                groups = updatedGroups,
+                chatHistory = updatedChatHistory,
+                currentGroup = if (_uiState.value.currentGroup?.group_id == group.group_id) null else _uiState.value.currentGroup,
+                showDeleteGroupConfirmation = null
+            )
+
+            // Navigate back to chat history if we were in the group screen
+            if (_currentScreen.value is Screen.Group && (_currentScreen.value as Screen.Group).groupId == group.group_id) {
+                navigateToScreen(Screen.ChatHistory)
+            }
+        } else {
+            _uiState.value = _uiState.value.copy(
+                showDeleteGroupConfirmation = null
+            )
+        }
     }
 
 }
