@@ -74,5 +74,6 @@ sealed class Screen {
     object Chat : Screen()
     object ApiKeys : Screen()
     object UserSettings : Screen()
+    object ChildLock : Screen()
     data class Group(val groupId: String) : Screen()
 }

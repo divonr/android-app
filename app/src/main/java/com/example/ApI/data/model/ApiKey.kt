@@ -18,7 +18,8 @@ data class AppSettings(
     val selected_model: String,
     val temperature: Double = 1.0,
     val titleGenerationSettings: TitleGenerationSettings = TitleGenerationSettings(),
-    val multiMessageMode: Boolean = false
+    val multiMessageMode: Boolean = false,
+    val childLockSettings: ChildLockSettings = ChildLockSettings()
 )
 
 @Serializable
@@ -26,4 +27,12 @@ data class TitleGenerationSettings(
     val enabled: Boolean = true,
     val provider: String = "auto", // "auto", "openai", "poe", "google"
     val updateOnExtension: Boolean = true // Update title after 3rd model response
+)
+
+@Serializable
+data class ChildLockSettings(
+    val enabled: Boolean = false,
+    val encryptedPassword: String = "",
+    val startTime: String = "23:00", // Default start time
+    val endTime: String = "07:00" // Default end time
 )

@@ -9,6 +9,7 @@ import android.provider.OpenableColumns
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.network.StreamingCallback
+import com.example.ApI.data.ParentalControlManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +19,8 @@ import java.nio.charset.Charset
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.time.ZoneId
+import java.time.LocalTime
+import java.time.LocalDateTime
 
 class ChatViewModel(
     private val repository: DataRepository,
@@ -1854,6 +1857,124 @@ class ChatViewModel(
                 showDeleteGroupConfirmation = null
             )
         }
+    }
+
+    // Child Lock Methods
+
+    fun setupChildLock(password: String, startTime: String, endTime: String, deviceId: String) {
+        viewModelScope.launch {
+            try {
+                val parentalControlManager = ParentalControlManager(context)
+                parentalControlManager.setParentalPassword(password, deviceId)
+
+                // Update settings with child lock enabled
+                val updatedSettings = _appSettings.value.copy(
+                    childLockSettings = ChildLockSettings(
+                        enabled = true,
+                        encryptedPassword = parentalControlManager.getEncryptedPassword(),
+                        startTime = startTime,
+                        endTime = endTime
+                    )
+                )
+
+                repository.saveAppSettings(updatedSettings)
+                _appSettings.value = updatedSettings
+
+                // Show success message
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "מצב נעילת ילדים הופעל בהצלחה"
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "שגיאה בהגדרת נעילת ילדים: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun verifyAndDisableChildLock(password: String, deviceId: String): Boolean {
+        return try {
+            val parentalControlManager = ParentalControlManager(context)
+            val isValidPassword = parentalControlManager.verifyParentalPassword(password, deviceId)
+
+            if (isValidPassword) {
+                // Disable child lock
+                val updatedSettings = _appSettings.value.copy(
+                    childLockSettings = ChildLockSettings(
+                        enabled = false,
+                        encryptedPassword = "",
+                        startTime = "23:00",
+                        endTime = "07:00"
+                    )
+                )
+
+                repository.saveAppSettings(updatedSettings)
+                _appSettings.value = updatedSettings
+
+                // Show success message
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "נעילת ילדים בוטלה בהצלחה"
+                )
+                true
+            } else {
+                // Show error message
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "סיסמה שגויה"
+                )
+                false
+            }
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(
+                snackbarMessage = "שגיאה בביטול נעילת ילדים: ${e.message}"
+            )
+            false
+        }
+    }
+
+    fun updateChildLockSettings(enabled: Boolean, password: String, startTime: String, endTime: String) {
+        val updatedSettings = _appSettings.value.copy(
+            childLockSettings = ChildLockSettings(
+                enabled = enabled,
+                encryptedPassword = password,
+                startTime = startTime,
+                endTime = endTime
+            )
+        )
+
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+    }
+
+    fun isChildLockActive(): Boolean {
+        val settings = _appSettings.value.childLockSettings
+        if (!settings.enabled) return false
+
+        return isCurrentTimeInLockRange(settings.startTime, settings.endTime)
+    }
+
+    private fun isCurrentTimeInLockRange(startTime: String, endTime: String): Boolean {
+        try {
+            val now = LocalTime.now()
+            val start = LocalTime.parse(startTime)
+            val end = LocalTime.parse(endTime)
+
+            // Handle case where end time is next day (e.g., 23:00 to 07:00)
+            return if (start.isBefore(end)) {
+                // Same day range (e.g., 09:00 to 17:00)
+                now.isAfter(start) && now.isBefore(end)
+            } else {
+                // Overnight range (e.g., 23:00 to 07:00)
+                now.isAfter(start) || now.isBefore(end)
+            }
+        } catch (e: Exception) {
+            // If parsing fails, default to not locked
+            return false
+        }
+    }
+
+    fun getLockEndTime(): String {
+        val settings = _appSettings.value.childLockSettings
+        return settings.endTime
     }
 
 }

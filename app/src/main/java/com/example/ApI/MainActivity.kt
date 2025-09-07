@@ -23,6 +23,7 @@ import com.example.ApI.ui.screen.ChatHistoryScreen
 import com.example.ApI.ui.screen.GroupScreen
 import com.example.ApI.ui.screen.ChatScreen
 import com.example.ApI.ui.screen.UserSettingsScreen
+import com.example.ApI.ui.screen.ChildLockScreen
 import com.example.ApI.ui.theme.ApITheme
 import com.example.ApI.ui.theme.Background
 
@@ -62,21 +63,38 @@ fun LLMChatApp(sharedIntent: Intent? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val repository = remember { DataRepository(context) }
     val viewModel: ChatViewModel = viewModel { ChatViewModel(repository, context, sharedIntent) }
-    
+
     val currentScreen by viewModel.currentScreen.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
     val appSettings by viewModel.appSettings.collectAsState()
 
-    // Handle system back button: navigate back to previous screen, exit on main screen
+    // Check for child lock on app start
+    val isChildLockActive = viewModel.isChildLockActive()
+    val effectiveScreen = if (isChildLockActive && currentScreen != Screen.ChildLock) {
+        Screen.ChildLock
+    } else if (!isChildLockActive && currentScreen == Screen.ChildLock) {
+        Screen.ChatHistory
+    } else {
+        currentScreen
+    }
+
+    // Handle system back button: navigate back to previous screen, exit on main screen or child lock
     BackHandler(enabled = true) {
-        if (currentScreen !is Screen.ChatHistory) {
-            viewModel.navigateToScreen(Screen.ChatHistory)
-        } else {
-            (context as? Activity)?.finish()
+        when {
+            effectiveScreen is Screen.ChildLock -> {
+                // Exit app when on child lock screen
+                (context as? Activity)?.finish()
+            }
+            effectiveScreen !is Screen.ChatHistory -> {
+                viewModel.navigateToScreen(Screen.ChatHistory)
+            }
+            else -> {
+                (context as? Activity)?.finish()
+            }
         }
     }
 
-    when (currentScreen) {
+    when (effectiveScreen) {
         is Screen.ChatHistory -> {
             ChatHistoryScreen(
                 viewModel = viewModel,
@@ -108,6 +126,11 @@ fun LLMChatApp(sharedIntent: Intent? = null) {
             GroupScreen(
                 viewModel = viewModel,
                 uiState = uiState
+            )
+        }
+        is Screen.ChildLock -> {
+            ChildLockScreen(
+                viewModel = viewModel
             )
         }
     }

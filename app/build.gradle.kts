@@ -84,6 +84,9 @@ dependencies {
     implementation(libs.camerax.camera2)
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
+
+    // Security Crypto
+    implementation(libs.androidx.security.crypto)
     
     // Testing
     testImplementation(libs.junit)
