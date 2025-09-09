@@ -143,7 +143,7 @@ class ApiService(private val context: Context) {
             if (webSearchEnabled) {
                 put("tools", buildJsonArray {
                     add(buildJsonObject {
-                        put("type", "web_search_preview")
+                        put("type", "web_search")
                     })
                 })
             }
@@ -286,7 +286,7 @@ class ApiService(private val context: Context) {
                 if (webSearchEnabled) {
                     put("tools", buildJsonArray {
                         add(buildJsonObject {
-                            put("type", "web_search_preview")
+                            put("type", "web_search")
                         })
                     })
                 }
@@ -307,7 +307,7 @@ class ApiService(private val context: Context) {
                     connection.disconnect() // Disconnect the failed stream connection
 
                     // Run the non-streaming version as a fallback
-                    val fallbackResponse = sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys)
+                    val fallbackResponse = sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled)
 
                     when (fallbackResponse) {
                         is ApiResponse.Success -> {

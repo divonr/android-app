@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -44,6 +45,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,6 +69,44 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import kotlin.math.min
 
+/**
+ * Scrolls to the previous message (one message up) in the chat.
+ * Aligns the beginning of the message to the top of the screen.
+ */
+suspend fun scrollToPreviousMessage(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    messages: List<Message>?,
+    isStreaming: Boolean = false,
+    showReplyButton: Boolean = false
+) {
+    if (messages.isNullOrEmpty()) return
+
+    val currentIndex = listState.firstVisibleItemIndex
+
+    // Account for streaming message and reply button at the top
+    val streamingOffset = if (isStreaming) 1 else 0
+    val replyOffset = if (showReplyButton) 1 else 0
+    val totalOffset = streamingOffset + replyOffset
+
+    // Calculate the message index we want to scroll to
+    // Messages are displayed in reverse order (newest first)
+    val targetMessageIndex = currentIndex - totalOffset + 1
+
+    // Make sure we don't go beyond the available messages
+    val maxMessageIndex = messages.size - 1 + totalOffset
+    val targetIndex = minOf(targetMessageIndex, maxMessageIndex)
+
+    if (targetIndex >= 0) {
+        try {
+            // Use scrollOffset = 0 to pin the top of the message to the top of the screen
+            listState.animateScrollToItem(index = targetIndex, scrollOffset = 0)
+        } catch (e: Exception) {
+            // If scrolling fails, just scroll to the first item
+            listState.animateScrollToItem(index = 0, scrollOffset = 0)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -83,6 +125,52 @@ fun ChatScreen(
                 duration = SnackbarDuration.Short
             )
             viewModel.clearSnackbar()
+        }
+    }
+    
+    // Handle search context - scroll to found message
+    LaunchedEffect(uiState.searchContext, uiState.currentChat?.messages?.size) {
+        val searchContext = uiState.searchContext
+        val currentChat = uiState.currentChat
+        
+        if (searchContext != null && 
+            currentChat != null && 
+            searchContext.matchType == SearchMatchType.CONTENT && 
+            searchContext.messageIndex >= 0 &&
+            searchContext.messageIndex < currentChat.messages.size) {
+            
+            // Calculate the reversed index since messages are displayed in reverse order
+            val reversedIndex = currentChat.messages.size - 1 - searchContext.messageIndex
+            
+            // Wait longer for the UI to fully settle and load
+            kotlinx.coroutines.delay(500)
+            
+            // First try to scroll to the item
+            try {
+                // Account for streaming bubble (1) + reply button (1) if present
+                val adjustedIndex = reversedIndex + 
+                    (if (uiState.isStreaming && uiState.streamingText.isNotEmpty()) 1 else 0) +
+                    (if (uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading) 1 else 0)
+                
+                println("DEBUG SEARCH: Scrolling to message index ${searchContext.messageIndex}, reversedIndex: $reversedIndex, adjustedIndex: $adjustedIndex, total messages: ${currentChat.messages.size}")
+                
+                // Try to scroll to the item
+                if (adjustedIndex >= 0 && adjustedIndex < (currentChat.messages.size + 2)) {
+                    listState.animateScrollToItem(adjustedIndex)
+                } else {
+                    // Fallback: just scroll to the original reversed index
+                    listState.animateScrollToItem(reversedIndex)
+                }
+                
+                // Keep highlighting for longer so user can see it
+                kotlinx.coroutines.delay(8000) // Keep highlighting for 8 seconds
+                viewModel.clearSearchContext()
+            } catch (e: Exception) {
+                println("DEBUG SEARCH: Error scrolling to message: ${e.message}")
+                // If scrolling fails, still clear context after delay
+                kotlinx.coroutines.delay(3000)
+                viewModel.clearSearchContext()
+            }
         }
     }
     
@@ -125,18 +213,16 @@ fun ChatScreen(
                     color = Surface,
                     shadowElevation = 1.dp
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Left side - Back arrow
+                    if (uiState.searchMode) {
+                        // Full-width search bar covering entire top line
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Back arrow (always visible)
                             Surface(
                                 shape = MaterialTheme.shapes.medium,
                                 color = SurfaceVariant,
@@ -153,74 +239,179 @@ fun ChatScreen(
                                     )
                                 }
                             }
-                        }
-                        
-                        // Center - Model and Provider info
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = uiState.currentProvider?.provider?.let { provider ->
-                                    stringResource(id = when(provider) {
-                                        "openai" -> R.string.provider_openai
-                                        "poe" -> R.string.provider_poe
-                                        "google" -> R.string.provider_google
-                                        else -> R.string.provider_openai
-                                    })
-                                } ?: "",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = OnSurfaceVariant,
-                                modifier = Modifier.clickable { viewModel.showProviderSelector() }
+                            
+                            // Search text field spanning the entire remaining width
+                            OutlinedTextField(
+                                value = uiState.searchQuery,
+                                onValueChange = { viewModel.updateSearchQuery(it) },
+                                modifier = Modifier.weight(1f),
+                                placeholder = {
+                                    Text(
+                                        text = "חפש בשיחה...",
+                                        color = OnSurfaceVariant,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Primary,
+                                    unfocusedBorderColor = OnSurfaceVariant.copy(alpha = 0.3f),
+                                    focusedTextColor = OnSurface,
+                                    unfocusedTextColor = OnSurface,
+                                    unfocusedContainerColor = Surface,
+                                    focusedContainerColor = Surface
+                                ),
+                                textStyle = MaterialTheme.typography.bodyMedium,
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions.Default.copy(
+                                    keyboardType = KeyboardType.Text
+                                ),
+                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                    onSearch = { viewModel.performConversationSearch() }
+                                ),
+                                shape = MaterialTheme.shapes.medium,
+                                trailingIcon = {
+                                    Surface(
+                                        shape = MaterialTheme.shapes.medium,
+                                        color = Color.Transparent,
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clickable {
+                                                if (uiState.searchQuery.isNotEmpty()) {
+                                                    viewModel.exitSearchMode()
+                                                } else {
+                                                    viewModel.performConversationSearch()
+                                                }
+                                            }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = if (uiState.searchQuery.isNotEmpty()) Icons.Default.Close else Icons.Default.Search,
+                                                contentDescription = if (uiState.searchQuery.isNotEmpty()) "Exit search" else "Search",
+                                                tint = OnSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = uiState.currentModel,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = OnSurface,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.clickable { viewModel.showModelSelector() }
-                            )
                         }
-                        
-                        // Right side - System Prompt and Delete icons
+                    } else {
+                        // Normal top bar with all elements
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // System Prompt icon
-                            Surface(
-                                shape = MaterialTheme.shapes.medium,
-                                color = SurfaceVariant,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clickable { viewModel.showSystemPromptDialog() }
+                            // Left side - Back arrow and Search icon
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Build,
-                                        contentDescription = "System Prompt",
-                                        tint = OnSurfaceVariant,
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                Surface(
+                                    shape = MaterialTheme.shapes.medium,
+                                    color = SurfaceVariant,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable { viewModel.navigateToScreen(Screen.ChatHistory) }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back to chat history",
+                                            tint = OnSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                
+                                // Search icon
+                                Surface(
+                                    shape = MaterialTheme.shapes.medium,
+                                    color = SurfaceVariant,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable { viewModel.enterConversationSearchMode() }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = "Search in conversation",
+                                            tint = OnSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                             }
-
-                            // Delete Chat
-                            Surface(
-                                shape = MaterialTheme.shapes.medium,
-                                color = SurfaceVariant,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clickable { viewModel.showDeleteChatConfirmation() }
+                            
+                            // Center - Model and Provider info
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete Chat",
-                                        tint = OnSurfaceVariant,
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                Text(
+                                    text = uiState.currentProvider?.provider?.let { provider ->
+                                        stringResource(id = when(provider) {
+                                            "openai" -> R.string.provider_openai
+                                            "poe" -> R.string.provider_poe
+                                            "google" -> R.string.provider_google
+                                            else -> R.string.provider_openai
+                                        })
+                                    } ?: "",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = OnSurfaceVariant,
+                                    modifier = Modifier.clickable { viewModel.showProviderSelector() }
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = uiState.currentModel,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = OnSurface,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.clickable { viewModel.showModelSelector() }
+                                )
+                            }
+                            
+                            // Right side - System Prompt and Delete icons
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // System Prompt icon
+                                Surface(
+                                    shape = MaterialTheme.shapes.medium,
+                                    color = SurfaceVariant,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable { viewModel.showSystemPromptDialog() }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Build,
+                                            contentDescription = "System Prompt",
+                                            tint = OnSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                // Delete Chat
+                                Surface(
+                                    shape = MaterialTheme.shapes.medium,
+                                    color = SurfaceVariant,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable { viewModel.showDeleteChatConfirmation() }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete Chat",
+                                            tint = OnSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -265,12 +456,24 @@ fun ChatScreen(
                                 val topPadding = if (isFirstMessage || !isSameSpeaker) 4.dp else 0.dp
                                 val bottomPadding = if (!isSameSpeaker) 4.dp else 0.dp
 
+                                // Calculate original message index from reversed index
+                                val originalIndex = messages.size - 1 - index
+                                
+                                // Check if this message should be highlighted (find all search results for this message)
+                                val searchHighlight = if (uiState.searchMode && uiState.searchResults.isNotEmpty()) {
+                                    uiState.searchResults.find { result ->
+                                        result.matchType == SearchMatchType.CONTENT && 
+                                        result.messageIndex == originalIndex
+                                    }
+                                } else null
+
                                 MessageBubble(
                                     message = message,
                                     viewModel = viewModel,
                                     modifier = Modifier.padding(top = topPadding, bottom = bottomPadding),
                                     isEditMode = uiState.isEditMode,
-                                    isBeingEdited = uiState.editingMessage == message
+                                    isBeingEdited = uiState.editingMessage == message,
+                                    searchHighlight = searchHighlight
                                 )
                             }
                         }
@@ -301,34 +504,65 @@ fun ChatScreen(
                         }
                     }
 
-                    // Animated floating scroll button
+                    // Animated floating scroll buttons (Up and Down)
                     androidx.compose.animation.AnimatedVisibility(
                         visible = showScrollButton,
                         enter = fadeIn(),
                         exit = fadeOut(),
                         modifier = Modifier.align(Alignment.BottomCenter)
                     ) {
-                        FloatingActionButton(
-                            onClick = { 
-                                coroutineScope.launch {
-                                    listState.animateScrollToItem(0) // Scroll to bottom (newest messages)
-                                }
-                                // Cancel auto-hide timer when button is clicked
-                                hideButtonJob?.cancel()
-                                showScrollButton = false
-                            },
-                            shape = CircleShape,
-                            containerColor = Primary,
-                            contentColor = Color.White,
-                            modifier = Modifier
-                                .padding(bottom = 16.dp)
-                                .size(48.dp)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(bottom = 16.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.KeyboardArrowDown,
-                                contentDescription = "Scroll to bottom",
-                                modifier = Modifier.size(24.dp)
-                            )
+                            // Up arrow button - scroll to previous message
+                            FloatingActionButton(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        scrollToPreviousMessage(
+                                            listState,
+                                            uiState.currentChat?.messages,
+                                            uiState.isStreaming && uiState.streamingText.isNotEmpty(),
+                                            uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading
+                                        )
+                                    }
+                                    // Cancel auto-hide timer when button is clicked
+                                    hideButtonJob?.cancel()
+                                },
+                                shape = CircleShape,
+                                containerColor = Primary,
+                                contentColor = Color.White,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowUp,
+                                    contentDescription = "Scroll to previous message",
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            // Down arrow button - scroll to bottom (existing functionality)
+                            FloatingActionButton(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        listState.animateScrollToItem(0) // Scroll to bottom (newest messages)
+                                    }
+                                    // Cancel auto-hide timer when button is clicked
+                                    hideButtonJob?.cancel()
+                                    showScrollButton = false
+                                },
+                                shape = CircleShape,
+                                containerColor = Primary,
+                                contentColor = Color.White,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Scroll to bottom",
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -693,7 +927,8 @@ fun MessageBubble(
     viewModel: ChatViewModel,
     modifier: Modifier = Modifier,
     isEditMode: Boolean = false,
-    isBeingEdited: Boolean = false
+    isBeingEdited: Boolean = false,
+    searchHighlight: SearchResult? = null
 ) {
     val bubbleColor = when (message.role) {
         "user" -> UserMessageBubble
@@ -761,8 +996,17 @@ fun MessageBubble(
                 bottomStart = 20.dp,
                 bottomEnd = 20.dp
             ),
-            color = bubbleColor,
+            color = if (searchHighlight != null) {
+                // Add a subtle glow effect for search results
+                bubbleColor.copy(alpha = 0.9f)
+            } else {
+                bubbleColor
+            },
             shadowElevation = if (isUser) 2.dp else 0.dp,
+            border = if (searchHighlight != null) {
+                // Add border for search highlighted messages
+                androidx.compose.foundation.BorderStroke(2.dp, AccentBlue.copy(alpha = 0.7f))
+            } else null,
             modifier = Modifier
                 .widthIn(max = 320.dp)
                 .combinedClickable(
@@ -847,15 +1091,34 @@ fun MessageBubble(
                     ) {
                         // Show text if exists and is not just placeholder
                         if (hasText) {
-                            MarkdownText(
-                                markdown = message.text,
-                                style = TextStyle(
-                                    color = if (isUser) Color.White else OnSurface,
-                                    fontSize = 15.sp,
-                                    lineHeight = 18.sp,
-                                    letterSpacing = 0.sp
+                            if (searchHighlight != null) {
+                                // Show highlighted text for search results
+                                val highlightedText = createHighlightedText(
+                                    text = message.text,
+                                    highlightRanges = searchHighlight.highlightRanges,
+                                    highlightColor = AccentBlue
                                 )
-                            )
+                                Text(
+                                    text = highlightedText,
+                                    style = TextStyle(
+                                        color = if (isUser) Color.White else OnSurface,
+                                        fontSize = 15.sp,
+                                        lineHeight = 18.sp,
+                                        letterSpacing = 0.sp
+                                    )
+                                )
+                            } else {
+                                // Normal markdown rendering
+                                MarkdownText(
+                                    markdown = message.text,
+                                    style = TextStyle(
+                                        color = if (isUser) Color.White else OnSurface,
+                                        fontSize = 15.sp,
+                                        lineHeight = 18.sp,
+                                        letterSpacing = 0.sp
+                                    )
+                                )
+                            }
                         }
 
                         // Show non-image attachments
@@ -1227,6 +1490,44 @@ fun ReplyPromptBubble(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Create highlighted text with search terms highlighted
+ */
+fun createHighlightedText(text: String, highlightRanges: List<IntRange>, highlightColor: androidx.compose.ui.graphics.Color): AnnotatedString {
+    if (highlightRanges.isEmpty() || text.isEmpty()) {
+        return AnnotatedString(text)
+    }
+    
+    return buildAnnotatedString {
+        var lastIndex = 0
+        
+        // Sort ranges to process them in order
+        val sortedRanges = highlightRanges.sortedBy { it.first }
+        
+        for (range in sortedRanges) {
+            // Skip if range is out of bounds
+            if (range.first >= text.length || range.last >= text.length) continue
+            
+            // Add text before highlight
+            if (lastIndex < range.first) {
+                append(text.substring(lastIndex, range.first))
+            }
+            
+            // Add highlighted text with more visible highlighting
+            withStyle(androidx.compose.ui.text.SpanStyle(background = highlightColor.copy(alpha = 0.6f))) {
+                append(text.substring(range.first, minOf(range.last + 1, text.length)))
+            }
+            
+            lastIndex = minOf(range.last + 1, text.length)
+        }
+        
+        // Add remaining text
+        if (lastIndex < text.length) {
+            append(text.substring(lastIndex))
         }
     }
 }

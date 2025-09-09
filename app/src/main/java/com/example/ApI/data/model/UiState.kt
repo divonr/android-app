@@ -43,7 +43,11 @@ data class ChatUiState(
     val webSearchEnabled: Boolean = false,
     val webSearchSupport: WebSearchSupport = WebSearchSupport.UNSUPPORTED,
     val showReplyButton: Boolean = false,
-    val systemPromptOverrideEnabled: Boolean = false
+    val systemPromptOverrideEnabled: Boolean = false,
+    val searchMode: Boolean = false,
+    val searchQuery: String = "",
+    val searchResults: List<SearchResult> = emptyList(),
+    val searchContext: SearchResult? = null // Context for jumping to search results
 )
 
 data class ChatContextMenuState(
@@ -62,6 +66,20 @@ data class SelectedFile(
     val mimeType: String,
     val localPath: String? = null
 )
+
+data class SearchResult(
+    val chat: Chat,
+    val searchQuery: String,
+    val matchType: SearchMatchType,
+    val messageIndex: Int = -1, // Index of the message that matched (for content matches)
+    val highlightRanges: List<IntRange> = emptyList() // Character ranges to highlight
+)
+
+enum class SearchMatchType {
+    TITLE,          // Match found in chat title
+    CONTENT,        // Match found in message content
+    FILE_NAME       // Match found in attachment file name
+}
 
 data class ApiKeysUiState(
     val apiKeys: List<ApiKey> = emptyList(),

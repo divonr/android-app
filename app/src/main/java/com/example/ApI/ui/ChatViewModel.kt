@@ -566,8 +566,24 @@ class ChatViewModel(
         _uiState.value = _uiState.value.copy(
             currentChat = chat,
             systemPrompt = chat.systemPrompt,  // Load system prompt from selected chat
-            showChatHistory = false
+            showChatHistory = false,
+            searchContext = null // Clear search context when selecting normally
         )
+    }
+    
+    fun selectChatFromSearch(searchResult: SearchResult) {
+        _uiState.value = _uiState.value.copy(
+            currentChat = searchResult.chat,
+            systemPrompt = searchResult.chat.systemPrompt,
+            showChatHistory = false,
+            searchContext = null // Clear old search context
+        )
+        
+        // Enter conversation search mode with the same query
+        enterSearchModeWithQuery(searchResult.searchQuery)
+        
+        // Navigate to the chat screen
+        navigateToScreen(Screen.Chat)
     }
     
     fun refreshChatHistory() {
@@ -1857,6 +1873,123 @@ class ChatViewModel(
                 showDeleteGroupConfirmation = null
             )
         }
+    }
+
+    // Search Methods
+    
+    fun enterSearchMode() {
+        _uiState.value = _uiState.value.copy(searchMode = true, searchQuery = "")
+    }
+    
+    fun enterConversationSearchMode() {
+        _uiState.value = _uiState.value.copy(searchMode = true, searchQuery = "")
+    }
+    
+    fun enterSearchModeWithQuery(query: String) {
+        _uiState.value = _uiState.value.copy(
+            searchMode = true, 
+            searchQuery = query
+        )
+        // Perform search immediately with the given query
+        performConversationSearch()
+    }
+    
+    fun exitSearchMode() {
+        _uiState.value = _uiState.value.copy(
+            searchMode = false,
+            searchQuery = "",
+            searchResults = emptyList(),
+            searchContext = null // Clear search context when exiting
+        )
+    }
+    
+    fun updateSearchQuery(query: String) {
+        _uiState.value = _uiState.value.copy(searchQuery = query)
+        // Always use conversation search when in search mode in chat screen
+        if (_uiState.value.searchMode && _currentScreen.value == Screen.Chat) {
+            performConversationSearch()
+        } else if (!_uiState.value.searchMode) {
+            // Only perform general search if not in conversation search mode
+            performSearch()
+        }
+    }
+    
+    fun performSearch() {
+        val query = _uiState.value.searchQuery.trim()
+        if (query.isEmpty()) {
+            _uiState.value = _uiState.value.copy(searchResults = emptyList())
+            return
+        }
+        
+        val currentUser = _appSettings.value.current_user
+        val results = repository.searchChats(currentUser, query)
+        _uiState.value = _uiState.value.copy(searchResults = results)
+    }
+
+    fun performConversationSearch() {
+        val query = _uiState.value.searchQuery.trim()
+        val currentChat = _uiState.value.currentChat
+        
+        if (query.isEmpty() || currentChat == null) {
+            _uiState.value = _uiState.value.copy(searchContext = null)
+            return
+        }
+        
+        // Search in current conversation messages and attachments
+        val searchResults = mutableListOf<SearchResult>()
+        
+        currentChat.messages.forEachIndexed { messageIndex, message ->
+            val highlightRanges = mutableListOf<IntRange>()
+            
+            // Search in message text
+            if (message.text.contains(query, ignoreCase = true)) {
+                // Find all occurrences of the search term
+                var startIndex = 0
+                while (true) {
+                    val index = message.text.indexOf(query, startIndex, ignoreCase = true)
+                    if (index == -1) break
+                    highlightRanges.add(IntRange(index, index + query.length - 1))
+                    startIndex = index + 1
+                }
+                
+                if (highlightRanges.isNotEmpty()) {
+                    searchResults.add(
+                        SearchResult(
+                            chat = currentChat,
+                            searchQuery = query,
+                            matchType = SearchMatchType.CONTENT,
+                            messageIndex = messageIndex,
+                            highlightRanges = highlightRanges
+                        )
+                    )
+                }
+            }
+            
+            // Search in attachment file names
+            message.attachments.forEach { attachment ->
+                if (attachment.file_name.contains(query, ignoreCase = true)) {
+                    searchResults.add(
+                        SearchResult(
+                            chat = currentChat,
+                            searchQuery = query,
+                            matchType = SearchMatchType.FILE_NAME,
+                            messageIndex = messageIndex,
+                            highlightRanges = emptyList() // File name highlighting would be in a separate UI element
+                        )
+                    )
+                }
+            }
+        }
+        
+        // Update the search context to highlight matches
+        _uiState.value = _uiState.value.copy(
+            searchResults = searchResults,
+            searchContext = if (searchResults.isNotEmpty()) searchResults.first() else null
+        )
+    }
+    
+    fun clearSearchContext() {
+        _uiState.value = _uiState.value.copy(searchContext = null)
     }
 
     // Child Lock Methods

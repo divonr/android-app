@@ -37,10 +37,19 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextDirection
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.theme.*
+import com.example.ApI.ui.screen.createHighlightedText
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -55,6 +64,11 @@ fun ChatHistoryScreen(
     modifier: Modifier = Modifier
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    
+    // Handle back button press to exit search mode
+    BackHandler(enabled = uiState.searchMode) {
+        viewModel.exitSearchMode()
+    }
     
     LaunchedEffect(uiState.snackbarMessage) {
         uiState.snackbarMessage?.let {
@@ -77,35 +91,110 @@ fun ChatHistoryScreen(
                     androidx.compose.runtime.CompositionLocalProvider(
                         androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Ltr
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = buildAnnotatedString {
-                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("A") }
-                                    withStyle(SpanStyle(fontWeight = FontWeight.Normal)) { append("p") }
-                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("I") }
-                                },
-                                color = OnSurface,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                                modifier = Modifier.padding(start = 42.dp)
-                            )
-                            Row {
-                                IconButton(onClick = { viewModel.navigateToScreen(Screen.ApiKeys) }) {
-                                    Icon(
-                                        Icons.Default.Key,
-                                        contentDescription = "API Keys",
-                                        tint = OnSurfaceVariant
+                        if (uiState.searchMode) {
+                            // Search mode UI
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = buildAnnotatedString {
+                                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("A") }
+                                        withStyle(SpanStyle(fontWeight = FontWeight.Normal)) { append("p") }
+                                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("I") }
+                                    },
+                                    color = OnSurface,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                                
+                                androidx.compose.runtime.CompositionLocalProvider(
+                                    androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl
+                                ) {
+                                    OutlinedTextField(
+                                        value = uiState.searchQuery,
+                                        onValueChange = { viewModel.updateSearchQuery(it) },
+                                        placeholder = { 
+                                            Text(
+                                                "חיפוש בשיחות...", 
+                                                color = OnSurfaceVariant
+                                            ) 
+                                        },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                        keyboardActions = KeyboardActions(
+                                            onSearch = { viewModel.performSearch() }
+                                        ),
+                                        trailingIcon = {
+                                            IconButton(
+                                                onClick = { 
+                                                    if (uiState.searchResults.isNotEmpty() || uiState.searchQuery.isNotEmpty()) {
+                                                        viewModel.exitSearchMode()
+                                                    } else {
+                                                        viewModel.performSearch()
+                                                    }
+                                                }
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "סגור חיפוש",
+                                                    tint = OnSurfaceVariant
+                                                )
+                                            }
+                                        },
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = OnSurface,
+                                            unfocusedTextColor = OnSurface,
+                                            focusedBorderColor = Primary,
+                                            unfocusedBorderColor = Gray500,
+                                            cursorColor = Primary
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(horizontal = 8.dp)
                                     )
                                 }
-                                IconButton(onClick = { viewModel.navigateToScreen(Screen.UserSettings) }) {
-                                    Icon(
-                                        Icons.Default.Settings,
-                                        contentDescription = "Settings",
-                                        tint = OnSurfaceVariant
-                                    )
+                            }
+                        } else {
+                            // Normal mode UI
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = buildAnnotatedString {
+                                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("A") }
+                                        withStyle(SpanStyle(fontWeight = FontWeight.Normal)) { append("p") }
+                                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("I") }
+                                    },
+                                    color = OnSurface,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                                    modifier = Modifier.padding(start = 42.dp)
+                                )
+                                Row {
+                                    IconButton(onClick = { viewModel.enterSearchMode() }) {
+                                        Icon(
+                                            Icons.Default.Search,
+                                            contentDescription = "חיפוש",
+                                            tint = OnSurfaceVariant
+                                        )
+                                    }
+                                    IconButton(onClick = { viewModel.navigateToScreen(Screen.ApiKeys) }) {
+                                        Icon(
+                                            Icons.Default.Key,
+                                            contentDescription = "API Keys",
+                                            tint = OnSurfaceVariant
+                                        )
+                                    }
+                                    IconButton(onClick = { viewModel.navigateToScreen(Screen.UserSettings) }) {
+                                        Icon(
+                                            Icons.Default.Settings,
+                                            contentDescription = "Settings",
+                                            tint = OnSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -140,98 +229,182 @@ fun ChatHistoryScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            if (uiState.chatHistory.isEmpty()) {
-                // Empty state
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        Icons.Default.Forum,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = OnSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "אין עדיין שיחות",
-                        color = OnSurfaceVariant,
-                        fontSize = 18.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "לחץ על + כדי להתחיל שיחה חדשה",
-                        color = OnSurfaceVariant,
-                        fontSize = 14.sp
-                    )
+            if (uiState.searchMode) {
+                // Search mode content
+                if (uiState.searchQuery.isEmpty()) {
+                    // Search instruction
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = OnSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "הזן מילות חיפוש למציאת שיחות",
+                            color = OnSurfaceVariant,
+                            fontSize = 18.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "החיפוש כולל כותרות שיחות, תוכן הודעות ושמות קבצים",
+                            color = OnSurfaceVariant,
+                            fontSize = 14.sp
+                        )
+                    }
+                } else if (uiState.searchResults.isEmpty()) {
+                    // No search results
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.SearchOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = OnSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "לא נמצאו תוצאות",
+                            color = OnSurfaceVariant,
+                            fontSize = 18.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "נסה מילות חיפוש אחרות",
+                            color = OnSurfaceVariant,
+                            fontSize = 14.sp
+                        )
+                    }
+                } else {
+                    // Show search results
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        items(
+                            items = uiState.searchResults,
+                            key = { "search_result_${it.chat.chat_id}" }
+                        ) { searchResult ->
+                            SearchResultItem(
+                                searchResult = searchResult,
+                                onClick = {
+                                    viewModel.selectChatFromSearch(searchResult)
+                                    // Note: selectChatFromSearch now handles navigation and search mode
+                                },
+                                onLongClick = { offset ->
+                                    viewModel.showChatContextMenu(searchResult.chat, offset)
+                                }
+                            )
+                        }
+                    }
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 8.dp)
-                ) {
-                    // Organize and sort all items (groups and individual chats) by most recent activity
-                    val sortedItems = organizeAndSortAllItems(uiState.chatHistory, uiState.groups)
+                // Normal mode content - show chat history
+                if (uiState.chatHistory.isEmpty()) {
+                    // Empty state
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Forum,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = OnSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "אין עדיין שיחות",
+                            color = OnSurfaceVariant,
+                            fontSize = 18.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "לחץ על + כדי להתחיל שיחה חדשה",
+                            color = OnSurfaceVariant,
+                            fontSize = 14.sp
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        // Organize and sort all items (groups and individual chats) by most recent activity
+                        val sortedItems = organizeAndSortAllItems(uiState.chatHistory, uiState.groups)
 
-                    sortedItems.forEach { item ->
-                        when (item) {
-                            is ChatListItem.GroupItem -> {
-                                val isExpanded = uiState.expandedGroups.contains(item.group.group_id)
+                        sortedItems.forEach { item ->
+                            when (item) {
+                                is ChatListItem.GroupItem -> {
+                                    val isExpanded = uiState.expandedGroups.contains(item.group.group_id)
 
-                                item(key = "group_${item.group.group_id}") {
-                                    GroupItem(
-                                        group = item.group,
-                                        isExpanded = isExpanded,
-                                        chatCount = item.chats.size,
-                                        onGroupClick = { viewModel.navigateToGroup(item.group.group_id) },
-                                        onToggleExpansion = { viewModel.toggleGroupExpansion(item.group.group_id) },
-                                        onLongPress = { offset ->
-                                            viewModel.showGroupContextMenu(item.group, offset)
+                                    item(key = "group_${item.group.group_id}") {
+                                        GroupItem(
+                                            group = item.group,
+                                            isExpanded = isExpanded,
+                                            chatCount = item.chats.size,
+                                            onGroupClick = { viewModel.navigateToGroup(item.group.group_id) },
+                                            onToggleExpansion = { viewModel.toggleGroupExpansion(item.group.group_id) },
+                                            onLongPress = { offset ->
+                                                viewModel.showGroupContextMenu(item.group, offset)
+                                            }
+                                        )
+                                    }
+
+                                    if (isExpanded) {
+                                        // Sort chats within group by last message timestamp
+                                        val sortedGroupChats = item.chats.sortedWith(
+                                            compareByDescending<com.example.ApI.data.model.Chat> { getLastTimestampOrNull(it) != null }
+                                                .thenByDescending { getLastTimestampOrNull(it) ?: Long.MIN_VALUE }
+                                        )
+
+                                        items(
+                                            items = sortedGroupChats,
+                                            key = { "grouped_chat_${it.id}" }
+                                        ) { chat ->
+                                            ChatHistoryItem(
+                                                chat = chat,
+                                                onClick = {
+                                                    viewModel.selectChat(chat)
+                                                    viewModel.navigateToScreen(Screen.Chat)
+                                                },
+                                                onLongClick = { offset ->
+                                                    viewModel.showChatContextMenu(chat, offset)
+                                                },
+                                                modifier = Modifier.padding(start = 32.dp) // Indent grouped chats
+                                            )
                                         }
-                                    )
+                                    }
                                 }
 
-                                if (isExpanded) {
-                                    // Sort chats within group by last message timestamp
-                                    val sortedGroupChats = item.chats.sortedWith(
-                                        compareByDescending<com.example.ApI.data.model.Chat> { getLastTimestampOrNull(it) != null }
-                                            .thenByDescending { getLastTimestampOrNull(it) ?: Long.MIN_VALUE }
-                                    )
-
-                                    items(
-                                        items = sortedGroupChats,
-                                        key = { "grouped_chat_${it.id}" }
-                                    ) { chat ->
+                                is ChatListItem.ChatItem -> {
+                                    item(key = "chat_${item.chat.id}") {
                                         ChatHistoryItem(
-                                            chat = chat,
+                                            chat = item.chat,
                                             onClick = {
-                                                viewModel.selectChat(chat)
+                                                viewModel.selectChat(item.chat)
                                                 viewModel.navigateToScreen(Screen.Chat)
                                             },
                                             onLongClick = { offset ->
-                                                viewModel.showChatContextMenu(chat, offset)
-                                            },
-                                            modifier = Modifier.padding(start = 32.dp) // Indent grouped chats
+                                                viewModel.showChatContextMenu(item.chat, offset)
+                                            }
                                         )
                                     }
-                                }
-                            }
-
-                            is ChatListItem.ChatItem -> {
-                                item(key = "chat_${item.chat.id}") {
-                                    ChatHistoryItem(
-                                        chat = item.chat,
-                                        onClick = {
-                                            viewModel.selectChat(item.chat)
-                                            viewModel.navigateToScreen(Screen.Chat)
-                                        },
-                                        onLongClick = { offset ->
-                                            viewModel.showChatContextMenu(item.chat, offset)
-                                        }
-                                    )
                                 }
                             }
                         }
@@ -894,6 +1067,199 @@ fun GroupContextMenu(
         )
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun SearchResultItem(
+    searchResult: SearchResult,
+    onClick: () -> Unit,
+    onLongClick: (DpOffset) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var itemPosition by remember { mutableStateOf(DpOffset.Zero) }
+    var itemTopLeft by remember { mutableStateOf(Offset.Zero) }
+    var itemSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+    val density = LocalDensity.current
+    
+    Card(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .onGloballyPositioned { coordinates ->
+                // Capture item bounds and approximate center in window coordinates
+                val pos = coordinates.localToWindow(Offset.Zero)
+                itemTopLeft = pos
+                itemSize = coordinates.size.run { androidx.compose.ui.geometry.Size(width.toFloat(), height.toFloat()) }
+                val centerX = pos.x + itemSize.width - 16f
+                val centerY = pos.y + itemSize.height / 2f
+                itemPosition = with(density) { DpOffset(centerX.toDp(), centerY.toDp()) }
+            },
+        colors = CardDefaults.cardColors(
+            containerColor = Surface
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = { pressOffset ->
+                            // Position menu to the right of the item, vertically at press Y
+                            val anchor = with(density) {
+                                val anchorX = (itemTopLeft.x + itemSize.width - 8f).toDp()
+                                val anchorY = (itemTopLeft.y + pressOffset.y).toDp()
+                                DpOffset(anchorX, anchorY)
+                            }
+                            onLongClick(anchor)
+                        },
+                        onTap = { onClick() }
+                    )
+                }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Model initial circle
+            val lastAssistantMessage = searchResult.chat.messages.lastOrNull { it.role == "assistant" }
+            val modelName = lastAssistantMessage?.model ?: searchResult.chat.model
+            val initial = getModelInitial(modelName)
+            
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Primary.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = initial,
+                    color = Primary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            // Chat content with highlighting
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                // Title with highlighting if it's a title match
+                val titleText = when (searchResult.matchType) {
+                    SearchMatchType.TITLE -> createHighlightedText(
+                        searchResult.chat.title, 
+                        searchResult.highlightRanges, 
+                        AccentBlue
+                    )
+                    else -> AnnotatedString(searchResult.chat.title)
+                }
+                
+                Text(
+                    text = titleText,
+                    color = OnSurface,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 16.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                // Show preview based on match type
+                val previewText = when (searchResult.matchType) {
+                    SearchMatchType.TITLE -> {
+                        val lastMessage = searchResult.chat.messages.lastOrNull()
+                        if (lastMessage != null) {
+                            AnnotatedString(lastMessage.text.take(100))
+                        } else {
+                            AnnotatedString("")
+                        }
+                    }
+                    SearchMatchType.CONTENT -> {
+                        val message = searchResult.chat.messages.getOrNull(searchResult.messageIndex)
+                        if (message != null) {
+                            createHighlightedText(
+                                message.text.take(150), 
+                                searchResult.highlightRanges.filter { it.first < 150 }, 
+                                AccentBlue
+                            )
+                        } else {
+                            AnnotatedString("")
+                        }
+                    }
+                    SearchMatchType.FILE_NAME -> {
+                        val message = searchResult.chat.messages.getOrNull(searchResult.messageIndex)
+                        val matchedFile = message?.attachments?.find { 
+                            it.file_name.lowercase().contains(searchResult.searchQuery.lowercase())
+                        }
+                        if (matchedFile != null) {
+                            buildAnnotatedString {
+                                append("📎 ")
+                                val fileText = createHighlightedText(
+                                    matchedFile.file_name, 
+                                    searchResult.highlightRanges, 
+                                    AccentBlue
+                                )
+                                append(fileText)
+                            }
+                        } else {
+                            AnnotatedString("")
+                        }
+                    }
+                }
+                
+                if (previewText.isNotEmpty()) {
+                    Text(
+                        text = previewText,
+                        color = OnSurfaceVariant,
+                        fontSize = 14.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.width(8.dp))
+            
+            // Timestamp
+            Column(
+                horizontalAlignment = Alignment.End
+            ) {
+                val ts = getLastTimestampOrNull(searchResult.chat)
+                if (ts != null) {
+                    Text(
+                        text = formatTimestamp(ts),
+                        color = OnSurfaceVariant,
+                        fontSize = 12.sp
+                    )
+                }
+                
+                if (searchResult.chat.messages.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Forum,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = OnSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = searchResult.chat.messages.size.toString(),
+                            color = OnSurfaceVariant,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 fun getModelInitial(model: String): String {
     return when {
