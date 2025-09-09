@@ -45,6 +45,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.ChatViewModel
@@ -64,6 +66,7 @@ fun ChatHistoryScreen(
     modifier: Modifier = Modifier
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    val searchFocusRequester = remember { FocusRequester() }
     
     // Handle back button press to exit search mode
     BackHandler(enabled = uiState.searchMode) {
@@ -77,6 +80,14 @@ fun ChatHistoryScreen(
                 duration = SnackbarDuration.Short
             )
             viewModel.clearSnackbar()
+        }
+    }
+
+    // Auto-focus search field when entering search mode
+    LaunchedEffect(uiState.searchMode) {
+        if (uiState.searchMode) {
+            kotlinx.coroutines.delay(100) // Small delay to ensure UI is ready
+            searchFocusRequester.requestFocus()
         }
     }
     
@@ -137,8 +148,16 @@ fun ChatHistoryScreen(
                                                 }
                                             ) {
                                                 Icon(
-                                                    Icons.Default.Close,
-                                                    contentDescription = "סגור חיפוש",
+                                                    if (uiState.searchResults.isNotEmpty() || uiState.searchQuery.isNotEmpty()) {
+                                                        Icons.Default.Close
+                                                    } else {
+                                                        Icons.Default.Search
+                                                    },
+                                                    contentDescription = if (uiState.searchResults.isNotEmpty() || uiState.searchQuery.isNotEmpty()) {
+                                                        "סגור חיפוש"
+                                                    } else {
+                                                        "חפש"
+                                                    },
                                                     tint = OnSurfaceVariant
                                                 )
                                             }
@@ -146,13 +165,14 @@ fun ChatHistoryScreen(
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedTextColor = OnSurface,
                                             unfocusedTextColor = OnSurface,
-                                            focusedBorderColor = Primary,
-                                            unfocusedBorderColor = Gray500,
+                                            focusedBorderColor = Color.Transparent,
+                                            unfocusedBorderColor = Color.Transparent,
                                             cursorColor = Primary
                                         ),
                                         modifier = Modifier
                                             .weight(1f)
                                             .padding(horizontal = 8.dp)
+                                            .focusRequester(searchFocusRequester)
                                     )
                                 }
                             }

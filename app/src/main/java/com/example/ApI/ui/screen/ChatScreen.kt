@@ -40,6 +40,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -117,6 +119,7 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val searchFocusRequester = remember { FocusRequester() }
     
     LaunchedEffect(uiState.snackbarMessage) {
         uiState.snackbarMessage?.let {
@@ -125,6 +128,14 @@ fun ChatScreen(
                 duration = SnackbarDuration.Short
             )
             viewModel.clearSnackbar()
+        }
+    }
+
+    // Auto-focus search field when entering search mode
+    LaunchedEffect(uiState.searchMode) {
+        if (uiState.searchMode) {
+            kotlinx.coroutines.delay(100) // Small delay to ensure UI is ready
+            searchFocusRequester.requestFocus()
         }
     }
     
@@ -180,10 +191,15 @@ fun ChatScreen(
                 .fillMaxSize()
                 .background(Background)
         ) {
-            // Back cancels edit mode if active
-            BackHandler(enabled = uiState.isEditMode) {
-                viewModel.cancelEditingMessage()
-            }
+    // Back cancels edit mode if active
+    BackHandler(enabled = uiState.isEditMode) {
+        viewModel.cancelEditingMessage()
+    }
+
+    // Back exits search mode if active
+    BackHandler(enabled = uiState.searchMode) {
+        viewModel.exitSearchMode()
+    }
             // Semi-transparent overlay for edit mode
             if (uiState.isEditMode) {
                 Box(
@@ -244,7 +260,9 @@ fun ChatScreen(
                             OutlinedTextField(
                                 value = uiState.searchQuery,
                                 onValueChange = { viewModel.updateSearchQuery(it) },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .focusRequester(searchFocusRequester),
                                 placeholder = {
                                     Text(
                                         text = "חפש בשיחה...",
@@ -253,8 +271,8 @@ fun ChatScreen(
                                     )
                                 },
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Primary,
-                                    unfocusedBorderColor = OnSurfaceVariant.copy(alpha = 0.3f),
+                                    focusedBorderColor = Color.Transparent,
+                                    unfocusedBorderColor = Color.Transparent,
                                     focusedTextColor = OnSurface,
                                     unfocusedTextColor = OnSurface,
                                     unfocusedContainerColor = Surface,
