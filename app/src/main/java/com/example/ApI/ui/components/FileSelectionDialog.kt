@@ -35,6 +35,7 @@ import java.util.*
 @Composable
 fun FileSelectionDialog(
     onFileSelected: (Uri, String, String) -> Unit,
+    onMultipleFilesSelected: (List<Triple<Uri, String, String>>) -> Unit = { },
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -55,14 +56,26 @@ fun FileSelectionDialog(
         }
     }
     
-    // File picker launcher
+    // File picker launcher (supports both single and multiple files)
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let { selectedUri ->
-            val fileName = getFileName(context, selectedUri)
-            val mimeType = context.contentResolver.getType(selectedUri) ?: "application/octet-stream"
-            onFileSelected(selectedUri, fileName, mimeType)
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            if (uris.size == 1) {
+                // Single file selected
+                val uri = uris[0]
+                val fileName = getFileName(context, uri)
+                val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                onFileSelected(uri, fileName, mimeType)
+            } else {
+                // Multiple files selected
+                val filesList = uris.map { uri ->
+                    val fileName = getFileName(context, uri)
+                    val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                    Triple(uri, fileName, mimeType)
+                }
+                onMultipleFilesSelected(filesList)
+            }
             onDismiss()
         }
     }
@@ -123,7 +136,7 @@ fun FileSelectionDialog(
                         }
                     }
 
-                    // Upload File Option
+                    // Upload Files Option (supports both single and multiple)
                     Button(
                         onClick = {
                             filePickerLauncher.launch("*/*")
@@ -182,7 +195,8 @@ fun FileSelectionDialog(
 fun FileSelectionDropdown(
     expanded: Boolean,
     onDismiss: () -> Unit,
-    onFileSelected: (Uri, String, String) -> Unit
+    onFileSelected: (Uri, String, String) -> Unit,
+    onMultipleFilesSelected: (List<Triple<Uri, String, String>>) -> Unit = { }
 ) {
     val context = LocalContext.current
 
@@ -202,14 +216,26 @@ fun FileSelectionDropdown(
         }
     }
 
-    // File picker launcher
+    // File picker launcher (supports both single and multiple files)
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let { selectedUri ->
-            val fileName = getFileName(context, selectedUri)
-            val mimeType = context.contentResolver.getType(selectedUri) ?: "application/octet-stream"
-            onFileSelected(selectedUri, fileName, mimeType)
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            if (uris.size == 1) {
+                // Single file selected
+                val uri = uris[0]
+                val fileName = getFileName(context, uri)
+                val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                onFileSelected(uri, fileName, mimeType)
+            } else {
+                // Multiple files selected
+                val filesList = uris.map { uri ->
+                    val fileName = getFileName(context, uri)
+                    val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                    Triple(uri, fileName, mimeType)
+                }
+                onMultipleFilesSelected(filesList)
+            }
             onDismiss()
         }
     }
@@ -252,11 +278,9 @@ fun FileSelectionDropdown(
             }
         )
 
-        HorizontalDivider(color = OnSurface.copy(alpha = 0.1f))
-
-        // Upload file row (table-like)
+        // Upload files row (supports both single and multiple)
         DropdownMenuItem(
-            text = { 
+            text = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -268,7 +292,7 @@ fun FileSelectionDropdown(
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = stringResource(R.string.upload_file), 
+                        text = stringResource(R.string.upload_file),
                         color = OnSurface
                     )
                 }
@@ -289,7 +313,12 @@ fun FileSelectionDropdown(
 
 private fun createImageUri(context: Context): Uri {
     val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-    val imageFile = File(context.cacheDir, "JPEG_${timeStamp}.jpg")
+    // Use external files directory instead of cache for better persistence
+    val imagesDir = File(context.getExternalFilesDir(null), "images")
+    if (!imagesDir.exists()) {
+        imagesDir.mkdirs()
+    }
+    val imageFile = File(imagesDir, "JPEG_${timeStamp}.jpg")
     return FileProvider.getUriForFile(
         context,
         "${context.packageName}.fileprovider",

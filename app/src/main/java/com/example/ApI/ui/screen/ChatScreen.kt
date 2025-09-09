@@ -14,6 +14,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -585,19 +588,41 @@ fun ChatScreen(
                     }
                 }
 
-                // Selected Files Preview
+                // Selected Files Preview - Grid Layout for Multiple Files
                 if (uiState.selectedFiles.isNotEmpty()) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .heightIn(max = 120.dp)
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                    ) {
-                        items(uiState.selectedFiles) { file ->
-                            FilePreview(
-                                file = file,
-                                onRemove = { viewModel.removeSelectedFile(file) }
-                            )
+                    if (uiState.selectedFiles.size == 1) {
+                        // Single file - show as list item
+                        LazyColumn(
+                            modifier = Modifier
+                                .heightIn(max = 120.dp)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            items(uiState.selectedFiles) { file ->
+                                FilePreview(
+                                    file = file,
+                                    onRemove = { viewModel.removeSelectedFile(file) }
+                                )
+                            }
+                        }
+                    } else {
+                        // Multiple files - show as grid of thumbnails
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 80.dp),
+                            modifier = Modifier
+                                .heightIn(max = 160.dp)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            contentPadding = PaddingValues(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(uiState.selectedFiles) { file ->
+                                FilePreviewThumbnail(
+                                    file = file,
+                                    onRemove = { viewModel.removeSelectedFile(file) }
+                                )
+                            }
                         }
                     }
                 }
@@ -651,6 +676,9 @@ fun ChatScreen(
                                         onDismiss = { showFileMenu = false },
                                         onFileSelected = { uri, name, mime ->
                                             viewModel.addFileFromUri(uri, name, mime)
+                                        },
+                                        onMultipleFilesSelected = { filesList ->
+                                            viewModel.addMultipleFilesFromUris(filesList)
                                         }
                                     )
                                 }
@@ -922,6 +950,9 @@ fun ChatScreen(
                 FileSelectionDialog(
                     onFileSelected = { uri, fileName, mimeType ->
                         viewModel.addFileFromUri(uri, fileName, mimeType)
+                    },
+                    onMultipleFilesSelected = { filesList ->
+                        viewModel.addMultipleFilesFromUris(filesList)
                     },
                     onDismiss = { viewModel.hideFileSelection() }
                 )
@@ -1546,6 +1577,94 @@ fun createHighlightedText(text: String, highlightRanges: List<IntRange>, highlig
         // Add remaining text
         if (lastIndex < text.length) {
             append(text.substring(lastIndex))
+        }
+    }
+}
+
+@Composable
+fun FilePreviewThumbnail(
+    file: SelectedFile,
+    onRemove: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(80.dp)
+            .background(
+                color = SurfaceVariant,
+                shape = RoundedCornerShape(12.dp)
+            )
+    ) {
+        // File thumbnail/icon
+        if (file.mimeType.startsWith("image/")) {
+            AsyncImage(
+                model = file.uri,
+                contentDescription = file.name,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        color = Surface,
+                        shape = RoundedCornerShape(12.dp)
+                    ),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            // Non-image file icon
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Primary.copy(alpha = 0.1f),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Add, // Use as document icon
+                            contentDescription = "File",
+                            tint = Primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // File name overlay (bottom)
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            color = Color.Black.copy(alpha = 0.7f),
+            shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
+        ) {
+            Text(
+                text = file.name.take(8) + if (file.name.length > 8) "..." else "",
+                color = Color.White,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                maxLines = 1
+            )
+        }
+
+        // Remove button (top-right corner)
+        Surface(
+            shape = CircleShape,
+            color = Color.Red.copy(alpha = 0.8f),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(20.dp)
+                .clickable { onRemove() }
+                .padding(2.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Remove file",
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp)
+                )
+            }
         }
     }
 }

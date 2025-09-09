@@ -852,6 +852,40 @@ class ChatViewModel(
             }
         }
     }
+
+    fun addMultipleFilesFromUris(filesList: List<Triple<Uri, String, String>>) {
+        viewModelScope.launch {
+            val newSelectedFiles = mutableListOf<SelectedFile>()
+            
+            for ((uri, fileName, mimeType) in filesList) {
+                try {
+                    val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
+                    inputStream?.use { stream ->
+                        val fileData = stream.readBytes()
+                        val localPath = repository.saveFileLocally(fileName, fileData)
+                        
+                        if (localPath != null) {
+                            val selectedFile = SelectedFile(
+                                uri = uri,
+                                name = fileName,
+                                mimeType = mimeType,
+                                localPath = localPath
+                            )
+                            newSelectedFiles.add(selectedFile)
+                        }
+                    }
+                } catch (e: Exception) {
+                    println("Error adding file $fileName: ${e.message}")
+                }
+            }
+            
+            if (newSelectedFiles.isNotEmpty()) {
+                _uiState.value = _uiState.value.copy(
+                    selectedFiles = _uiState.value.selectedFiles + newSelectedFiles
+                )
+            }
+        }
+    }
     
     fun showFileSelection() {
         _uiState.value = _uiState.value.copy(showFileSelection = true)
