@@ -19,7 +19,8 @@ data class AppSettings(
     val temperature: Double = 1.0,
     val titleGenerationSettings: TitleGenerationSettings = TitleGenerationSettings(),
     val multiMessageMode: Boolean = false,
-    val childLockSettings: ChildLockSettings = ChildLockSettings()
+    val childLockSettings: ChildLockSettings = ChildLockSettings(),
+    val enabledTools: List<String> = emptyList() // List of enabled tool IDs
 )
 
 @Serializable

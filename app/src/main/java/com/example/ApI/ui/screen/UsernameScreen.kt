@@ -32,6 +32,7 @@ import com.example.ApI.R
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.TitleGenerationSettings
 import com.example.ApI.data.model.ChildLockSettings
+import com.example.ApI.data.model.Screen
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.theme.*
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -225,6 +226,13 @@ fun UserSettingsScreen(
                     onShowSetupDialog = { showChildLockSetupDialog = true },
                     onShowDisableDialog = { showChildLockDisableDialog = true },
                     deviceId = deviceId
+                )
+
+                // Integrations Section
+                IntegrationsNavigationItem(
+                    onClick = {
+                        viewModel.navigateToScreen(Screen.Integrations)
+                    }
                 )
             }
         }
@@ -1197,6 +1205,42 @@ private fun QuickSelectChip(
                        else MaterialTheme.typography.bodyMedium,
                 color = if (isSelected) OnPrimary else OnSurfaceVariant,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+    }
+}
+
+@Composable
+private fun IntegrationsNavigationItem(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = Surface,
+        shadowElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onClick() }
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "אינטגרציות (MCPs)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = OnSurface,
+                fontWeight = FontWeight.Medium
+            )
+            
+            Text(
+                text = ">",
+                style = MaterialTheme.typography.bodyLarge,
+                color = OnSurface.copy(alpha = 0.7f),
+                fontWeight = FontWeight.Bold
             )
         }
     }

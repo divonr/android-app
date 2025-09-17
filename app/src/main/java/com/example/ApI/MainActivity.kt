@@ -24,6 +24,7 @@ import com.example.ApI.ui.screen.GroupScreen
 import com.example.ApI.ui.screen.ChatScreen
 import com.example.ApI.ui.screen.UserSettingsScreen
 import com.example.ApI.ui.screen.ChildLockScreen
+import com.example.ApI.ui.screen.IntegrationsScreen
 import com.example.ApI.ui.theme.ApITheme
 import com.example.ApI.ui.theme.Background
 
@@ -85,6 +86,10 @@ fun LLMChatApp(sharedIntent: Intent? = null) {
                 // Exit app when on child lock screen
                 (context as? Activity)?.finish()
             }
+            effectiveScreen is Screen.Integrations -> {
+                // Go back to UserSettings from Integrations
+                viewModel.navigateToScreen(Screen.UserSettings)
+            }
             effectiveScreen !is Screen.ChatHistory -> {
                 viewModel.navigateToScreen(Screen.ChatHistory)
             }
@@ -131,6 +136,13 @@ fun LLMChatApp(sharedIntent: Intent? = null) {
         is Screen.ChildLock -> {
             ChildLockScreen(
                 viewModel = viewModel
+            )
+        }
+        is Screen.Integrations -> {
+            IntegrationsScreen(
+                viewModel = viewModel,
+                appSettings = appSettings,
+                onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) }
             )
         }
     }

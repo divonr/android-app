@@ -2,6 +2,8 @@ package com.example.ApI.data.network
 
 import android.content.Context
 import com.example.ApI.data.model.*
+import com.example.ApI.tools.ToolCall
+import com.example.ApI.tools.ToolSpecification
 import kotlinx.serialization.json.*
 import kotlinx.serialization.encodeToString
 import java.io.OutputStreamWriter
@@ -27,13 +29,14 @@ class ApiService(private val context: Context) {
         messages: List<Message>,
         systemPrompt: String,
         apiKeys: Map<String, String>,
-        webSearchEnabled: Boolean = false
+        webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList()
     ): ApiResponse = withContext(Dispatchers.IO) {
         
         when (provider.provider) {
-            "openai" -> sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled)
-            "poe" -> sendPoeMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled)
-            "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled)
+            "openai" -> sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
+            "poe" -> sendPoeMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
+            "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
             else -> throw IllegalArgumentException("Unknown provider: ${provider.provider}")
         }
     }
@@ -45,13 +48,14 @@ class ApiService(private val context: Context) {
         systemPrompt: String,
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList(),
         callback: StreamingCallback
     ): Unit = withContext(Dispatchers.IO) {
         
         when (provider.provider) {
-            "openai" -> sendOpenAIMessageStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, callback)
-            "poe" -> sendPoeMessageStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, callback)
-            "google" -> sendGoogleMessageStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, callback)
+            "openai" -> sendOpenAIMessageStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "poe" -> sendPoeMessageStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "google" -> sendGoogleMessageStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             else -> {
                 callback.onError("Unknown provider: ${provider.provider}")
             }
@@ -64,7 +68,8 @@ class ApiService(private val context: Context) {
         messages: List<Message>,
         systemPrompt: String,
         apiKeys: Map<String, String>,
-        webSearchEnabled: Boolean = false
+        webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList()
     ): ApiResponse {
         val apiKey = apiKeys["openai"] ?: throw IllegalArgumentException("OpenAI API key is required")
         
@@ -139,13 +144,32 @@ class ApiService(private val context: Context) {
             put("model", modelName)
             put("input", JsonArray(conversationMessages))
             
-            // Add tools section for web search if enabled
-            if (webSearchEnabled) {
-                put("tools", buildJsonArray {
+            // Add tools section for web search and custom tools if enabled
+            val toolsArray = buildJsonArray {
+                // Add web search tool if enabled
+                if (webSearchEnabled) {
                     add(buildJsonObject {
-                        put("type", "web_search")
+                        put("type", "web_search_preview")
                     })
-                })
+                }
+                
+                // Add custom tools from enabledTools list
+                enabledTools.forEach { toolSpec ->
+                    add(buildJsonObject {
+                        put("type", "function")
+                        put("function", buildJsonObject {
+                            put("name", toolSpec.name)
+                            put("description", toolSpec.description)
+                            if (toolSpec.parameters != null) {
+                                put("parameters", toolSpec.parameters)
+                            }
+                        })
+                    })
+                }
+            }
+            
+            if (toolsArray.isNotEmpty()) {
+                put("tools", toolsArray)
             }
         }
         
@@ -203,6 +227,7 @@ class ApiService(private val context: Context) {
         systemPrompt: String,
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList(),
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["openai"] ?: run {
@@ -282,13 +307,32 @@ class ApiService(private val context: Context) {
                 put("input", JsonArray(conversationMessages))
                 put("stream", true)  // Enable streaming
                 
-                // Add tools section for web search if enabled
-                if (webSearchEnabled) {
-                    put("tools", buildJsonArray {
+                // Add tools section for web search and custom tools if enabled
+                val toolsArray = buildJsonArray {
+                    // Add web search tool if enabled
+                    if (webSearchEnabled) {
                         add(buildJsonObject {
-                            put("type", "web_search")
+                            put("type", "web_search_preview")
                         })
-                    })
+                    }
+                    
+                    // Add custom tools from enabledTools list
+                    enabledTools.forEach { toolSpec ->
+                        add(buildJsonObject {
+                            put("type", "function")
+                            put("function", buildJsonObject {
+                                put("name", toolSpec.name)
+                                put("description", toolSpec.description)
+                                if (toolSpec.parameters != null) {
+                                    put("parameters", toolSpec.parameters)
+                                }
+                            })
+                        })
+                    }
+                }
+                
+                if (toolsArray.isNotEmpty()) {
+                    put("tools", toolsArray)
                 }
             }
             
@@ -396,7 +440,8 @@ class ApiService(private val context: Context) {
         messages: List<Message>,
         systemPrompt: String,
         apiKeys: Map<String, String>,
-        webSearchEnabled: Boolean = false
+        webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList()
     ): ApiResponse {
         val apiKey = apiKeys["poe"] ?: throw IllegalArgumentException("Poe API key is required")
         
@@ -574,6 +619,7 @@ class ApiService(private val context: Context) {
         systemPrompt: String,
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList(),
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["poe"] ?: run {
@@ -751,7 +797,8 @@ class ApiService(private val context: Context) {
         messages: List<Message>,
         systemPrompt: String,
         apiKeys: Map<String, String>,
-        webSearchEnabled: Boolean = false
+        webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList()
     ): ApiResponse {
         val apiKey = apiKeys["google"] ?: throw IllegalArgumentException("Google API key is required")
         
@@ -829,13 +876,33 @@ class ApiService(private val context: Context) {
                 })
             }
             
-            // Add tools section for web search if enabled
-            if (webSearchEnabled) {
-                put("tools", buildJsonArray {
+            // Add tools section for web search and custom tools if enabled
+            val toolsArray = buildJsonArray {
+                // Add web search tool if enabled
+                if (webSearchEnabled) {
                     add(buildJsonObject {
                         put("google_search", buildJsonObject {})
                     })
-                })
+                }
+                
+                // Add custom tools from enabledTools list
+                enabledTools.forEach { toolSpec ->
+                    add(buildJsonObject {
+                        put("function_declarations", buildJsonArray {
+                            add(buildJsonObject {
+                                put("name", toolSpec.name)
+                                put("description", toolSpec.description)
+                                if (toolSpec.parameters != null) {
+                                    put("parameters", toolSpec.parameters)
+                                }
+                            })
+                        })
+                    })
+                }
+            }
+            
+            if (toolsArray.isNotEmpty()) {
+                put("tools", toolsArray)
             }
             
             put("contents", JsonArray(conversationContents))
@@ -929,6 +996,7 @@ class ApiService(private val context: Context) {
         systemPrompt: String,
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList(),
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["google"] ?: run {
@@ -1012,13 +1080,33 @@ class ApiService(private val context: Context) {
                     })
                 }
                 
-                // Add tools section for web search if enabled
-                if (webSearchEnabled) {
-                    put("tools", buildJsonArray {
+                // Add tools section for web search and custom tools if enabled
+                val toolsArray = buildJsonArray {
+                    // Add web search tool if enabled
+                    if (webSearchEnabled) {
                         add(buildJsonObject {
                             put("google_search", buildJsonObject {})
                         })
-                    })
+                    }
+                    
+                    // Add custom tools from enabledTools list
+                    enabledTools.forEach { toolSpec ->
+                        add(buildJsonObject {
+                            put("function_declarations", buildJsonArray {
+                                add(buildJsonObject {
+                                    put("name", toolSpec.name)
+                                    put("description", toolSpec.description)
+                                    if (toolSpec.parameters != null) {
+                                        put("parameters", toolSpec.parameters)
+                                    }
+                                })
+                            })
+                        })
+                    }
+                }
+                
+                if (toolsArray.isNotEmpty()) {
+                    put("tools", toolsArray)
                 }
                 
                 put("contents", JsonArray(conversationContents))

@@ -1,6 +1,7 @@
 package com.example.ApI.data.model
 
 import kotlinx.serialization.Serializable
+import com.example.ApI.tools.ToolCallInfo
 
 @Serializable
 data class UserChatHistory(
@@ -33,14 +34,18 @@ data class Chat(
 
 @Serializable
 data class Message(
-    val role: String, // "user", "assistant", "system"
+    val role: String, // "user", "assistant", "system", "tool_call"
     val text: String,
     val attachments: List<Attachment> = emptyList(),
     val model: String? = null, // Model name that generated this response (for assistant messages)
-    val datetime: String? = null // ISO 8601 format timestamp when message was sent/received
+    val datetime: String? = null, // ISO 8601 format timestamp when message was sent/received
+    val toolCall: ToolCallInfo? = null // Tool call information if this is a tool call message
 ) {
     // Convenience property
     val content: String get() = text
+    
+    // Check if this is a tool call message
+    val isToolCall: Boolean get() = role == "tool_call" || toolCall != null
 }
 
 @Serializable

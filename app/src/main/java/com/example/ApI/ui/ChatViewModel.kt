@@ -10,6 +10,8 @@ import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.network.StreamingCallback
 import com.example.ApI.data.ParentalControlManager
+import com.example.ApI.tools.ToolRegistry
+import com.example.ApI.tools.ToolSpecification
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -98,7 +100,8 @@ class ChatViewModel(
                 chatHistory = chatHistory.chat_history,
                 groups = chatHistory.groups,
                 webSearchSupport = webSearchSupport,
-                webSearchEnabled = webSearchEnabled
+                webSearchEnabled = webSearchEnabled,
+                showChatHistory = true
             )
             
             // Debug log
@@ -328,6 +331,7 @@ class ChatViewModel(
                         chatId = updatedChat.chat_id,
                         projectAttachments = projectAttachments,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
+                        enabledTools = getEnabledToolSpecifications(),
                         callback = streamingCallback
                     )
                     
@@ -478,6 +482,7 @@ class ChatViewModel(
                         chatId = currentChat.chat_id,
                         projectAttachments = projectAttachments,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
+                        enabledTools = getEnabledToolSpecifications(),
                         callback = streamingCallback
                     )
 
@@ -749,6 +754,19 @@ class ChatViewModel(
             }
             // If not in project, use regular chat system prompt
             else -> currentChat.systemPrompt
+        }
+    }
+
+    /**
+     * Get enabled tool specifications based on current app settings
+     */
+    private fun getEnabledToolSpecifications(): List<ToolSpecification> {
+        val enabledToolIds = _appSettings.value.enabledTools
+        val toolRegistry = ToolRegistry.getInstance()
+        val currentProvider = _uiState.value.currentProvider?.provider ?: "openai"
+        
+        return enabledToolIds.mapNotNull { toolId ->
+            toolRegistry.getTool(toolId)?.getSpecification(currentProvider)
         }
     }
 
@@ -1128,6 +1146,7 @@ class ChatViewModel(
                         chatId = resendUpdatedChat.chat_id,
                         projectAttachments = projectAttachments,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
+                        enabledTools = getEnabledToolSpecifications(),
                         callback = streamingCallback
                     )
 
@@ -2142,6 +2161,42 @@ class ChatViewModel(
     fun getLockEndTime(): String {
         val settings = _appSettings.value.childLockSettings
         return settings.endTime
+    }
+
+    // Tool Management Methods
+
+    fun enableTool(toolId: String) {
+        val currentSettings = _appSettings.value
+        if (!currentSettings.enabledTools.contains(toolId)) {
+            val updatedSettings = currentSettings.copy(
+                enabledTools = currentSettings.enabledTools + toolId
+            )
+            repository.saveAppSettings(updatedSettings)
+            _appSettings.value = updatedSettings
+            
+            _uiState.value = _uiState.value.copy(
+                snackbarMessage = "הכלי הופעל בהצלחה"
+            )
+        }
+    }
+
+    fun disableTool(toolId: String) {
+        val currentSettings = _appSettings.value
+        if (currentSettings.enabledTools.contains(toolId)) {
+            val updatedSettings = currentSettings.copy(
+                enabledTools = currentSettings.enabledTools.filter { it != toolId }
+            )
+            repository.saveAppSettings(updatedSettings)
+            _appSettings.value = updatedSettings
+            
+            _uiState.value = _uiState.value.copy(
+                snackbarMessage = "הכלי כובה בהצלחה"
+            )
+        }
+    }
+
+    fun getAvailableTools(): List<com.example.ApI.tools.Tool> {
+        return ToolRegistry.getInstance().getAllTools()
     }
 
 }

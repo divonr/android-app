@@ -93,5 +93,6 @@ sealed class Screen {
     object ApiKeys : Screen()
     object UserSettings : Screen()
     object ChildLock : Screen()
+    object Integrations : Screen()
     data class Group(val groupId: String) : Screen()
 }

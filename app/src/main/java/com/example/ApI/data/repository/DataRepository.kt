@@ -5,6 +5,7 @@ import android.os.Environment
 import com.example.ApI.data.model.*
 import com.example.ApI.data.network.ApiService
 import com.example.ApI.data.network.ApiResponse
+import com.example.ApI.tools.ToolSpecification
 import kotlinx.serialization.json.*
 import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.withContext
@@ -175,9 +176,11 @@ class DataRepository(private val context: Context) {
                 val content = file.readText()
                 json.decodeFromString<UserChatHistory>(content)
             } catch (e: Exception) {
+                android.util.Log.e("DataRepository", "Failed to load chat history", e)
                 UserChatHistory(username, emptyList(), emptyList())
             }
         } else {
+            android.util.Log.e("DataRepository", "Failed to load chat history, file doesn't exist")
             UserChatHistory(username, emptyList(), emptyList())
         }
     }
@@ -599,7 +602,8 @@ class DataRepository(private val context: Context) {
         username: String,
         chatId: String? = null,
         projectAttachments: List<Attachment> = emptyList(),
-        webSearchEnabled: Boolean = false
+        webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList()
     ): ApiResponse {
         val apiKeys = loadApiKeys(username)
             .filter { it.isActive }
@@ -629,7 +633,7 @@ class DataRepository(private val context: Context) {
             updatedMessages
         }
 
-        return apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled)
+        return apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
     }
 
     suspend fun sendMessageStreaming(
@@ -641,6 +645,7 @@ class DataRepository(private val context: Context) {
         chatId: String? = null,
         projectAttachments: List<Attachment> = emptyList(),
         webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList(),
         callback: com.example.ApI.data.network.StreamingCallback
     ) {
         val apiKeys = loadApiKeys(username)
@@ -671,7 +676,7 @@ class DataRepository(private val context: Context) {
             updatedMessages
         }
 
-        apiService.sendMessageStreaming(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, callback)
+        apiService.sendMessageStreaming(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
     }
 
     // Check and upload project files for current provider
@@ -1137,7 +1142,8 @@ class DataRepository(private val context: Context) {
                 messages = promptMessages,
                 systemPrompt = "",
                 apiKeys = apiKeys,
-                webSearchEnabled = false // No web search for title generation
+                webSearchEnabled = false, // No web search for title generation
+                enabledTools = emptyList() // No tools for title generation
             )
             
             // Extract title from response based on provider
