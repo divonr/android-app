@@ -61,6 +61,7 @@ import androidx.core.view.drawToBitmap
 import coil.compose.AsyncImage
 import com.example.ApI.R
 import com.example.ApI.data.model.*
+import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.components.*
 import com.example.ApI.ui.theme.*
@@ -979,6 +980,15 @@ fun MessageBubble(
     isBeingEdited: Boolean = false,
     searchHighlight: SearchResult? = null
 ) {
+    // Handle tool call messages specially
+    if (message.isToolCall || message.toolCall != null) {
+        ToolCallBubble(
+            message = message,
+            modifier = modifier,
+            isEditMode = isEditMode
+        )
+        return
+    }
     val bubbleColor = when (message.role) {
         "user" -> UserMessageBubble
         "assistant" -> AssistantMessageBubble
@@ -1540,6 +1550,234 @@ fun ReplyPromptBubble(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun ToolCallBubble(
+    message: Message,
+    modifier: Modifier = Modifier,
+    isEditMode: Boolean = false
+) {
+    val toolCallInfo = message.toolCall ?: return
+    var isExpanded by remember { mutableStateOf(false) }
+    
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.Start
+    ) {
+        // Tool call container with modern design
+        Surface(
+            shape = RoundedCornerShape(
+                topStart = 6.dp,
+                topEnd = 20.dp,
+                bottomStart = 20.dp,
+                bottomEnd = 20.dp
+            ),
+            color = Primary.copy(alpha = 0.1f), // Subtle primary color background
+            border = BorderStroke(1.dp, Primary.copy(alpha = 0.2f)),
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .clickable { isExpanded = !isExpanded }
+                .then(
+                    if (isEditMode) {
+                        Modifier.alpha(0.3f)
+                    } else {
+                        Modifier
+                    }
+                )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                // Header with tool icon and name
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Tool icon with modern styling
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Primary.copy(alpha = 0.15f),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Build, // Tool/function icon
+                                contentDescription = "Tool",
+                                tint = Primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    
+                    // Tool name and status
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "🔧 ${toolCallInfo.toolName}",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        
+                        // Status indicator based on result
+                        val (statusText, statusColor) = when (toolCallInfo.result) {
+                            is ToolExecutionResult.Success -> "✅ Completed" to AccentGreen
+                            is ToolExecutionResult.Error -> "❌ Failed" to AccentRed
+                        }
+                        
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = statusColor,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    
+                    // Expand/collapse indicator
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isExpanded) Primary.copy(alpha = 0.1f) else Color.Transparent,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = if (isExpanded) "Collapse" else "Expand",
+                                tint = OnSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+                
+                // Quick result preview (always visible)
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                val resultPreview = when (val result = toolCallInfo.result) {
+                    is ToolExecutionResult.Success -> {
+                        if (result.result.length > 80) {
+                            "${result.result.take(80)}..."
+                        } else result.result
+                    }
+                    is ToolExecutionResult.Error -> result.error
+                }
+                
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Surface,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = resultPreview,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OnSurface,
+                        modifier = Modifier.padding(12.dp),
+                        maxLines = if (isExpanded) Int.MAX_VALUE else 2
+                    )
+                }
+                
+                // Expanded details
+                AnimatedVisibility(
+                    visible = isExpanded,
+                    enter = fadeIn() + androidx.compose.animation.expandVertically(),
+                    exit = fadeOut() + androidx.compose.animation.shrinkVertically()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Parameters section if any
+                        if (toolCallInfo.parameters.isNotEmpty()) {
+                            Text(
+                                text = "Parameters:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = OnSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = SurfaceVariant,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = toolCallInfo.parameters.toString(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = OnSurfaceVariant,
+                                    modifier = Modifier.padding(12.dp),
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                )
+                            }
+                        }
+                        
+                        // Full result section
+                        Text(
+                            text = "Result:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = OnSurfaceVariant,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = when (toolCallInfo.result) {
+                                is ToolExecutionResult.Success -> AccentGreen.copy(alpha = 0.1f)
+                                is ToolExecutionResult.Error -> AccentRed.copy(alpha = 0.1f)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            when (val result = toolCallInfo.result) {
+                                is ToolExecutionResult.Success -> {
+                                    Text(
+                                        text = result.result,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = OnSurface,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
+                                is ToolExecutionResult.Error -> {
+                                    Text(
+                                        text = result.error,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = AccentRed,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
+                            }
+                        }
+                        
+                        // Timestamp
+                        Text(
+                            text = "Executed at ${formatToolCallTimestamp(toolCallInfo.timestamp)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.align(Alignment.End)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Format timestamp for tool call display
+ */
+private fun formatToolCallTimestamp(timestamp: String): String {
+    return try {
+        val instant = Instant.parse(timestamp)
+        val formatter = DateTimeFormatter.ofPattern("HH:mm:ss")
+            .withZone(ZoneId.systemDefault())
+        formatter.format(instant)
+    } catch (e: Exception) {
+        timestamp // Fallback to original string
     }
 }
 

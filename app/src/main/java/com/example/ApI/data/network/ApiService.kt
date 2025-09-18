@@ -11,6 +11,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -139,11 +140,13 @@ class ApiService(private val context: Context) {
             }
         }
         
-        // Build request body according to providers.json format
+            // Build request body according to providers.json format
         val requestBody = buildJsonObject {
             put("model", modelName)
+
+            // Build input array with messages
             put("input", JsonArray(conversationMessages))
-            
+
             // Add tools section for web search and custom tools if enabled
             val toolsArray = buildJsonArray {
                 // Add web search tool if enabled
@@ -157,17 +160,25 @@ class ApiService(private val context: Context) {
                 enabledTools.forEach { toolSpec ->
                     add(buildJsonObject {
                         put("type", "function")
-                        put("function", buildJsonObject {
-                            put("name", toolSpec.name)
-                            put("description", toolSpec.description)
-                            if (toolSpec.parameters != null) {
-                                put("parameters", toolSpec.parameters)
+                        put("name", toolSpec.name)
+                        put("description", toolSpec.description)
+                        if (toolSpec.parameters != null) {
+                            val newParametersObject = buildJsonObject {
+                                toolSpec.parameters.forEach { (key, value) ->
+                                    put(key, value)
+                                }
+                                put("additionalProperties", false)
                             }
-                        })
+                            put("parameters", newParametersObject)
+                        }
+                        else {
+                            put("parameters", buildJsonObject {})
+                        }
+                        put("strict", true)
                     })
                 }
             }
-            
+
             if (toolsArray.isNotEmpty()) {
                 put("tools", toolsArray)
             }
@@ -195,23 +206,53 @@ class ApiService(private val context: Context) {
             return ApiResponse.Error("HTTP $responseCode: $response")
         }
         
-        // Parse response according to providers.json format
+            // Parse response according to providers.json format
         try {
             val responseJson = json.parseToJsonElement(response).jsonObject
             val outputArray = responseJson["output"]?.jsonArray
             
             var responseText = ""
+            var toolCall: com.example.ApI.tools.ToolCall? = null
+            
             outputArray?.forEach { outputElement ->
                 val outputObj = outputElement.jsonObject
-                if (outputObj["type"]?.jsonPrimitive?.content == "message") {
-                    val content = outputObj["content"]?.jsonArray
-                    content?.forEach { contentElement ->
-                        val contentObj = contentElement.jsonObject
-                        if (contentObj["type"]?.jsonPrimitive?.content == "output_text") {
-                            responseText = contentObj["text"]?.jsonPrimitive?.content ?: ""
+                when (outputObj["type"]?.jsonPrimitive?.content) {
+                    "message" -> {
+                        val content = outputObj["content"]?.jsonArray
+                        content?.forEach { contentElement ->
+                            val contentObj = contentElement.jsonObject
+                            if (contentObj["type"]?.jsonPrimitive?.content == "output_text") {
+                                responseText = contentObj["text"]?.jsonPrimitive?.content ?: ""
+                            }
+                        }
+                    }
+                    "function_call" -> {
+                        val status = outputObj["status"]?.jsonPrimitive?.content
+                        if (status == "completed") {
+                            val name = outputObj["name"]?.jsonPrimitive?.content
+                            val callId = outputObj["call_id"]?.jsonPrimitive?.content
+                            val arguments = outputObj["arguments"]?.jsonPrimitive?.content
+                            
+                            if (name != null && callId != null && arguments != null) {
+                                val paramsJson = json.parseToJsonElement(arguments).jsonObject
+                                toolCall = com.example.ApI.tools.ToolCall(
+                                    id = callId,
+                                    toolId = name,
+                                    parameters = paramsJson,
+                                    provider = "openai"
+                                )
+                            }
                         }
                     }
                 }
+            }
+            
+            // If we found a tool call, handle it through the ToolRegistry
+            if (toolCall != null) {
+                val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
+                // Send follow-up request with tool result
+                // This should be handled by the ViewModel layer
+                return ApiResponse.Success("") // Empty response since we're handling tool call
             }
             
             return ApiResponse.Success(responseText)
@@ -320,13 +361,21 @@ class ApiService(private val context: Context) {
                     enabledTools.forEach { toolSpec ->
                         add(buildJsonObject {
                             put("type", "function")
-                            put("function", buildJsonObject {
-                                put("name", toolSpec.name)
-                                put("description", toolSpec.description)
-                                if (toolSpec.parameters != null) {
-                                    put("parameters", toolSpec.parameters)
+                            put("name", toolSpec.name)
+                            put("description", toolSpec.description)
+                            if (toolSpec.parameters != null) {
+                                val newParametersObject = buildJsonObject {
+                                    toolSpec.parameters.forEach { (key, value) ->
+                                        put(key, value)
+                                    }
+                                    put("additionalProperties", false)
                                 }
-                            })
+                                put("parameters", newParametersObject)
+                            }
+                            else {
+                                put("parameters", buildJsonObject {})
+                            }
+                            put("strict", true)
                         })
                     }
                 }
@@ -351,7 +400,7 @@ class ApiService(private val context: Context) {
                     connection.disconnect() // Disconnect the failed stream connection
 
                     // Run the non-streaming version as a fallback
-                    val fallbackResponse = sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled)
+                    val fallbackResponse = sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
 
                     when (fallbackResponse) {
                         is ApiResponse.Success -> {
@@ -384,6 +433,8 @@ class ApiService(private val context: Context) {
                 // OpenAI SSE format: "data: {json}" for each chunk
                 if (currentLine.startsWith("data:")) {
                     val dataContent = currentLine.substring(5).trim()
+                    Log.d("TOOL_CALL_DEBUG", "RAW DATA CHUNK: $dataContent")
+                    Log.d("TOOL_CALL_DEBUG", "RAW DATA CHUNK: $dataContent")
                     
                     // Check for end of stream
                     if (dataContent == "[DONE]") {
@@ -397,6 +448,7 @@ class ApiService(private val context: Context) {
                     
                     try {
                         val chunkJson = json.parseToJsonElement(dataContent).jsonObject
+                        Log.d("TOOL_CALL_DEBUG", "Parsed JSON chunk successfully.")
                         val eventType = chunkJson["type"]?.jsonPrimitive?.content
                         
                         when (eventType) {
@@ -419,6 +471,7 @@ class ApiService(private val context: Context) {
                             }
                         }
                     } catch (jsonException: Exception) {
+                        Log.e("TOOL_CALL_DEBUG", "Error parsing chunk: ${jsonException.message}")
                         // Continue reading other chunks on JSON parsing error
                         continue
                     }
@@ -513,6 +566,27 @@ class ApiService(private val context: Context) {
             put("user_id", "")
             put("conversation_id", "")
             put("message_id", "")
+            
+            // Add tools section for web search and custom tools if enabled
+            if (enabledTools.isNotEmpty()) {
+                put("tools", buildJsonArray {
+                    enabledTools.forEach { toolSpec ->
+                        add(buildJsonObject {
+                            put("type", "function")
+                            put("function", buildJsonObject {
+                                put("name", toolSpec.name)
+                                put("description", toolSpec.description)
+                                if (toolSpec.parameters != null) {
+                                    put("parameters", toolSpec.parameters)
+                                }
+                                else {
+                                    put("parameters", buildJsonObject {})
+                                }
+                            })
+                        })
+                    }
+                })
+            }
         }
         
         // Send request
@@ -579,6 +653,42 @@ class ApiService(private val context: Context) {
                                 if (replacementText != null) {
                                     fullResponse.clear()
                                     fullResponse.append(replacementText)
+                                }
+                            }
+                            "json" -> {
+                                val eventData = eventJson["data"]?.jsonObject
+                                val choices = eventData?.get("choices")?.jsonArray
+                                
+                                choices?.firstOrNull()?.jsonObject?.let { choice ->
+                                    val delta = choice["delta"]?.jsonObject
+                                    val toolCalls = delta?.get("tool_calls")?.jsonArray
+                                    
+                                    toolCalls?.forEach { toolCallElement ->
+                                        val toolCallObj = toolCallElement.jsonObject
+                                        val index = toolCallObj["index"]?.jsonPrimitive?.int
+                                        val function = toolCallObj["function"]?.jsonObject
+                                        
+                                        if (function != null) {
+                                            val arguments = function["arguments"]?.jsonPrimitive?.content
+                                            if (arguments != null) {
+                                                // Create and execute tool call
+                                                val paramsJson = json.parseToJsonElement(arguments).jsonObject
+                                                val toolName = function["name"]?.jsonPrimitive?.content ?: "unknown_tool"
+                                                val toolCall = com.example.ApI.tools.ToolCall(
+                                                    id = index.toString(),
+                                                    toolId = toolName,
+                                                    parameters = paramsJson,
+                                                    provider = "poe"
+                                                )
+                                                val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
+                                                return ApiResponse.Success("") // Empty response since we're handling tool call
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Check finish reason
+                                    val finishReason = choice["finish_reason"]?.jsonPrimitive?.content
+                                    // Note: finish_reason handling removed to avoid inline lambda return issue
                                 }
                             }
                             "error" -> {
@@ -696,6 +806,27 @@ class ApiService(private val context: Context) {
                 put("user_id", "")
                 put("conversation_id", "")
                 put("message_id", "")
+
+                // Add tools section for web search and custom tools if enabled
+                if (enabledTools.isNotEmpty()) {
+                    put("tools", buildJsonArray {
+                        enabledTools.forEach { toolSpec ->
+                            add(buildJsonObject {
+                                put("type", "function")
+                                put("function", buildJsonObject {
+                                    put("name", toolSpec.name)
+                                    put("description", toolSpec.description)
+                                    if (toolSpec.parameters != null) {
+                                        put("parameters", toolSpec.parameters)
+                                    }
+                                    else {
+                                        put("parameters", buildJsonObject {})
+                                    }
+                                })
+                            })
+                        }
+                    })
+                }
             }
             
             // Send request
@@ -759,6 +890,43 @@ class ApiService(private val context: Context) {
                                     fullResponse.clear()
                                     fullResponse.append(replacementText)
                                     callback.onPartialResponse(replacementText)
+                                }
+                            }
+                            "json" -> {
+                                val eventData = eventJson["data"]?.jsonObject
+                                val choices = eventData?.get("choices")?.jsonArray
+                                
+                                choices?.firstOrNull()?.jsonObject?.let { choice ->
+                                    val delta = choice["delta"]?.jsonObject
+                                    val toolCalls = delta?.get("tool_calls")?.jsonArray
+                                    
+                                    toolCalls?.forEach { toolCallElement ->
+                                        val toolCallObj = toolCallElement.jsonObject
+                                        val index = toolCallObj["index"]?.jsonPrimitive?.int
+                                        val function = toolCallObj["function"]?.jsonObject
+                                        
+                                        if (function != null) {
+                                            val arguments = function["arguments"]?.jsonPrimitive?.content
+                                            if (arguments != null) {
+                                                // Create and execute tool call
+                                                val paramsJson = json.parseToJsonElement(arguments).jsonObject
+                                                val toolName = function["name"]?.jsonPrimitive?.content ?: "unknown_tool"
+                                                val toolCall = com.example.ApI.tools.ToolCall(
+                                                    id = index.toString(),
+                                                    toolId = toolName,
+                                                    parameters = paramsJson,
+                                                    provider = "poe"
+                                                )
+                                                val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
+                                                callback.onComplete("") // Empty response since we're handling tool call
+                                                return
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Check finish reason
+                                    val finishReason = choice["finish_reason"]?.jsonPrimitive?.content
+                                    // Note: finish_reason handling removed to avoid inline lambda return issue
                                 }
                             }
                             "error" -> {
@@ -886,16 +1054,21 @@ class ApiService(private val context: Context) {
                 }
                 
                 // Add custom tools from enabledTools list
-                enabledTools.forEach { toolSpec ->
+                if (enabledTools.isNotEmpty()) {
                     add(buildJsonObject {
-                        put("function_declarations", buildJsonArray {
-                            add(buildJsonObject {
-                                put("name", toolSpec.name)
-                                put("description", toolSpec.description)
-                                if (toolSpec.parameters != null) {
-                                    put("parameters", toolSpec.parameters)
-                                }
-                            })
+                        put("functionDeclarations", buildJsonArray {
+                            enabledTools.forEach { toolSpec ->
+                                add(buildJsonObject {
+                                    put("name", toolSpec.name)
+                                    put("description", toolSpec.description)
+                                    if (toolSpec.parameters != null) {
+                                        put("parameters", toolSpec.parameters)
+                                    }
+                                    else {
+                                        put("parameters", buildJsonObject {})
+                                    }
+                                })
+                            }
                         })
                     })
                 }
@@ -909,9 +1082,6 @@ class ApiService(private val context: Context) {
         }
         
         val requestBodyJson = json.encodeToString(requestBodyBuilder)
-        
-        // Log request for debugging (remove in production)
-        println("[DEBUG] Google API Request: $requestBodyJson")
         
         // Send request
         val writer = OutputStreamWriter(connection.outputStream)
@@ -930,10 +1100,6 @@ class ApiService(private val context: Context) {
         val response = reader.readText()
         reader.close()
         connection.disconnect()
-        
-        // Log response for debugging (remove in production)
-        println("[DEBUG] Google API Response Code: $responseCode")
-        println("[DEBUG] Google API Response: $response")
         
         if (responseCode >= 400) {
             return ApiResponse.Error("HTTP $responseCode: $response")
@@ -977,8 +1143,29 @@ class ApiService(private val context: Context) {
             }
             
             val firstPart = parts[0].jsonObject
-            val responseText = firstPart["text"]?.jsonPrimitive?.content
             
+            // Check for function call
+            val functionCall = firstPart["functionCall"]?.jsonObject
+            if (functionCall != null) {
+                val name = functionCall["name"]?.jsonPrimitive?.content
+                val args = functionCall["args"]?.jsonObject?.toString()
+                
+                if (name != null && args != null) {
+                    // Create and execute tool call
+                    val paramsJson = if (args != null) json.parseToJsonElement(args).jsonObject else buildJsonObject {}
+                    val toolCall = com.example.ApI.tools.ToolCall(
+                        id = "google_${System.currentTimeMillis()}", // Google doesn't provide call IDs
+                        toolId = name,
+                        parameters = paramsJson,
+                        provider = "google"
+                    )
+                    val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
+                    return ApiResponse.Success("") // Empty response since we're handling tool call
+                }
+            }
+            
+            // Check for text response
+            val responseText = firstPart["text"]?.jsonPrimitive?.content
             if (responseText.isNullOrBlank()) {
                 return ApiResponse.Error("Empty text response from Google API")
             }
@@ -1090,16 +1277,21 @@ class ApiService(private val context: Context) {
                     }
                     
                     // Add custom tools from enabledTools list
-                    enabledTools.forEach { toolSpec ->
+                    if (enabledTools.isNotEmpty()) {
                         add(buildJsonObject {
-                            put("function_declarations", buildJsonArray {
-                                add(buildJsonObject {
-                                    put("name", toolSpec.name)
-                                    put("description", toolSpec.description)
-                                    if (toolSpec.parameters != null) {
-                                        put("parameters", toolSpec.parameters)
-                                    }
-                                })
+                            put("functionDeclarations", buildJsonArray {
+                                enabledTools.forEach { toolSpec ->
+                                    add(buildJsonObject {
+                                        put("name", toolSpec.name)
+                                        put("description", toolSpec.description)
+                                        if (toolSpec.parameters != null) {
+                                            put("parameters", toolSpec.parameters)
+                                        }
+                                        else {
+                                            put("parameters", buildJsonObject {})
+                                        }
+                                    })
+                                }
                             })
                         })
                     }
@@ -1149,8 +1341,10 @@ class ApiService(private val context: Context) {
                 return
             }
             
+            Log.d("TOOL_CALL_DEBUG", "Starting to read Google stream...")
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             val fullResponse = StringBuilder()
+            val toolCalls = mutableListOf<com.example.ApI.tools.ToolCall>()
             var line: String?
             
             // Google Gemini streams SSE JSON objects
@@ -1193,9 +1387,33 @@ class ApiService(private val context: Context) {
                             
                             if (parts != null && parts.isNotEmpty()) {
                                 val firstPart = parts[0].jsonObject
-                                val chunkText = firstPart["text"]?.jsonPrimitive?.content
                                 
-                                if (chunkText != null && chunkText.isNotEmpty()) {
+                                // Check for function call
+                                val functionCall = firstPart["functionCall"]?.jsonObject
+                                if (functionCall != null) {
+                                    Log.d("TOOL_CALL_DEBUG", "Found functionCall part: $functionCall")
+                                    val name = functionCall["name"]?.jsonPrimitive?.content
+                                    val args = functionCall["args"]?.jsonObject?.toString()
+                                    
+                                    if (name != null && args != null) {
+                                        // Create and execute tool call
+                                        val paramsJson = if (args != null) json.parseToJsonElement(args).jsonObject else buildJsonObject {}
+                                        val toolCall = com.example.ApI.tools.ToolCall(
+                                            id = "google_${System.currentTimeMillis()}", // Google doesn't provide call IDs
+                                            toolId = name,
+                                            parameters = paramsJson,
+                                            provider = "google"
+                                        )
+                                        val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
+                                        callback.onComplete("") // Empty response since we're handling tool call
+                                        return
+                                    }
+                                }
+                                
+                                // Check for text response
+                                val chunkText = firstPart["text"]?.jsonPrimitive?.content
+                                if (chunkText != null) {
+                                    Log.d("TOOL_CALL_DEBUG", "Found text part: '$chunkText'")
                                     fullResponse.append(chunkText)
                                     callback.onPartialResponse(chunkText)
                                 }

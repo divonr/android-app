@@ -23,6 +23,24 @@
                 "tools": [
                     {
                         "type": "web_search_preview"
+                    },
+                    {
+                        "type": "function",
+                        "name": "{tool_name}",
+                        "description": "{tool_description}",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "param_name": {
+                                    "type": "{param_type, e.g. string, number, boolean, array, object}",
+                                    "description": "{param_description}",
+                                    "enum": "{optional, for picklists}"
+                                }
+                            },
+                            "required": ["{param_name}"],
+                            "additionalProperties": false
+                        },
+                        "strict": true
                     }
                 ],
                 "input": [
@@ -49,7 +67,18 @@
                     },
                     {
                         "role": "user",
-                        "content": "{user_second_prompt}"
+                        "content": "{prompt_requires_tool_call}"
+                    },
+                    {
+                        "type": "function_call",
+                        "name": "{tool_name}",
+                        "arguments": "{\"key\": \"value\"}",
+                        "call_id": "{tool_call_id}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "{tool_call_id}",
+                        "output": "{\"key\": \"value\"}"
                     }
                 ]
             }
@@ -92,6 +121,14 @@
                         }
                     ],
                     "role": "assistant"
+                },
+                {
+                    "id": "{function_call_id: non relevant!}",
+                    "type": "function_call",
+                    "status": "completed",
+                    "arguments": "{\"key\": \"value\"}",
+                    "call_id": "{tool_call_id}",
+                    "name": "{tool_name}"
                 }
             ],
             "usage": {
@@ -244,7 +281,45 @@
                 ],
                 "user_id": "",
                 "conversation_id": "",
-                "message_id": ""
+                "message_id": "",
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "{tool_name}",
+                            "description": "{tool_description}",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "param_name": {
+                                        "type": "{param_type, e.g. string, number, boolean, array, object}",
+                                        "description": "{param_description}",
+                                        "enum": "{optional, for picklists}"
+                                    }
+                                },
+                                "required": ["{param_name}"]
+                            }
+                        }
+                    }
+                ],
+                "tool_calls": [
+                    {
+                        "id": "{tool_call_id}",
+                        "type": "function",
+                        "function": {
+                            "name": "{tool_name}",
+                            "arguments": "{\"key\": \"value\"}"
+                        }
+                    }
+                ],
+                "tool_results": [
+                    {
+                        "role": "tool",
+                        "name": "{tool_name}",
+                        "tool_call_id": "{tool_call_id}",
+                        "content": "{\"key\": \"value\"}"
+                    }
+                ]
             }
         },
         "response_important_fields": {
@@ -262,6 +337,27 @@
                         "text": "{replacement_text}"
                     },
                     "description": "Replaces all previous text content"
+                },
+                {
+                    "event": "json",
+                    "data": {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": "{tool_call_index}",
+                                            "function": {
+                                                "arguments": "{\"key\": \"value\"}"
+                                            }
+                                        }
+                                    ]
+                                },
+                                "finish_reason": null, // continue listen for streaming
+                                "finish_reason": "tool_calls" // stop listening for streaming
+                            }
+                        ]
+                    }
                 },
                 {
                     "event": "error",
@@ -319,6 +415,25 @@
                 "tools": [
                     {
                         "google_search": {}
+                    },
+                    {
+                        "functionDeclarations": [
+                            {
+                                "name": "{tool_name}",
+                                "description": "{tool_description}",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                        "param_name": {
+                                            "type": "{param_type, e.g. string, number, boolean, array, object}",
+                                            "description": "{param_description}",
+                                            "enum": "{optional, for picklists}"
+                                        }
+                                    },
+                                    "required": ["{param_name}"]
+                                }
+                            }
+                        ]
                     }
                 ],
                 "contents": [
@@ -343,7 +458,33 @@
                     {
                         "role": "user",
                         "parts": [
-                            {"text": "{user_second_prompt}"}
+                            {"text": "{prompt_requires_tool_call}"}
+                        ]
+                    },
+                    {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "name": "{tool_name}",
+                                    "args": {
+                                        "key": "value"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "role": "function",
+                        "parts": [
+                            {
+                                "functionResponse": {
+                                    "name": "{tool_name}",
+                                    "response": {
+                                        "key": "value"
+                                    }
+                                }
+                            }
                         ]
                     }
                 ]
@@ -356,6 +497,14 @@
                         "parts": [
                             {
                                 "text": "{model_response}"
+                            },
+                            {
+                                "functionCall": {
+                                    "name": "{tool_name}",
+                                    "args": {
+                                        "key": "value"
+                                    }
+                                }
                             }
                         ],
                         "role": "model"
