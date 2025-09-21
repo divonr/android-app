@@ -2,6 +2,7 @@ package com.example.ApI.data.network
 
 import android.content.Context
 import com.example.ApI.data.model.*
+import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.serialization.json.*
@@ -31,39 +32,21 @@ class ApiService(private val context: Context) {
         systemPrompt: String,
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
-        enabledTools: List<ToolSpecification> = emptyList()
-    ): ApiResponse = withContext(Dispatchers.IO) {
-        
-        when (provider.provider) {
-            "openai" -> sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
-            "poe" -> sendPoeMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
-            "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
-            else -> throw IllegalArgumentException("Unknown provider: ${provider.provider}")
-        }
-    }
-
-    suspend fun sendMessageStreaming(
-        provider: Provider,
-        modelName: String,
-        messages: List<Message>,
-        systemPrompt: String,
-        apiKeys: Map<String, String>,
-        webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
         callback: StreamingCallback
     ): Unit = withContext(Dispatchers.IO) {
         
         when (provider.provider) {
-            "openai" -> sendOpenAIMessageStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
-            "poe" -> sendPoeMessageStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
-            "google" -> sendGoogleMessageStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "openai" -> sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "poe" -> sendPoeMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             else -> {
                 callback.onError("Unknown provider: ${provider.provider}")
             }
         }
     }
 
-    private suspend fun sendOpenAIMessage(
+    private suspend fun sendOpenAIMessageNonStreaming(
         provider: Provider,
         modelName: String,
         messages: List<Message>,
@@ -261,7 +244,7 @@ class ApiService(private val context: Context) {
         }
     }
 
-    private suspend fun sendOpenAIMessageStreaming(
+    private suspend fun sendOpenAIMessage(
         provider: Provider,
         modelName: String,
         messages: List<Message>,
@@ -400,7 +383,7 @@ class ApiService(private val context: Context) {
                     connection.disconnect() // Disconnect the failed stream connection
 
                     // Run the non-streaming version as a fallback
-                    val fallbackResponse = sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
+                    val fallbackResponse = sendOpenAIMessageNonStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
 
                     when (fallbackResponse) {
                         is ApiResponse.Success -> {
@@ -488,241 +471,6 @@ class ApiService(private val context: Context) {
     }
 
     private suspend fun sendPoeMessage(
-        provider: Provider,
-        modelName: String,
-        messages: List<Message>,
-        systemPrompt: String,
-        apiKeys: Map<String, String>,
-        webSearchEnabled: Boolean = false,
-        enabledTools: List<ToolSpecification> = emptyList()
-    ): ApiResponse {
-        val apiKey = apiKeys["poe"] ?: throw IllegalArgumentException("Poe API key is required")
-        
-        // Build request URL - replace {model_name} placeholder
-        val baseUrl = provider.request.base_url.replace("{model_name}", modelName)
-        val url = URL(baseUrl)
-        val connection = url.openConnection() as HttpURLConnection
-        
-        // Set headers
-        connection.requestMethod = provider.request.request_type
-        connection.setRequestProperty("Authorization", "Bearer $apiKey")
-        connection.setRequestProperty("Content-Type", "application/json")
-        connection.setRequestProperty("Accept", "application/json")
-        connection.doOutput = true
-        
-        // Build conversation history for Poe format
-        val conversationMessages = mutableListOf<JsonObject>()
-        
-        // Add system prompt
-        if (systemPrompt.isNotBlank()) {
-            conversationMessages.add(buildJsonObject {
-                put("role", "system")
-                put("content", systemPrompt)
-                put("content_type", "text/markdown")
-            })
-        }
-        
-        // Add messages from conversation history
-        messages.forEach { message ->
-            when (message.role) {
-                "user" -> {
-                    val messageObj = buildJsonObject {
-                        put("role", "user")
-                        put("content", message.text)
-                        put("content_type", "text/markdown")
-                        
-                        // Add attachments if any
-                        if (message.attachments.isNotEmpty()) {
-                            put("attachments", buildJsonArray {
-                                message.attachments.forEach { attachment ->
-                                    add(buildJsonObject {
-                                        put("url", attachment.file_POE_url ?: "{file_URL}")
-                                        put("content_type", attachment.mime_type)
-                                        put("name", attachment.file_name)
-                                        put("inline_ref", JsonNull)
-                                        put("parsed_content", JsonNull)
-                                    })
-                                }
-                            })
-                        }
-                    }
-                    conversationMessages.add(messageObj)
-                }
-                "assistant" -> {
-                    conversationMessages.add(buildJsonObject {
-                        put("role", "bot")
-                        put("content", message.text)
-                        put("content_type", "text/markdown")
-                    })
-                }
-            }
-        }
-        
-        // Build request body according to providers.json format
-        val requestBody = buildJsonObject {
-            put("version", "1.2")
-            put("type", "query")
-            put("query", JsonArray(conversationMessages))
-            put("user_id", "")
-            put("conversation_id", "")
-            put("message_id", "")
-            
-            // Add tools section for web search and custom tools if enabled
-            if (enabledTools.isNotEmpty()) {
-                put("tools", buildJsonArray {
-                    enabledTools.forEach { toolSpec ->
-                        add(buildJsonObject {
-                            put("type", "function")
-                            put("function", buildJsonObject {
-                                put("name", toolSpec.name)
-                                put("description", toolSpec.description)
-                                if (toolSpec.parameters != null) {
-                                    put("parameters", toolSpec.parameters)
-                                }
-                                else {
-                                    put("parameters", buildJsonObject {})
-                                }
-                            })
-                        })
-                    }
-                })
-            }
-        }
-        
-        // Send request
-        val writer = OutputStreamWriter(connection.outputStream)
-        writer.write(json.encodeToString(requestBody))
-        writer.flush()
-        writer.close()
-        
-        // Read response - Poe uses server-sent events format
-        val responseCode = connection.responseCode
-        val reader = if (responseCode >= 400) {
-            BufferedReader(InputStreamReader(connection.errorStream))
-        } else {
-            BufferedReader(InputStreamReader(connection.inputStream))
-        }
-        
-        if (responseCode >= 400) {
-            val errorResponse = reader.readText()
-            reader.close()
-            connection.disconnect()
-            return ApiResponse.Error("HTTP $responseCode: $errorResponse")
-        }
-        
-        // Parse server-sent events response similar to Python implementation
-        try {
-            val fullResponse = StringBuilder()
-            var line: String?
-            
-            while (reader.readLine().also { line = it } != null) {
-                val currentLine = line!!
-                
-                // Look for data lines in SSE format
-                if (currentLine.startsWith("data:")) {
-                    val dataContent = currentLine.substring(5).trim()
-                    
-                    // Skip empty data lines
-                    if (dataContent.isBlank() || dataContent == "{}") {
-                        continue
-                    }
-                    
-                    try {
-                        val eventJson = json.parseToJsonElement(dataContent).jsonObject
-                        
-                        // Check for text content
-                        val text = eventJson["text"]?.jsonPrimitive?.content
-                        if (text != null) {
-                            fullResponse.append(text)
-                            continue
-                        }
-                        
-                        // Check for event type
-                        val eventType = eventJson["event"]?.jsonPrimitive?.content
-                        when (eventType) {
-                            "text" -> {
-                                val eventData = eventJson["data"]?.jsonObject
-                                val eventText = eventData?.get("text")?.jsonPrimitive?.content
-                                if (eventText != null) {
-                                    fullResponse.append(eventText)
-                                }
-                            }
-                            "replace_response" -> {
-                                val eventData = eventJson["data"]?.jsonObject
-                                val replacementText = eventData?.get("text")?.jsonPrimitive?.content
-                                if (replacementText != null) {
-                                    fullResponse.clear()
-                                    fullResponse.append(replacementText)
-                                }
-                            }
-                            "json" -> {
-                                val eventData = eventJson["data"]?.jsonObject
-                                val choices = eventData?.get("choices")?.jsonArray
-                                
-                                choices?.firstOrNull()?.jsonObject?.let { choice ->
-                                    val delta = choice["delta"]?.jsonObject
-                                    val toolCalls = delta?.get("tool_calls")?.jsonArray
-                                    
-                                    toolCalls?.forEach { toolCallElement ->
-                                        val toolCallObj = toolCallElement.jsonObject
-                                        val index = toolCallObj["index"]?.jsonPrimitive?.int
-                                        val function = toolCallObj["function"]?.jsonObject
-                                        
-                                        if (function != null) {
-                                            val arguments = function["arguments"]?.jsonPrimitive?.content
-                                            if (arguments != null) {
-                                                // Create and execute tool call
-                                                val paramsJson = json.parseToJsonElement(arguments).jsonObject
-                                                val toolName = function["name"]?.jsonPrimitive?.content ?: "unknown_tool"
-                                                val toolCall = com.example.ApI.tools.ToolCall(
-                                                    id = index.toString(),
-                                                    toolId = toolName,
-                                                    parameters = paramsJson,
-                                                    provider = "poe"
-                                                )
-                                                val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
-                                                return ApiResponse.Success("") // Empty response since we're handling tool call
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Check finish reason
-                                    val finishReason = choice["finish_reason"]?.jsonPrimitive?.content
-                                    // Note: finish_reason handling removed to avoid inline lambda return issue
-                                }
-                            }
-                            "error" -> {
-                                val eventData = eventJson["data"]?.jsonObject
-                                val errorText = eventData?.get("text")?.jsonPrimitive?.content ?: "Unknown error"
-                                val errorType = eventData?.get("error_type")?.jsonPrimitive?.content
-                                reader.close()
-                                connection.disconnect()
-                                return ApiResponse.Error("Poe API error ($errorType): $errorText")
-                            }
-                            "done" -> {
-                                // End of stream
-                                break
-                            }
-                        }
-                    } catch (jsonException: Exception) {
-                        // If we can't parse as JSON, continue reading other lines
-                        continue
-                    }
-                }
-            }
-            
-            reader.close()
-            connection.disconnect()
-            
-            return ApiResponse.Success(fullResponse.toString())
-        } catch (e: Exception) {
-            reader.close()
-            connection.disconnect()
-            return ApiResponse.Error("Failed to parse Poe SSE response: ${e.message}")
-        }
-    }
-
-    private suspend fun sendPoeMessageStreaming(
         provider: Provider,
         modelName: String,
         messages: List<Message>,
@@ -966,223 +714,6 @@ class ApiService(private val context: Context) {
         systemPrompt: String,
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
-        enabledTools: List<ToolSpecification> = emptyList()
-    ): ApiResponse {
-        val apiKey = apiKeys["google"] ?: throw IllegalArgumentException("Google API key is required")
-        
-        // Build request URL - replace {model_name} placeholder and add API key
-        val baseUrl = provider.request.base_url.replace("{model_name}", modelName)
-        val url = URL("$baseUrl?key=$apiKey")
-        val connection = url.openConnection() as HttpURLConnection
-        
-        // Set headers
-        connection.requestMethod = provider.request.request_type
-        connection.setRequestProperty("Content-Type", "application/json")
-        connection.doOutput = true
-        
-        // Build conversation history for Google format
-        val conversationContents = mutableListOf<JsonObject>()
-        
-        // Add messages from conversation history (excluding system message for contents)
-        messages.forEach { message ->
-            when (message.role) {
-                "user" -> {
-                    val parts = mutableListOf<JsonElement>()
-                    
-                    // Only add text if not empty
-                    if (message.text.isNotBlank()) {
-                        parts.add(buildJsonObject {
-                            put("text", message.text)
-                        })
-                    }
-                    
-                    // Add file attachments
-                    message.attachments.forEach { attachment ->
-                        if (!attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}") {
-                            parts.add(buildJsonObject {
-                                put("file_data", buildJsonObject {
-                                    put("mime_type", attachment.mime_type)
-                                    put("file_uri", attachment.file_GOOGLE_uri)
-                                })
-                            })
-                        }
-                    }
-                    
-                    // Only add if there are parts
-                    if (parts.isNotEmpty()) {
-                        conversationContents.add(buildJsonObject {
-                            put("role", "user")
-                            put("parts", JsonArray(parts))
-                        })
-                    }
-                }
-                "assistant" -> {
-                    if (message.text.isNotBlank()) {
-                        conversationContents.add(buildJsonObject {
-                            put("role", "model")
-                            put("parts", buildJsonArray {
-                                add(buildJsonObject {
-                                    put("text", message.text)
-                                })
-                            })
-                        })
-                    }
-                }
-            }
-        }
-        
-        // Build request body according to providers.json format
-        val requestBodyBuilder = buildJsonObject {
-            // Add system instruction if provided
-            if (systemPrompt.isNotBlank()) {
-                put("systemInstruction", buildJsonObject {
-                    put("parts", buildJsonArray {
-                        add(buildJsonObject {
-                            put("text", systemPrompt)
-                        })
-                    })
-                })
-            }
-            
-            // Add tools section for web search and custom tools if enabled
-            val toolsArray = buildJsonArray {
-                // Add web search tool if enabled
-                if (webSearchEnabled) {
-                    add(buildJsonObject {
-                        put("google_search", buildJsonObject {})
-                    })
-                }
-                
-                // Add custom tools from enabledTools list
-                if (enabledTools.isNotEmpty()) {
-                    add(buildJsonObject {
-                        put("functionDeclarations", buildJsonArray {
-                            enabledTools.forEach { toolSpec ->
-                                add(buildJsonObject {
-                                    put("name", toolSpec.name)
-                                    put("description", toolSpec.description)
-                                    if (toolSpec.parameters != null) {
-                                        put("parameters", toolSpec.parameters)
-                                    }
-                                    else {
-                                        put("parameters", buildJsonObject {})
-                                    }
-                                })
-                            }
-                        })
-                    })
-                }
-            }
-            
-            if (toolsArray.isNotEmpty()) {
-                put("tools", toolsArray)
-            }
-            
-            put("contents", JsonArray(conversationContents))
-        }
-        
-        val requestBodyJson = json.encodeToString(requestBodyBuilder)
-        
-        // Send request
-        val writer = OutputStreamWriter(connection.outputStream)
-        writer.write(requestBodyJson)
-        writer.flush()
-        writer.close()
-        
-        // Read response
-        val responseCode = connection.responseCode
-        val reader = if (responseCode >= 400) {
-            BufferedReader(InputStreamReader(connection.errorStream))
-        } else {
-            BufferedReader(InputStreamReader(connection.inputStream))
-        }
-        
-        val response = reader.readText()
-        reader.close()
-        connection.disconnect()
-        
-        if (responseCode >= 400) {
-            return ApiResponse.Error("HTTP $responseCode: $response")
-        }
-        
-        // Parse response according to providers.json format
-        try {
-            val responseJson = json.parseToJsonElement(response).jsonObject
-            
-            // Check for error in response
-            val error = responseJson["error"]?.jsonObject
-            if (error != null) {
-                val errorMessage = error["message"]?.jsonPrimitive?.content ?: "Unknown Google API error"
-                val errorCode = error["code"]?.jsonPrimitive?.int
-                return ApiResponse.Error("Google API error ($errorCode): $errorMessage")
-            }
-            
-            val candidates = responseJson["candidates"]?.jsonArray
-            
-            // Check if candidates exist and are not empty
-            if (candidates.isNullOrEmpty()) {
-                return ApiResponse.Error("No candidates returned from Google API. Possible content filtering or safety block.")
-            }
-            
-            val firstCandidate = candidates[0].jsonObject
-            
-            // Check finish reason for safety blocks
-            val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.content
-            if (finishReason != null && finishReason != "STOP") {
-                return ApiResponse.Error("Google API blocked response due to: $finishReason")
-            }
-            
-            val content = firstCandidate["content"]?.jsonObject
-            if (content == null) {
-                return ApiResponse.Error("No content in Google API candidate")
-            }
-            
-            val parts = content["parts"]?.jsonArray
-            if (parts.isNullOrEmpty()) {
-                return ApiResponse.Error("No parts in Google API content")
-            }
-            
-            val firstPart = parts[0].jsonObject
-            
-            // Check for function call
-            val functionCall = firstPart["functionCall"]?.jsonObject
-            if (functionCall != null) {
-                val name = functionCall["name"]?.jsonPrimitive?.content
-                val args = functionCall["args"]?.jsonObject?.toString()
-                
-                if (name != null && args != null) {
-                    // Create and execute tool call
-                    val paramsJson = if (args != null) json.parseToJsonElement(args).jsonObject else buildJsonObject {}
-                    val toolCall = com.example.ApI.tools.ToolCall(
-                        id = "google_${System.currentTimeMillis()}", // Google doesn't provide call IDs
-                        toolId = name,
-                        parameters = paramsJson,
-                        provider = "google"
-                    )
-                    val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
-                    return ApiResponse.Success("") // Empty response since we're handling tool call
-                }
-            }
-            
-            // Check for text response
-            val responseText = firstPart["text"]?.jsonPrimitive?.content
-            if (responseText.isNullOrBlank()) {
-                return ApiResponse.Error("Empty text response from Google API")
-            }
-            
-            return ApiResponse.Success(responseText)
-        } catch (e: Exception) {
-            return ApiResponse.Error("Failed to parse Google response: ${e.message}. Raw response: $response")
-        }
-    }
-
-    private suspend fun sendGoogleMessageStreaming(
-        provider: Provider,
-        modelName: String,
-        messages: List<Message>,
-        systemPrompt: String,
-        apiKeys: Map<String, String>,
-        webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
         callback: StreamingCallback
     ) {
@@ -1319,25 +850,8 @@ class ApiService(private val context: Context) {
             val responseCode = connection.responseCode
             
             if (responseCode >= 400) {
-                if (responseCode == 400) {
-                    // Fallback for 400 Bad Request - try non-streaming version
-                    connection.disconnect()
-                    
-                    println("[DEBUG] Streaming failed with 400, trying fallback")
-                    val fallbackResponse = sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled)
-                    
-                    when (fallbackResponse) {
-                        is ApiResponse.Success -> {
-                            callback.onComplete(fallbackResponse.message)
-                        }
-                        is ApiResponse.Error -> {
-                            callback.onError("Streaming failed (400), fallback also failed: ${fallbackResponse.error}")
-                        }
-                    }
-                } else {
-                    val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
-                    callback.onError("HTTP $responseCode: $errorBody")
-                }
+                val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                callback.onError("HTTP $responseCode: $errorBody")
                 return
             }
             
@@ -1444,12 +958,6 @@ class ApiService(private val context: Context) {
     }
 }
 
-// Interface for streaming callbacks
-interface StreamingCallback {
-    fun onPartialResponse(text: String)
-    fun onComplete(fullText: String)
-    fun onError(error: String)
-}
 
 sealed class ApiResponse {
     data class Success(val message: String) : ApiResponse()

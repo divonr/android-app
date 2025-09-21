@@ -8,7 +8,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
-import com.example.ApI.data.network.StreamingCallback
+import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.ParentalControlManager
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
@@ -322,7 +322,7 @@ class ChatViewModel(
                     // Get project attachments if this chat belongs to a project
                     val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
 
-                    repository.sendMessageStreaming(
+                    repository.sendMessage(
                         provider = currentProvider,
                         modelName = currentModel,
                         messages = updatedChat!!.messages,
@@ -473,7 +473,7 @@ class ChatViewModel(
                     // Get project attachments if this chat belongs to a project
                     val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
 
-                    repository.sendMessageStreaming(
+                    repository.sendMessage(
                         provider = currentProvider,
                         modelName = currentModel,
                         messages = currentChat.messages,
@@ -1137,7 +1137,7 @@ class ChatViewModel(
                     // Get project attachments if this chat belongs to a project
                     val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
 
-                    repository.sendMessageStreaming(
+                    repository.sendMessage(
                         provider = currentProvider,
                         modelName = currentModel,
                         messages = resendUpdatedChat!!.messages,

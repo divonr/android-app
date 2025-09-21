@@ -3,6 +3,7 @@ package com.example.ApI.data.repository
 import android.content.Context
 import android.os.Environment
 import com.example.ApI.data.model.*
+import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.network.ApiService
 import com.example.ApI.data.network.ApiResponse
 import com.example.ApI.tools.ToolSpecification
@@ -603,50 +604,8 @@ class DataRepository(private val context: Context) {
         chatId: String? = null,
         projectAttachments: List<Attachment> = emptyList(),
         webSearchEnabled: Boolean = false,
-        enabledTools: List<ToolSpecification> = emptyList()
-    ): ApiResponse {
-        val apiKeys = loadApiKeys(username)
-            .filter { it.isActive }
-            .associate { it.provider to it.key }
-
-        // Check and re-upload files if needed when provider has changed
-        val (updatedMessages, hasUpdates) = ensureFilesUploadedForProvider(provider, messages, username)
-
-        // If files were re-uploaded, update the chat history
-        if (hasUpdates && chatId != null) {
-            updateChatWithNewAttachments(username, chatId, updatedMessages)
-        }
-
-        // Handle project files - upload them for current provider if needed
-        val updatedProjectAttachments = ensureProjectFilesUploadedForProvider(provider, projectAttachments, username)
-
-        // Create final messages list with project files attached to a user message if needed
-        val finalMessages = if (updatedProjectAttachments.isNotEmpty()) {
-            // Create a user message with project attachments at the beginning
-            val projectFilesMessage = Message(
-                role = "user",
-                text = "General files belonging to the project of which this conversation is a part are attached:",
-                attachments = updatedProjectAttachments
-            )
-            listOf(projectFilesMessage) + updatedMessages
-        } else {
-            updatedMessages
-        }
-
-        return apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
-    }
-
-    suspend fun sendMessageStreaming(
-        provider: Provider,
-        modelName: String,
-        messages: List<Message>,
-        systemPrompt: String,
-        username: String,
-        chatId: String? = null,
-        projectAttachments: List<Attachment> = emptyList(),
-        webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
-        callback: com.example.ApI.data.network.StreamingCallback
+        callback: StreamingCallback
     ) {
         val apiKeys = loadApiKeys(username)
             .filter { it.isActive }
@@ -676,7 +635,7 @@ class DataRepository(private val context: Context) {
             updatedMessages
         }
 
-        apiService.sendMessageStreaming(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+        apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
     }
 
     // Check and upload project files for current provider
@@ -1135,19 +1094,42 @@ class DataRepository(private val context: Context) {
                 )
             )
             
-            // Make API call
-            val response = apiService.sendMessage(
+            // Make API call with streaming callback that collects full response
+            var fullResponse = ""
+            var responseError: String? = null
+
+            val callback = object : StreamingCallback {
+                override fun onPartialResponse(text: String) {
+                    fullResponse += text
+                }
+
+                override fun onComplete(fullText: String) {
+                    fullResponse = fullText
+                }
+
+                override fun onError(error: String) {
+                    responseError = error
+                }
+            }
+
+            apiService.sendMessage(
                 provider = selectedProvider,
                 modelName = modelName,
                 messages = promptMessages,
                 systemPrompt = "",
                 apiKeys = apiKeys,
                 webSearchEnabled = false, // No web search for title generation
-                enabledTools = emptyList() // No tools for title generation
+                enabledTools = emptyList(), // No tools for title generation
+                callback = callback
             )
+
+            // Check if we got an error
+            if (responseError != null) {
+                return@withContext "שיחה חדשה"
+            }
             
-            // Extract title from response based on provider
-            val extractedTitle = extractTitleFromResponse(response, selectedProvider.provider)
+            // Extract title from the full response text
+            val extractedTitle = fullResponse.trim().takeIf { it.isNotBlank() }
             
             // Return extracted title or default
             return@withContext extractedTitle?.takeIf { it.isNotBlank() } ?: "שיחה חדשה"
