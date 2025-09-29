@@ -34,19 +34,24 @@ data class Chat(
 
 @Serializable
 data class Message(
-    val role: String, // "user", "assistant", "system", "tool_call"
+    val role: String, // "user", "assistant", "system", "tool_call", "tool_response"
     val text: String,
     val attachments: List<Attachment> = emptyList(),
     val model: String? = null, // Model name that generated this response (for assistant messages)
     val datetime: String? = null, // ISO 8601 format timestamp when message was sent/received
-        val toolCall: ToolCallInfo? = null, // Tool call information if this is a tool call message
-    val toolCallId: String? = null // For providers like OpenAI that require linking tool call results
+    val toolCall: ToolCallInfo? = null, // Tool call information if this is a tool call message
+    val toolCallId: String? = null, // For providers like OpenAI that require linking tool call results
+    val toolResponseCallId: String? = null, // For tool_response messages - links back to the tool_call
+    val toolResponseOutput: String? = null // For tool_response messages - the actual tool output
 ) {
     // Convenience property
     val content: String get() = text
     
     // Check if this is a tool call message
     val isToolCall: Boolean get() = role == "tool_call" || toolCall != null
+    
+    // Check if this is a tool response message
+    val isToolResponse: Boolean get() = role == "tool_response" || toolResponseCallId != null
 }
 
 @Serializable

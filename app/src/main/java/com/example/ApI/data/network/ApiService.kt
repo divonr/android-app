@@ -53,26 +53,196 @@ class ApiService(private val context: Context) {
         systemPrompt: String,
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
-        enabledTools: List<ToolSpecification> = emptyList()
-    ): ApiResponse {
-        val apiKey = apiKeys["openai"] ?: throw IllegalArgumentException("OpenAI API key is required")
+        enabledTools: List<ToolSpecification> = emptyList(),
+        callback: StreamingCallback
+    ) {
+        val apiKey = apiKeys["openai"] ?: run {
+            callback.onError("OpenAI API key is required")
+            return
+        }
         
-        // Build request URL
-        val url = URL(provider.request.base_url)
-        val connection = url.openConnection() as HttpURLConnection
-        
-        // Set headers
-        connection.requestMethod = provider.request.request_type
-        connection.setRequestProperty("Authorization", "Bearer $apiKey")
-        connection.setRequestProperty("Content-Type", "application/json")
-        connection.doOutput = true
-        
-        // Build conversation history for OpenAI format
-        val conversationMessages = mutableListOf<JsonObject>()
+        try {
+            // Build and send initial request
+            val initialResponse = makeOpenAIRequest(
+                provider, modelName, messages, systemPrompt, apiKey, 
+                webSearchEnabled, enabledTools
+            )
+            
+            when (initialResponse) {
+                is OpenAIResponse.TextResponse -> {
+                    // Normal text response - we're done
+                    callback.onComplete(initialResponse.text)
+                }
+                is OpenAIResponse.ToolCallResponse -> {
+                    // Model wants to call a tool
+                    Log.d("TOOL_CALL_DEBUG", "Non-streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
+                    
+                    // Execute the tool via callback
+                    val toolResult = callback.onToolCall(initialResponse.toolCall)
+                    Log.d("TOOL_CALL_DEBUG", "Non-streaming: Tool executed with result: $toolResult")
+                    
+                    // Build follow-up request with tool result
+                    val messagesWithToolResult = messages + listOf(
+                        // Add the function_call message
+                        Message(
+                            role = "tool_call",
+                            text = "Tool call: ${initialResponse.toolCall.toolId}",
+                            toolCallId = initialResponse.toolCall.id,
+                            toolCall = com.example.ApI.tools.ToolCallInfo(
+                                toolId = initialResponse.toolCall.toolId,
+                                toolName = initialResponse.toolCall.toolId,
+                                parameters = initialResponse.toolCall.parameters,
+                                result = toolResult,
+                                timestamp = java.time.Instant.now().toString()
+                            )
+                        ),
+                        // Add the function_call_output message
+                        Message(
+                            role = "tool_response",
+                            text = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            },
+                            toolResponseCallId = initialResponse.toolCall.id,
+                            toolResponseOutput = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            }
+                        )
+                    )
+                    
+                    Log.d("TOOL_CALL_DEBUG", "Non-streaming: Sending follow-up request with tool result")
+                    
+                    // Send follow-up request
+                    val followUpResponse = makeOpenAIRequest(
+                        provider, modelName, messagesWithToolResult, systemPrompt, apiKey,
+                        webSearchEnabled, enabledTools
+                    )
+                    
+                    when (followUpResponse) {
+                        is OpenAIResponse.TextResponse -> {
+                            Log.d("TOOL_CALL_DEBUG", "Non-streaming: Got final text response")
+                            callback.onComplete(followUpResponse.text)
+                        }
+                        is OpenAIResponse.ToolCallResponse -> {
+                            // Model wants to call another tool - for now, just return an error
+                            callback.onError("Multiple tool calls not yet supported")
+                        }
+                        is OpenAIResponse.ErrorResponse -> {
+                            callback.onError(followUpResponse.error)
+                        }
+                    }
+                }
+                is OpenAIResponse.ErrorResponse -> {
+                    callback.onError(initialResponse.error)
+                }
+            }
+        } catch (e: Exception) {
+            callback.onError("Failed to send OpenAI non-streaming message: ${e.message}")
+        }
+    }
+    
+    /**
+     * Makes a single OpenAI API request and returns the parsed response
+     */
+    private suspend fun makeOpenAIRequest(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>
+    ): OpenAIResponse = withContext(Dispatchers.IO) {
+        try {
+            // Build request URL
+            val url = URL(provider.request.base_url)
+            val connection = url.openConnection() as HttpURLConnection
+            
+            // Set headers
+            connection.requestMethod = provider.request.request_type
+            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.doOutput = true
+            
+            // Build conversation history for OpenAI format
+            val conversationInput = buildOpenAIInput(messages, systemPrompt)
+            
+            // Build request body according to providers.json format
+            val requestBody = buildJsonObject {
+                put("model", modelName)
+                put("input", JsonArray(conversationInput))
+                
+                // Add tools section
+                val toolsArray = buildJsonArray {
+                    if (webSearchEnabled) {
+                        add(buildJsonObject {
+                            put("type", "web_search_preview")
+                        })
+                    }
+                    enabledTools.forEach { toolSpec ->
+                        add(buildJsonObject {
+                            put("type", "function")
+                            put("name", toolSpec.name)
+                            put("description", toolSpec.description)
+                            if (toolSpec.parameters != null) {
+                                val newParametersObject = buildJsonObject {
+                                    toolSpec.parameters.forEach { (key, value) ->
+                                        put(key, value)
+                                    }
+                                    put("additionalProperties", false)
+                                }
+                                put("parameters", newParametersObject)
+                            } else {
+                                put("parameters", buildJsonObject {})
+                            }
+                            put("strict", true)
+                        })
+                    }
+                }
+                if (toolsArray.isNotEmpty()) {
+                    put("tools", toolsArray)
+                }
+            }
+            
+            // Send request
+            val writer = OutputStreamWriter(connection.outputStream)
+            writer.write(json.encodeToString(requestBody))
+            writer.flush()
+            writer.close()
+            
+            // Read response
+            val responseCode = connection.responseCode
+            val reader = if (responseCode >= 400) {
+                BufferedReader(InputStreamReader(connection.errorStream))
+            } else {
+                BufferedReader(InputStreamReader(connection.inputStream))
+            }
+            
+            val response = reader.readText()
+            reader.close()
+            connection.disconnect()
+            
+            if (responseCode >= 400) {
+                return@withContext OpenAIResponse.ErrorResponse("HTTP $responseCode: $response")
+            }
+            
+            // Parse response
+            parseOpenAIResponse(response)
+        } catch (e: Exception) {
+            OpenAIResponse.ErrorResponse("Failed to make OpenAI request: ${e.message}")
+        }
+    }
+    
+    /**
+     * Builds the input array for OpenAI API request
+     */
+    private fun buildOpenAIInput(messages: List<Message>, systemPrompt: String): List<JsonObject> {
+        val conversationInput = mutableListOf<JsonObject>()
         
         // Add system prompt
         if (systemPrompt.isNotBlank()) {
-            conversationMessages.add(buildJsonObject {
+            conversationInput.add(buildJsonObject {
                 put("role", "system")
                 put("content", systemPrompt)
             })
@@ -83,8 +253,7 @@ class ApiService(private val context: Context) {
             when (message.role) {
                 "user" -> {
                     if (message.attachments.isEmpty()) {
-                        // Text-only message
-                        conversationMessages.add(buildJsonObject {
+                        conversationInput.add(buildJsonObject {
                             put("role", "user")
                             put("content", buildJsonArray {
                                 add(buildJsonObject {
@@ -94,17 +263,14 @@ class ApiService(private val context: Context) {
                             })
                         })
                     } else {
-                        // Message with attachments
-                        conversationMessages.add(buildJsonObject {
+                        conversationInput.add(buildJsonObject {
                             put("role", "user")
                             put("content", buildJsonArray {
                                 add(buildJsonObject {
                                     put("type", "input_text")
                                     put("text", message.text)
                                 })
-                                // Add file attachments
                                 message.attachments.forEach { attachment ->
-                                    // This assumes files are already uploaded and we have file_id
                                     add(buildJsonObject {
                                         put("type", if (attachment.mime_type.startsWith("image/")) "input_image" else "input_file")
                                         put("file_id", attachment.file_OPENAI_id ?: "{file_ID}")
@@ -115,89 +281,46 @@ class ApiService(private val context: Context) {
                     }
                 }
                 "assistant" -> {
-                    conversationMessages.add(buildJsonObject {
+                    conversationInput.add(buildJsonObject {
                         put("role", "assistant")
                         put("content", message.text)
                     })
                 }
-            }
-        }
-        
-            // Build request body according to providers.json format
-        val requestBody = buildJsonObject {
-            put("model", modelName)
-
-            // Build input array with messages
-            put("input", JsonArray(conversationMessages))
-
-            // Add tools section for web search and custom tools if enabled
-            val toolsArray = buildJsonArray {
-                // Add web search tool if enabled
-                if (webSearchEnabled) {
-                    add(buildJsonObject {
-                        put("type", "web_search_preview")
+                "tool_call" -> {
+                    // Add function_call entry
+                    conversationInput.add(buildJsonObject {
+                        put("type", "function_call")
+                        put("name", message.toolCall?.toolId ?: "unknown")
+                        put("arguments", message.toolCall?.parameters?.toString() ?: "{}")
+                        put("call_id", message.toolCallId ?: "")
                     })
                 }
-                
-                // Add custom tools from enabledTools list
-                enabledTools.forEach { toolSpec ->
-                    add(buildJsonObject {
-                        put("type", "function")
-                        put("name", toolSpec.name)
-                        put("description", toolSpec.description)
-                        if (toolSpec.parameters != null) {
-                            val newParametersObject = buildJsonObject {
-                                toolSpec.parameters.forEach { (key, value) ->
-                                    put(key, value)
-                                }
-                                put("additionalProperties", false)
-                            }
-                            put("parameters", newParametersObject)
-                        }
-                        else {
-                            put("parameters", buildJsonObject {})
-                        }
-                        put("strict", true)
+                "tool_response" -> {
+                    // Add function_call_output entry
+                    conversationInput.add(buildJsonObject {
+                        put("type", "function_call_output")
+                        put("call_id", message.toolResponseCallId ?: "")
+                        put("output", message.toolResponseOutput ?: "")
                     })
                 }
             }
-
-            if (toolsArray.isNotEmpty()) {
-                put("tools", toolsArray)
-            }
         }
         
-        // Send request
-        val writer = OutputStreamWriter(connection.outputStream)
-        writer.write(json.encodeToString(requestBody))
-        writer.flush()
-        writer.close()
-        
-        // Read response
-        val responseCode = connection.responseCode
-        val reader = if (responseCode >= 400) {
-            BufferedReader(InputStreamReader(connection.errorStream))
-        } else {
-            BufferedReader(InputStreamReader(connection.inputStream))
-        }
-        
-        val response = reader.readText()
-        reader.close()
-        connection.disconnect()
-        
-        if (responseCode >= 400) {
-            return ApiResponse.Error("HTTP $responseCode: $response")
-        }
-        
-            // Parse response according to providers.json format
+        return conversationInput
+    }
+    
+    /**
+     * Parses OpenAI API response and returns structured response
+     */
+    private fun parseOpenAIResponse(response: String): OpenAIResponse {
         try {
             val responseJson = json.parseToJsonElement(response).jsonObject
-            val outputArray = responseJson["output"]?.jsonArray
+            val outputArray = responseJson["output"]?.jsonArray ?: return OpenAIResponse.ErrorResponse("No output in response")
             
             var responseText = ""
             var toolCall: com.example.ApI.tools.ToolCall? = null
             
-            outputArray?.forEach { outputElement ->
+            outputArray.forEach { outputElement ->
                 val outputObj = outputElement.jsonObject
                 when (outputObj["type"]?.jsonPrimitive?.content) {
                     "message" -> {
@@ -230,18 +353,23 @@ class ApiService(private val context: Context) {
                 }
             }
             
-            // If we found a tool call, handle it through the ToolRegistry
-            if (toolCall != null) {
-                val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
-                // Send follow-up request with tool result
-                // This should be handled by the ViewModel layer
-                return ApiResponse.Success("") // Empty response since we're handling tool call
+            return when {
+                toolCall != null -> OpenAIResponse.ToolCallResponse(toolCall!!)
+                responseText.isNotEmpty() -> OpenAIResponse.TextResponse(responseText)
+                else -> OpenAIResponse.ErrorResponse("Empty response from OpenAI")
             }
-            
-            return ApiResponse.Success(responseText)
         } catch (e: Exception) {
-            return ApiResponse.Error("Failed to parse response: ${e.message}")
+            return OpenAIResponse.ErrorResponse("Failed to parse response: ${e.message}")
         }
+    }
+    
+    /**
+     * Sealed class representing different types of OpenAI responses
+     */
+    private sealed class OpenAIResponse {
+        data class TextResponse(val text: String) : OpenAIResponse()
+        data class ToolCallResponse(val toolCall: com.example.ApI.tools.ToolCall) : OpenAIResponse()
+        data class ErrorResponse(val error: String) : OpenAIResponse()
     }
 
     private suspend fun sendOpenAIMessage(
@@ -260,6 +388,102 @@ class ApiService(private val context: Context) {
         }
         
         try {
+            // Make streaming request and parse response
+            val streamingResponse = makeOpenAIStreamingRequest(
+                provider, modelName, messages, systemPrompt, apiKey,
+                webSearchEnabled, enabledTools, callback
+            )
+            
+            when (streamingResponse) {
+                is OpenAIStreamingResult.TextComplete -> {
+                    // Normal text response - we're done
+                    Log.d("TOOL_CALL_DEBUG", "Streaming: Text response complete")
+                    callback.onComplete(streamingResponse.fullText)
+                }
+                is OpenAIStreamingResult.ToolCallDetected -> {
+                    // Model wants to call a tool
+                    Log.d("TOOL_CALL_DEBUG", "Streaming: Tool call detected - ${streamingResponse.toolCall.toolId}")
+                    
+                    // Execute the tool via callback
+                    val toolResult = callback.onToolCall(streamingResponse.toolCall)
+                    Log.d("TOOL_CALL_DEBUG", "Streaming: Tool executed with result: $toolResult")
+                    
+                    // Build follow-up request with tool result
+                    val messagesWithToolResult = messages + listOf(
+                        // Add the function_call message
+                        Message(
+                            role = "tool_call",
+                            text = "Tool call: ${streamingResponse.toolCall.toolId}",
+                            toolCallId = streamingResponse.toolCall.id,
+                            toolCall = com.example.ApI.tools.ToolCallInfo(
+                                toolId = streamingResponse.toolCall.toolId,
+                                toolName = streamingResponse.toolCall.toolId,
+                                parameters = streamingResponse.toolCall.parameters,
+                                result = toolResult,
+                                timestamp = java.time.Instant.now().toString()
+                            )
+                        ),
+                        // Add the function_call_output message
+                        Message(
+                            role = "tool_response",
+                            text = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            },
+                            toolResponseCallId = streamingResponse.toolCall.id,
+                            toolResponseOutput = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            }
+                        )
+                    )
+                    
+                    Log.d("TOOL_CALL_DEBUG", "Streaming: Sending follow-up request with tool result")
+                    
+                    // Send follow-up streaming request
+                    val followUpResponse = makeOpenAIStreamingRequest(
+                        provider, modelName, messagesWithToolResult, systemPrompt, apiKey,
+                        webSearchEnabled, enabledTools, callback
+                    )
+                    
+                    when (followUpResponse) {
+                        is OpenAIStreamingResult.TextComplete -> {
+                            Log.d("TOOL_CALL_DEBUG", "Streaming: Got final text response")
+                            callback.onComplete(followUpResponse.fullText)
+                        }
+                        is OpenAIStreamingResult.ToolCallDetected -> {
+                            // Model wants to call another tool - for now, just return an error
+                            callback.onError("Multiple tool calls not yet supported")
+                        }
+                        is OpenAIStreamingResult.Error -> {
+                            callback.onError(followUpResponse.error)
+                        }
+                    }
+                }
+                is OpenAIStreamingResult.Error -> {
+                    // Already called callback.onError in makeOpenAIStreamingRequest
+                    // No need to call it again
+                }
+            }
+        } catch (e: Exception) {
+            callback.onError("Failed to send OpenAI streaming message: ${e.message}")
+        }
+    }
+    
+    /**
+     * Makes a streaming OpenAI API request and returns the parsed result
+     */
+    private suspend fun makeOpenAIStreamingRequest(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        callback: StreamingCallback
+    ): OpenAIStreamingResult = withContext(Dispatchers.IO) {
+        try {
             // Build request URL
             val url = URL(provider.request.base_url)
             val connection = url.openConnection() as HttpURLConnection
@@ -270,77 +494,22 @@ class ApiService(private val context: Context) {
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
             
-            // Build conversation history for OpenAI format
-            val conversationMessages = mutableListOf<JsonObject>()
-            
-            // Add system prompt
-            if (systemPrompt.isNotBlank()) {
-                conversationMessages.add(buildJsonObject {
-                    put("role", "system")
-                    put("content", systemPrompt)
-                })
-            }
-            
-            // Add messages from conversation history
-            messages.forEach { message ->
-                when (message.role) {
-                    "user" -> {
-                        if (message.attachments.isEmpty()) {
-                            // Text-only message
-                            conversationMessages.add(buildJsonObject {
-                                put("role", "user")
-                                put("content", buildJsonArray {
-                                    add(buildJsonObject {
-                                        put("type", "input_text")
-                                        put("text", message.text)
-                                    })
-                                })
-                            })
-                        } else {
-                            // Message with attachments
-                            conversationMessages.add(buildJsonObject {
-                                put("role", "user")
-                                put("content", buildJsonArray {
-                                    add(buildJsonObject {
-                                        put("type", "input_text")
-                                        put("text", message.text)
-                                    })
-                                    // Add file attachments
-                                    message.attachments.forEach { attachment ->
-                                        add(buildJsonObject {
-                                            put("type", if (attachment.mime_type.startsWith("image/")) "input_image" else "input_file")
-                                            put("file_id", attachment.file_OPENAI_id ?: "{file_ID}")
-                                        })
-                                    }
-                                })
-                            })
-                        }
-                    }
-                    "assistant" -> {
-                        conversationMessages.add(buildJsonObject {
-                            put("role", "assistant")
-                            put("content", message.text)
-                        })
-                    }
-                }
-            }
+            // Build conversation input
+            val conversationInput = buildOpenAIInput(messages, systemPrompt)
             
             // Build request body with streaming enabled
             val requestBody = buildJsonObject {
                 put("model", modelName)
-                put("input", JsonArray(conversationMessages))
-                put("stream", true)  // Enable streaming
+                put("input", JsonArray(conversationInput))
+                put("stream", true)
                 
-                // Add tools section for web search and custom tools if enabled
+                // Add tools section
                 val toolsArray = buildJsonArray {
-                    // Add web search tool if enabled
                     if (webSearchEnabled) {
                         add(buildJsonObject {
                             put("type", "web_search_preview")
                         })
                     }
-                    
-                    // Add custom tools from enabledTools list
                     enabledTools.forEach { toolSpec ->
                         add(buildJsonObject {
                             put("type", "function")
@@ -354,15 +523,13 @@ class ApiService(private val context: Context) {
                                     put("additionalProperties", false)
                                 }
                                 put("parameters", newParametersObject)
-                            }
-                            else {
+                            } else {
                                 put("parameters", buildJsonObject {})
                             }
                             put("strict", true)
                         })
                     }
                 }
-                
                 if (toolsArray.isNotEmpty()) {
                     put("tools", toolsArray)
                 }
@@ -376,38 +543,25 @@ class ApiService(private val context: Context) {
             
             // Read streaming response
             val responseCode = connection.responseCode
-
+            
             if (responseCode >= 400) {
                 if (responseCode == 400) {
                     // Fallback for 400 Bad Request
-                    connection.disconnect() // Disconnect the failed stream connection
-
+                    connection.disconnect()
+                    
                     // Run the non-streaming version as a fallback
-                    val fallbackResponse = sendOpenAIMessageNonStreaming(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools)
-
-                    when (fallbackResponse) {
-                        is ApiResponse.Success -> {
-                            // We got a successful response from the fallback.
-                            // We can call onComplete directly.
-                            // The ViewModel will handle adding the message.
-                            callback.onComplete(fallbackResponse.message)
-                        }
-                        is ApiResponse.Error -> {
-                            // The fallback also failed.
-                            callback.onError("Streaming failed (400), fallback also failed: ${fallbackResponse.error}")
-                        }
-                    }
+                    sendOpenAIMessageNonStreaming(provider, modelName, messages, systemPrompt, mapOf("openai" to apiKey), webSearchEnabled, enabledTools, callback)
+                    return@withContext OpenAIStreamingResult.Error("Fallback to non-streaming handled")
                 } else {
-                    // For other errors (not 400), report them directly.
                     val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
                     callback.onError("HTTP $responseCode: $errorBody")
+                    return@withContext OpenAIStreamingResult.Error("HTTP $responseCode: $errorBody")
                 }
-                return // Exit function as we've handled the error/fallback
             }
-
-            val reader = BufferedReader(InputStreamReader(connection.inputStream))
             
+            val reader = BufferedReader(InputStreamReader(connection.inputStream))
             val fullResponse = StringBuilder()
+            var detectedToolCall: com.example.ApI.tools.ToolCall? = null
             var line: String?
             
             while (reader.readLine().also { line = it } != null) {
@@ -416,8 +570,6 @@ class ApiService(private val context: Context) {
                 // OpenAI SSE format: "data: {json}" for each chunk
                 if (currentLine.startsWith("data:")) {
                     val dataContent = currentLine.substring(5).trim()
-                    Log.d("TOOL_CALL_DEBUG", "RAW DATA CHUNK: $dataContent")
-                    Log.d("TOOL_CALL_DEBUG", "RAW DATA CHUNK: $dataContent")
                     
                     // Check for end of stream
                     if (dataContent == "[DONE]") {
@@ -431,7 +583,6 @@ class ApiService(private val context: Context) {
                     
                     try {
                         val chunkJson = json.parseToJsonElement(dataContent).jsonObject
-                        Log.d("TOOL_CALL_DEBUG", "Parsed JSON chunk successfully.")
                         val eventType = chunkJson["type"]?.jsonPrimitive?.content
                         
                         when (eventType) {
@@ -442,20 +593,71 @@ class ApiService(private val context: Context) {
                                     callback.onPartialResponse(deltaText)
                                 }
                             }
+                            "response.output_item.done" -> {
+                                // Check if this is a function call completion
+                                val item = chunkJson["item"]?.jsonObject
+                                if (item?.get("type")?.jsonPrimitive?.content == "function_call") {
+                                    val status = item["status"]?.jsonPrimitive?.content
+                                    if (status == "completed") {
+                                        val name = item["name"]?.jsonPrimitive?.content
+                                        val callId = item["call_id"]?.jsonPrimitive?.content
+                                        val arguments = item["arguments"]?.jsonPrimitive?.content
+                                        
+                                        if (name != null && callId != null && arguments != null) {
+                                            val paramsJson = json.parseToJsonElement(arguments).jsonObject
+                                            detectedToolCall = com.example.ApI.tools.ToolCall(
+                                                id = callId,
+                                                toolId = name,
+                                                parameters = paramsJson,
+                                                provider = "openai"
+                                            )
+                                            Log.d("TOOL_CALL_DEBUG", "Streaming: Detected tool call in output_item.done")
+                                        }
+                                    }
+                                }
+                            }
                             "response.completed" -> {
-                                // Can handle final usage stats here if needed
+                                // Response is complete - check for tool call in the full response
+                                if (detectedToolCall == null) {
+                                    val response = chunkJson["response"]?.jsonObject
+                                    val output = response?.get("output")?.jsonArray
+                                    
+                                    output?.forEach { outputItem ->
+                                        val outputObj = outputItem.jsonObject
+                                        if (outputObj["type"]?.jsonPrimitive?.content == "function_call") {
+                                            val status = outputObj["status"]?.jsonPrimitive?.content
+                                            if (status == "completed") {
+                                                val name = outputObj["name"]?.jsonPrimitive?.content
+                                                val callId = outputObj["call_id"]?.jsonPrimitive?.content
+                                                val arguments = outputObj["arguments"]?.jsonPrimitive?.content
+                                                
+                                                if (name != null && callId != null && arguments != null) {
+                                                    val paramsJson = json.parseToJsonElement(arguments).jsonObject
+                                                    detectedToolCall = com.example.ApI.tools.ToolCall(
+                                                        id = callId,
+                                                        toolId = name,
+                                                        parameters = paramsJson,
+                                                        provider = "openai"
+                                                    )
+                                                    Log.d("TOOL_CALL_DEBUG", "Streaming: Detected tool call in response.completed")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 break
                             }
                             "response.failed" -> {
                                 val error = chunkJson["response"]?.jsonObject?.get("error")?.jsonObject
                                 val errorMessage = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
                                 callback.onError("OpenAI API error: $errorMessage")
-                                return
+                                reader.close()
+                                connection.disconnect()
+                                return@withContext OpenAIStreamingResult.Error("OpenAI API error: $errorMessage")
                             }
                         }
                     } catch (jsonException: Exception) {
-                        Log.e("TOOL_CALL_DEBUG", "Error parsing chunk: ${jsonException.message}")
-                        // Continue reading other chunks on JSON parsing error
+                        Log.e("TOOL_CALL_DEBUG", "Error parsing streaming chunk: ${jsonException.message}")
                         continue
                     }
                 }
@@ -464,10 +666,25 @@ class ApiService(private val context: Context) {
             reader.close()
             connection.disconnect()
             
-            callback.onComplete(fullResponse.toString())
+            // Return result based on what we found
+            return@withContext when {
+                detectedToolCall != null -> OpenAIStreamingResult.ToolCallDetected(detectedToolCall!!)
+                fullResponse.isNotEmpty() -> OpenAIStreamingResult.TextComplete(fullResponse.toString())
+                else -> OpenAIStreamingResult.Error("Empty response from OpenAI")
+            }
         } catch (e: Exception) {
-            callback.onError("Failed to send OpenAI streaming message: ${e.message}")
+            callback.onError("Failed to make OpenAI streaming request: ${e.message}")
+            OpenAIStreamingResult.Error("Failed to make OpenAI streaming request: ${e.message}")
         }
+    }
+    
+    /**
+     * Sealed class representing different types of OpenAI streaming results
+     */
+    private sealed class OpenAIStreamingResult {
+        data class TextComplete(val fullText: String) : OpenAIStreamingResult()
+        data class ToolCallDetected(val toolCall: com.example.ApI.tools.ToolCall) : OpenAIStreamingResult()
+        data class Error(val error: String) : OpenAIStreamingResult()
     }
 
     private suspend fun sendPoeMessage(

@@ -333,6 +333,12 @@ class ChatViewModel(
                                 )
                             }
                         }
+                        
+                        override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+                            // Execute the tool through ToolRegistry
+                            val enabledToolIds = getEnabledToolSpecifications().map { it.name }
+                            return ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
+                        }
                     }
 
                     // Get project attachments if this chat belongs to a project
@@ -483,6 +489,11 @@ class ChatViewModel(
                                     chatHistory = finalChatHistory
                                 )
                             }
+                        }
+                        
+                        override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+                            val enabledToolIds = getEnabledToolSpecifications().map { it.name }
+                            return ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
                         }
                     }
 
@@ -1147,6 +1158,11 @@ class ChatViewModel(
                                     chatHistory = finalHistory
                                 )
                             }
+                        }
+                        
+                        override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+                            val enabledToolIds = getEnabledToolSpecifications().map { it.name }
+                            return ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
                         }
                     }
 
