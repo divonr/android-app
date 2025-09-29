@@ -377,6 +377,169 @@ class ApiService(private val context: Context) {
         data class ErrorResponse(val error: String) : OpenAIResponse()
     }
 
+    /**
+     * Sealed class representing different types of Google responses
+     */
+    private sealed class GoogleResponse {
+        data class TextResponse(val text: String) : GoogleResponse()
+        data class ToolCallResponse(val toolCall: com.example.ApI.tools.ToolCall) : GoogleResponse()
+        data class ErrorResponse(val error: String) : GoogleResponse()
+    }
+
+    /**
+     * Builds the contents array for Google API request
+     */
+    private fun buildGoogleContents(messages: List<Message>, systemPrompt: String): List<JsonObject> {
+        val contents = mutableListOf<JsonObject>()
+
+        // Add system instruction if provided
+        if (systemPrompt.isNotBlank()) {
+            contents.add(buildJsonObject {
+                put("role", "user")
+                put("parts", buildJsonArray {
+                    add(buildJsonObject {
+                        put("text", systemPrompt)
+                    })
+                })
+            })
+        }
+
+        // Add messages from conversation history
+        messages.forEach { message ->
+            when (message.role) {
+                "user" -> {
+                    val parts = mutableListOf<JsonElement>()
+
+                    // Add text if not empty
+                    if (message.text.isNotBlank()) {
+                        parts.add(buildJsonObject {
+                            put("text", message.text)
+                        })
+                    }
+
+                    // Add file attachments
+                    message.attachments.forEach { attachment ->
+                        if (!attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}") {
+                            parts.add(buildJsonObject {
+                                put("file_data", buildJsonObject {
+                                    put("mime_type", attachment.mime_type)
+                                    put("file_uri", attachment.file_GOOGLE_uri)
+                                })
+                            })
+                        }
+                    }
+
+                    // Only add if there are parts
+                    if (parts.isNotEmpty()) {
+                        contents.add(buildJsonObject {
+                            put("role", "user")
+                            put("parts", JsonArray(parts))
+                        })
+                    }
+                }
+                "assistant" -> {
+                    if (message.text.isNotBlank()) {
+                        contents.add(buildJsonObject {
+                            put("role", "model")
+                            put("parts", buildJsonArray {
+                                add(buildJsonObject {
+                                    put("text", message.text)
+                                })
+                            })
+                        })
+                    }
+                }
+                "tool_call" -> {
+                    // Add function call message
+                    contents.add(buildJsonObject {
+                        put("role", "model")
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject {
+                                put("functionCall", buildJsonObject {
+                                    put("name", message.toolCall?.toolId ?: "unknown")
+                                    put("args", message.toolCall?.parameters ?: buildJsonObject {})
+                                })
+                            })
+                        })
+                    })
+                }
+                "tool_response" -> {
+                    // Add function response message
+                    contents.add(buildJsonObject {
+                        put("role", "function")
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject {
+                                put("functionResponse", buildJsonObject {
+                                    put("name", message.toolResponseCallId?.let { findToolNameByCallId(messages, it) } ?: "unknown")
+                                    put("response", buildJsonObject {
+                                        put("result", message.toolResponseOutput ?: "")
+                                    })
+                                })
+                            })
+                        })
+                    })
+                }
+            }
+        }
+
+        return contents
+    }
+
+    /**
+     * Helper function to find tool name by call ID for Google format
+     */
+    private fun findToolNameByCallId(messages: List<Message>, callId: String): String? {
+        return messages.find { it.role == "tool_call" && it.toolCallId == callId }
+            ?.toolCall?.toolId
+    }
+
+    /**
+     * Parses Google API response and returns structured response
+     */
+    private fun parseGoogleResponse(response: String): GoogleResponse {
+        try {
+            val responseJson = json.parseToJsonElement(response).jsonObject
+            val candidates = responseJson["candidates"]?.jsonArray
+
+            if (candidates != null && candidates.isNotEmpty()) {
+                val firstCandidate = candidates[0].jsonObject
+                val content = firstCandidate["content"]?.jsonObject
+                val parts = content?.get("parts")?.jsonArray
+
+                if (parts != null && parts.isNotEmpty()) {
+                    val firstPart = parts[0].jsonObject
+
+                    // Check for function call
+                    val functionCall = firstPart["functionCall"]?.jsonObject
+                    if (functionCall != null) {
+                        val name = functionCall["name"]?.jsonPrimitive?.content
+                        val args = functionCall["args"]?.jsonObject
+
+                        if (name != null && args != null) {
+                            val toolCall = com.example.ApI.tools.ToolCall(
+                                id = "google_${System.currentTimeMillis()}", // Google doesn't provide call IDs
+                                toolId = name,
+                                parameters = args,
+                                provider = "google"
+                            )
+                            return GoogleResponse.ToolCallResponse(toolCall)
+                        }
+                    }
+
+                    // Check for text response
+                    val text = firstPart["text"]?.jsonPrimitive?.content
+                    if (text != null) {
+                        return GoogleResponse.TextResponse(text)
+                    }
+                }
+            }
+
+            return GoogleResponse.ErrorResponse("Empty response from Google")
+        } catch (e: Exception) {
+            return GoogleResponse.ErrorResponse("Failed to parse response: ${e.message}")
+        }
+    }
+
     private suspend fun sendOpenAIMessage(
         provider: Provider,
         modelName: String,
@@ -948,83 +1111,125 @@ class ApiService(private val context: Context) {
             callback.onError("Google API key is required")
             return
         }
-        
+
+        try {
+            // Make streaming request and parse response
+            val streamingResponse = makeGoogleStreamingRequest(
+                provider, modelName, messages, systemPrompt, apiKey,
+                webSearchEnabled, enabledTools, callback
+            )
+
+            when (streamingResponse) {
+                is GoogleStreamingResult.TextComplete -> {
+                    // Normal text response - we're done
+                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Text response complete")
+                    callback.onComplete(streamingResponse.fullText)
+                }
+                is GoogleStreamingResult.ToolCallDetected -> {
+                    // Model wants to call a tool
+                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Tool call detected - ${streamingResponse.toolCall.toolId}")
+
+                    // Execute the tool via callback
+                    val toolResult = callback.onToolCall(streamingResponse.toolCall)
+                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Tool executed with result: $toolResult")
+
+                    // Build tool messages
+                    val toolCallMessage = Message(
+                        role = "tool_call",
+                        text = "Tool call: ${streamingResponse.toolCall.toolId}",
+                        toolCallId = streamingResponse.toolCall.id,
+                        toolCall = com.example.ApI.tools.ToolCallInfo(
+                            toolId = streamingResponse.toolCall.toolId,
+                            toolName = streamingResponse.toolCall.toolId,
+                            parameters = streamingResponse.toolCall.parameters,
+                            result = toolResult,
+                            timestamp = java.time.Instant.now().toString()
+                        ),
+                        datetime = java.time.Instant.now().toString()
+                    )
+
+                    val toolResponseMessage = Message(
+                        role = "tool_response",
+                        text = when (toolResult) {
+                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                            is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                        },
+                        toolResponseCallId = streamingResponse.toolCall.id,
+                        toolResponseOutput = when (toolResult) {
+                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                            is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                        },
+                        datetime = java.time.Instant.now().toString()
+                    )
+
+                    // Save the tool messages to chat history
+                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+
+                    // Build follow-up request with tool result
+                    val messagesWithToolResult = messages + listOf(toolCallMessage, toolResponseMessage)
+
+                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Sending follow-up request with tool result")
+
+                    // Send follow-up streaming request
+                    val followUpResponse = makeGoogleStreamingRequest(
+                        provider, modelName, messagesWithToolResult, systemPrompt, apiKey,
+                        webSearchEnabled, enabledTools, callback
+                    )
+
+                    when (followUpResponse) {
+                        is GoogleStreamingResult.TextComplete -> {
+                            Log.d("TOOL_CALL_DEBUG", "Google Streaming: Got final text response")
+                            callback.onComplete(followUpResponse.fullText)
+                        }
+                        is GoogleStreamingResult.ToolCallDetected -> {
+                            // Model wants to call another tool - for now, just return an error
+                            callback.onError("Multiple tool calls not yet supported")
+                        }
+                        is GoogleStreamingResult.Error -> {
+                            callback.onError(followUpResponse.error)
+                        }
+                    }
+                }
+                is GoogleStreamingResult.Error -> {
+                    // Already called callback.onError in makeGoogleStreamingRequest
+                    // No need to call it again
+                }
+            }
+        } catch (e: Exception) {
+            callback.onError("Failed to send Google streaming message: ${e.message}")
+        }
+    }
+
+    /**
+     * Makes a streaming Google API request and returns the parsed result
+     */
+    private suspend fun makeGoogleStreamingRequest(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        callback: StreamingCallback
+    ): GoogleStreamingResult = withContext(Dispatchers.IO) {
         try {
             // Build request URL - replace {model_name} placeholder and change to streaming endpoint
             val baseUrl = provider.request.base_url.replace("{model_name}", modelName)
                 .replace(":generateContent", ":streamGenerateContent")
             val url = URL("$baseUrl?alt=sse&key=$apiKey")
             val connection = url.openConnection() as HttpURLConnection
-            
+
             // Set headers
             connection.requestMethod = provider.request.request_type
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
-            
-            // Build conversation history for Google format
-            val conversationContents = mutableListOf<JsonObject>()
-            
-            // Add messages from conversation history (excluding system message for contents)
-            messages.forEach { message ->
-                when (message.role) {
-                    "user" -> {
-                        val parts = mutableListOf<JsonElement>()
-                        
-                        // Only add text if not empty
-                        if (message.text.isNotBlank()) {
-                            parts.add(buildJsonObject {
-                                put("text", message.text)
-                            })
-                        }
-                        
-                        // Add file attachments
-                        message.attachments.forEach { attachment ->
-                            if (!attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}") {
-                                parts.add(buildJsonObject {
-                                    put("file_data", buildJsonObject {
-                                        put("mime_type", attachment.mime_type)
-                                        put("file_uri", attachment.file_GOOGLE_uri)
-                                    })
-                                })
-                            }
-                        }
-                        
-                        // Only add if there are parts
-                        if (parts.isNotEmpty()) {
-                            conversationContents.add(buildJsonObject {
-                                put("role", "user")
-                                put("parts", JsonArray(parts))
-                            })
-                        }
-                    }
-                    "assistant" -> {
-                        if (message.text.isNotBlank()) {
-                            conversationContents.add(buildJsonObject {
-                                put("role", "model")
-                                put("parts", buildJsonArray {
-                                    add(buildJsonObject {
-                                        put("text", message.text)
-                                    })
-                                })
-                            })
-                        }
-                    }
-                }
-            }
-            
+
+            // Build contents array
+            val contents = buildGoogleContents(messages, systemPrompt)
+
             // Build request body according to providers.json format
             val requestBodyBuilder = buildJsonObject {
-                // Add system instruction if provided
-                if (systemPrompt.isNotBlank()) {
-                    put("systemInstruction", buildJsonObject {
-                        put("parts", buildJsonArray {
-                            add(buildJsonObject {
-                                put("text", systemPrompt)
-                            })
-                        })
-                    })
-                }
-                
                 // Add tools section for web search and custom tools if enabled
                 val toolsArray = buildJsonArray {
                     // Add web search tool if enabled
@@ -1033,7 +1238,7 @@ class ApiService(private val context: Context) {
                             put("google_search", buildJsonObject {})
                         })
                     }
-                    
+
                     // Add custom tools from enabledTools list
                     if (enabledTools.isNotEmpty()) {
                         add(buildJsonObject {
@@ -1054,40 +1259,40 @@ class ApiService(private val context: Context) {
                         })
                     }
                 }
-                
+
                 if (toolsArray.isNotEmpty()) {
                     put("tools", toolsArray)
                 }
-                
-                put("contents", JsonArray(conversationContents))
+
+                put("contents", JsonArray(contents))
             }
-            
+
             val requestBodyJson = json.encodeToString(requestBodyBuilder)
-            
+
             // Log request for debugging (remove in production)
             println("[DEBUG] Google Streaming API Request: $requestBodyJson")
-            
+
             // Send request
             val writer = OutputStreamWriter(connection.outputStream)
             writer.write(requestBodyJson)
             writer.flush()
             writer.close()
-            
+
             // Read streaming response
             val responseCode = connection.responseCode
-            
+
             if (responseCode >= 400) {
                 val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
                 callback.onError("HTTP $responseCode: $errorBody")
-                return
+                return@withContext GoogleStreamingResult.Error("HTTP $responseCode: $errorBody")
             }
-            
+
             Log.d("TOOL_CALL_DEBUG", "Starting to read Google stream...")
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             val fullResponse = StringBuilder()
-            val toolCalls = mutableListOf<com.example.ApI.tools.ToolCall>()
+            var detectedToolCall: com.example.ApI.tools.ToolCall? = null
             var line: String?
-            
+
             // Google Gemini streams SSE JSON objects
             while (reader.readLine().also { line = it } != null) {
                 val currentLine = line!!
@@ -1099,62 +1304,60 @@ class ApiService(private val context: Context) {
                     if (dataContent.isBlank()) {
                         continue
                     }
-                    
+
                     try {
                         val chunkJson = json.parseToJsonElement(dataContent).jsonObject
-                        
+
                         // Check for error in streaming response
                         val error = chunkJson["error"]?.jsonObject
                         if (error != null) {
                             val errorMessage = error["message"]?.jsonPrimitive?.content ?: "Unknown Google API streaming error"
                             callback.onError("Google API streaming error: $errorMessage")
-                            return
+                            reader.close()
+                            connection.disconnect()
+                            return@withContext GoogleStreamingResult.Error("Google API streaming error: $errorMessage")
                         }
-                        
+
                         val candidates = chunkJson["candidates"]?.jsonArray
-                        
+
                         if (candidates != null && candidates.isNotEmpty()) {
                             val firstCandidate = candidates[0].jsonObject
-                            
+
                             // Check for safety blocks in streaming
                             val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.content
                             if (finishReason != null && finishReason != "STOP") {
                                 callback.onError("Google API streaming blocked due to: $finishReason")
-                                return
+                                return@withContext GoogleStreamingResult.Error("Google API streaming blocked due to: $finishReason")
                             }
-                            
+
                             val content = firstCandidate["content"]?.jsonObject
                             val parts = content?.get("parts")?.jsonArray
-                            
+
                             if (parts != null && parts.isNotEmpty()) {
                                 val firstPart = parts[0].jsonObject
-                                
+
                                 // Check for function call
                                 val functionCall = firstPart["functionCall"]?.jsonObject
                                 if (functionCall != null) {
-                                    Log.d("TOOL_CALL_DEBUG", "Found functionCall part: $functionCall")
+                                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found functionCall part: $functionCall")
                                     val name = functionCall["name"]?.jsonPrimitive?.content
-                                    val args = functionCall["args"]?.jsonObject?.toString()
-                                    
+                                    val args = functionCall["args"]?.jsonObject
+
                                     if (name != null && args != null) {
-                                        // Create and execute tool call
-                                        val paramsJson = if (args != null) json.parseToJsonElement(args).jsonObject else buildJsonObject {}
-                                        val toolCall = com.example.ApI.tools.ToolCall(
+                                        detectedToolCall = com.example.ApI.tools.ToolCall(
                                             id = "google_${System.currentTimeMillis()}", // Google doesn't provide call IDs
                                             toolId = name,
-                                            parameters = paramsJson,
+                                            parameters = args,
                                             provider = "google"
                                         )
-                                        val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
-                                        callback.onComplete("") // Empty response since we're handling tool call
-                                        return
+                                        Log.d("TOOL_CALL_DEBUG", "Google Streaming: Detected tool call in chunk")
                                     }
                                 }
-                                
+
                                 // Check for text response
                                 val chunkText = firstPart["text"]?.jsonPrimitive?.content
                                 if (chunkText != null) {
-                                    Log.d("TOOL_CALL_DEBUG", "Found text part: '$chunkText'")
+                                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found text part: '$chunkText'")
                                     fullResponse.append(chunkText)
                                     callback.onPartialResponse(chunkText)
                                 }
@@ -1162,26 +1365,36 @@ class ApiService(private val context: Context) {
                         }
                     } catch (jsonException: Exception) {
                         // Log parsing errors for debugging
-                        println("[DEBUG] Error parsing streaming chunk: ${jsonException.message}")
+                        println("[DEBUG] Error parsing Google streaming chunk: ${jsonException.message}")
                         println("[DEBUG] Problematic chunk: $dataContent")
                         // Continue reading other chunks on JSON parsing error
                         continue
                     }
                 }
             }
-            
+
             reader.close()
             connection.disconnect()
-            
-            // Check if we got any response
-            if (fullResponse.isEmpty()) {
-                callback.onError("Google API streaming returned empty response")
-            } else {
-                callback.onComplete(fullResponse.toString())
+
+            // Return result based on what we found
+            return@withContext when {
+                detectedToolCall != null -> GoogleStreamingResult.ToolCallDetected(detectedToolCall!!)
+                fullResponse.isNotEmpty() -> GoogleStreamingResult.TextComplete(fullResponse.toString())
+                else -> GoogleStreamingResult.Error("Empty response from Google")
             }
         } catch (e: Exception) {
-            callback.onError("Failed to send Google streaming message: ${e.message}")
+            callback.onError("Failed to make Google streaming request: ${e.message}")
+            GoogleStreamingResult.Error("Failed to make Google streaming request: ${e.message}")
         }
+    }
+
+    /**
+     * Sealed class representing different types of Google streaming results
+     */
+    private sealed class GoogleStreamingResult {
+        data class TextComplete(val fullText: String) : GoogleStreamingResult()
+        data class ToolCallDetected(val toolCall: com.example.ApI.tools.ToolCall) : GoogleStreamingResult()
+        data class Error(val error: String) : GoogleStreamingResult()
     }
 }
 
