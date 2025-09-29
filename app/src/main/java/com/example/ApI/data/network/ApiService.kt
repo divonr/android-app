@@ -81,35 +81,40 @@ class ApiService(private val context: Context) {
                     val toolResult = callback.onToolCall(initialResponse.toolCall)
                     Log.d("TOOL_CALL_DEBUG", "Non-streaming: Tool executed with result: $toolResult")
                     
-                    // Build follow-up request with tool result
-                    val messagesWithToolResult = messages + listOf(
-                        // Add the function_call message
-                        Message(
-                            role = "tool_call",
-                            text = "Tool call: ${initialResponse.toolCall.toolId}",
-                            toolCallId = initialResponse.toolCall.id,
-                            toolCall = com.example.ApI.tools.ToolCallInfo(
-                                toolId = initialResponse.toolCall.toolId,
-                                toolName = initialResponse.toolCall.toolId,
-                                parameters = initialResponse.toolCall.parameters,
-                                result = toolResult,
-                                timestamp = java.time.Instant.now().toString()
-                            )
+                    // Create the tool messages
+                    val toolCallMessage = Message(
+                        role = "tool_call",
+                        text = "Tool call: ${initialResponse.toolCall.toolId}",
+                        toolCallId = initialResponse.toolCall.id,
+                        toolCall = com.example.ApI.tools.ToolCallInfo(
+                            toolId = initialResponse.toolCall.toolId,
+                            toolName = initialResponse.toolCall.toolId,
+                            parameters = initialResponse.toolCall.parameters,
+                            result = toolResult,
+                            timestamp = java.time.Instant.now().toString()
                         ),
-                        // Add the function_call_output message
-                        Message(
-                            role = "tool_response",
-                            text = when (toolResult) {
-                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
-                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
-                            },
-                            toolResponseCallId = initialResponse.toolCall.id,
-                            toolResponseOutput = when (toolResult) {
-                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
-                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
-                            }
-                        )
+                        datetime = java.time.Instant.now().toString()
                     )
+                    
+                    val toolResponseMessage = Message(
+                        role = "tool_response",
+                        text = when (toolResult) {
+                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                            is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                        },
+                        toolResponseCallId = initialResponse.toolCall.id,
+                        toolResponseOutput = when (toolResult) {
+                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                            is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                        },
+                        datetime = java.time.Instant.now().toString()
+                    )
+                    
+                    // Save the tool messages to chat history
+                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+                    
+                    // Build follow-up request with tool result
+                    val messagesWithToolResult = messages + listOf(toolCallMessage, toolResponseMessage)
                     
                     Log.d("TOOL_CALL_DEBUG", "Non-streaming: Sending follow-up request with tool result")
                     
@@ -155,75 +160,75 @@ class ApiService(private val context: Context) {
         enabledTools: List<ToolSpecification>
     ): OpenAIResponse = withContext(Dispatchers.IO) {
         try {
-            // Build request URL
-            val url = URL(provider.request.base_url)
-            val connection = url.openConnection() as HttpURLConnection
-            
-            // Set headers
-            connection.requestMethod = provider.request.request_type
-            connection.setRequestProperty("Authorization", "Bearer $apiKey")
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.doOutput = true
-            
-            // Build conversation history for OpenAI format
+        // Build request URL
+        val url = URL(provider.request.base_url)
+        val connection = url.openConnection() as HttpURLConnection
+        
+        // Set headers
+        connection.requestMethod = provider.request.request_type
+        connection.setRequestProperty("Authorization", "Bearer $apiKey")
+        connection.setRequestProperty("Content-Type", "application/json")
+        connection.doOutput = true
+        
+        // Build conversation history for OpenAI format
             val conversationInput = buildOpenAIInput(messages, systemPrompt)
-            
+        
             // Build request body according to providers.json format
-            val requestBody = buildJsonObject {
-                put("model", modelName)
+        val requestBody = buildJsonObject {
+            put("model", modelName)
                 put("input", JsonArray(conversationInput))
-                
+
                 // Add tools section
-                val toolsArray = buildJsonArray {
-                    if (webSearchEnabled) {
-                        add(buildJsonObject {
-                            put("type", "web_search_preview")
-                        })
-                    }
-                    enabledTools.forEach { toolSpec ->
-                        add(buildJsonObject {
-                            put("type", "function")
-                            put("name", toolSpec.name)
-                            put("description", toolSpec.description)
-                            if (toolSpec.parameters != null) {
-                                val newParametersObject = buildJsonObject {
-                                    toolSpec.parameters.forEach { (key, value) ->
-                                        put(key, value)
-                                    }
-                                    put("additionalProperties", false)
+            val toolsArray = buildJsonArray {
+                if (webSearchEnabled) {
+                    add(buildJsonObject {
+                        put("type", "web_search_preview")
+                    })
+                }
+                enabledTools.forEach { toolSpec ->
+                    add(buildJsonObject {
+                        put("type", "function")
+                        put("name", toolSpec.name)
+                        put("description", toolSpec.description)
+                        if (toolSpec.parameters != null) {
+                            val newParametersObject = buildJsonObject {
+                                toolSpec.parameters.forEach { (key, value) ->
+                                    put(key, value)
                                 }
-                                put("parameters", newParametersObject)
-                            } else {
-                                put("parameters", buildJsonObject {})
+                                put("additionalProperties", false)
                             }
-                            put("strict", true)
-                        })
-                    }
-                }
-                if (toolsArray.isNotEmpty()) {
-                    put("tools", toolsArray)
+                            put("parameters", newParametersObject)
+                            } else {
+                            put("parameters", buildJsonObject {})
+                        }
+                        put("strict", true)
+                    })
                 }
             }
-            
-            // Send request
-            val writer = OutputStreamWriter(connection.outputStream)
-            writer.write(json.encodeToString(requestBody))
-            writer.flush()
-            writer.close()
-            
-            // Read response
-            val responseCode = connection.responseCode
-            val reader = if (responseCode >= 400) {
-                BufferedReader(InputStreamReader(connection.errorStream))
-            } else {
-                BufferedReader(InputStreamReader(connection.inputStream))
+            if (toolsArray.isNotEmpty()) {
+                put("tools", toolsArray)
             }
-            
-            val response = reader.readText()
-            reader.close()
-            connection.disconnect()
-            
-            if (responseCode >= 400) {
+        }
+        
+        // Send request
+        val writer = OutputStreamWriter(connection.outputStream)
+        writer.write(json.encodeToString(requestBody))
+        writer.flush()
+        writer.close()
+        
+        // Read response
+        val responseCode = connection.responseCode
+        val reader = if (responseCode >= 400) {
+            BufferedReader(InputStreamReader(connection.errorStream))
+        } else {
+            BufferedReader(InputStreamReader(connection.inputStream))
+        }
+        
+        val response = reader.readText()
+        reader.close()
+        connection.disconnect()
+        
+        if (responseCode >= 400) {
                 return@withContext OpenAIResponse.ErrorResponse("HTTP $responseCode: $response")
             }
             
@@ -408,35 +413,40 @@ class ApiService(private val context: Context) {
                     val toolResult = callback.onToolCall(streamingResponse.toolCall)
                     Log.d("TOOL_CALL_DEBUG", "Streaming: Tool executed with result: $toolResult")
                     
-                    // Build follow-up request with tool result
-                    val messagesWithToolResult = messages + listOf(
-                        // Add the function_call message
-                        Message(
-                            role = "tool_call",
-                            text = "Tool call: ${streamingResponse.toolCall.toolId}",
-                            toolCallId = streamingResponse.toolCall.id,
-                            toolCall = com.example.ApI.tools.ToolCallInfo(
-                                toolId = streamingResponse.toolCall.toolId,
-                                toolName = streamingResponse.toolCall.toolId,
-                                parameters = streamingResponse.toolCall.parameters,
-                                result = toolResult,
-                                timestamp = java.time.Instant.now().toString()
-                            )
+                    // Create the tool messages
+                    val toolCallMessage = Message(
+                        role = "tool_call",
+                        text = "Tool call: ${streamingResponse.toolCall.toolId}",
+                        toolCallId = streamingResponse.toolCall.id,
+                        toolCall = com.example.ApI.tools.ToolCallInfo(
+                            toolId = streamingResponse.toolCall.toolId,
+                            toolName = streamingResponse.toolCall.toolId,
+                            parameters = streamingResponse.toolCall.parameters,
+                            result = toolResult,
+                            timestamp = java.time.Instant.now().toString()
                         ),
-                        // Add the function_call_output message
-                        Message(
-                            role = "tool_response",
-                            text = when (toolResult) {
-                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
-                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
-                            },
-                            toolResponseCallId = streamingResponse.toolCall.id,
-                            toolResponseOutput = when (toolResult) {
-                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
-                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
-                            }
-                        )
+                        datetime = java.time.Instant.now().toString()
                     )
+                    
+                    val toolResponseMessage = Message(
+                        role = "tool_response",
+                        text = when (toolResult) {
+                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                            is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                        },
+                        toolResponseCallId = streamingResponse.toolCall.id,
+                        toolResponseOutput = when (toolResult) {
+                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                            is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                        },
+                        datetime = java.time.Instant.now().toString()
+                    )
+                    
+                    // Save the tool messages to chat history
+                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+                    
+                    // Build follow-up request with tool result
+                    val messagesWithToolResult = messages + listOf(toolCallMessage, toolResponseMessage)
                     
                     Log.d("TOOL_CALL_DEBUG", "Streaming: Sending follow-up request with tool result")
                     
@@ -543,12 +553,12 @@ class ApiService(private val context: Context) {
             
             // Read streaming response
             val responseCode = connection.responseCode
-            
+
             if (responseCode >= 400) {
                 if (responseCode == 400) {
                     // Fallback for 400 Bad Request
                     connection.disconnect()
-                    
+
                     // Run the non-streaming version as a fallback
                     sendOpenAIMessageNonStreaming(provider, modelName, messages, systemPrompt, mapOf("openai" to apiKey), webSearchEnabled, enabledTools, callback)
                     return@withContext OpenAIStreamingResult.Error("Fallback to non-streaming handled")
@@ -558,7 +568,7 @@ class ApiService(private val context: Context) {
                     return@withContext OpenAIStreamingResult.Error("HTTP $responseCode: $errorBody")
                 }
             }
-            
+
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             val fullResponse = StringBuilder()
             var detectedToolCall: com.example.ApI.tools.ToolCall? = null

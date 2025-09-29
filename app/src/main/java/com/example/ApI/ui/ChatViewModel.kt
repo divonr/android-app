@@ -335,22 +335,69 @@ class ChatViewModel(
                         }
                         
                         override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+                            // Show tool execution indicator
+                            _uiState.value = _uiState.value.copy(
+                                executingToolCall = ExecutingToolInfo(
+                                    toolId = toolCall.toolId,
+                                    toolName = toolCall.toolId,
+                                    startTime = getCurrentDateTimeISO()
+                                )
+                            )
+                            
                             // Execute the tool through ToolRegistry
                             val enabledToolIds = getEnabledToolSpecifications().map { it.name }
-                            return ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
+                            val result = ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
+                            
+                            // Clear tool execution indicator
+                            _uiState.value = _uiState.value.copy(executingToolCall = null)
+                            
+                            return result
+                        }
+                        
+                        override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message) {
+                            // Save tool messages to chat history
+                            val currentChat = updatedChat ?: return
+                            
+                            // Add tool_call message
+                            var tempChat = repository.addMessageToChat(
+                                currentUser,
+                                currentChat.chat_id,
+                                toolCallMessage
+                            )
+                            
+                            // Add tool_response message
+                            tempChat = repository.addMessageToChat(
+                                currentUser,
+                                currentChat.chat_id,
+                                toolResponseMessage
+                            )
+                            
+                            // Update the updatedChat reference for next messages
+                            updatedChat = tempChat
+                            
+                            // Reload chat history
+                            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+                            
+                            // Update UI
+                            _uiState.value = _uiState.value.copy(
+                                currentChat = tempChat,
+                                chatHistory = finalChatHistory
+                            )
                         }
                     }
 
                     // Get project attachments if this chat belongs to a project
                     val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
 
+                    // Capture chat reference before callback to avoid smart cast issues
+                    val chatForRequest = updatedChat!!
                     repository.sendMessage(
                         provider = currentProvider,
                         modelName = currentModel,
-                        messages = updatedChat!!.messages,
+                        messages = chatForRequest.messages,
                         systemPrompt = systemPrompt,
                         username = currentUser,
-                        chatId = updatedChat.chat_id,
+                        chatId = chatForRequest.chat_id,
                         projectAttachments = projectAttachments,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
                         enabledTools = getEnabledToolSpecifications(),
@@ -360,8 +407,8 @@ class ChatViewModel(
                     // Reload chat to get any updated file IDs from re-uploads
                     val refreshedChatHistory = repository.loadChatHistory(currentUser)
                     val refreshedCurrentChat = refreshedChatHistory.chat_history.find { 
-                        it.chat_id == updatedChat.chat_id 
-                    } ?: updatedChat
+                        it.chat_id == chatForRequest.chat_id 
+                    } ?: chatForRequest
                     
                     _uiState.value = _uiState.value.copy(
                         currentChat = refreshedCurrentChat,
@@ -492,8 +539,43 @@ class ChatViewModel(
                         }
                         
                         override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+                            _uiState.value = _uiState.value.copy(
+                                executingToolCall = ExecutingToolInfo(
+                                    toolId = toolCall.toolId,
+                                    toolName = toolCall.toolId,
+                                    startTime = getCurrentDateTimeISO()
+                                )
+                            )
                             val enabledToolIds = getEnabledToolSpecifications().map { it.name }
-                            return ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
+                            val result = ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
+                            _uiState.value = _uiState.value.copy(executingToolCall = null)
+                            return result
+                        }
+                        
+                        override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message) {
+                            // Save tool messages to chat history
+                            // Add tool_call message
+                            var tempChat = repository.addMessageToChat(
+                                currentUser,
+                                currentChat.chat_id,
+                                toolCallMessage
+                            )
+                            
+                            // Add tool_response message
+                            tempChat = repository.addMessageToChat(
+                                currentUser,
+                                currentChat.chat_id,
+                                toolResponseMessage
+                            )
+                            
+                            // Reload chat history
+                            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+                            
+                            // Update UI
+                            _uiState.value = _uiState.value.copy(
+                                currentChat = tempChat,
+                                chatHistory = finalChatHistory
+                            )
                         }
                     }
 
@@ -1161,8 +1243,43 @@ class ChatViewModel(
                         }
                         
                         override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+                            _uiState.value = _uiState.value.copy(
+                                executingToolCall = ExecutingToolInfo(
+                                    toolId = toolCall.toolId,
+                                    toolName = toolCall.toolId,
+                                    startTime = getCurrentDateTimeISO()
+                                )
+                            )
                             val enabledToolIds = getEnabledToolSpecifications().map { it.name }
-                            return ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
+                            val result = ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
+                            _uiState.value = _uiState.value.copy(executingToolCall = null)
+                            return result
+                        }
+                        
+                        override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message) {
+                            // Save tool messages to chat history
+                            // Add tool_call message
+                            var tempChat = repository.addMessageToChat(
+                                currentUser,
+                                resendUpdatedChat!!.chat_id,
+                                toolCallMessage
+                            )
+                            
+                            // Add tool_response message
+                            tempChat = repository.addMessageToChat(
+                                currentUser,
+                                resendUpdatedChat.chat_id,
+                                toolResponseMessage
+                            )
+                            
+                            // Reload chat history
+                            val finalHistory = repository.loadChatHistory(currentUser).chat_history
+                            
+                            // Update UI
+                            _uiState.value = _uiState.value.copy(
+                                currentChat = tempChat,
+                                chatHistory = finalHistory
+                            )
                         }
                     }
 

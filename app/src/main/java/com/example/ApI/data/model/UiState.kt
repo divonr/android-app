@@ -51,7 +51,8 @@ data class ChatUiState(
     val searchMode: Boolean = false,
     val searchQuery: String = "",
     val searchResults: List<SearchResult> = emptyList(),
-    val searchContext: SearchResult? = null // Context for jumping to search results
+    val searchContext: SearchResult? = null, // Context for jumping to search results
+    val executingToolCall: ExecutingToolInfo? = null // Track currently executing tool
 )
 
 data class ChatContextMenuState(
@@ -84,6 +85,12 @@ enum class SearchMatchType {
     CONTENT,        // Match found in message content
     FILE_NAME       // Match found in attachment file name
 }
+
+data class ExecutingToolInfo(
+    val toolId: String,
+    val toolName: String,
+    val startTime: String // ISO 8601 format
+)
 
 data class ApiKeysUiState(
     val apiKeys: List<ApiKey> = emptyList(),

@@ -48,12 +48,12 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -542,11 +542,33 @@ fun ChatScreen(
                             }
                         }
                         
+                        // Show tool execution loading indicator if a tool is executing
+                        uiState.executingToolCall?.let { toolInfo ->
+                            item {
+                                ToolExecutionLoadingBubble(
+                                    toolInfo = toolInfo,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                                )
+                            }
+                        }
+                        
                         uiState.currentChat?.messages?.let { messages ->
                             val reversedMessages = messages.reversed()
                             itemsIndexed(reversedMessages) { index, message ->
+                                // Skip tool_call messages - they should not be displayed
+                                if (message.role == "tool_call") {
+                                    return@itemsIndexed
+                                }
+                                
                                 val isFirstMessage = index == 0
-                                val previousMessage = if (index > 0) reversedMessages[index - 1] else null
+                                val previousMessage = if (index > 0) {
+                                    // Find the previous visible message (skip tool_call messages)
+                                    var prevIndex = index - 1
+                                    while (prevIndex >= 0 && reversedMessages[prevIndex].role == "tool_call") {
+                                        prevIndex--
+                                    }
+                                    if (prevIndex >= 0) reversedMessages[prevIndex] else null
+                                } else null
                                 val isSameSpeaker = previousMessage?.role == message.role
 
                                 val topPadding = if (isFirstMessage || !isSameSpeaker) 4.dp else 0.dp
@@ -1063,10 +1085,11 @@ fun MessageBubble(
     isBeingEdited: Boolean = false,
     searchHighlight: SearchResult? = null
 ) {
-    // Handle tool call messages specially
-    if (message.isToolCall || message.toolCall != null) {
+    // Handle tool call and tool response messages specially
+    if (message.isToolCall || message.toolCall != null || message.isToolResponse) {
         ToolCallBubble(
             message = message,
+            viewModel = viewModel,
             modifier = modifier,
             isEditMode = isEditMode
         )
@@ -1637,12 +1660,301 @@ fun ReplyPromptBubble(
 }
 
 @Composable
+fun ToolExecutionLoadingBubble(
+    toolInfo: ExecutingToolInfo,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.Start
+    ) {
+        Surface(
+            shape = RoundedCornerShape(
+                topStart = 6.dp,
+                topEnd = 20.dp,
+                bottomStart = 20.dp,
+                bottomEnd = 20.dp
+            ),
+            color = Primary.copy(alpha = 0.08f),
+            border = BorderStroke(1.dp, Primary.copy(alpha = 0.3f)),
+            modifier = Modifier.widthIn(max = 320.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Tool icon with pulsing animation
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Primary.copy(alpha = 0.15f),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Router,
+                                contentDescription = "MCP Tool",
+                                tint = Primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    
+                    // Tool name and loading status
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "${toolInfo.toolName}",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = Primary
+                            )
+                            Text(
+                                text = "Executing...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceVariant,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+                
+                // Quick info about what's happening
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Surface,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Running ${toolInfo.toolName}...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OnSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun ToolCallBubble(
     message: Message,
+    viewModel: ChatViewModel,
     modifier: Modifier = Modifier,
     isEditMode: Boolean = false
 ) {
-    val toolCallInfo = message.toolCall ?: return
+    // Handle both tool_call messages (with toolCall field) and tool_response messages
+    val toolCallInfo = message.toolCall
+    val toolResponseCallId = message.toolResponseCallId
+    val toolResponseOutput = message.toolResponseOutput
+    
+    // If this is a tool_response message without toolCall info, create a basic display
+    if (toolCallInfo == null && toolResponseCallId != null) {
+        var isExpanded by remember { mutableStateOf(false) }
+        
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Surface(
+                shape = RoundedCornerShape(
+                    topStart = 6.dp,
+                    topEnd = 20.dp,
+                    bottomStart = 20.dp,
+                    bottomEnd = 20.dp
+                ),
+                color = Primary.copy(alpha = 0.1f),
+                border = BorderStroke(1.dp, Primary.copy(alpha = 0.2f)),
+                modifier = Modifier
+                    .widthIn(max = 320.dp)
+                    .clickable { isExpanded = !isExpanded }
+                    .then(
+                        if (isEditMode) {
+                            Modifier.alpha(0.3f)
+                        } else {
+                            Modifier
+                        }
+                    )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Primary.copy(alpha = 0.15f),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Extension,
+                                    contentDescription = "MCP Tool",
+                                    tint = Primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            // Extract tool name - for tool_response messages, we need to find the corresponding tool_call
+                            // message to get the actual tool name
+                            val toolName = if (message.role == "tool_response") {
+                                // Find the corresponding tool_call message by toolResponseCallId
+                                val currentChat = viewModel.uiState.value.currentChat
+                                val correspondingToolCall = currentChat?.messages?.find {
+                                    it.role == "tool_call" && it.toolCallId == message.toolResponseCallId
+                                }
+                                correspondingToolCall?.text?.removePrefix("Tool call: ") ?: "Tool Call"
+                            } else {
+                                // For tool_call messages, extract from text
+                                message.text.let { text ->
+                                    if (text.startsWith("Tool call: ")) {
+                                        text.removePrefix("Tool call: ")
+                                    } else if (text.isNotBlank()) {
+                                        text
+                                    } else {
+                                        "Tool Call"
+                                    }
+                                }
+                            }
+                            
+                            Text(
+                                text = "Tool Call",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "✅ Completed",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AccentGreen,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isExpanded) Primary.copy(alpha = 0.1f) else Color.Transparent,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                                    tint = OnSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Show tool name instead of result preview
+                    val toolName = if (message.role == "tool_response") {
+                        // Find the corresponding tool_call message by toolResponseCallId
+                        val currentChat = viewModel.uiState.value.currentChat
+                        val correspondingToolCall = currentChat?.messages?.find {
+                            it.role == "tool_call" && it.toolCallId == message.toolResponseCallId
+                        }
+                        correspondingToolCall?.text?.removePrefix("Tool call: ") ?: "Tool Call"
+                    } else {
+                        // For tool_call messages, extract from text
+                        message.text.let { text ->
+                            if (text.startsWith("Tool call: ")) {
+                                text.removePrefix("Tool call: ")
+                            } else if (text.isNotBlank()) {
+                                text
+                            } else {
+                                "Tool Call"
+                            }
+                        }
+                    }
+                    
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Surface,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = toolName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = OnSurface,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
+                    
+                    AnimatedVisibility(
+                        visible = isExpanded && toolResponseOutput != null,
+                        enter = fadeIn() + androidx.compose.animation.expandVertically(),
+                        exit = fadeOut() + androidx.compose.animation.shrinkVertically()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(top = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = "Full Result:",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = OnSurfaceVariant,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AccentGreen.copy(alpha = 0.1f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                    Text(
+                                        text = toolResponseOutput ?: "",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = OnSurface,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
+    
+    // Original logic for messages with full toolCall info
+    if (toolCallInfo == null) return
     var isExpanded by remember { mutableStateOf(false) }
     
     Column(
@@ -1689,8 +2001,8 @@ fun ToolCallBubble(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = Icons.Default.Build, // Tool/function icon
-                                contentDescription = "Tool",
+                                imageVector = Icons.Default.Extension, // Tool/function icon
+                                contentDescription = "MCP Tool",
                                 tint = Primary,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -1702,12 +2014,14 @@ fun ToolCallBubble(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        Text(
-                            text = "🔧 ${toolCallInfo.toolName}",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = Primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = toolCallInfo.toolName,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                         
                         // Status indicator based on result
                         val (statusText, statusColor) = when (toolCallInfo.result) {
@@ -1740,30 +2054,22 @@ fun ToolCallBubble(
                     }
                 }
                 
-                // Quick result preview (always visible)
+                // Tool name display (always visible)
                 Spacer(modifier = Modifier.height(8.dp))
-                
-                val resultPreview = when (val result = toolCallInfo.result) {
-                    is ToolExecutionResult.Success -> {
-                        if (result.result.length > 80) {
-                            "${result.result.take(80)}..."
-                        } else result.result
-                    }
-                    is ToolExecutionResult.Error -> result.error
-                }
                 
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = Surface,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = resultPreview,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = OnSurface,
-                        modifier = Modifier.padding(12.dp),
-                        maxLines = if (isExpanded) Int.MAX_VALUE else 2
-                    )
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Text(
+                            text = toolCallInfo.toolName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = OnSurface,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
                 }
                 
                 // Expanded details
@@ -1801,12 +2107,14 @@ fun ToolCallBubble(
                         }
                         
                         // Full result section
-                        Text(
-                            text = "Result:",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = OnSurfaceVariant,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = "Result:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = OnSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                         
                         Surface(
                             shape = RoundedCornerShape(8.dp),
@@ -1818,20 +2126,24 @@ fun ToolCallBubble(
                         ) {
                             when (val result = toolCallInfo.result) {
                                 is ToolExecutionResult.Success -> {
-                                    Text(
-                                        text = result.result,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = OnSurface,
-                                        modifier = Modifier.padding(12.dp)
-                                    )
+                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                        Text(
+                                            text = result.result,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = OnSurface,
+                                            modifier = Modifier.padding(12.dp)
+                                        )
+                                    }
                                 }
                                 is ToolExecutionResult.Error -> {
-                                    Text(
-                                        text = result.error,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = AccentRed,
-                                        modifier = Modifier.padding(12.dp)
-                                    )
+                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                        Text(
+                                            text = result.error,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = AccentRed,
+                                            modifier = Modifier.padding(12.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
