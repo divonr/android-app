@@ -18,6 +18,10 @@ data class ChatUiState(
     val showSystemPromptDialog: Boolean = false,
     val showChatHistory: Boolean = false,
     val showFileSelection: Boolean = false,
+    val quickSettingsExpanded: Boolean = false,
+    val showChatExportDialog: Boolean = false,
+    val chatExportJson: String = "",
+    val isChatExportEditable: Boolean = false,
     val selectedFiles: List<SelectedFile> = emptyList(),
     val currentChat: Chat? = null,
     val availableProviders: List<Provider> = emptyList(),
@@ -96,3 +100,5 @@ sealed class Screen {
     object Integrations : Screen()
     data class Group(val groupId: String) : Screen()
 }
+
+

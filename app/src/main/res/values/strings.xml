@@ -10,6 +10,14 @@
     <string name="user_settings">הגדרות משתמש</string>
     <string name="api_keys">מפתחות API</string>
     <string name="export_chat_history">יצוא היסטוריית צ\'אט</string>
+    <string name="share_chat_title">שי�?וף שיחה</string>
+    <string name="save_to_downloads">ש�?ירה להורדות</string>
+    <string name="chat_export_title">שיתוף שיחה</string>
+    <string name="edit_button">עריכה</string>
+    <string name="share_button">שיתוף</string>
+    <string name="no_content_to_export">אין תוכן לייצוא</string>
+    <string name="export_success">הקובץ נשמר בהצלחה בהורדות</string>
+    <string name="export_failed">כשל בשמירת הקובץ</string>
     <string name="add_api_key">הוסף מפתח API</string>
     <string name="take_photo">צילום תמונה</string>
     <string name="upload_file">העלאת קובץ</string>

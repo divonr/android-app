@@ -3,9 +3,18 @@ package com.example.ApI.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.pm.PackageManager
+import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.model.StreamingCallback
@@ -15,7 +24,14 @@ import com.example.ApI.tools.ToolSpecification
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import androidx.core.content.FileProvider
+import androidx.core.app.PendingIntentCompat
+import android.app.PendingIntent
+import android.os.Environment
+import java.io.File
 import java.io.InputStream
 import java.nio.charset.Charset
 import java.time.Instant
@@ -1928,6 +1944,269 @@ class ChatViewModel(
         }
     }
 
+    // Quick Settings & Chat Export
+    fun toggleQuickSettings() {
+        _uiState.value = _uiState.value.copy(
+            quickSettingsExpanded = !_uiState.value.quickSettingsExpanded
+        )
+    }
+
+    fun openChatExportDialog() {
+        val currentChat = _uiState.value.currentChat ?: return
+        val currentUser = _appSettings.value.current_user
+        viewModelScope.launch {
+            val chatJson = withContext(Dispatchers.IO) {
+                repository.getChatJson(currentUser, currentChat.chat_id)
+            }.orEmpty()
+
+            _uiState.value = _uiState.value.copy(
+                showChatExportDialog = true,
+                chatExportJson = chatJson,
+                isChatExportEditable = false
+            )
+
+            if (chatJson.isBlank()) {
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = context.getString(R.string.no_content_to_export)
+                )
+            }
+        }
+    }
+
+    fun closeChatExportDialog() {
+        _uiState.value = _uiState.value.copy(
+            showChatExportDialog = false,
+            isChatExportEditable = false
+        )
+    }
+
+    fun enableChatExportEditing() {
+        _uiState.value = _uiState.value.copy(isChatExportEditable = true)
+    }
+
+    fun updateChatExportContent(content: String) {
+        _uiState.value = _uiState.value.copy(chatExportJson = content)
+    }
+
+    fun shareChatExportContent() {
+        val content = _uiState.value.chatExportJson
+        val chatId = _uiState.value.currentChat?.chat_id
+
+        if (content.isBlank()) {
+            _uiState.value = _uiState.value.copy(
+                snackbarMessage = context.getString(R.string.no_content_to_export)
+            )
+            return
+        }
+
+        if (chatId == null) {
+            _uiState.value = _uiState.value.copy(
+                snackbarMessage = context.getString(R.string.error_sending_message)
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    repository.saveChatJsonToDownloads(chatId, content)
+                }
+
+                if (result != null) {
+                    // File was saved successfully, now share it
+                    withContext(Dispatchers.Main) {
+                        try {
+                            val file = File(result)
+                            val uri = FileProvider.getUriForFile(
+                                context,
+                                context.applicationContext.packageName + ".fileprovider",
+                                file
+                            )
+
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/json"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+
+                            val chooserTitle = context.getString(R.string.share_chat_title)
+                            val chooser = Intent.createChooser(shareIntent, chooserTitle).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(chooser)
+                        } catch (e: Exception) {
+                            _uiState.value = _uiState.value.copy(
+                                snackbarMessage = context.getString(R.string.error_sending_message)
+                            )
+                        }
+                    }
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        snackbarMessage = context.getString(R.string.export_failed)
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = context.getString(R.string.error_sending_message)
+                )
+            }
+        }
+    }
+
+    fun saveChatExportToDownloads() {
+        val content = _uiState.value.chatExportJson
+        val chatId = _uiState.value.currentChat?.chat_id
+
+        if (content.isBlank()) {
+            _uiState.value = _uiState.value.copy(
+                snackbarMessage = context.getString(R.string.no_content_to_export)
+            )
+            return
+        }
+
+        if (chatId == null) {
+            _uiState.value = _uiState.value.copy(
+                snackbarMessage = context.getString(R.string.error_sending_message)
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                repository.saveChatJsonToDownloads(chatId, content)
+            }
+
+            if (result != null) {
+                // Show success notification
+                showDownloadNotification(chatId)
+
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = context.getString(R.string.export_success)
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = context.getString(R.string.export_failed)
+                )
+            }
+        }
+    }
+
+    private fun showDownloadNotification(chatId: String) {
+        android.util.Log.d("ChatExport", "Attempting to show notification for chat: $chatId on Android ${android.os.Build.VERSION.SDK_INT}")
+
+        try {
+            // Check if POST_NOTIFICATIONS permission is required (Android 13+)
+            val needsPermission = android.os.Build.VERSION.SDK_INT >= 33
+            android.util.Log.d("ChatExport", "POST_NOTIFICATIONS permission required: $needsPermission")
+
+            if (needsPermission) {
+                // Check if we have the permission
+                val hasPermission = ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+
+                android.util.Log.d("ChatExport", "Has POST_NOTIFICATIONS permission: $hasPermission")
+
+                if (!hasPermission) {
+                    android.util.Log.w("ChatExport", "POST_NOTIFICATIONS permission not granted, cannot show notification")
+                    return
+                }
+            }
+
+            val notificationManager = NotificationManagerCompat.from(context)
+
+            // Create notification channel for Android 8.0+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val channel = android.app.NotificationChannel(
+                    "chat_export_channel",
+                    "התראות ייצוא שיחה",
+                    android.app.NotificationManager.IMPORTANCE_DEFAULT
+                ).apply {
+                    description = "התראות עבור פעולות ייצוא שיחה"
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+
+            // Create intent to open the downloaded file
+            val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "${chatId}.json")
+            android.util.Log.d("ChatExport", "File path: ${file.absolutePath}")
+            android.util.Log.d("ChatExport", "File exists: ${file.exists()}")
+
+            if (file.exists()) {
+                val fileUri = FileProvider.getUriForFile(
+                    context,
+                    context.applicationContext.packageName + ".fileprovider",
+                    file
+                )
+                android.util.Log.d("ChatExport", "File URI: $fileUri")
+
+                val openFileIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(fileUri, "application/json")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+
+                try {
+                    val pendingIntent = PendingIntentCompat.getActivity(
+                        context,
+                        "chat_export_${chatId}".hashCode(),
+                        openFileIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                        false
+                    )
+
+                    val notification = NotificationCompat.Builder(context, "chat_export_channel")
+                        .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                        .setContentTitle("שיחה הורדה בהצלחה")
+                        .setContentText("הקובץ ${chatId}.json נשמר בתיקיית ההורדות")
+                        .setPriority(NotificationCompat.PRIORITY_HIGH) // Higher priority for downloads
+                        .setAutoCancel(true)
+                        .setContentIntent(pendingIntent) // Open file when clicked
+                        .build()
+
+                    // Use a unique ID for each notification to avoid conflicts
+                    val notificationId = "chat_export_${chatId}_${System.currentTimeMillis()}".hashCode()
+                    notificationManager.notify(notificationId, notification)
+
+                    android.util.Log.d("ChatExport", "Notification sent for chat: $chatId with file URI: $fileUri")
+                } catch (e: Exception) {
+                    android.util.Log.e("ChatExport", "Failed to create pending intent: ${e.message}")
+                    // Create notification without click action if pending intent fails
+                    val fallbackNotification = NotificationCompat.Builder(context, "chat_export_channel")
+                        .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                        .setContentTitle("שיחה הורדה בהצלחה")
+                        .setContentText("הקובץ ${chatId}.json נשמר בתיקיית ההורדות")
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .setAutoCancel(true)
+                        .build()
+
+                    val notificationId = "chat_export_${chatId}_${System.currentTimeMillis()}".hashCode()
+                    notificationManager.notify(notificationId, fallbackNotification)
+                }
+            } else {
+                android.util.Log.w("ChatExport", "File does not exist at path: ${file.absolutePath}")
+                // Create notification without click action if file doesn't exist
+                val fallbackNotification = NotificationCompat.Builder(context, "chat_export_channel")
+                    .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                    .setContentTitle("שיחה הורדה בהצלחה")
+                    .setContentText("הקובץ ${chatId}.json נשמר בתיקיית ההורדות (אך לא ניתן לפתוח)")
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setAutoCancel(true)
+                    .build()
+
+                val notificationId = "chat_export_${chatId}_${System.currentTimeMillis()}".hashCode()
+                notificationManager.notify(notificationId, fallbackNotification)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ChatExport", "Failed to send notification: ${e.message}")
+            // If notification fails, just continue silently
+            // The snackbar message will still show the success
+        }
+    }
+
     // Search Methods
     
     fun enterSearchMode() {
@@ -2200,3 +2479,7 @@ class ChatViewModel(
     }
 
 }
+
+
+
+

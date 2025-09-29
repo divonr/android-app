@@ -227,213 +227,287 @@ fun ChatScreen(
                     .systemBarsPadding()
                     .padding(end = 0.dp)
             ) {
-                // Modern Minimalist Top Bar
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Surface,
-                    shadowElevation = 1.dp
-                ) {
-                    if (uiState.searchMode) {
-                        // Full-width search bar covering entire top line
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                // Top bars container with floating arrow
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    // Top bars column (without padding between them)
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // Modern Minimalist Top Bar
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Surface,
+                            shadowElevation = 1.dp
                         ) {
-                            // Back arrow (always visible)
-                            Surface(
-                                shape = MaterialTheme.shapes.medium,
-                                color = SurfaceVariant,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clickable { viewModel.navigateToScreen(Screen.ChatHistory) }
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "Back to chat history",
-                                        tint = OnSurfaceVariant,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                            
-                            // Search text field spanning the entire remaining width
-                            OutlinedTextField(
-                                value = uiState.searchQuery,
-                                onValueChange = { viewModel.updateSearchQuery(it) },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .focusRequester(searchFocusRequester),
-                                placeholder = {
-                                    Text(
-                                        text = "חפש בשיחה...",
-                                        color = OnSurfaceVariant,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                },
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color.Transparent,
-                                    unfocusedBorderColor = Color.Transparent,
-                                    focusedTextColor = OnSurface,
-                                    unfocusedTextColor = OnSurface,
-                                    unfocusedContainerColor = Surface,
-                                    focusedContainerColor = Surface
-                                ),
-                                textStyle = MaterialTheme.typography.bodyMedium,
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions.Default.copy(
-                                    keyboardType = KeyboardType.Text
-                                ),
-                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                                    onSearch = { viewModel.performConversationSearch() }
-                                ),
-                                shape = MaterialTheme.shapes.medium,
-                                trailingIcon = {
+                            if (uiState.searchMode) {
+                                // Full-width search bar covering entire top line
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Back arrow (always visible)
                                     Surface(
                                         shape = MaterialTheme.shapes.medium,
-                                        color = Color.Transparent,
+                                        color = SurfaceVariant,
                                         modifier = Modifier
-                                            .size(32.dp)
-                                            .clickable {
-                                                if (uiState.searchQuery.isNotEmpty()) {
-                                                    viewModel.exitSearchMode()
-                                                } else {
-                                                    viewModel.performConversationSearch()
-                                                }
-                                            }
+                                            .size(36.dp)
+                                            .clickable { viewModel.navigateToScreen(Screen.ChatHistory) }
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Icon(
-                                                imageVector = if (uiState.searchQuery.isNotEmpty()) Icons.Default.Close else Icons.Default.Search,
-                                                contentDescription = if (uiState.searchQuery.isNotEmpty()) "Exit search" else "Search",
+                                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                contentDescription = "Back to chat history",
                                                 tint = OnSurfaceVariant,
                                                 modifier = Modifier.size(18.dp)
                                             )
                                         }
                                     }
+
+                                    // Search text field spanning the entire remaining width
+                                    OutlinedTextField(
+                                        value = uiState.searchQuery,
+                                        onValueChange = { viewModel.updateSearchQuery(it) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .focusRequester(searchFocusRequester),
+                                        placeholder = {
+                                            Text(
+                                                text = "חפש בשיחה...",
+                                                color = OnSurfaceVariant,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                        },
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = Color.Transparent,
+                                            unfocusedBorderColor = Color.Transparent,
+                                            focusedTextColor = OnSurface,
+                                            unfocusedTextColor = OnSurface,
+                                            unfocusedContainerColor = Surface,
+                                            focusedContainerColor = Surface
+                                        ),
+                                        textStyle = MaterialTheme.typography.bodyMedium,
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions.Default.copy(
+                                            keyboardType = KeyboardType.Text
+                                        ),
+                                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                            onSearch = { viewModel.performConversationSearch() }
+                                        ),
+                                        shape = MaterialTheme.shapes.medium,
+                                        trailingIcon = {
+                                            Surface(
+                                                shape = MaterialTheme.shapes.medium,
+                                                color = Color.Transparent,
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clickable {
+                                                        if (uiState.searchQuery.isNotEmpty()) {
+                                                            viewModel.exitSearchMode()
+                                                        } else {
+                                                            viewModel.performConversationSearch()
+                                                        }
+                                                    }
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = if (uiState.searchQuery.isNotEmpty()) Icons.Default.Close else Icons.Default.Search,
+                                                        contentDescription = if (uiState.searchQuery.isNotEmpty()) "Exit search" else "Search",
+                                                        tint = OnSurfaceVariant,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    )
                                 }
-                            )
+                            } else {
+                                // Normal top bar with all elements (original layout)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Left side - Back arrow and Search icon
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Surface(
+                                            shape = MaterialTheme.shapes.medium,
+                                            color = SurfaceVariant,
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clickable { viewModel.navigateToScreen(Screen.ChatHistory) }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                    contentDescription = "Back to chat history",
+                                                    tint = OnSurfaceVariant,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+
+                                        // Search icon
+                                        Surface(
+                                            shape = MaterialTheme.shapes.medium,
+                                            color = SurfaceVariant,
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clickable { viewModel.enterConversationSearchMode() }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Search,
+                                                    contentDescription = "Search in conversation",
+                                                    tint = OnSurfaceVariant,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Center - Model and Provider info
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = uiState.currentProvider?.provider?.let { provider ->
+                                                stringResource(id = when(provider) {
+                                                    "openai" -> R.string.provider_openai
+                                                    "poe" -> R.string.provider_poe
+                                                    "google" -> R.string.provider_google
+                                                    else -> R.string.provider_openai
+                                                })
+                                            } ?: "",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = OnSurfaceVariant,
+                                            modifier = Modifier.clickable { viewModel.showProviderSelector() }
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = uiState.currentModel,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = OnSurface,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.clickable { viewModel.showModelSelector() }
+                                        )
+                                    }
+
+                                    // Right side - System Prompt and Delete icons
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // System Prompt icon
+                                        Surface(
+                                            shape = MaterialTheme.shapes.medium,
+                                            color = SurfaceVariant,
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clickable { viewModel.showSystemPromptDialog() }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Build,
+                                                    contentDescription = "System Prompt",
+                                                    tint = OnSurfaceVariant,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+
+                                        // Delete Chat
+                                        Surface(
+                                            shape = MaterialTheme.shapes.medium,
+                                            color = SurfaceVariant,
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clickable { viewModel.showDeleteChatConfirmation() }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Delete Chat",
+                                                    tint = OnSurfaceVariant,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    } else {
-                        // Normal top bar with all elements
-                        Row(
+
+                        // Expandable bar positioned directly below the top bar (no padding)
+                        AnimatedVisibility(
+                            visible = uiState.quickSettingsExpanded && !uiState.searchMode,
+                            enter = fadeIn(),
+                            exit = fadeOut()
+                        ) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Surface,
+                                shadowElevation = 1.dp
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Surface(
+                                        shape = MaterialTheme.shapes.medium,
+                                        color = SurfaceVariant,
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clickable { viewModel.openChatExportDialog() }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.Download,
+                                                contentDescription = "Download chat",
+                                                tint = OnSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(45.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    // Floating arrow positioned absolutely over the bars at their junction
+                    if (!uiState.searchMode) {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(top = 68.dp, end = 20.dp),
+                            contentAlignment = Alignment.TopEnd
                         ) {
-                            // Left side - Back arrow and Search icon
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            Surface(
+                                shape = CircleShape,
+                                color = SurfaceVariant,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clickable { viewModel.toggleQuickSettings() },
+                                shadowElevation = 4.dp
                             ) {
-                                Surface(
-                                    shape = MaterialTheme.shapes.medium,
-                                    color = SurfaceVariant,
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clickable { viewModel.navigateToScreen(Screen.ChatHistory) }
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                            contentDescription = "Back to chat history",
-                                            tint = OnSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                                
-                                // Search icon
-                                Surface(
-                                    shape = MaterialTheme.shapes.medium,
-                                    color = SurfaceVariant,
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clickable { viewModel.enterConversationSearchMode() }
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Search,
-                                            contentDescription = "Search in conversation",
-                                            tint = OnSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            }
-                            
-                            // Center - Model and Provider info
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = uiState.currentProvider?.provider?.let { provider ->
-                                        stringResource(id = when(provider) {
-                                            "openai" -> R.string.provider_openai
-                                            "poe" -> R.string.provider_poe
-                                            "google" -> R.string.provider_google
-                                            else -> R.string.provider_openai
-                                        })
-                                    } ?: "",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = OnSurfaceVariant,
-                                    modifier = Modifier.clickable { viewModel.showProviderSelector() }
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = uiState.currentModel,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = OnSurface,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.clickable { viewModel.showModelSelector() }
-                                )
-                            }
-                            
-                            // Right side - System Prompt and Delete icons
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // System Prompt icon
-                                Surface(
-                                    shape = MaterialTheme.shapes.medium,
-                                    color = SurfaceVariant,
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clickable { viewModel.showSystemPromptDialog() }
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Build,
-                                            contentDescription = "System Prompt",
-                                            tint = OnSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-
-                                // Delete Chat
-                                Surface(
-                                    shape = MaterialTheme.shapes.medium,
-                                    color = SurfaceVariant,
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clickable { viewModel.showDeleteChatConfirmation() }
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Delete,
-                                            contentDescription = "Delete Chat",
-                                            tint = OnSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (uiState.quickSettingsExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                        contentDescription = if (uiState.quickSettingsExpanded) "Collapse quick settings" else "Expand quick settings",
+                                        tint = OnSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
                             }
                         }
@@ -956,6 +1030,15 @@ fun ChatScreen(
                         viewModel.addMultipleFilesFromUris(filesList)
                     },
                     onDismiss = { viewModel.hideFileSelection() }
+                )
+            }
+
+            // Chat Export Dialog
+            if (uiState.showChatExportDialog) {
+                ChatExportDialog(
+                    viewModel = viewModel,
+                    uiState = uiState,
+                    onDismiss = { viewModel.closeChatExportDialog() }
                 )
             }
 

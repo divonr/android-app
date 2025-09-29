@@ -195,6 +195,28 @@ class DataRepository(private val context: Context) {
         }
     }
     
+    fun getChatJson(username: String, chatId: String): String? {
+        return try {
+            val chat = loadChatHistory(username).chat_history.find { it.chat_id == chatId }
+            chat?.let { json.encodeToString(it) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun saveChatJsonToDownloads(chatId: String, content: String): String? {
+        return try {
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!downloadsDir.exists()) {
+                downloadsDir.mkdirs()
+            }
+            val exportFile = File(downloadsDir, "${chatId}.json")
+            exportFile.writeText(content)
+            exportFile.absolutePath
+        } catch (e: Exception) {
+            null
+        }
+    }
     fun addMessageToChat(username: String, chatId: String, message: Message): Chat? {
         val chatHistory = loadChatHistory(username)
         val targetChat = chatHistory.chat_history.find { it.chat_id == chatId }?.copy(
@@ -1349,3 +1371,5 @@ class DataRepository(private val context: Context) {
         }
     }
 }
+
+
