@@ -1,9 +1,14 @@
 package com.example.ApI.data.network
 
 import android.content.Context
+import android.app.AlertDialog
+import android.app.Activity
+import android.os.Handler
+import android.os.Looper
 import com.example.ApI.data.model.*
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.tools.ToolCall
+import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.serialization.json.*
 import kotlinx.serialization.encodeToString
@@ -16,8 +21,40 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+private data class OpenAIToolCallPayload(
+    val callId: String,
+    val functionName: String,
+    val rawArguments: String
+)
+
+private data class OpenAIToolCallBuffer(
+    val functionName: String,
+    val argumentsBuilder: StringBuilder = StringBuilder()
+)
+
 class ApiService(private val context: Context) {
     
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun notifyToolCallCollected(provider: String, callId: String, functionName: String, rawArguments: String) {
+        val preview = if (rawArguments.length > 200) rawArguments.substring(0, 200) + "..." else rawArguments
+        val dialogMessage = buildString {
+            appendLine("Provider: $provider")
+            appendLine("Tool: $functionName")
+            appendLine("Call ID: $callId")
+            appendLine()
+            append(preview)
+        }
+        mainHandler.post {
+            val activity = context as? Activity ?: return@post
+            AlertDialog.Builder(activity)
+                .setTitle("Tool Call Ready")
+                .setMessage(dialogMessage)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
+    }
+
     private val json = Json {
         prettyPrint = true
         ignoreUnknownKeys = true
@@ -195,8 +232,8 @@ class ApiService(private val context: Context) {
             val outputArray = responseJson["output"]?.jsonArray
             
             var responseText = ""
-            var toolCall: com.example.ApI.tools.ToolCall? = null
-            
+            var pendingToolCall: OpenAIToolCallPayload? = null
+
             outputArray?.forEach { outputElement ->
                 val outputObj = outputElement.jsonObject
                 when (outputObj["type"]?.jsonPrimitive?.content) {
@@ -215,29 +252,36 @@ class ApiService(private val context: Context) {
                             val name = outputObj["name"]?.jsonPrimitive?.content
                             val callId = outputObj["call_id"]?.jsonPrimitive?.content
                             val arguments = outputObj["arguments"]?.jsonPrimitive?.content
-                            
+
                             if (name != null && callId != null && arguments != null) {
-                                val paramsJson = json.parseToJsonElement(arguments).jsonObject
-                                toolCall = com.example.ApI.tools.ToolCall(
-                                    id = callId,
-                                    toolId = name,
-                                    parameters = paramsJson,
-                                    provider = "openai"
+                                pendingToolCall = OpenAIToolCallPayload(
+                                    callId = callId,
+                                    functionName = name,
+                                    rawArguments = arguments
                                 )
                             }
                         }
                     }
                 }
             }
-            
-            // If we found a tool call, handle it through the ToolRegistry
-            if (toolCall != null) {
-                val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
-                // Send follow-up request with tool result
-                // This should be handled by the ViewModel layer
-                return ApiResponse.Success("") // Empty response since we're handling tool call
+
+            // If we found a tool call, pass it to the registry for decoding later
+            if (pendingToolCall != null) {
+                notifyToolCallCollected(
+                    provider = "openai",
+                    callId = pendingToolCall.callId,
+                    functionName = pendingToolCall.functionName,
+                    rawArguments = pendingToolCall.rawArguments
+                )
+                ToolRegistry.getInstance().registerPendingToolCall(
+                    provider = "openai",
+                    callId = pendingToolCall.callId,
+                    toolName = pendingToolCall.functionName,
+                    rawArguments = pendingToolCall.rawArguments
+                )
+                return ApiResponse.Success("")
             }
-            
+
             return ApiResponse.Success(responseText)
         } catch (e: Exception) {
             return ApiResponse.Error("Failed to parse response: ${e.message}")
@@ -408,6 +452,7 @@ class ApiService(private val context: Context) {
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             
             val fullResponse = StringBuilder()
+            val toolCallBuffers = mutableMapOf<String, OpenAIToolCallBuffer>()
             var line: String?
             
             while (reader.readLine().also { line = it } != null) {
@@ -440,6 +485,60 @@ class ApiService(private val context: Context) {
                                 if (deltaText != null) {
                                     fullResponse.append(deltaText)
                                     callback.onPartialResponse(deltaText)
+                                }
+                            }
+                            "response.output_item.added" -> {
+                                val item = chunkJson["item"]?.jsonObject
+                                val itemType = item?.get("type")?.jsonPrimitive?.content
+                                if (itemType == "tool_call") {
+                                    val callId = item["id"]?.jsonPrimitive?.content
+                                    val functionName = item["function"]?.jsonObject?.get("name")?.jsonPrimitive?.content
+                                    val initialArgs = item["function"]?.jsonObject?.get("arguments")?.jsonPrimitive?.content
+                                    if (callId != null && functionName != null) {
+                                        val buffer = OpenAIToolCallBuffer(functionName = functionName)
+                                        if (!initialArgs.isNullOrEmpty()) {
+                                            buffer.argumentsBuilder.append(initialArgs)
+                                        }
+                                        toolCallBuffers[callId] = buffer
+                                        Log.d("TOOL_CALL_DEBUG", "Registered tool call buffer for $functionName ($callId)")
+                                    }
+                                }
+                            }
+                            "response.function_call_arguments.delta" -> {
+                                val callId = chunkJson["item_id"]?.jsonPrimitive?.content
+                                val delta = chunkJson["delta"]?.jsonPrimitive?.content
+                                if (!callId.isNullOrEmpty() && !delta.isNullOrEmpty()) {
+                                    val buffer = toolCallBuffers[callId]
+                                    if (buffer != null) {
+                                        buffer.argumentsBuilder.append(delta)
+                                    } else {
+                                        Log.w("TOOL_CALL_DEBUG", "Delta received for unknown tool call id: $callId")
+                                    }
+                                }
+                            }
+                            "response.function_call_arguments.done" -> {
+                                val callId = chunkJson["item_id"]?.jsonPrimitive?.content
+                                if (!callId.isNullOrEmpty()) {
+                                    val buffer = toolCallBuffers[callId]
+                                    if (buffer != null) {
+                                        val completedArguments = chunkJson["arguments"]?.jsonPrimitive?.content
+                                            ?: buffer.argumentsBuilder.toString()
+                                        notifyToolCallCollected(
+                                            provider = "openai",
+                                            callId = callId,
+                                            functionName = buffer.functionName,
+                                            rawArguments = completedArguments
+                                        )
+                                        ToolRegistry.getInstance().registerPendingToolCall(
+                                            provider = "openai",
+                                            callId = callId,
+                                            toolName = buffer.functionName,
+                                            rawArguments = completedArguments
+                                        )
+                                        toolCallBuffers.remove(callId)
+                                    } else {
+                                        Log.w("TOOL_CALL_DEBUG", "Completed arguments received for unknown tool call id: $callId")
+                                    }
                                 }
                             }
                             "response.completed" -> {

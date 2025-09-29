@@ -28,6 +28,10 @@ class ToolRegistry {
         // registerTool(CalculatorTool())
     }
     
+    fun registerPendingToolCall(provider: String, callId: String, toolName: String, rawArguments: String) {
+        // TODO: Decode and handle provider-specific tool call payloads
+    }
+
     /**
      * Register a tool with the registry
      */
@@ -139,3 +143,4 @@ class ToolRegistry {
         return null
     }
 }
+

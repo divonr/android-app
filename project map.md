@@ -1,108 +1,125 @@
-### Project Guide
+# Android LLM Chat App - Project Guide
 
-This document provides a high-level overview of the Android chat application's structure and functionality. It is designed to help developers quickly locate relevant code for understanding or modifying features.
+This guide provides a concise overview of the project structure and file contents, designed to be easily understood by LLMs and new developers. The app is a multi-provider LLM chat client built with Jetpack Compose, following an MVVM architecture.
 
-#### 1. Project Overview & Structure
+## 1. Project Structure Overview
 
-The application is a multi-provider LLM chat client built with Kotlin and Jetpack Compose. Its architecture follows the MVVM (Model-View-ViewModel) pattern.
+The project's essential files are located primarily within the `app/src/main/` directory and the root-level Gradle scripts.
 
-*   `app/src/main/java/com/example/ApI/data/`: **Data Layer**. Handles all data operations.
-    *   `model/`: Contains Kotlin data classes (`Chat`, `Message`, `Provider`, `ApiKey`) that define the application's data structures. These are serialized to/from JSON.
-    *   `network/`: Contains `ApiService.kt`, responsible for making all HTTP requests to external LLM APIs.
-    *   `repository/`: Contains `DataRepository.kt`, the single source of truth. It manages local JSON storage, orchestrates network calls, and contains core business logic.
-*   `app/src/main/java/com/example/ApI/ui/`: **UI Layer**. Contains all UI-related code.
-    *   `screen/`: Each file represents a major screen in the app (e.g., `ChatScreen.kt`, `ChatHistoryScreen.kt`).
-    *   `components/`: Reusable Jetpack Compose components, primarily dialogs (`Dialogs.kt`, `FileSelectionDialog.kt`).
-    *   `theme/`: Defines the app's visual style, including colors (`Color.kt`) and typography (`Type.kt`).
-    *   `ChatViewModel.kt`: The central ViewModel that manages UI state and handles user interactions for all screens.
-*   `app/src/main/assets/`: Contains `providers.json`, a critical configuration file defining API endpoints and models.
-*   `app/src/main/res/`: Standard Android resources, including UI strings (`values/strings.xml`).
+-   **Configuration & Build:** Gradle files (`/build.gradle.kts`, `/app/build.gradle.kts`, `gradle/libs.versions.toml`) and the app manifest.
+-   **Core Logic (`app/src/main/java/com/example/ApI/`)**:
+    -   `/data`: Handles all data operations, including models, networking, and local storage.
+    -   `/tools`: Implements the function-calling (tools) capability for the LLM.
+    -   `/ui`: Contains all Jetpack Compose UI elements, divided into screens, components, view models, and themes.
+    -   `MainActivity.kt`: The single activity and entry point for the UI.
+-   **Assets & Resources (`app/src/main/`)**:
+    -   `/assets`: Contains static data files like `providers.json`.
+    -   `/res`: Standard Android resources, including UI strings.
 
-#### 2. File Contents Index
+---
 
-This index details the purpose and key contents of each important file.
+## 2. File Contents Index
 
-##### Core Logic & State Management
+This index details the purpose of each key file. To modify a feature, find the relevant file here.
 
-*   **`ui/ChatViewModel.kt`**
-    *   **Purpose**: The central brain of the UI. It manages the entire application state (`ChatUiState`) and handles all user actions.
-    *   **Key Contents**:
-        *   `uiState`: A `StateFlow` holding the complete UI state, including the current chat, message list, selected provider, and dialog visibility.
-        *   `sendMessage()`: The primary function for sending a user's message. It updates the state, handles file uploads via the repository, and initiates the streaming API call.
-        *   `sendBufferedBatch()`: Sends multiple user messages at once when "Multi-Message Mode" is enabled.
-        *   `selectChat()`, `createNewChat()`: Functions to manage chat sessions.
-        *   `selectProvider()`, `selectModel()`: Handle provider and model selection.
-        *   `startEditingMessage()`, `finishEditingMessage()`, `resendFromMessage()`: Logic for editing, confirming, and resending messages.
-        *   `loadInitialData()`: Loads user settings, API keys, and chat history on startup.
-        *   Dialog management functions (`show...Dialog()`, `hide...Dialog()`).
+### Configuration & Build
 
-*   **`data/repository/DataRepository.kt`**
-    *   **Purpose**: The single source of truth for all application data. It abstracts data sources (local JSON files and network).
-    *   **Key Contents**:
-        *   `loadChatHistory()`, `saveChatHistory()`: Reads from and writes to `chat_history_{user}.json`.
-        *   `loadApiKeys()`, `saveApiKeys()`: Manages `api_keys_{user}.json`.
-        *   `loadAppSettings()`, `saveAppSettings()`: Manages `app_settings.json`.
-        *   `sendMessageStreaming()`: Prepares messages for the API call. It ensures files are uploaded for the correct provider (`ensureFilesUploadedForProvider`) before calling `ApiService`.
-        *   `uploadFile()`: A wrapper that calls provider-specific upload methods (`uploadFileToOpenAI`, `uploadFileToGoogle`, etc.).
-        *   `generateConversationTitle()`: Constructs a prompt and calls an LLM to generate a title for a chat.
+-   `app/build.gradle.kts`
+    -   Defines app-specific configurations (SDK versions, application ID).
+    -   Lists all dependencies for Jetpack Compose, Networking (Retrofit, OkHttp), Coroutines, Serialization, CameraX, and Security.
 
-*   **`data/network/ApiService.kt`**
-    *   **Purpose**: Handles all direct network communication with external LLM APIs (OpenAI, Poe, Google).
-    *   **Key Contents**:
-        *   `sendMessageStreaming()`: The main entry point. It delegates to provider-specific methods.
-        *   `sendOpenAIMessageStreaming()`, `sendPoeMessageStreaming()`, `sendGoogleMessageStreaming()`: Each of these methods constructs the unique JSON request body and headers required by its respective provider, initiates the HTTP request, and parses the streaming (SSE) response.
-        *   `StreamingCallback`: An interface used to stream partial responses, completion signals, or errors back to the `ChatViewModel`.
+-   `gradle/libs.versions.toml`
+    -   A centralized catalog for managing all project dependency versions.
 
-##### Data Models & Configuration
+-   `app/src/main/AndroidManifest.xml`
+    -   Declares necessary permissions: `INTERNET`, `CAMERA`, `READ/WRITE_STORAGE`.
+    -   Defines **`MainActivity`** as the main entry point.
+    -   Configures intent filters to handle shared files (`ACTION_SEND`, `ACTION_SEND_MULTIPLE`).
+    -   Sets up a `FileProvider` for secure file sharing.
 
-*   **`data/model/ChatHistory.kt` & `ApiKey.kt`**
-    *   **Purpose**: Defines the schemas for all locally stored JSON data.
-    *   **Key Contents**:
-        *   `UserChatHistory`: The root object for a user's data.
-        *   `Chat`: Represents a single conversation thread with its messages and metadata.
-        *   `Message`: Represents a single user or assistant message, including text and attachments.
-        *   `ChatGroup`: Defines a folder-like structure for organizing chats.
-        *   `ApiKey`: Represents a single API key for a provider.
-        *   `AppSettings`: Stores global settings like the current user, selected model, and feature toggles.
+### Data Layer
 
-*   **`assets/providers.json` & `data/model/Provider.kt`**
-    *   **Purpose**: `providers.json` is a configuration file defining how to interact with each LLM provider. `Provider.kt` contains the data classes used to parse this JSON.
-    *   **Key Contents**:
-        *   Defines the `base_url`, `request_type`, `headers`, and `body` structure for each provider's API.
-        *   Lists the available `models` for each provider and their capabilities (e.g., `web_search`).
-        *   Specifies the structure for file uploads (`upload_files_request`).
+-   `app/src/main/assets/providers.json`
+    -   **Crucial instruction file.** Defines the API specifications for each LLM provider (OpenAI, Poe, Google).
+    -   Contains base URLs, request/response formats, models, and file upload specifications. **This file should not be modified unless an API changes.**
 
-##### UI Screens (Composables)
+-   `app/src/main/java/com/example/ApI/data/model/`
+    -   **`ApiKey.kt`**: Defines `ApiKey`, `AppSettings`, `TitleGenerationSettings`, and `ChildLockSettings` data classes. These models represent the core user settings.
+    -   **`ChatHistory.kt`**: Defines the main data structures for conversations: `UserChatHistory`, `Chat`, `Message`, `Attachment`, and `ChatGroup`.
+    -   **`Provider.kt`**: Defines data classes (`Provider`, `Model`, `ApiRequest`, etc.) that map directly to the structure of `providers.json`.
+    -   **`ModelSerializer.kt`**: A custom serializer for handling the flexible `Model` structure in `providers.json` (can be a simple string or a complex object).
+    -   **`UiState.kt`**: Defines all state holder data classes for the UI, including `ChatUiState`, `Screen` navigation states, and states for context menus and dialogs.
 
-*   **`MainActivity.kt`**
-    *   **Purpose**: The app's single entry point.
-    *   **Key Contents**:
-        *   Sets up the edge-to-edge display and the main theme (`LLMApiTheme`).
-        *   `LLMChatApp`: The root composable that acts as a navigator, displaying the correct screen based on `viewModel.currentScreen`.
+-   `app/src/main/java/com/example/ApI/data/repository/DataRepository.kt`
+    -   **Single source of truth for all app data.**
+    -   **Chat Management**: Loads, saves, creates, and deletes chats and groups from local JSON files (`chat_history_[user].json`).
+    -   **API Key Management**: Loads, saves, and reorders API keys from `api_keys_[user].json`.
+    -   **Settings**: Loads and saves `AppSettings` from `app_settings.json`.
+    -   **File Handling**: Manages local file storage for attachments and handles file uploads to the appropriate provider API.
+    -   **Search**: Implements logic for searching through chat titles, content, and filenames.
+    -   **Title Generation**: Contains the logic to call an LLM API to generate a title for a conversation.
 
-*   **`ui/screen/ChatScreen.kt`**
-    *   **Purpose**: Displays the main conversation view.
-    *   **Key Contents**:
-        *   `ChatScreen`: The main composable that builds the top bar, message list, and input area.
-        *   `MessageBubble`: A composable that renders a single chat message, handling different styles for user and assistant. It also includes the logic for the long-press context menu (copy, edit, delete).
-        *   `FilePreview`: Shows a thumbnail for attached files in the input area.
-        *   The bottom input bar with text field, file attachment button, and send/edit buttons.
+-   `app/src/main/java/com/example/ApI/data/network/ApiService.kt`
+    -   **Handles all network communication.**
+    -   Contains functions (`sendMessage`, `sendMessageStreaming`) that build and execute HTTP requests to the LLM providers based on the specifications in `providers.json`.
+    -   Implements logic to parse both standard and streaming (Server-Sent Events) responses.
+    -   Handles provider-specific request body construction and response parsing.
 
-*   **`ui/screen/ChatHistoryScreen.kt`**
-    *   **Purpose**: The main screen that lists all chats and groups.
-    *   **Key Contents**:
-        *   `ChatHistoryScreen`: The main composable that builds the top bar, floating action button, and the list of chats.
-        *   `ChatHistoryItem` & `GroupItem`: Composables that render a single row for a chat or a group, respectively.
-        *   `ChatContextMenu` & `GroupContextMenu`: The pop-up menus that appear on long-press to rename, delete, or manage group associations.
+-   `app/src/main/java/com/example/ApI/data/PasswordEncryption.kt`
+    -   Provides utility functions for encrypting and decrypting the child lock password.
+    -   Uses `EncryptedSharedPreferences` for secure storage.
 
-*   **`ui/screen/ApiKeysScreen.kt` & `UsernameScreen.kt` (Settings)**
-    *   **Purpose**: These screens manage app settings.
-    *   **Key Contents**:
-        *   `ApiKeysScreen`: UI for adding, viewing, toggling, and deleting API keys for different providers.
-        *   `UserSettingsScreen`: UI for changing global settings, such as enabling automatic title generation or multi-message mode.
+### Tools / Function Calling
 
-*   **`ui/screen/GroupScreen.kt`**
-    *   **Purpose**: Displays the contents of a single group/project, including its chats and associated files.
-    *   **Key Contents**:
-        *   `GroupScreen`: The main composable for the group view.
-        *   `ProjectArea`: A special section that appears if a group is marked as a "project," allowing for a shared system prompt and file attachments for all chats within it.
+-   `app/src/main/java/com/example/ApI/tools/Tool.kt`
+    -   Defines the core interfaces and data classes for the function-calling feature: `Tool`, `ToolExecutionResult`, `ToolSpecification`, `ToolCall`, and `ToolCallInfo`.
+
+-   `app/src/main/java/com/example/ApI/tools/ToolRegistry.kt`
+    -   A singleton that holds all available tools in the app.
+    -   Provides methods to get tool specifications formatted for each provider and to execute a tool call requested by an LLM.
+
+-   `app/src/main/java/com/example/ApI/tools/DateTimeTool.kt`
+    -   An example implementation of a `Tool` that provides the current date and time.
+
+### UI Layer & State Management
+
+-   `app/src/main/java/com/example/ApI/ui/ChatViewModel.kt`
+    -   **The central ViewModel for the application.**
+    -   Holds the UI state (`ChatUiState`) and manages all user interactions.
+    -   **Core Logic**: Sending messages, creating/selecting chats, managing API keys, handling file selections and uploads, managing search state.
+    -   **UI Events**: Shows/hides all dialogs and context menus.
+    -   **State Management**: Updates and exposes `ChatUiState` to the UI.
+    -   **Feature Logic**: Handles Child Lock activation, multi-message mode, and title generation triggers.
+
+-   `app/src/main/java/com/example/ApI/MainActivity.kt`
+    -   The app's single `Activity`.
+    -   Sets up the theme and the main composable `LLMChatApp`.
+    -   **Navigation**: Contains the primary `when` statement that routes to different screens based on `viewModel.currentScreen`.
+    -   **Intent Handling**: Processes incoming shared files or text from other apps.
+    -   **Back Handling**: Manages system back button behavior.
+
+-   `app/src/main/java/com/example/ApI/ui/screen/`
+    -   **`ChatScreen.kt`**: The main chat interface. Displays messages, the input field, file attachments, and tool call results. Handles all user interactions within a chat.
+    -   **`ChatHistoryScreen.kt`**: The main screen. Displays the list of all chats and groups. Includes search functionality and context menus for managing chats.
+    -   **`GroupScreen.kt`**: Displays chats within a specific group and manages project-specific features like shared files and system prompts.
+    -   **`ApiKeysScreen.kt`**: UI for adding, deleting, toggling, and reordering API keys for different providers.
+    -   **`UsernameScreen.kt` (UserSettingsScreen)**: UI for managing application settings, including multi-message mode, title generation, and child lock.
+    -   **`ChildLockScreen.kt`**: The lock screen displayed when the child lock feature is active.
+    -   **`IntegrationsScreen.kt`**: UI for enabling or disabling available tools (function calling).
+
+-   `app/src/main/java/com/example/ApI/ui/components/`
+    -   Contains reusable UI components used across different screens.
+    -   **`Dialogs.kt`**: Defines various AlertDialogs (e.g., `SystemPromptDialog`, `ProviderSelectorDialog`, `AddApiKeyDialog`).
+    -   **`ChatHistoryDialog.kt`**: Contains the side panel for chat history and associated dialogs for renaming/deleting chats.
+    -   **`FileSelectionDialog.kt`**: UI for choosing between taking a photo and selecting a file.
+    -   **`ContextMenu.kt`**: A generic context menu component.
+
+-   `app/src/main/java/com/example/ApI/ui/theme/`
+    -   **`Theme.kt`**: Defines the `ApITheme` with a dark color scheme.
+    -   **`Color.kt`**: Defines the application's color palette.
+    -   **`Type.kt`**: Defines the application's typography styles.
+
+### Testing
+
+-   `app/src/test/java/com/example/ApI/ApiKeyReorderTest.kt`
+    -   Unit tests to verify the logic for reordering API keys in a list.

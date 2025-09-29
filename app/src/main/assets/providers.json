@@ -1,7 +1,16 @@
 [
     {
         "provider": "openai",
-        "models": ["gpt-5", "gpt-4.1", "gpt-4o", "o1", "o1-pro","o3", "o4-mini", "o4-mini-deep-research"],
+        "models": [
+            {"name":"gpt-5", "web_search": "optional"},
+            {"name":"gpt-4.1", "web_search": "optional"},
+            {"name":"gpt-4o", "web_search": "optional"},
+            {"name":"o1", "web_search": "unsupported"},
+            {"name":"o1-pro", "web_search": "unsupported"},
+            {"name":"o3", "web_search": "optional"},
+            {"name":"o4-mini", "web_search": "optional"},
+            {"name":"o4-mini-deep-research", "web_search": "required"}
+        ],
         "request": {
             "request_type": "POST",
             "base_url": "https://api.openai.com/v1/responses",
@@ -11,6 +20,29 @@
             },
             "body": {
                 "model": "{model_name}",
+                "tools": [
+                    {
+                        "type": "web_search_preview"
+                    },
+                    {
+                        "type": "function",
+                        "name": "{tool_name}",
+                        "description": "{tool_description}",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "param_name": {
+                                    "type": "{param_type, e.g. string, number, boolean, array, object}",
+                                    "description": "{param_description}",
+                                    "enum": "{optional, for picklists}"
+                                }
+                            },
+                            "required": ["{param_name}"],
+                            "additionalProperties": false
+                        },
+                        "strict": true
+                    }
+                ],
                 "input": [
                     {
                         "role": "system",
@@ -35,7 +67,18 @@
                     },
                     {
                         "role": "user",
-                        "content": "{user_second_prompt}"
+                        "content": "{prompt_requires_tool_call}"
+                    },
+                    {
+                        "type": "function_call",
+                        "name": "{tool_name}",
+                        "arguments": "{\"key\": \"value\"}",
+                        "call_id": "{tool_call_id}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "{tool_call_id}",
+                        "output": "{\"key\": \"value\"}"
                     }
                 ]
             }
@@ -44,6 +87,15 @@
             "id": "{response_id}",
             "model": "{model_name}",
             "output": [
+                {
+                    "id": "{web_search_call_id}",
+                    "type": "web_search_call",
+                    "status": "completed",
+                    "action": {
+                        "type": "search",
+                        "query": "{web_search_query}"
+                    }
+                }
                 {
                     "id": "{reasoning_id}",
                     "type": "reasoning",
@@ -56,11 +108,27 @@
                     "content": [
                         {
                             "type": "output_text",
-                            "annotations": [],
+                            "annotations": [
+                                {
+                                    "type": "url_citation",
+                                    "end_index": "{end_index}",
+                                    "start_index": "{start_index}",
+                                    "title": "{title}",
+                                    "url": "{url}"
+                                }
+                            ],
                             "text": "{model_response}"
                         }
                     ],
                     "role": "assistant"
+                },
+                {
+                    "id": "{function_call_id: non relevant!}",
+                    "type": "function_call",
+                    "status": "completed",
+                    "arguments": "{\"key\": \"value\"}",
+                    "call_id": "{tool_call_id}",
+                    "name": "{tool_name}"
                 }
             ],
             "usage": {
@@ -83,7 +151,7 @@
                 "purpose": "{`assistants` for general use/`vision` for images}"
             },
             "files": {
-                "file": "{open(file_path, \"rb\")}"
+                "file": {open(file_path, "rb")}
             }
         },
         "upload_files_response_important_fields": {
@@ -95,63 +163,78 @@
         "models": [
             {
                 "name": "GPT-5",
-                "min_points": 250
+                "min_points": 250,
+                "web_search": "unsupported"
             },
             {
                 "name": "GPT-4.1",
-                "min_points": 206
+                "min_points": 206,
+                "web_search": "unsupported"
             },
             {
                 "name": "o3",
-                "min_points": 401
+                "min_points": 401,
+                "web_search": "unsupported"
             },
             {
                 "name": "o4-mini",
-                "min_points": 243
+                "min_points": 243,
+                "web_search": "unsupported"
             },
             {
                 "name": "Claude-Sonnet-4-Search",
-                "min_points": 870
+                "min_points": 870,
+                "web_search": "required"
             },
             {
                 "name": "Claude-Sonnet-4-Reasoning",
-                "min_points": 1628
+                "min_points": 1628,
+                "web_search": "unsupported"
             },
             {
                 "name": "Claude-Sonnet-3.5",
-                "min_points": 270
+                "min_points": 270,
+                "web_search": "unsupported"
             },
             {
                 "name": "GLM-4.5",
-                "min_points": 180
+                "min_points": 180,
+                "web_search": "unsupported"
             },
             {
                 "name": "Gemini-2.5-Pro",
-                "min_points": 335
+                "min_points": 335,
+                "web_search": "required"
             },
             {
                 "name": "Grok-3",
-                "min_points": 856
+                "min_points": 856,
+                "web_search": "unsupported"
             },
             {
                 "name": "Grok-4",
-                "min_points": 773
+                "min_points": 773,
+                "web_search": "unsupported"
             },
             {
                 "name": "GPT-OSS-120B-T",
-                "min_points": 50
+                "min_points": 50,
+                "web_search": "unsupported"
             },
             {
                 "name": "DeepSeek-V3-FW",
-                "min_points": 300
+                "min_points": 300,
+                "web_search": "unsupported"
             },
             {
                 "name": "DeepSeek-R1",
-                "min_points": 600
+                "min_points": 600,
+                "web_search": "unsupported"
             },
             {
                 "name": "Kimi-K2",
-                "min_points": 200
+                "min_points": 200,
+                "web_search": "unsupported"
             }
         ],
         "request": {
@@ -180,8 +263,8 @@
                                 "url": "{file_URL}",
                                 "content_type": "{mime_type, e.g. image/png}",
                                 "name": "{file_name}",
-                                "inline_ref": "(None)",
-                                "parsed_content": "(None)"
+                                "inline_ref": None,
+                                "parsed_content": None
                             }
                         ]
                     },
@@ -198,7 +281,45 @@
                 ],
                 "user_id": "",
                 "conversation_id": "",
-                "message_id": ""
+                "message_id": "",
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "{tool_name}",
+                            "description": "{tool_description}",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "param_name": {
+                                        "type": "{param_type, e.g. string, number, boolean, array, object}",
+                                        "description": "{param_description}",
+                                        "enum": "{optional, for picklists}"
+                                    }
+                                },
+                                "required": ["{param_name}"]
+                            }
+                        }
+                    }
+                ],
+                "tool_calls": [
+                    {
+                        "id": "{tool_call_id}",
+                        "type": "function",
+                        "function": {
+                            "name": "{tool_name}",
+                            "arguments": "{\"key\": \"value\"}"
+                        }
+                    }
+                ],
+                "tool_results": [
+                    {
+                        "role": "tool",
+                        "name": "{tool_name}",
+                        "tool_call_id": "{tool_call_id}",
+                        "content": "{\"key\": \"value\"}"
+                    }
+                ]
             }
         },
         "response_important_fields": {
@@ -216,6 +337,27 @@
                         "text": "{replacement_text}"
                     },
                     "description": "Replaces all previous text content"
+                },
+                {
+                    "event": "json",
+                    "data": {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": "{tool_call_index}",
+                                            "function": {
+                                                "arguments": "{\"key\": \"value\"}"
+                                            }
+                                        }
+                                    ]
+                                },
+                                "finish_reason": null, // continue listen for streaming
+                                "finish_reason": "tool_calls" // stop listening for streaming
+                            }
+                        ]
+                    }
                 },
                 {
                     "event": "error",
@@ -238,7 +380,7 @@
                 "Authorization": "{POE_API_KEY_HERE}"
             },
             "files": {
-                "file": "({file_name}, {open(file_path, \"rb\")}, {mime_type, e.g. image/png})"
+                "file": ("{file_name}", {open(file_path, "rb")}, "{mime_type, e.g. image/png}")
             }
         },
         "upload_files_response_important_fields": {
@@ -249,7 +391,12 @@
     },
     {
         "provider": "google",
-        "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"],
+        "models": [
+            {"name": "gemini-2.5-pro", "web_search": "optional"},
+            {"name": "gemini-2.5-flash", "web_search": "optional"},
+            {"name": "gemini-1.5-pro-latest", "web_search": "optional"},
+            {"name": "gemini-1.5-flash-latest", "web_search": "optional"}
+        ],
         "request": {
             "request_type": "POST",
             "base_url": "https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
@@ -265,6 +412,30 @@
                         {"text": "{system_prompt}"}
                     ]
                 },
+                "tools": [
+                    {
+                        "google_search": {}
+                    },
+                    {
+                        "functionDeclarations": [
+                            {
+                                "name": "{tool_name}",
+                                "description": "{tool_description}",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                        "param_name": {
+                                            "type": "{param_type, e.g. string, number, boolean, array, object}",
+                                            "description": "{param_description}",
+                                            "enum": "{optional, for picklists}"
+                                        }
+                                    },
+                                    "required": ["{param_name}"]
+                                }
+                            }
+                        ]
+                    }
+                ],
                 "contents": [
                     {
                         "role": "user",
@@ -287,7 +458,33 @@
                     {
                         "role": "user",
                         "parts": [
-                            {"text": "{user_second_prompt}"}
+                            {"text": "{prompt_requires_tool_call}"}
+                        ]
+                    },
+                    {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "name": "{tool_name}",
+                                    "args": {
+                                        "key": "value"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "role": "function",
+                        "parts": [
+                            {
+                                "functionResponse": {
+                                    "name": "{tool_name}",
+                                    "response": {
+                                        "key": "value"
+                                    }
+                                }
+                            }
                         ]
                     }
                 ]
@@ -300,11 +497,45 @@
                         "parts": [
                             {
                                 "text": "{model_response}"
+                            },
+                            {
+                                "functionCall": {
+                                    "name": "{tool_name}",
+                                    "args": {
+                                        "key": "value"
+                                    }
+                                }
                             }
                         ],
                         "role": "model"
                     },
-                    "finishReason": "STOP"
+                    "finishReason": "STOP",
+                    "groundingMetadata": {
+                        "searchEntryPoint": {
+                            "renderedContent": "{rendered_content_as_html_css}"
+                        },
+                        "groundingChunks": [
+                            {
+                                "web": {
+                                    "uri": "{web_search_uri}",
+                                    "title": "{web_search_title}"
+                                }
+                            }
+                        ],
+                        "groundingSupports": [
+                            {
+                                "segment": {
+                                    "startIndex": "{start_index}",
+                                    "endIndex": "{end_index}",
+                                    "text": "{relevant_segment}"
+                                },
+                                "groundingChunkIndices": ["{grounding_chunk_indices}"]
+                            }
+                        ],
+                        "webSearchQueries": [
+                            "{web_search_query}"
+                        ]
+                    }
                 }
             ],
             "usageMetadata": {
@@ -326,7 +557,7 @@
                 "Content-Type": "{mime_type, e.g. image/png}"
             },
             "data": {
-                "{open(file_path, \"rb\").read()}"
+                {open(file_path, "rb").read()}
             }
         },
         "upload_files_response_important_fields": {
