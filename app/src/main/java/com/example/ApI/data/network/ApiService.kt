@@ -876,6 +876,112 @@ class ApiService(private val context: Context) {
         }
         
         try {
+            // Make streaming request and parse response
+            val streamingResponse = makePoeStreamingRequest(
+                provider, modelName, messages, systemPrompt, apiKey,
+                webSearchEnabled, enabledTools, callback
+            )
+            
+            when (streamingResponse) {
+                is PoeStreamingResult.TextComplete -> {
+                    // Normal text response - we're done
+                    Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Text response complete")
+                    callback.onComplete(streamingResponse.fullText)
+                }
+                is PoeStreamingResult.ToolCallDetected -> {
+                    // Model wants to call a tool
+                    Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool call detected - ${streamingResponse.toolCall.toolId}")
+                    
+                    // Execute the tool via callback
+                    val toolResult = callback.onToolCall(streamingResponse.toolCall)
+                    Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool executed with result: $toolResult")
+                    
+                    // Create the tool messages (but don't add them to conversation history for Poe)
+                    val toolCallMessage = Message(
+                        role = "tool_call",
+                        text = "Tool call: ${streamingResponse.toolCall.toolId}",
+                        toolCallId = streamingResponse.toolCall.id,
+                        toolCall = com.example.ApI.tools.ToolCallInfo(
+                            toolId = streamingResponse.toolCall.toolId,
+                            toolName = streamingResponse.toolCall.toolId,
+                            parameters = streamingResponse.toolCall.parameters,
+                            result = toolResult,
+                            timestamp = java.time.Instant.now().toString()
+                        ),
+                        datetime = java.time.Instant.now().toString()
+                    )
+                    
+                    val toolResponseMessage = Message(
+                        role = "tool_response",
+                        text = when (toolResult) {
+                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                            is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                        },
+                        toolResponseCallId = streamingResponse.toolCall.id,
+                        toolResponseOutput = when (toolResult) {
+                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                            is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                        },
+                        datetime = java.time.Instant.now().toString()
+                    )
+                    
+                    // Save the tool messages to chat history (displayed separately from conversation)
+                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+                    
+                    // For Poe: Send the tool_calls and tool_results in the follow-up request
+                    // This is how Poe handles client-side tool execution
+                    Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Sending follow-up request with tool_calls and tool_results")
+                    
+                    // Send follow-up streaming request with tool results
+                    val followUpResponse = makePoeStreamingRequestWithToolResults(
+                        provider, modelName, messages, systemPrompt, apiKey,
+                        webSearchEnabled, enabledTools,
+                        streamingResponse.toolCall,
+                        toolResult,
+                        callback
+                    )
+                    
+                    when (followUpResponse) {
+                        is PoeStreamingResult.TextComplete -> {
+                            Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Got final text response")
+                            callback.onComplete(followUpResponse.fullText)
+                        }
+                        is PoeStreamingResult.ToolCallDetected -> {
+                            // Model wants to call another tool - for now, just return an error
+                            callback.onError("Multiple tool calls not yet supported")
+                        }
+                        is PoeStreamingResult.Error -> {
+                            callback.onError(followUpResponse.error)
+                        }
+                    }
+                }
+                is PoeStreamingResult.Error -> {
+                    // Already called callback.onError in makePoeStreamingRequest
+                    // No need to call it again
+                }
+            }
+        } catch (e: Exception) {
+            callback.onError("Failed to send Poe streaming message: ${e.message}")
+        }
+    }
+    
+    /**
+     * Makes a streaming Poe API request WITH tool results and returns the parsed result
+     * This is used for the follow-up request after a tool has been executed
+     */
+    private suspend fun makePoeStreamingRequestWithToolResults(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        toolCall: com.example.ApI.tools.ToolCall,
+        toolResult: com.example.ApI.tools.ToolExecutionResult,
+        callback: StreamingCallback
+    ): PoeStreamingResult = withContext(Dispatchers.IO) {
+        try {
             // Build request URL - replace {model_name} placeholder
             val baseUrl = provider.request.base_url.replace("{model_name}", modelName)
             val url = URL(baseUrl)
@@ -888,7 +994,7 @@ class ApiService(private val context: Context) {
             connection.setRequestProperty("Accept", "application/json")
             connection.doOutput = true
             
-            // Build conversation history for Poe format
+            // Build conversation history for Poe format (same as before)
             val conversationMessages = mutableListOf<JsonObject>()
             
             // Add system prompt
@@ -900,7 +1006,7 @@ class ApiService(private val context: Context) {
                 })
             }
             
-            // Add messages from conversation history
+            // Add messages from conversation history (skip tool_call and tool_response)
             messages.forEach { message ->
                 when (message.role) {
                     "user" -> {
@@ -932,6 +1038,243 @@ class ApiService(private val context: Context) {
                             put("content", message.text)
                             put("content_type", "text/markdown")
                         })
+                    }
+                    "tool_call", "tool_response" -> {
+                        // Skip - these are handled separately in tool_calls/tool_results
+                    }
+                }
+            }
+            
+            // Build request body with tool_calls and tool_results
+            val requestBody = buildJsonObject {
+                put("version", "1.2")
+                put("type", "query")
+                put("query", JsonArray(conversationMessages))
+                put("user_id", "")
+                put("conversation_id", "")
+                put("message_id", "")
+
+                // Add tools section
+                if (enabledTools.isNotEmpty()) {
+                    put("tools", buildJsonArray {
+                        enabledTools.forEach { toolSpec ->
+                            add(buildJsonObject {
+                                put("type", "function")
+                                put("function", buildJsonObject {
+                                    put("name", toolSpec.name)
+                                    put("description", toolSpec.description)
+                                    if (toolSpec.parameters != null) {
+                                        put("parameters", toolSpec.parameters)
+                                    } else {
+                                        put("parameters", buildJsonObject {})
+                                    }
+                                })
+                            })
+                        }
+                    })
+                }
+                
+                // Add tool_calls - the original tool call that was made
+                put("tool_calls", buildJsonArray {
+                    add(buildJsonObject {
+                        put("id", toolCall.id)
+                        put("type", "function")
+                        put("function", buildJsonObject {
+                            put("name", toolCall.toolId)
+                            put("arguments", json.encodeToString(toolCall.parameters))
+                        })
+                    })
+                })
+                
+                // Add tool_results - the result from executing the tool
+                put("tool_results", buildJsonArray {
+                    add(buildJsonObject {
+                        put("role", "tool")
+                        put("name", toolCall.toolId)
+                        put("tool_call_id", toolCall.id)
+                        put("content", when (toolResult) {
+                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                            is com.example.ApI.tools.ToolExecutionResult.Error -> "{\"error\":\"${toolResult.error}\"}"
+                        })
+                    })
+                })
+            }
+            
+            Log.d("TOOL_CALL_DEBUG", "Poe: Sending request with tool results: ${json.encodeToString(requestBody)}")
+            
+            // Send request
+            val writer = OutputStreamWriter(connection.outputStream)
+            writer.write(json.encodeToString(requestBody))
+            writer.flush()
+            writer.close()
+            
+            // Read response - same as before
+            val responseCode = connection.responseCode
+            val reader = if (responseCode >= 400) {
+                val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                callback.onError("HTTP $responseCode: $errorBody")
+                return@withContext PoeStreamingResult.Error("HTTP $responseCode: $errorBody")
+            } else {
+                BufferedReader(InputStreamReader(connection.inputStream))
+            }
+            
+            // Parse server-sent events response and stream chunks
+            val fullResponse = StringBuilder()
+            var line: String?
+            
+            Log.d("TOOL_CALL_DEBUG", "Poe: Starting to read follow-up stream...")
+            
+            while (reader.readLine().also { line = it } != null) {
+                val currentLine = line!!
+                
+                // Look for event lines in SSE format
+                if (currentLine.startsWith("event:")) {
+                    val eventType = currentLine.substring(6).trim()
+                    
+                    // Read the next line which should be the data
+                    val dataLine = reader.readLine()
+                    if (dataLine == null || !dataLine.startsWith("data:")) {
+                        continue
+                    }
+                    
+                    val dataContent = dataLine.substring(5).trim()
+                    
+                    // Skip empty data lines
+                    if (dataContent.isBlank() || dataContent == "{}") {
+                        continue
+                    }
+                    
+                    try {
+                        when (eventType) {
+                            "text" -> {
+                                val eventJson = json.parseToJsonElement(dataContent).jsonObject
+                                val text = eventJson["text"]?.jsonPrimitive?.content
+                                if (text != null) {
+                                    fullResponse.append(text)
+                                    callback.onPartialResponse(text)
+                                }
+                            }
+                            "replace_response" -> {
+                                val eventJson = json.parseToJsonElement(dataContent).jsonObject
+                                val replacementText = eventJson["text"]?.jsonPrimitive?.content
+                                if (replacementText != null && replacementText.isNotBlank()) {
+                                    fullResponse.clear()
+                                    fullResponse.append(replacementText)
+                                    callback.onPartialResponse(replacementText)
+                                }
+                            }
+                            "error" -> {
+                                val eventJson = json.parseToJsonElement(dataContent).jsonObject
+                                val errorText = eventJson["text"]?.jsonPrimitive?.content ?: "Unknown error"
+                                val errorType = eventJson["error_type"]?.jsonPrimitive?.content
+                                reader.close()
+                                connection.disconnect()
+                                callback.onError("Poe API error ($errorType): $errorText")
+                                return@withContext PoeStreamingResult.Error("Poe API error ($errorType): $errorText")
+                            }
+                            "done" -> {
+                                // End of stream
+                                Log.d("TOOL_CALL_DEBUG", "Poe: Follow-up stream done")
+                                break
+                            }
+                        }
+                    } catch (jsonException: Exception) {
+                        Log.e("TOOL_CALL_DEBUG", "Poe: Error parsing follow-up event: ${jsonException.message}")
+                        continue
+                    }
+                }
+            }
+            
+            reader.close()
+            connection.disconnect()
+            
+            // Return the text response (no more tool calls expected in follow-up)
+            return@withContext if (fullResponse.isNotEmpty()) {
+                PoeStreamingResult.TextComplete(fullResponse.toString())
+            } else {
+                PoeStreamingResult.Error("Empty response from Poe follow-up request")
+            }
+        } catch (e: Exception) {
+            callback.onError("Failed to make Poe streaming request with tool results: ${e.message}")
+            PoeStreamingResult.Error("Failed to make Poe streaming request with tool results: ${e.message}")
+        }
+    }
+    
+    /**
+     * Makes a streaming Poe API request and returns the parsed result
+     */
+    private suspend fun makePoeStreamingRequest(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        callback: StreamingCallback
+    ): PoeStreamingResult = withContext(Dispatchers.IO) {
+        try {
+            // Build request URL - replace {model_name} placeholder
+            val baseUrl = provider.request.base_url.replace("{model_name}", modelName)
+            val url = URL(baseUrl)
+            val connection = url.openConnection() as HttpURLConnection
+            
+            // Set headers
+            connection.requestMethod = provider.request.request_type
+            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.doOutput = true
+            
+            // Build conversation history for Poe format
+            val conversationMessages = mutableListOf<JsonObject>()
+            
+            // Add system prompt
+            if (systemPrompt.isNotBlank()) {
+                conversationMessages.add(buildJsonObject {
+                    put("role", "system")
+                    put("content", systemPrompt)
+                    put("content_type", "text/markdown")
+                })
+            }
+            
+            // Add messages from conversation history
+            // NOTE: For Poe, we DON'T include tool_call and tool_response messages in the conversation
+            messages.forEach { message ->
+                when (message.role) {
+                    "user" -> {
+                        val messageObj = buildJsonObject {
+                            put("role", "user")
+                            put("content", message.text)
+                            put("content_type", "text/markdown")
+                            
+                            // Add attachments if any
+                            if (message.attachments.isNotEmpty()) {
+                                put("attachments", buildJsonArray {
+                                    message.attachments.forEach { attachment ->
+                                        add(buildJsonObject {
+                                            put("url", attachment.file_POE_url ?: "{file_URL}")
+                                            put("content_type", attachment.mime_type)
+                                            put("name", attachment.file_name)
+                                            put("inline_ref", JsonNull)
+                                            put("parsed_content", JsonNull)
+                                        })
+                                    }
+                                })
+                            }
+                        }
+                        conversationMessages.add(messageObj)
+                    }
+                    "assistant" -> {
+                        conversationMessages.add(buildJsonObject {
+                            put("role", "bot")
+                            put("content", message.text)
+                            put("content_type", "text/markdown")
+                        })
+                    }
+                    // Skip tool_call and tool_response - they're not part of Poe's conversation history
+                    "tool_call", "tool_response" -> {
+                        // Do nothing - Poe handles these outside the conversation flow
                     }
                 }
             }
@@ -976,23 +1319,35 @@ class ApiService(private val context: Context) {
             // Read response - Poe uses server-sent events format
             val responseCode = connection.responseCode
             val reader = if (responseCode >= 400) {
-                BufferedReader(InputStreamReader(connection.errorStream))
-                callback.onError("HTTP $responseCode")
-                return
+                val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                callback.onError("HTTP $responseCode: $errorBody")
+                return@withContext PoeStreamingResult.Error("HTTP $responseCode: $errorBody")
             } else {
                 BufferedReader(InputStreamReader(connection.inputStream))
             }
             
             // Parse server-sent events response and stream chunks
             val fullResponse = StringBuilder()
+            var detectedToolCall: com.example.ApI.tools.ToolCall? = null
+            val toolCallBuffer = mutableMapOf<Int, MutableMap<String, Any>>() // Buffer to accumulate tool call data
             var line: String?
+            
+            Log.d("TOOL_CALL_DEBUG", "Poe: Starting to read stream...")
             
             while (reader.readLine().also { line = it } != null) {
                 val currentLine = line!!
                 
-                // Look for data lines in SSE format
-                if (currentLine.startsWith("data:")) {
-                    val dataContent = currentLine.substring(5).trim()
+                // Look for event lines in SSE format
+                if (currentLine.startsWith("event:")) {
+                    val eventType = currentLine.substring(6).trim()
+                    
+                    // Read the next line which should be the data
+                    val dataLine = reader.readLine()
+                    if (dataLine == null || !dataLine.startsWith("data:")) {
+                        continue
+                    }
+                    
+                    val dataContent = dataLine.substring(5).trim()
                     
                     // Skip empty data lines
                     if (dataContent.isBlank() || dataContent == "{}") {
@@ -1000,88 +1355,118 @@ class ApiService(private val context: Context) {
                     }
                     
                     try {
-                        val eventJson = json.parseToJsonElement(dataContent).jsonObject
-                        
-                        // Check for text content (direct text field)
-                        val text = eventJson["text"]?.jsonPrimitive?.content
-                        if (text != null) {
-                            fullResponse.append(text)
-                            callback.onPartialResponse(text)
-                            continue
-                        }
-                        
-                        // Check for event type
-                        val eventType = eventJson["event"]?.jsonPrimitive?.content
                         when (eventType) {
                             "text" -> {
-                                val eventData = eventJson["data"]?.jsonObject
-                                val eventText = eventData?.get("text")?.jsonPrimitive?.content
-                                if (eventText != null) {
-                                    fullResponse.append(eventText)
-                                    callback.onPartialResponse(eventText)
+                                val eventJson = json.parseToJsonElement(dataContent).jsonObject
+                                val text = eventJson["text"]?.jsonPrimitive?.content
+                                if (text != null) {
+                                    fullResponse.append(text)
+                                    callback.onPartialResponse(text)
                                 }
                             }
                             "replace_response" -> {
-                                val eventData = eventJson["data"]?.jsonObject
-                                val replacementText = eventData?.get("text")?.jsonPrimitive?.content
-                                if (replacementText != null) {
+                                val eventJson = json.parseToJsonElement(dataContent).jsonObject
+                                val replacementText = eventJson["text"]?.jsonPrimitive?.content
+                                if (replacementText != null && replacementText.isNotBlank()) {
                                     fullResponse.clear()
                                     fullResponse.append(replacementText)
                                     callback.onPartialResponse(replacementText)
                                 }
                             }
                             "json" -> {
-                                val eventData = eventJson["data"]?.jsonObject
-                                val choices = eventData?.get("choices")?.jsonArray
+                                val eventJson = json.parseToJsonElement(dataContent).jsonObject
+                                val choices = eventJson["choices"]?.jsonArray
                                 
                                 choices?.firstOrNull()?.jsonObject?.let { choice ->
                                     val delta = choice["delta"]?.jsonObject
                                     val toolCalls = delta?.get("tool_calls")?.jsonArray
                                     
-                                    toolCalls?.forEach { toolCallElement ->
-                                        val toolCallObj = toolCallElement.jsonObject
-                                        val index = toolCallObj["index"]?.jsonPrimitive?.int
-                                        val function = toolCallObj["function"]?.jsonObject
-                                        
-                                        if (function != null) {
-                                            val arguments = function["arguments"]?.jsonPrimitive?.content
-                                            if (arguments != null) {
-                                                // Create and execute tool call
-                                                val paramsJson = json.parseToJsonElement(arguments).jsonObject
-                                                val toolName = function["name"]?.jsonPrimitive?.content ?: "unknown_tool"
-                                                val toolCall = com.example.ApI.tools.ToolCall(
-                                                    id = index.toString(),
-                                                    toolId = toolName,
-                                                    parameters = paramsJson,
-                                                    provider = "poe"
-                                                )
-                                                val toolResult = com.example.ApI.tools.ToolRegistry.getInstance().executeTool(toolCall, enabledTools.map { it.name })
-                                                callback.onComplete("") // Empty response since we're handling tool call
-                                                return
+                                    if (toolCalls != null) {
+                                        toolCalls.forEach { toolCallElement ->
+                                            val toolCallObj = toolCallElement.jsonObject
+                                            val index = toolCallObj["index"]?.jsonPrimitive?.int ?: 0
+                                            val id = toolCallObj["id"]?.jsonPrimitive?.content
+                                            val type = toolCallObj["type"]?.jsonPrimitive?.content
+                                            val function = toolCallObj["function"]?.jsonObject
+                                            
+                                            // Initialize buffer for this index if needed
+                                            if (!toolCallBuffer.containsKey(index)) {
+                                                toolCallBuffer[index] = mutableMapOf()
                                             }
+                                            
+                                            val buffer = toolCallBuffer[index]!!
+                                            
+                                            // Accumulate tool call data
+                                            if (id != null) {
+                                                buffer["id"] = id
+                                            }
+                                            if (type != null) {
+                                                buffer["type"] = type
+                                            }
+                                            if (function != null) {
+                                                val name = function["name"]?.jsonPrimitive?.content
+                                                val arguments = function["arguments"]?.jsonPrimitive?.content
+                                                
+                                                if (name != null) {
+                                                    buffer["name"] = name
+                                                }
+                                                if (arguments != null) {
+                                                    // Append to existing arguments
+                                                    val existingArgs = buffer["arguments"] as? String ?: ""
+                                                    buffer["arguments"] = existingArgs + arguments
+                                                }
+                                            }
+                                            
+                                            Log.d("TOOL_CALL_DEBUG", "Poe: Accumulated tool call data for index $index: $buffer")
                                         }
                                     }
                                     
                                     // Check finish reason
                                     val finishReason = choice["finish_reason"]?.jsonPrimitive?.content
-                                    // Note: finish_reason handling removed to avoid inline lambda return issue
+                                    if (finishReason == "tool_calls") {
+                                        Log.d("TOOL_CALL_DEBUG", "Poe: Finish reason is tool_calls")
+                                        
+                                        // Finalize the tool call from buffer
+                                        toolCallBuffer.values.firstOrNull()?.let { buffer ->
+                                            val toolId = buffer["id"] as? String
+                                            val toolName = buffer["name"] as? String
+                                            val toolArguments = buffer["arguments"] as? String
+                                            
+                                            if (toolId != null && toolName != null && toolArguments != null) {
+                                                try {
+                                                    val paramsJson = json.parseToJsonElement(toolArguments).jsonObject
+                                                    detectedToolCall = com.example.ApI.tools.ToolCall(
+                                                        id = toolId,
+                                                        toolId = toolName,
+                                                        parameters = paramsJson,
+                                                        provider = "poe"
+                                                    )
+                                                    Log.d("TOOL_CALL_DEBUG", "Poe: Created tool call: $detectedToolCall")
+                                                } catch (e: Exception) {
+                                                    Log.e("TOOL_CALL_DEBUG", "Poe: Failed to parse tool arguments: ${e.message}")
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             "error" -> {
-                                val eventData = eventJson["data"]?.jsonObject
-                                val errorText = eventData?.get("text")?.jsonPrimitive?.content ?: "Unknown error"
-                                val errorType = eventData?.get("error_type")?.jsonPrimitive?.content
+                                val eventJson = json.parseToJsonElement(dataContent).jsonObject
+                                val errorText = eventJson["text"]?.jsonPrimitive?.content ?: "Unknown error"
+                                val errorType = eventJson["error_type"]?.jsonPrimitive?.content
                                 reader.close()
                                 connection.disconnect()
                                 callback.onError("Poe API error ($errorType): $errorText")
-                                return
+                                return@withContext PoeStreamingResult.Error("Poe API error ($errorType): $errorText")
                             }
                             "done" -> {
                                 // End of stream
+                                Log.d("TOOL_CALL_DEBUG", "Poe: Stream done")
                                 break
                             }
                         }
                     } catch (jsonException: Exception) {
+                        Log.e("TOOL_CALL_DEBUG", "Poe: Error parsing event: ${jsonException.message}")
                         // If we can't parse as JSON, continue reading other lines
                         continue
                     }
@@ -1091,10 +1476,25 @@ class ApiService(private val context: Context) {
             reader.close()
             connection.disconnect()
             
-            callback.onComplete(fullResponse.toString())
+            // Return result based on what we found
+            return@withContext when {
+                detectedToolCall != null -> PoeStreamingResult.ToolCallDetected(detectedToolCall!!)
+                fullResponse.isNotEmpty() -> PoeStreamingResult.TextComplete(fullResponse.toString())
+                else -> PoeStreamingResult.Error("Empty response from Poe")
+            }
         } catch (e: Exception) {
-            callback.onError("Failed to send Poe streaming message: ${e.message}")
+            callback.onError("Failed to make Poe streaming request: ${e.message}")
+            PoeStreamingResult.Error("Failed to make Poe streaming request: ${e.message}")
         }
+    }
+    
+    /**
+     * Sealed class representing different types of Poe streaming results
+     */
+    private sealed class PoeStreamingResult {
+        data class TextComplete(val fullText: String) : PoeStreamingResult()
+        data class ToolCallDetected(val toolCall: com.example.ApI.tools.ToolCall) : PoeStreamingResult()
+        data class Error(val error: String) : PoeStreamingResult()
     }
 
     private suspend fun sendGoogleMessage(
