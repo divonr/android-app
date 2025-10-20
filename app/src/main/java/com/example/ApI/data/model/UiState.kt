@@ -8,6 +8,12 @@ enum class WebSearchSupport {
     REQUIRED
 }
 
+enum class TextDirectionMode {
+    AUTO,   // Automatically infer based on first character
+    RTL,    // Force right-to-left
+    LTR     // Force left-to-right
+}
+
 data class ChatUiState(
     val currentMessage: String = "",
     val isLoading: Boolean = false,
@@ -52,7 +58,8 @@ data class ChatUiState(
     val searchQuery: String = "",
     val searchResults: List<SearchResult> = emptyList(),
     val searchContext: SearchResult? = null, // Context for jumping to search results
-    val executingToolCall: ExecutingToolInfo? = null // Track currently executing tool
+    val executingToolCall: ExecutingToolInfo? = null, // Track currently executing tool
+    val textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO // Text direction mode for message bubbles
 )
 
 data class ChatContextMenuState(

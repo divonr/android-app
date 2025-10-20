@@ -80,8 +80,10 @@ dependencies {
     // Permissions
     implementation(libs.accompanist.permissions)
     
-    // Markdown support
-    implementation("com.github.jeziellago:compose-markdown:0.5.4")
+    // Markdown support - CommonMark
+    implementation("org.commonmark:commonmark:0.22.0")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.22.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.22.0")
     
     // Camera
     implementation(libs.camerax.core)

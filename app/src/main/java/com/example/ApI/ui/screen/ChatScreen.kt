@@ -65,7 +65,6 @@ import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.components.*
 import com.example.ApI.ui.theme.*
-import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
 import java.io.File
 import java.time.Instant
@@ -463,6 +462,48 @@ fun ChatScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Spacer(modifier = Modifier.weight(1f))
+                                    
+                                    // Text Direction Toggle Button
+                                    Surface(
+                                        shape = MaterialTheme.shapes.medium,
+                                        color = SurfaceVariant,
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clickable { viewModel.toggleTextDirection() }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            when (uiState.textDirectionMode) {
+                                                TextDirectionMode.AUTO -> {
+                                                    Text(
+                                                        text = "A",
+                                                        color = OnSurfaceVariant,
+                                                        fontSize = 16.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                                TextDirectionMode.RTL -> {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                        contentDescription = "RTL",
+                                                        tint = OnSurfaceVariant,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                                TextDirectionMode.LTR -> {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                                        contentDescription = "LTR",
+                                                        tint = OnSurfaceVariant,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    
+                                    // Download/Export Button
                                     Surface(
                                         shape = MaterialTheme.shapes.medium,
                                         color = SurfaceVariant,
@@ -528,6 +569,7 @@ fun ChatScreen(
                             item {
                                 StreamingMessageBubble(
                                     text = uiState.streamingText,
+                                    textDirectionMode = uiState.textDirectionMode,
                                     modifier = Modifier.padding(vertical = 4.dp)
                                 )
                             }
@@ -1085,6 +1127,8 @@ fun MessageBubble(
     isBeingEdited: Boolean = false,
     searchHighlight: SearchResult? = null
 ) {
+    val uiState by viewModel.uiState.collectAsState()
+    
     // Handle tool call and tool response messages specially
     if (message.isToolCall || message.toolCall != null || message.isToolResponse) {
         ToolCallBubble(
@@ -1274,6 +1318,12 @@ fun MessageBubble(
                                 )
                             } else {
                                 // Normal markdown rendering
+                                val textDirection = when (uiState.textDirectionMode) {
+                                    TextDirectionMode.AUTO -> TextDirectionUtils.inferTextDirection(message.text)
+                                    TextDirectionMode.RTL -> LayoutDirection.Rtl
+                                    TextDirectionMode.LTR -> LayoutDirection.Ltr
+                                }
+                                
                                 MarkdownText(
                                     markdown = message.text,
                                     style = TextStyle(
@@ -1281,7 +1331,8 @@ fun MessageBubble(
                                         fontSize = 15.sp,
                                         lineHeight = 18.sp,
                                         letterSpacing = 0.sp
-                                    )
+                                    ),
+                                    textDirection = textDirection
                                 )
                             }
                         }
@@ -1540,6 +1591,7 @@ fun FilePreview(
 @Composable
 fun StreamingMessageBubble(
     text: String,
+    textDirectionMode: TextDirectionMode,
     modifier: Modifier = Modifier
 ) {
     val bubbleColor = AssistantMessageBubble
@@ -1567,6 +1619,12 @@ fun StreamingMessageBubble(
                     vertical = 12.dp
                 )
             ) {
+                val textDirection = when (textDirectionMode) {
+                    TextDirectionMode.AUTO -> TextDirectionUtils.inferTextDirection(text)
+                    TextDirectionMode.RTL -> LayoutDirection.Rtl
+                    TextDirectionMode.LTR -> LayoutDirection.Ltr
+                }
+                
                 MarkdownText(
                     markdown = text,
                     style = TextStyle(
@@ -1574,7 +1632,8 @@ fun StreamingMessageBubble(
                         fontSize = 15.sp,
                         lineHeight = 18.sp,
                         letterSpacing = 0.sp
-                    )
+                    ),
+                    textDirection = textDirection
                 )
                 
                 // Modern typing indicator

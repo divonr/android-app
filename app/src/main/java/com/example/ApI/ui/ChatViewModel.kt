@@ -925,6 +925,16 @@ class ChatViewModel(
         _uiState.value = _uiState.value.copy(snackbarMessage = null)
     }
     
+    fun toggleTextDirection() {
+        val currentMode = _uiState.value.textDirectionMode
+        val nextMode = when (currentMode) {
+            TextDirectionMode.AUTO -> TextDirectionMode.RTL
+            TextDirectionMode.RTL -> TextDirectionMode.LTR
+            TextDirectionMode.LTR -> TextDirectionMode.AUTO
+        }
+        _uiState.value = _uiState.value.copy(textDirectionMode = nextMode)
+    }
+    
     fun importChatHistoryFromUri(uri: Uri) {
         viewModelScope.launch {
             try {
@@ -2612,6 +2622,8 @@ class ChatViewModel(
     }
 
 }
+
+
 
 
 

@@ -54,7 +54,6 @@ import androidx.core.content.FileProvider
 import androidx.core.view.drawToBitmap
 import coil.compose.AsyncImage
 import com.example.ApI.ui.components.*
-import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.min
