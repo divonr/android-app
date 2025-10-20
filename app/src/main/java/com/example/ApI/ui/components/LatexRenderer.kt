@@ -356,9 +356,7 @@ fun InlineLatexText(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        elements.forEach { element ->
-            RenderLatexElement(element, style, inline = true)
-        }
+        RenderLatexElements(elements, style, inline = true)
     }
 }
 
@@ -432,6 +430,126 @@ private fun RenderLatexElement(
 }
 
 /**
+ * Render a list of LaTeX elements with combining logic for base+super/sub scripts
+ */
+@Composable
+private fun RenderLatexElements(
+    elements: List<LatexRenderer.LatexElement>,
+    style: TextStyle,
+    inline: Boolean
+) {
+    // Preprocess elements to combine base character with following super/subscripts (in any order)
+    var index = 0
+    while (index < elements.size) {
+        val current = elements[index]
+        when (current) {
+            is LatexRenderer.LatexElement.Text -> {
+                val text = current.text
+                // If next token(s) are super/sub, attach them to the last char of this text
+                if (text.isNotEmpty() && index + 1 < elements.size) {
+                    val next1 = elements.getOrNull(index + 1)
+                    if (next1 is LatexRenderer.LatexElement.Superscript || next1 is LatexRenderer.LatexElement.Subscript) {
+                        val baseChar = text.last().toString()
+                        val prefix = text.dropLast(1)
+                        if (prefix.isNotEmpty()) {
+                            // render prefix first
+                            RenderLatexElement(LatexRenderer.LatexElement.Text(prefix), style, inline)
+                        }
+
+                        var superText: String? = null
+                        var subText: String? = null
+                        var consume = 1
+                        // Collect up to two following tokens in any order
+                        val n2 = elements.getOrNull(index + 1)
+                        if (n2 is LatexRenderer.LatexElement.Superscript) superText = n2.text
+                        if (n2 is LatexRenderer.LatexElement.Subscript) subText = n2.text
+                        val n3 = elements.getOrNull(index + 2)
+                        if (n3 is LatexRenderer.LatexElement.Superscript && superText == null) {
+                            superText = n3.text; consume = 2
+                        }
+                        if (n3 is LatexRenderer.LatexElement.Subscript && subText == null) {
+                            subText = n3.text; consume = 2
+                        }
+
+                        BaseWithScripts(
+                            base = baseChar,
+                            superText = superText,
+                            subText = subText,
+                            style = style
+                        )
+                        index += 1 + consume
+                        continue
+                    }
+                }
+                // default: render as-is
+                RenderLatexElement(current, style, inline)
+                index++
+            }
+            else -> {
+                // Not text: just render (fractions/sqrt recurse internally)
+                RenderLatexElement(current, style, inline)
+                index++
+            }
+        }
+    }
+}
+
+@Composable
+private fun BaseWithScripts(
+    base: String,
+    superText: String?,
+    subText: String?,
+    style: TextStyle
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = base,
+            style = style.copy(
+                fontStyle = FontStyle.Italic,
+                fontFamily = FontFamily.Serif
+            )
+        )
+        if (superText != null || subText != null) {
+            Column(modifier = Modifier.padding(start = 1.dp)) {
+                if (superText != null) {
+                    val superElements = LatexRenderer.parseLatexStructure(superText)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        superElements.forEach { e ->
+                            RenderLatexElement(
+                                e,
+                                style.copy(
+                                    fontSize = style.fontSize * 0.7f,
+                                    baselineShift = BaselineShift(0.5f)
+                                ),
+                                inline = true
+                            )
+                        }
+                    }
+                } else {
+                    // keep spacing consistent
+                    Spacer(Modifier.height(0.dp))
+                }
+                if (subText != null) {
+                    val subElements = LatexRenderer.parseLatexStructure(subText)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        subElements.forEach { e ->
+                            RenderLatexElement(
+                                e,
+                                style.copy(
+                                    fontSize = style.fontSize * 0.7f,
+                                    baselineShift = BaselineShift(-0.3f)
+                                ),
+                                inline = true
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Composable for rendering display (block) LaTeX
  */
 @Composable
@@ -457,13 +575,11 @@ fun DisplayLatexText(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                elements.forEach { element ->
-                    RenderLatexElement(
-                        element,
-                        style.copy(fontSize = style.fontSize * 1.3f),
-                        inline = false
-                    )
-                }
+                RenderLatexElements(
+                    elements,
+                    style.copy(fontSize = style.fontSize * 1.3f),
+                    inline = false
+                )
             }
         }
     }
@@ -490,18 +606,14 @@ fun FractionDisplayNested(
         // Subcompose numerator
         val numPlaceables = subcompose("numerator") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                numeratorElements.forEach { element ->
-                    RenderLatexElement(element, nestedStyle, inline = true)
-                }
+                RenderLatexElements(numeratorElements, nestedStyle, inline = true)
             }
         }.map { it.measure(constraints.copy(minWidth = 0)) }
 
         // Subcompose denominator
         val denPlaceables = subcompose("denominator") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                denominatorElements.forEach { element ->
-                    RenderLatexElement(element, nestedStyle, inline = true)
-                }
+                RenderLatexElements(denominatorElements, nestedStyle, inline = true)
             }
         }.map { it.measure(constraints.copy(minWidth = 0)) }
 
