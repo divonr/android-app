@@ -129,40 +129,23 @@ fun UserSettingsScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                // Import chat history row
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showImportWarning = true },
-                    shape = RoundedCornerShape(16.dp),
-                    color = Surface,
-                    shadowElevation = 2.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(R.string.import_chat_history),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = OnSurface,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = stringResource(R.string.beta),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Primary,
-                                fontSize = 12.sp
-                            )
-                        }
+                // 1. Integrations Section
+                IntegrationsNavigationItem(
+                    onClick = {
+                        viewModel.navigateToScreen(Screen.Integrations)
                     }
-                }
+                )
 
-                // Multi-message mode switch
+                // 2. AI Title Generation Section
+                TitleGenerationSettingsSection(
+                    settings = appSettings.titleGenerationSettings,
+                    onSettingsChange = { newSettings ->
+                        viewModel.updateTitleGenerationSettings(newSettings)
+                    },
+                    availableProviders = viewModel.getAvailableProvidersForTitleGeneration()
+                )
+
+                // 3. Multi-message mode switch
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth(),
@@ -209,15 +192,40 @@ fun UserSettingsScreen(
                     }
                 }
 
-                TitleGenerationSettingsSection(
-                    settings = appSettings.titleGenerationSettings,
-                    onSettingsChange = { newSettings ->
-                        viewModel.updateTitleGenerationSettings(newSettings)
-                    },
-                    availableProviders = viewModel.getAvailableProvidersForTitleGeneration()
-                )
+                // 4. Import chat history row
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showImportWarning = true },
+                    shape = RoundedCornerShape(16.dp),
+                    color = Surface,
+                    shadowElevation = 2.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.import_chat_history),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = OnSurface,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = stringResource(R.string.beta),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Primary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
 
-                // Child Lock Section
+                // 5. Child Lock Section
                 ChildLockSettingsSection(
                     settings = appSettings.childLockSettings,
                     onSettingsChange = { enabled, password, startTime, endTime ->
@@ -226,13 +234,6 @@ fun UserSettingsScreen(
                     onShowSetupDialog = { showChildLockSetupDialog = true },
                     onShowDisableDialog = { showChildLockDisableDialog = true },
                     deviceId = deviceId
-                )
-
-                // Integrations Section
-                IntegrationsNavigationItem(
-                    onClick = {
-                        viewModel.navigateToScreen(Screen.Integrations)
-                    }
                 )
             }
         }
