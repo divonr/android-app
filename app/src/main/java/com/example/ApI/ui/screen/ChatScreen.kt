@@ -485,7 +485,7 @@ fun ChatScreen(
                                                 }
                                                 TextDirectionMode.RTL -> {
                                                     Icon(
-                                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                                                         contentDescription = "RTL",
                                                         tint = OnSurfaceVariant,
                                                         modifier = Modifier.size(18.dp)
@@ -493,7 +493,7 @@ fun ChatScreen(
                                                 }
                                                 TextDirectionMode.LTR -> {
                                                     Icon(
-                                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                                         contentDescription = "LTR",
                                                         tint = OnSurfaceVariant,
                                                         modifier = Modifier.size(18.dp)
@@ -1321,12 +1321,6 @@ fun MessageBubble(
                                 )
                             } else {
                                 // Normal markdown rendering
-                                val textDirection = when (uiState.textDirectionMode) {
-                                    TextDirectionMode.AUTO -> TextDirectionUtils.inferTextDirection(message.text)
-                                    TextDirectionMode.RTL -> LayoutDirection.Rtl
-                                    TextDirectionMode.LTR -> LayoutDirection.Ltr
-                                }
-                                
                                 MarkdownText(
                                     markdown = message.text,
                                     style = TextStyle(
@@ -1335,7 +1329,7 @@ fun MessageBubble(
                                         lineHeight = 18.sp,
                                         letterSpacing = 0.sp
                                     ),
-                                    textDirection = textDirection
+                                    textDirectionMode = uiState.textDirectionMode
                                 )
                             }
                         }
@@ -1622,12 +1616,6 @@ fun StreamingMessageBubble(
                     vertical = 12.dp
                 )
             ) {
-                val textDirection = when (textDirectionMode) {
-                    TextDirectionMode.AUTO -> TextDirectionUtils.inferTextDirection(text)
-                    TextDirectionMode.RTL -> LayoutDirection.Rtl
-                    TextDirectionMode.LTR -> LayoutDirection.Ltr
-                }
-                
                 MarkdownText(
                     markdown = text,
                     style = TextStyle(
@@ -1636,7 +1624,7 @@ fun StreamingMessageBubble(
                         lineHeight = 18.sp,
                         letterSpacing = 0.sp
                     ),
-                    textDirection = textDirection
+                    textDirectionMode = textDirectionMode
                 )
                 
                 // Modern typing indicator

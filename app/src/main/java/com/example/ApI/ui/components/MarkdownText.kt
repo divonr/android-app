@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
+import com.example.ApI.data.model.TextDirectionMode
+import com.example.ApI.ui.screen.TextDirectionUtils
 import org.commonmark.ext.gfm.strikethrough.Strikethrough
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.*
@@ -67,7 +69,8 @@ fun MarkdownText(
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
     color: Color = style.color,
-    textDirection: LayoutDirection? = null
+    textDirection: LayoutDirection? = null,
+    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO
 ) {
     val parser = remember {
         Parser.builder()
@@ -101,6 +104,7 @@ fun MarkdownText(
                                 node = doc,
                                 style = style.copy(color = color),
                                 layoutDirection = layoutDirection,
+                                textDirectionMode = textDirectionMode,
                                 enableInlineLatex = true
                             )
                         }
@@ -127,6 +131,7 @@ fun MarkdownText(
             node = document,
             style = style.copy(color = color),
                 layoutDirection = layoutDirection,
+                textDirectionMode = textDirectionMode,
                 enableInlineLatex = true
         )
         }
@@ -138,21 +143,22 @@ private fun RenderNode(
     node: Node,
     style: TextStyle,
     layoutDirection: LayoutDirection,
+    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
     enableInlineLatex: Boolean = false
 ) {
     var child = node.firstChild
     while (child != null) {
         when (child) {
-            is MdParagraph -> RenderParagraph(child, style, layoutDirection, enableInlineLatex)
-            is Heading -> RenderHeading(child, style, layoutDirection, enableInlineLatex)
-            is BlockQuote -> RenderBlockQuote(child, style, layoutDirection, enableInlineLatex)
+            is MdParagraph -> RenderParagraph(child, style, layoutDirection, textDirectionMode, enableInlineLatex)
+            is Heading -> RenderHeading(child, style, layoutDirection, textDirectionMode, enableInlineLatex)
+            is BlockQuote -> RenderBlockQuote(child, style, layoutDirection, textDirectionMode, enableInlineLatex)
             is Code -> RenderInlineCode(child, style)
             is FencedCodeBlock -> RenderCodeBlock(child, style, layoutDirection)
             is IndentedCodeBlock -> RenderCodeBlock(child, style, layoutDirection)
-            is BulletList -> RenderBulletList(child, style, layoutDirection, enableInlineLatex)
-            is OrderedList -> RenderOrderedList(child, style, layoutDirection, enableInlineLatex)
-            is ListItem -> RenderListItem(child, style, layoutDirection, enableInlineLatex)
-            is TableBlock -> RenderTable(child, style, layoutDirection, enableInlineLatex)
+            is BulletList -> RenderBulletList(child, style, layoutDirection, textDirectionMode, enableInlineLatex)
+            is OrderedList -> RenderOrderedList(child, style, layoutDirection, textDirectionMode, enableInlineLatex)
+            is ListItem -> RenderListItem(child, style, layoutDirection, textDirectionMode, enableInlineLatex)
+            is TableBlock -> RenderTable(child, style, layoutDirection, textDirectionMode, enableInlineLatex)
             is HardLineBreak -> Spacer(modifier = Modifier.height(4.dp))
             is ThematicBreak -> {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -165,7 +171,7 @@ private fun RenderNode(
             is HtmlBlock, is HtmlInline -> {
                 // Skip HTML for now
             }
-            else -> RenderNode(child, style, layoutDirection, enableInlineLatex)
+            else -> RenderNode(child, style, layoutDirection, textDirectionMode, enableInlineLatex)
         }
         child = child.next
     }
@@ -176,6 +182,7 @@ private fun RenderParagraph(
     node: MdParagraph,
     style: TextStyle,
     layoutDirection: LayoutDirection,
+    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
     enableInlineLatex: Boolean = false
 ) {
     val uriHandler = LocalUriHandler.current
@@ -187,6 +194,13 @@ private fun RenderParagraph(
     if (annotatedString.text.isNotEmpty()) {
         val rawText = annotatedString.text.trimStart()
         val isQuote = rawText.startsWith(">")
+        
+        // Determine paragraph-specific direction based on mode
+        val paragraphDirection = when (textDirectionMode) {
+            TextDirectionMode.AUTO -> TextDirectionUtils.inferTextDirection(rawText)
+            TextDirectionMode.RTL -> LayoutDirection.Rtl
+            TextDirectionMode.LTR -> LayoutDirection.Ltr
+        }
         
         if (isQuote) {
             // Remove the ">" prefix and any following space
@@ -241,7 +255,7 @@ private fun RenderParagraph(
                         .background(Color.Gray)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
-                CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+                CompositionLocalProvider(LocalLayoutDirection provides paragraphDirection) {
                     ClickableText(
                         text = displayAnnotated,
                         style = style.copy(fontStyle = FontStyle.Italic),
@@ -263,11 +277,11 @@ private fun RenderParagraph(
             }
         } else {
             // Regular paragraph
-            CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+            CompositionLocalProvider(LocalLayoutDirection provides paragraphDirection) {
                 RenderTextWithInlineLatex(
                     text = annotatedString,
                     style = style,
-                    layoutDirection = layoutDirection,
+                    layoutDirection = paragraphDirection,
                     inlineLatexContent = inlineLatexContent,
                     modifier = Modifier.padding(bottom = 8.dp),
                     uriHandler = uriHandler
@@ -540,6 +554,7 @@ private fun RenderHeading(
     node: Heading,
     style: TextStyle,
     layoutDirection: LayoutDirection,
+    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
     enableInlineLatex: Boolean = false
 ) {
     val headingStyle = when (node.level) {
@@ -557,11 +572,18 @@ private fun RenderHeading(
         appendInlineContent(node, headingStyle, enableInlineLatex, inlineLatexContent)
     }
     
-    CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+    // Determine heading-specific direction based on mode
+    val headingDirection = when (textDirectionMode) {
+        TextDirectionMode.AUTO -> TextDirectionUtils.inferTextDirection(annotatedString.text)
+        TextDirectionMode.RTL -> LayoutDirection.Rtl
+        TextDirectionMode.LTR -> LayoutDirection.Ltr
+    }
+    
+    CompositionLocalProvider(LocalLayoutDirection provides headingDirection) {
         RenderTextWithInlineLatex(
             text = annotatedString,
             style = headingStyle,
-            layoutDirection = layoutDirection,
+            layoutDirection = headingDirection,
             inlineLatexContent = inlineLatexContent,
             modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
             uriHandler = uriHandler
@@ -574,6 +596,7 @@ private fun RenderBlockQuote(
     node: BlockQuote,
     style: TextStyle,
     layoutDirection: LayoutDirection,
+    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
     enableInlineLatex: Boolean = false
 ) {
     Row(
@@ -590,7 +613,7 @@ private fun RenderBlockQuote(
         )
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            RenderNode(node, style.copy(fontStyle = FontStyle.Italic), layoutDirection, enableInlineLatex)
+            RenderNode(node, style.copy(fontStyle = FontStyle.Italic), layoutDirection, textDirectionMode, enableInlineLatex)
         }
     }
 }
@@ -688,6 +711,7 @@ private fun RenderBulletList(
     node: BulletList,
     style: TextStyle,
     layoutDirection: LayoutDirection,
+    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
     enableInlineLatex: Boolean = false
 ) {
     var child = node.firstChild
@@ -712,7 +736,7 @@ private fun RenderBulletList(
                         )
                     )
                     Column(modifier = Modifier.weight(1f)) {
-                        RenderNode(child, style, layoutDirection, enableInlineLatex)
+                        RenderNode(child, style, layoutDirection, textDirectionMode, enableInlineLatex)
                     }
                 }
             }
@@ -726,6 +750,7 @@ private fun RenderOrderedList(
     node: OrderedList,
     style: TextStyle,
     layoutDirection: LayoutDirection,
+    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
     enableInlineLatex: Boolean = false
 ) {
     var child = node.firstChild
@@ -751,7 +776,7 @@ private fun RenderOrderedList(
                         )
                     )
                     Column(modifier = Modifier.weight(1f)) {
-                        RenderNode(child, style, layoutDirection, enableInlineLatex)
+                        RenderNode(child, style, layoutDirection, textDirectionMode, enableInlineLatex)
                     }
                 }
             }
@@ -766,9 +791,10 @@ private fun RenderListItem(
     node: ListItem,
     style: TextStyle,
     layoutDirection: LayoutDirection,
+    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
     enableInlineLatex: Boolean = false
 ) {
-    RenderNode(node, style, layoutDirection, enableInlineLatex)
+    RenderNode(node, style, layoutDirection, textDirectionMode, enableInlineLatex)
 }
 
 @Composable
@@ -776,6 +802,7 @@ private fun RenderTable(
     table: TableBlock,
     style: TextStyle,
     layoutDirection: LayoutDirection,
+    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
     enableInlineLatex: Boolean = false
 ) {
     Column(
@@ -789,7 +816,7 @@ private fun RenderTable(
                 var tableRow = row.firstChild
                 while (tableRow != null) {
                     if (tableRow is TableRow) {
-                        RenderTableRow(tableRow, row is TableHead, style, layoutDirection, enableInlineLatex)
+                        RenderTableRow(tableRow, row is TableHead, style, layoutDirection, textDirectionMode, enableInlineLatex)
                     }
                     tableRow = tableRow.next
                 }
@@ -805,6 +832,7 @@ private fun RenderTableRow(
     isHeader: Boolean,
     style: TextStyle,
     layoutDirection: LayoutDirection,
+    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
     enableInlineLatex: Boolean = false
 ) {
     val uriHandler = LocalUriHandler.current
@@ -837,10 +865,17 @@ private fun RenderTableRow(
                             appendInlineContent(cell, cellStyle, enableInlineLatex, inlineLatexContent)
                         }
                         
+                        // Determine cell-specific direction based on mode
+                        val cellDirection = when (textDirectionMode) {
+                            TextDirectionMode.AUTO -> TextDirectionUtils.inferTextDirection(cellText.text)
+                            TextDirectionMode.RTL -> LayoutDirection.Rtl
+                            TextDirectionMode.LTR -> LayoutDirection.Ltr
+                        }
+                        
                         RenderTextWithInlineLatex(
                             text = cellText,
                             style = cellStyle,
-                            layoutDirection = layoutDirection,
+                            layoutDirection = cellDirection,
                             inlineLatexContent = inlineLatexContent,
                             modifier = Modifier,
                             uriHandler = uriHandler
