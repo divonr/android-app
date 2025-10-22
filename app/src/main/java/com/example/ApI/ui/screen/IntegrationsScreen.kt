@@ -1,6 +1,7 @@
 package com.example.ApI.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -40,70 +41,84 @@ fun IntegrationsScreen(
         Column(
             modifier = modifier
                 .fillMaxSize()
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+                .background(Background)
+                .systemBarsPadding()
         ) {
-            // Header with back arrow and title
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "כלים חיצוניים",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = OnSurface,
-                    fontWeight = FontWeight.Bold
-                )
-                
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = SurfaceVariant,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clickable { onBackClick() }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = OnSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            }
-            
-            // Tools Section
+            // Modern Top Bar
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
                 color = Surface,
-                shadowElevation = 2.dp
+                shadowElevation = 1.dp
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text(
-                        text = "כלים זמינים",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = OnSurface,
-                        fontWeight = FontWeight.Medium
-                    )
-                    
-                    // Date and Time Tool
-                    DateTimeToolItem(
-                        isEnabled = appSettings.enabledTools.contains("get_date_time"),
-                        onToggle = { enabled ->
-                            if (enabled) {
-                                viewModel.enableTool("get_date_time")
-                            } else {
-                                viewModel.disableTool("get_date_time")
-                            }
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = SurfaceVariant,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clickable { onBackClick() }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = OnSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
+                    }
+                    
+                    Text(
+                        text = "כלים חיצוניים",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = OnSurface,
+                        fontWeight = FontWeight.SemiBold
                     )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .padding(24.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                // Tools Section
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Surface,
+                    shadowElevation = 2.dp
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "כלים זמינים",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = OnSurface,
+                            fontWeight = FontWeight.Medium
+                        )
+                        
+                        // Date and Time Tool
+                        DateTimeToolItem(
+                            isEnabled = appSettings.enabledTools.contains("get_date_time"),
+                            onToggle = { enabled ->
+                                if (enabled) {
+                                    viewModel.enableTool("get_date_time")
+                                } else {
+                                    viewModel.disableTool("get_date_time")
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
