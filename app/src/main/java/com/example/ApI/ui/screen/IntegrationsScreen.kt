@@ -118,6 +118,20 @@ fun IntegrationsScreen(
                                 }
                             }
                         )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Group Conversations Tool
+                        GroupConversationsToolItem(
+                            isEnabled = appSettings.enabledTools.contains("get_current_group_conversations"),
+                            onToggle = { enabled ->
+                                if (enabled) {
+                                    viewModel.enableTool("get_current_group_conversations")
+                                } else {
+                                    viewModel.disableTool("get_current_group_conversations")
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -158,7 +172,53 @@ private fun DateTimeToolItem(
                     lineHeight = 16.sp
                 )
             }
-            
+
+            Switch(
+                checked = isEnabled,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Primary,
+                    checkedTrackColor = Primary.copy(alpha = 0.5f)
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun GroupConversationsToolItem(
+    isEnabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = SurfaceVariant.copy(alpha = 0.3f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "שיחות בקבוצה",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = OnSurface,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "אפשר למודל לראות שיחות אחרות באותה הקבוצה",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface.copy(alpha = 0.7f),
+                    lineHeight = 16.sp
+                )
+            }
+
             Switch(
                 checked = isEnabled,
                 onCheckedChange = onToggle,
