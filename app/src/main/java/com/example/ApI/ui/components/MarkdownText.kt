@@ -667,6 +667,7 @@ private fun RenderInlineCode(
     )
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun RenderCodeBlock(
     node: Node,
