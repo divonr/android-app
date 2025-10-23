@@ -350,6 +350,15 @@ private fun RenderTextWithInlineLatex(
                 )
             }
         }
+
+        // Copy span styles from the original text (for link colors, underlines, etc.)
+        text.spanStyles.forEach { spanStyle ->
+            addStyle(
+                spanStyle.item,
+                spanStyle.start,
+                spanStyle.end
+            )
+        }
     }
     
     ClickableText(
