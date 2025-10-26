@@ -1329,7 +1329,8 @@ fun MessageBubble(
                                         lineHeight = 18.sp,
                                         letterSpacing = 0.sp
                                     ),
-                                    textDirectionMode = uiState.textDirectionMode
+                                    textDirectionMode = uiState.textDirectionMode,
+                                    onLongPress = { showContextMenu = true }
                                 )
                             }
                         }
@@ -1624,7 +1625,8 @@ fun StreamingMessageBubble(
                         lineHeight = 18.sp,
                         letterSpacing = 0.sp
                     ),
-                    textDirectionMode = textDirectionMode
+                    textDirectionMode = textDirectionMode,
+                    onLongPress = {} // No long press action for streaming messages
                 )
                 
                 // Modern typing indicator

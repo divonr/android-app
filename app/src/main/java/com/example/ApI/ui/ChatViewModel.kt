@@ -343,14 +343,13 @@ class ChatViewModel(
                                     startTime = getCurrentDateTimeISO()
                                 )
                             )
-                            
-                            // Execute the tool through ToolRegistry
-                            val enabledToolIds = getEnabledToolSpecifications().map { it.name }
-                            val result = ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
-                            
+
+                            // Execute the tool
+                            val result = executeToolCall(toolCall)
+
                             // Clear tool execution indicator
                             _uiState.value = _uiState.value.copy(executingToolCall = null)
-                            
+
                             return result
                         }
                         
@@ -546,8 +545,7 @@ class ChatViewModel(
                                     startTime = getCurrentDateTimeISO()
                                 )
                             )
-                            val enabledToolIds = getEnabledToolSpecifications().map { it.name }
-                            val result = ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
+                            val result = executeToolCall(toolCall)
                             _uiState.value = _uiState.value.copy(executingToolCall = null)
                             return result
                         }
@@ -873,10 +871,84 @@ class ChatViewModel(
         val enabledToolIds = _appSettings.value.enabledTools
         val toolRegistry = ToolRegistry.getInstance()
         val currentProvider = _uiState.value.currentProvider?.provider ?: "openai"
-        
-        return enabledToolIds.mapNotNull { toolId ->
-            toolRegistry.getTool(toolId)?.getSpecification(currentProvider)
+
+        val specifications = mutableListOf<ToolSpecification>()
+
+        // Add standard tools from registry
+        enabledToolIds.forEach { toolId ->
+            // Skip group conversations tool - it's handled separately below
+            if (toolId == "get_current_group_conversations") {
+                return@forEach
+            }
+
+            toolRegistry.getTool(toolId)?.getSpecification(currentProvider)?.let {
+                specifications.add(it)
+            }
         }
+
+        // Handle group conversations tool specially - only add if chat is in a group
+        if (enabledToolIds.contains("get_current_group_conversations")) {
+            val currentChat = _uiState.value.currentChat
+            val groups = _uiState.value.groups
+            val currentUser = _appSettings.value.current_user
+
+            // Check if current chat belongs to a group
+            currentChat?.group?.let { groupId ->
+                // Find the group to get its name
+                groups.find { it.group_id == groupId }?.let { group ->
+                    // Create dynamic tool instance with current context
+                    val groupConversationsTool = com.example.ApI.tools.GroupConversationsTool(
+                        repository = repository,
+                        username = currentUser,
+                        currentChatId = currentChat.chat_id,
+                        groupId = groupId,
+                        groupName = group.group_name
+                    )
+
+                    // Add its specification
+                    specifications.add(groupConversationsTool.getSpecification(currentProvider))
+                }
+            }
+        }
+
+        return specifications
+    }
+
+    /**
+     * Execute a tool call, handling both standard registry tools and dynamic tools
+     */
+    private suspend fun executeToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+        // Special handling for group conversations tool (dynamic instance)
+        if (toolCall.toolId == "get_current_group_conversations") {
+            val currentChat = _uiState.value.currentChat
+            val groups = _uiState.value.groups
+            val currentUser = _appSettings.value.current_user
+
+            return currentChat?.group?.let { groupId ->
+                groups.find { it.group_id == groupId }?.let { group ->
+                    val groupConversationsTool = com.example.ApI.tools.GroupConversationsTool(
+                        repository = repository,
+                        username = currentUser,
+                        currentChatId = currentChat.chat_id,
+                        groupId = groupId,
+                        groupName = group.group_name
+                    )
+                    try {
+                        groupConversationsTool.execute(toolCall.parameters)
+                    } catch (e: Exception) {
+                        com.example.ApI.tools.ToolExecutionResult.Error(
+                            "Failed to execute group conversations tool: ${e.message}"
+                        )
+                    }
+                }
+            } ?: com.example.ApI.tools.ToolExecutionResult.Error(
+                "Group conversations tool can only be used in a group chat"
+            )
+        }
+
+        // Standard tools - use registry
+        val enabledToolIds = getEnabledToolSpecifications().map { it.name }
+        return ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
     }
 
     fun showChatHistory() {
@@ -1260,8 +1332,7 @@ class ChatViewModel(
                                     startTime = getCurrentDateTimeISO()
                                 )
                             )
-                            val enabledToolIds = getEnabledToolSpecifications().map { it.name }
-                            val result = ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
+                            val result = executeToolCall(toolCall)
                             _uiState.value = _uiState.value.copy(executingToolCall = null)
                             return result
                         }
