@@ -20,7 +20,19 @@ data class AppSettings(
     val titleGenerationSettings: TitleGenerationSettings = TitleGenerationSettings(),
     val multiMessageMode: Boolean = false,
     val childLockSettings: ChildLockSettings = ChildLockSettings(),
-    val enabledTools: List<String> = emptyList() // List of enabled tool IDs
+    val enabledTools: List<String> = emptyList(), // List of enabled tool IDs
+    val githubConnections: Map<String, GitHubConnectionInfo> = emptyMap() // GitHub connections per user (username -> connection info)
+)
+
+/**
+ * GitHub connection information stored in app settings
+ */
+@Serializable
+data class GitHubConnectionInfo(
+    val username: String, // App username (not GitHub username)
+    val githubUsername: String, // GitHub username
+    val connectedAt: Long,
+    val lastUsed: Long = System.currentTimeMillis()
 )
 
 @Serializable

@@ -1370,6 +1370,119 @@ class DataRepository(private val context: Context) {
             null
         }
     }
+
+    // ==================== GitHub Integration ====================
+
+    /**
+     * Load GitHub connection for a user
+     * @param username The app username
+     * @return GitHubConnection or null if not connected
+     */
+    fun loadGitHubConnection(username: String): GitHubConnection? {
+        return try {
+            val file = File(internalDir, "github_auth_${username}.json")
+            if (!file.exists()) return null
+
+            val jsonString = file.readText()
+            json.decodeFromString<GitHubConnection>(jsonString)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * Save GitHub connection for a user
+     * @param username The app username
+     * @param connection The GitHub connection to save
+     */
+    fun saveGitHubConnection(username: String, connection: GitHubConnection) {
+        try {
+            val file = File(internalDir, "github_auth_${username}.json")
+            val jsonString = json.encodeToString(connection)
+            file.writeText(jsonString)
+
+            // Update app settings to track connection
+            val settings = loadAppSettings()
+            val updatedConnections = settings.githubConnections.toMutableMap()
+            updatedConnections[username] = GitHubConnectionInfo(
+                username = username,
+                githubUsername = connection.user.login,
+                connectedAt = connection.connectedAt,
+                lastUsed = System.currentTimeMillis()
+            )
+            val updatedSettings = settings.copy(githubConnections = updatedConnections)
+            saveAppSettings(updatedSettings)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Remove GitHub connection for a user
+     * @param username The app username
+     */
+    fun removeGitHubConnection(username: String) {
+        try {
+            // Delete the auth file
+            val file = File(internalDir, "github_auth_${username}.json")
+            if (file.exists()) {
+                file.delete()
+            }
+
+            // Update app settings
+            val settings = loadAppSettings()
+            val updatedConnections = settings.githubConnections.toMutableMap()
+            updatedConnections.remove(username)
+            val updatedSettings = settings.copy(githubConnections = updatedConnections)
+            saveAppSettings(updatedSettings)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Check if GitHub is connected for a user
+     * @param username The app username
+     * @return true if connected and auth is valid
+     */
+    fun isGitHubConnected(username: String): Boolean {
+        val connection = loadGitHubConnection(username) ?: return false
+        // Check if token is expired (if applicable)
+        return !connection.auth.isExpired()
+    }
+
+    /**
+     * Get GitHub API service with the user's access token
+     * @param username The app username
+     * @return GitHubApiService or null if not connected
+     */
+    fun getGitHubApiService(username: String): Pair<com.example.ApI.data.network.GitHubApiService, String>? {
+        val connection = loadGitHubConnection(username) ?: return null
+        if (connection.auth.isExpired()) return null
+
+        val apiService = com.example.ApI.data.network.GitHubApiService()
+        return Pair(apiService, connection.auth.accessToken)
+    }
+
+    /**
+     * Update the last used timestamp for GitHub connection
+     * @param username The app username
+     */
+    fun updateGitHubLastUsed(username: String) {
+        try {
+            val settings = loadAppSettings()
+            val connectionInfo = settings.githubConnections[username] ?: return
+
+            val updatedConnections = settings.githubConnections.toMutableMap()
+            updatedConnections[username] = connectionInfo.copy(lastUsed = System.currentTimeMillis())
+
+            val updatedSettings = settings.copy(githubConnections = updatedConnections)
+            saveAppSettings(updatedSettings)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 }
 
 

@@ -60,6 +60,22 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_provider_paths" />
         </provider>
+
+        <!-- GitHub OAuth Callback Activity -->
+        <activity
+            android:name=".GitHubOAuthCallbackActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <!-- GitHub OAuth callback deep link -->
+                <data
+                    android:scheme="chatapi"
+                    android:host="github-oauth-callback" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>

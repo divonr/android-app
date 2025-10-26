@@ -1,5 +1,7 @@
 package com.example.ApI.tools
 
+import com.example.ApI.data.network.GitHubApiService
+import com.example.ApI.tools.github.*
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
 
@@ -10,16 +12,27 @@ class ToolRegistry {
     companion object {
         @Volatile
         private var INSTANCE: ToolRegistry? = null
-        
+
         fun getInstance(): ToolRegistry {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: ToolRegistry().also { INSTANCE = it }
             }
         }
+
+        // GitHub tool IDs for easy reference
+        const val GITHUB_READ_FILE = "github_read_file"
+        const val GITHUB_WRITE_FILE = "github_write_file"
+        const val GITHUB_LIST_FILES = "github_list_files"
+        const val GITHUB_SEARCH_CODE = "github_search_code"
+        const val GITHUB_CREATE_BRANCH = "github_create_branch"
+        const val GITHUB_CREATE_PR = "github_create_pr"
+        const val GITHUB_GET_REPO_INFO = "github_get_repo_info"
+        const val GITHUB_LIST_REPOS = "github_list_repositories"
     }
-    
+
     private val tools = mutableMapOf<String, Tool>()
-    
+    private var githubToolsRegistered = false
+
     init {
         // Register all available tools
         registerTool(DateTimeTool())
@@ -27,6 +40,65 @@ class ToolRegistry {
         // registerTool(WeatherTool())
         // registerTool(CalculatorTool())
     }
+
+    /**
+     * Register GitHub tools with authentication
+     * This should be called when GitHub authentication is available
+     * @param apiService The GitHub API service
+     * @param accessToken The GitHub access token
+     */
+    fun registerGitHubTools(apiService: GitHubApiService, accessToken: String) {
+        // Remove existing GitHub tools if any
+        unregisterGitHubTools()
+
+        // Register GitHub tools with authentication
+        registerTool(GitHubReadFileTool(apiService, accessToken))
+        registerTool(GitHubWriteFileTool(apiService, accessToken))
+        registerTool(GitHubListFilesTool(apiService, accessToken))
+        registerTool(GitHubSearchCodeTool(apiService, accessToken))
+        registerTool(GitHubCreateBranchTool(apiService, accessToken))
+        registerTool(GitHubCreatePRTool(apiService, accessToken))
+        registerTool(GitHubGetRepoInfoTool(apiService, accessToken))
+        registerTool(GitHubListRepositoriesTool(apiService, accessToken))
+
+        githubToolsRegistered = true
+    }
+
+    /**
+     * Unregister all GitHub tools
+     * This should be called when GitHub authentication is removed/expired
+     */
+    fun unregisterGitHubTools() {
+        tools.remove(GITHUB_READ_FILE)
+        tools.remove(GITHUB_WRITE_FILE)
+        tools.remove(GITHUB_LIST_FILES)
+        tools.remove(GITHUB_SEARCH_CODE)
+        tools.remove(GITHUB_CREATE_BRANCH)
+        tools.remove(GITHUB_CREATE_PR)
+        tools.remove(GITHUB_GET_REPO_INFO)
+        tools.remove(GITHUB_LIST_REPOS)
+
+        githubToolsRegistered = false
+    }
+
+    /**
+     * Check if GitHub tools are currently registered
+     */
+    fun areGitHubToolsRegistered(): Boolean = githubToolsRegistered
+
+    /**
+     * Get all GitHub tool IDs
+     */
+    fun getGitHubToolIds(): List<String> = listOf(
+        GITHUB_READ_FILE,
+        GITHUB_WRITE_FILE,
+        GITHUB_LIST_FILES,
+        GITHUB_SEARCH_CODE,
+        GITHUB_CREATE_BRANCH,
+        GITHUB_CREATE_PR,
+        GITHUB_GET_REPO_INFO,
+        GITHUB_LIST_REPOS
+    )
     
     /**
      * Register a tool with the registry

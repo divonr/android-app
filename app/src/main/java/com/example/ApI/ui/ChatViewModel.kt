@@ -2692,6 +2692,152 @@ class ChatViewModel(
         return ToolRegistry.getInstance().getAllTools()
     }
 
+    // GitHub Integration Methods
+
+    /**
+     * Start GitHub OAuth flow
+     * @return OAuth state parameter for verification
+     */
+    fun connectGitHub(): String {
+        val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
+        return oauthService.startAuthorizationFlow()
+    }
+
+    /**
+     * Handle OAuth callback and save connection
+     * @param code Authorization code from GitHub
+     * @param state State parameter for verification
+     * @return Success/failure message
+     */
+    fun handleGitHubCallback(code: String, state: String): String {
+        viewModelScope.launch {
+            try {
+                val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
+
+                // Exchange code for token
+                val authResult = oauthService.exchangeCodeForToken(code)
+
+                authResult.fold(
+                    onSuccess = { auth ->
+                        // Get user info
+                        val apiService = com.example.ApI.data.network.GitHubApiService()
+                        val userResult = apiService.getAuthenticatedUser(auth.accessToken)
+
+                        userResult.fold(
+                            onSuccess = { user ->
+                                // Save connection
+                                val connection = GitHubConnection(auth = auth, user = user)
+                                val username = _appSettings.value.current_user
+                                repository.saveGitHubConnection(username, connection)
+
+                                // Register GitHub tools
+                                val toolRegistry = ToolRegistry.getInstance()
+                                toolRegistry.registerGitHubTools(apiService, auth.accessToken)
+
+                                _uiState.value = _uiState.value.copy(
+                                    snackbarMessage = "GitHub connected successfully as ${user.login}"
+                                )
+                            },
+                            onFailure = { error ->
+                                _uiState.value = _uiState.value.copy(
+                                    snackbarMessage = "Failed to get GitHub user info: ${error.message}"
+                                )
+                            }
+                        )
+                    },
+                    onFailure = { error ->
+                        _uiState.value = _uiState.value.copy(
+                            snackbarMessage = "GitHub authentication failed: ${error.message}"
+                        )
+                    }
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "Error connecting to GitHub: ${e.message}"
+                )
+            }
+        }
+        return "Processing GitHub connection..."
+    }
+
+    /**
+     * Disconnect GitHub and remove all GitHub tools
+     */
+    fun disconnectGitHub() {
+        viewModelScope.launch {
+            try {
+                val username = _appSettings.value.current_user
+                val connection = repository.loadGitHubConnection(username)
+
+                if (connection != null) {
+                    // Revoke token on GitHub
+                    val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
+                    oauthService.revokeToken(connection.auth.accessToken)
+                }
+
+                // Remove local connection data
+                repository.removeGitHubConnection(username)
+
+                // Unregister GitHub tools
+                val toolRegistry = ToolRegistry.getInstance()
+                toolRegistry.unregisterGitHubTools()
+
+                // Disable all GitHub tools in settings
+                val currentSettings = _appSettings.value
+                val githubToolIds = toolRegistry.getGitHubToolIds()
+                val updatedEnabledTools = currentSettings.enabledTools.filter { it !in githubToolIds }
+                val updatedSettings = currentSettings.copy(enabledTools = updatedEnabledTools)
+                repository.saveAppSettings(updatedSettings)
+                _appSettings.value = updatedSettings
+
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "GitHub disconnected successfully"
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "Error disconnecting GitHub: ${e.message}"
+                )
+            }
+        }
+    }
+
+    /**
+     * Check if GitHub is connected for current user
+     */
+    fun isGitHubConnected(): Boolean {
+        val username = _appSettings.value.current_user
+        return repository.isGitHubConnected(username)
+    }
+
+    /**
+     * Get GitHub connection info for current user
+     */
+    fun getGitHubConnection(): GitHubConnection? {
+        val username = _appSettings.value.current_user
+        return repository.loadGitHubConnection(username)
+    }
+
+    /**
+     * Initialize GitHub tools if already connected
+     * Should be called during app startup
+     */
+    fun initializeGitHubToolsIfConnected() {
+        viewModelScope.launch {
+            try {
+                val username = _appSettings.value.current_user
+                val serviceAndToken = repository.getGitHubApiService(username)
+
+                if (serviceAndToken != null) {
+                    val (apiService, accessToken) = serviceAndToken
+                    val toolRegistry = ToolRegistry.getInstance()
+                    toolRegistry.registerGitHubTools(apiService, accessToken)
+                }
+            } catch (e: Exception) {
+                // Silent fail - GitHub tools won't be available
+            }
+        }
+    }
+
 }
 
 
