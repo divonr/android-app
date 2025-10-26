@@ -11,12 +11,13 @@ import kotlinx.serialization.json.*
  */
 class GitHubCreateBranchTool(
     private val apiService: GitHubApiService,
-    private val accessToken: String
+    private val accessToken: String,
+    private val githubUsername: String
 ) : Tool {
 
     override val id: String = "github_create_branch"
     override val name: String = "Create GitHub Branch"
-    override val description: String = "Create a new branch in a GitHub repository. Provide the repository owner, repository name, new branch name, and source branch/commit SHA to branch from."
+    override val description: String = "Create a new branch in a GitHub repository. You are authenticated as GitHub user '$githubUsername'. For your repositories, use '$githubUsername' as the owner. Provide the repository owner, repository name, new branch name, and source branch/commit SHA to branch from."
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         return try {

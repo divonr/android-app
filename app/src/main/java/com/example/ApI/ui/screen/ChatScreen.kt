@@ -1813,6 +1813,9 @@ fun ToolCallBubble(
     modifier: Modifier = Modifier,
     isEditMode: Boolean = false
 ) {
+    // Collect UI state for accessing current chat
+    val uiState by viewModel.uiState.collectAsState()
+
     // Handle both tool_call messages (with toolCall field) and tool_response messages
     val toolCallInfo = message.toolCall
     val toolResponseCallId = message.toolResponseCallId
@@ -1879,7 +1882,7 @@ fun ToolCallBubble(
                             // message to get the actual tool name
                             val toolName = if (message.role == "tool_response") {
                                 // Find the corresponding tool_call message by toolResponseCallId
-                                val currentChat = viewModel.uiState.value.currentChat
+                                val currentChat = uiState.currentChat
                                 val correspondingToolCall = currentChat?.messages?.find {
                                     it.role == "tool_call" && it.toolCallId == message.toolResponseCallId
                                 }
@@ -1932,7 +1935,7 @@ fun ToolCallBubble(
                     // Show tool name instead of result preview
                     val toolName = if (message.role == "tool_response") {
                         // Find the corresponding tool_call message by toolResponseCallId
-                        val currentChat = viewModel.uiState.value.currentChat
+                        val currentChat = uiState.currentChat
                         val correspondingToolCall = currentChat?.messages?.find {
                             it.role == "tool_call" && it.toolCallId == message.toolResponseCallId
                         }

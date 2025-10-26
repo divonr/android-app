@@ -46,20 +46,21 @@ class ToolRegistry {
      * This should be called when GitHub authentication is available
      * @param apiService The GitHub API service
      * @param accessToken The GitHub access token
+     * @param githubUsername The authenticated GitHub username
      */
-    fun registerGitHubTools(apiService: GitHubApiService, accessToken: String) {
+    fun registerGitHubTools(apiService: GitHubApiService, accessToken: String, githubUsername: String) {
         // Remove existing GitHub tools if any
         unregisterGitHubTools()
 
         // Register GitHub tools with authentication
-        registerTool(GitHubReadFileTool(apiService, accessToken))
-        registerTool(GitHubWriteFileTool(apiService, accessToken))
-        registerTool(GitHubListFilesTool(apiService, accessToken))
-        registerTool(GitHubSearchCodeTool(apiService, accessToken))
-        registerTool(GitHubCreateBranchTool(apiService, accessToken))
-        registerTool(GitHubCreatePRTool(apiService, accessToken))
-        registerTool(GitHubGetRepoInfoTool(apiService, accessToken))
-        registerTool(GitHubListRepositoriesTool(apiService, accessToken))
+        registerTool(GitHubReadFileTool(apiService, accessToken, githubUsername))
+        registerTool(GitHubWriteFileTool(apiService, accessToken, githubUsername))
+        registerTool(GitHubListFilesTool(apiService, accessToken, githubUsername))
+        registerTool(GitHubSearchCodeTool(apiService, accessToken, githubUsername))
+        registerTool(GitHubCreateBranchTool(apiService, accessToken, githubUsername))
+        registerTool(GitHubCreatePRTool(apiService, accessToken, githubUsername))
+        registerTool(GitHubGetRepoInfoTool(apiService, accessToken, githubUsername))
+        registerTool(GitHubListRepositoriesTool(apiService, accessToken, githubUsername))
 
         githubToolsRegistered = true
     }

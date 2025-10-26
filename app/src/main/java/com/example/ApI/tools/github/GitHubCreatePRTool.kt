@@ -12,12 +12,13 @@ import kotlinx.serialization.json.*
  */
 class GitHubCreatePRTool(
     private val apiService: GitHubApiService,
-    private val accessToken: String
+    private val accessToken: String,
+    private val githubUsername: String
 ) : Tool {
 
     override val id: String = "github_create_pr"
     override val name: String = "Create GitHub Pull Request"
-    override val description: String = "Create a pull request in a GitHub repository. Provide the repository owner, repository name, title, optional description, head branch (source), and base branch (target)."
+    override val description: String = "Create a pull request in a GitHub repository. You are authenticated as GitHub user '$githubUsername'. For your repositories, use '$githubUsername' as the owner. Provide the repository owner, repository name, title, optional description, head branch (source), and base branch (target)."
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         return try {

@@ -12,12 +12,13 @@ import kotlinx.serialization.json.*
  */
 class GitHubReadFileTool(
     private val apiService: GitHubApiService,
-    private val accessToken: String
+    private val accessToken: String,
+    private val githubUsername: String
 ) : Tool {
 
     override val id: String = "github_read_file"
     override val name: String = "Read GitHub File"
-    override val description: String = "Read the contents of a file from a GitHub repository. Provide the repository owner, repository name, and file path."
+    override val description: String = "Read the contents of a file from a GitHub repository. You are authenticated as GitHub user '$githubUsername'. For your repositories, use '$githubUsername' as the owner. Provide the repository owner, repository name, and file path."
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         return try {

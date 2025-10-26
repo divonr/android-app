@@ -46,21 +46,30 @@ class MainActivity : ComponentActivity() {
                     color = Background
                 ) {
                     LLMChatApp(
-                        sharedIntent = intent
+                        sharedIntent = intent,
+                        activity = this
                     )
                 }
             }
         }
     }
-    
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+
+        // Handle GitHub OAuth callback
+        val authCode = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_CODE)
+        val authState = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_STATE)
+        val error = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_ERROR)
+
+        // Store in intent for LLMChatApp to process
+        // The Composable will handle this via LaunchedEffect
     }
 }
 
 @Composable
-fun LLMChatApp(sharedIntent: Intent? = null) {
+fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val repository = remember { DataRepository(context) }
     val viewModel: ChatViewModel = viewModel { ChatViewModel(repository, context, sharedIntent) }
@@ -68,6 +77,31 @@ fun LLMChatApp(sharedIntent: Intent? = null) {
     val currentScreen by viewModel.currentScreen.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
     val appSettings by viewModel.appSettings.collectAsState()
+
+    // Initialize GitHub tools if already connected on app start
+    LaunchedEffect(Unit) {
+        viewModel.initializeGitHubToolsIfConnected()
+    }
+
+    // Handle GitHub OAuth callback
+    LaunchedEffect(activity) {
+        activity?.intent?.let { intent ->
+            val authCode = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_CODE)
+            val authState = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_STATE)
+            val error = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_ERROR)
+
+            if (error != null) {
+                viewModel.showSnackbar("GitHub connection error: $error")
+                // Clear the intent extras
+                intent.removeExtra(GitHubOAuthCallbackActivity.EXTRA_ERROR)
+            } else if (authCode != null && authState != null) {
+                viewModel.handleGitHubCallback(authCode, authState)
+                // Clear the intent extras to prevent re-processing
+                intent.removeExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_CODE)
+                intent.removeExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_STATE)
+            }
+        }
+    }
 
     // Check for child lock on app start
     val isChildLockActive = viewModel.isChildLockActive()

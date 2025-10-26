@@ -11,12 +11,13 @@ import kotlinx.serialization.json.*
  */
 class GitHubGetRepoInfoTool(
     private val apiService: GitHubApiService,
-    private val accessToken: String
+    private val accessToken: String,
+    private val githubUsername: String
 ) : Tool {
 
     override val id: String = "github_get_repo_info"
     override val name: String = "Get GitHub Repository Info"
-    override val description: String = "Get detailed information about a GitHub repository including description, language, stars, forks, open issues, and default branch."
+    override val description: String = "Get detailed information about a GitHub repository including description, language, stars, forks, open issues, and default branch. You are authenticated as GitHub user '$githubUsername'. For your repositories, use '$githubUsername' as the owner."
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         return try {

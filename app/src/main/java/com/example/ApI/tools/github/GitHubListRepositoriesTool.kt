@@ -11,12 +11,13 @@ import kotlinx.serialization.json.*
  */
 class GitHubListRepositoriesTool(
     private val apiService: GitHubApiService,
-    private val accessToken: String
+    private val accessToken: String,
+    private val githubUsername: String
 ) : Tool {
 
     override val id: String = "github_list_repositories"
     override val name: String = "List GitHub Repositories"
-    override val description: String = "List all repositories accessible to the authenticated user. You can filter by visibility (all, public, private) and sort by various criteria."
+    override val description: String = "List all repositories accessible to the authenticated user '$githubUsername'. You can filter by visibility (all, public, private) and sort by various criteria. This returns YOUR repositories."
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         return try {

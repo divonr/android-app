@@ -2364,6 +2364,7 @@ class ChatViewModel(
                 }
 
                 try {
+                    @Suppress("WrongConstant") // FLAG_IMMUTABLE is required for Android 12+
                     val pendingIntent = PendingIntentCompat.getActivity(
                         context,
                         "chat_export_${chatId}".hashCode(),
@@ -2732,7 +2733,15 @@ class ChatViewModel(
 
                                 // Register GitHub tools
                                 val toolRegistry = ToolRegistry.getInstance()
-                                toolRegistry.registerGitHubTools(apiService, auth.accessToken)
+                                toolRegistry.registerGitHubTools(apiService, auth.accessToken, user.login)
+
+                                // Enable GitHub tools in settings
+                                val currentSettings = _appSettings.value
+                                val githubToolIds = toolRegistry.getGitHubToolIds()
+                                val updatedEnabledTools = (currentSettings.enabledTools + githubToolIds).distinct()
+                                val updatedSettings = currentSettings.copy(enabledTools = updatedEnabledTools)
+                                repository.saveAppSettings(updatedSettings)
+                                _appSettings.value = updatedSettings
 
                                 _uiState.value = _uiState.value.copy(
                                     snackbarMessage = "GitHub connected successfully as ${user.login}"
@@ -2829,13 +2838,34 @@ class ChatViewModel(
 
                 if (serviceAndToken != null) {
                     val (apiService, accessToken) = serviceAndToken
-                    val toolRegistry = ToolRegistry.getInstance()
-                    toolRegistry.registerGitHubTools(apiService, accessToken)
+                    val connection = repository.loadGitHubConnection(username)
+
+                    if (connection != null) {
+                        val toolRegistry = ToolRegistry.getInstance()
+                        toolRegistry.registerGitHubTools(apiService, accessToken, connection.user.login)
+
+                        // Ensure GitHub tools are enabled in settings
+                        val currentSettings = _appSettings.value
+                        val githubToolIds = toolRegistry.getGitHubToolIds()
+                        if (!currentSettings.enabledTools.containsAll(githubToolIds)) {
+                            val updatedEnabledTools = (currentSettings.enabledTools + githubToolIds).distinct()
+                            val updatedSettings = currentSettings.copy(enabledTools = updatedEnabledTools)
+                            repository.saveAppSettings(updatedSettings)
+                            _appSettings.value = updatedSettings
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 // Silent fail - GitHub tools won't be available
             }
         }
+    }
+
+    /**
+     * Show a snackbar message to the user
+     */
+    fun showSnackbar(message: String) {
+        _uiState.value = _uiState.value.copy(snackbarMessage = message)
     }
 
 }

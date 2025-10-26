@@ -11,12 +11,13 @@ import kotlinx.serialization.json.*
  */
 class GitHubSearchCodeTool(
     private val apiService: GitHubApiService,
-    private val accessToken: String
+    private val accessToken: String,
+    private val githubUsername: String
 ) : Tool {
 
     override val id: String = "github_search_code"
     override val name: String = "Search GitHub Code"
-    override val description: String = "Search for code across GitHub repositories. You can search by keywords, filter by language, repository, path, and more. Use GitHub search syntax (e.g., 'addClass in:file language:js repo:jquery/jquery')"
+    override val description: String = "Search for code across GitHub repositories. You are authenticated as GitHub user '$githubUsername'. You can search by keywords, filter by language, repository, path, and more. Use GitHub search syntax (e.g., 'addClass in:file language:js repo:$githubUsername/myrepo')"
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         return try {

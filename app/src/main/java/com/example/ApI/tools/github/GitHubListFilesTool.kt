@@ -12,12 +12,13 @@ import kotlinx.serialization.json.*
  */
 class GitHubListFilesTool(
     private val apiService: GitHubApiService,
-    private val accessToken: String
+    private val accessToken: String,
+    private val githubUsername: String
 ) : Tool {
 
     override val id: String = "github_list_files"
     override val name: String = "List GitHub Files"
-    override val description: String = "List files and directories in a GitHub repository path. Provide the repository owner, repository name, and optional path (defaults to root)."
+    override val description: String = "List files and directories in a GitHub repository path. You are authenticated as GitHub user '$githubUsername'. For your repositories, use '$githubUsername' as the owner. Provide the repository owner, repository name, and optional path (defaults to root)."
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         return try {

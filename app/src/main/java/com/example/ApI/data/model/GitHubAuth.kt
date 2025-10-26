@@ -1,6 +1,7 @@
 package com.example.ApI.data.model
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 
 /**
  * GitHub OAuth authentication data
@@ -41,23 +42,23 @@ data class GitHubAuth(
 data class GitHubUser(
     val login: String,
     val id: Long,
-    val nodeId: String,
-    val avatarUrl: String,
-    val gravatarId: String?,
+    @SerialName("node_id") val nodeId: String,
+    @SerialName("avatar_url") val avatarUrl: String,
+    @SerialName("gravatar_id") val gravatarId: String?,
     val url: String,
-    val htmlUrl: String,
+    @SerialName("html_url") val htmlUrl: String,
     val name: String?,
     val company: String?,
     val blog: String?,
     val location: String?,
     val email: String?,
     val bio: String?,
-    val publicRepos: Int,
-    val publicGists: Int,
+    @SerialName("public_repos") val publicRepos: Int,
+    @SerialName("public_gists") val publicGists: Int,
     val followers: Int,
     val following: Int,
-    val createdAt: String,
-    val updatedAt: String
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("updated_at") val updatedAt: String
 )
 
 /**

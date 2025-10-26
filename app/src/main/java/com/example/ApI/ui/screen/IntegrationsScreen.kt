@@ -132,6 +132,24 @@ fun IntegrationsScreen(
                                 }
                             }
                         )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // GitHub Integration
+                        GitHubIntegrationItem(
+                            viewModel = viewModel,
+                            isConnected = viewModel.isGitHubConnected(),
+                            githubConnection = viewModel.getGitHubConnection(),
+                            onToggle = { shouldConnect ->
+                                if (shouldConnect) {
+                                    // Start OAuth flow
+                                    viewModel.connectGitHub()
+                                } else {
+                                    // Disconnect
+                                    viewModel.disconnectGitHub()
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -227,6 +245,119 @@ private fun GroupConversationsToolItem(
                     checkedTrackColor = Primary.copy(alpha = 0.5f)
                 )
             )
+        }
+    }
+}
+
+@Composable
+private fun GitHubIntegrationItem(
+    viewModel: ChatViewModel,
+    isConnected: Boolean,
+    githubConnection: com.example.ApI.data.model.GitHubConnection?,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = SurfaceVariant.copy(alpha = 0.3f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            // Main switch row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "חיבור ל-GitHub",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OnSurface,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (isConnected) {
+                            "מחובר כ-${githubConnection?.user?.login ?: "משתמש"}"
+                        } else {
+                            "אפשר למודל לעבוד עם קוד ב-GitHub"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurface.copy(alpha = 0.7f),
+                        lineHeight = 16.sp
+                    )
+                }
+
+                Switch(
+                    checked = isConnected,
+                    onCheckedChange = onToggle,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Primary,
+                        checkedTrackColor = Primary.copy(alpha = 0.5f)
+                    )
+                )
+            }
+
+            // Show GitHub tools list when connected
+            if (isConnected) {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Separator
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = OnSurface.copy(alpha = 0.1f)
+                )
+
+                Text(
+                    text = "כלי GitHub כלולים:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface.copy(alpha = 0.6f),
+                    fontWeight = FontWeight.Medium
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // List of GitHub tools
+                val githubTools = listOf(
+                    "קריאת קבצים מ-repositories",
+                    "כתיבה ועדכון קבצים",
+                    "רשימת תוכן תיקיות",
+                    "חיפוש קוד ב-repositories",
+                    "יצירת ענפים (branches)",
+                    "יצירת Pull Requests",
+                    "קבלת מידע על repositories",
+                    "רשימת repositories של המשתמש"
+                )
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    githubTools.forEach { tool ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "•",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurface.copy(alpha = 0.4f)
+                            )
+                            Text(
+                                text = tool,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurface.copy(alpha = 0.4f),
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

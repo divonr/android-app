@@ -14,12 +14,13 @@ import kotlinx.serialization.json.*
  */
 class GitHubWriteFileTool(
     private val apiService: GitHubApiService,
-    private val accessToken: String
+    private val accessToken: String,
+    private val githubUsername: String
 ) : Tool {
 
     override val id: String = "github_write_file"
     override val name: String = "Write GitHub File"
-    override val description: String = "Create or update a file in a GitHub repository. Provide the repository owner, repository name, file path, content, commit message, and branch. If updating an existing file, the current SHA is automatically retrieved."
+    override val description: String = "Create or update a file in a GitHub repository. You are authenticated as GitHub user '$githubUsername'. For your repositories, use '$githubUsername' as the owner. Provide the repository owner, repository name, file path, content, commit message, and branch. If updating an existing file, the current SHA is automatically retrieved."
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         return try {
