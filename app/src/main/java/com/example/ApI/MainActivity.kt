@@ -29,6 +29,9 @@ import com.example.ApI.ui.theme.ApITheme
 import com.example.ApI.ui.theme.Background
 
 class MainActivity : ComponentActivity() {
+    // State to trigger recomposition when a new intent arrives
+    private val intentState = mutableStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -47,7 +50,8 @@ class MainActivity : ComponentActivity() {
                 ) {
                     LLMChatApp(
                         sharedIntent = intent,
-                        activity = this
+                        activity = this,
+                        intentTrigger = intentState.value
                     )
                 }
             }
@@ -58,18 +62,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
 
-        // Handle GitHub OAuth callback
-        val authCode = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_CODE)
-        val authState = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_STATE)
-        val error = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_ERROR)
-
-        // Store in intent for LLMChatApp to process
-        // The Composable will handle this via LaunchedEffect
+        // Increment the state to trigger recomposition and LaunchedEffect
+        intentState.value++
     }
 }
 
 @Composable
-fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null) {
+fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null, intentTrigger: Int = 0) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val repository = remember { DataRepository(context) }
     val viewModel: ChatViewModel = viewModel { ChatViewModel(repository, context, sharedIntent) }
@@ -84,7 +83,8 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
     }
 
     // Handle GitHub OAuth callback
-    LaunchedEffect(activity) {
+    // Key on intentTrigger so this runs whenever onNewIntent is called
+    LaunchedEffect(intentTrigger) {
         activity?.intent?.let { intent ->
             val authCode = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_CODE)
             val authState = intent.getStringExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_STATE)
