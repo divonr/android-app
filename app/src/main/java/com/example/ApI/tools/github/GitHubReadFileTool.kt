@@ -118,11 +118,11 @@ class GitHubReadFileTool(
                         put("description", "The path to the file in the repository (e.g., 'src/Main.kt', 'README.md')")
                     })
                     put("ref", buildJsonObject {
-                        put("type", "string")
+                        put("type", JsonArray(listOf(JsonPrimitive("string"), JsonPrimitive("null"))))
                         put("description", "Optional: branch name, tag, or commit SHA (defaults to repository's default branch)")
                     })
                 })
-                put("required", JsonArray(listOf(JsonPrimitive("owner"), JsonPrimitive("repo"), JsonPrimitive("path"))))
+                put("required", JsonArray(listOf(JsonPrimitive("owner"), JsonPrimitive("repo"), JsonPrimitive("path"), JsonPrimitive("ref"))))
             }
         )
     }

@@ -115,12 +115,12 @@ class GitHubListRepositoriesTool(
                 put("type", "object")
                 put("properties", buildJsonObject {
                     put("visibility", buildJsonObject {
-                        put("type", "string")
+                        put("type", JsonArray(listOf(JsonPrimitive("string"), JsonPrimitive("null"))))
                         put("enum", JsonArray(listOf(JsonPrimitive("all"), JsonPrimitive("public"), JsonPrimitive("private"))))
                         put("description", "Filter by visibility: 'all', 'public', or 'private' (default: 'all')")
                     })
                     put("sort", buildJsonObject {
-                        put("type", "string")
+                        put("type", JsonArray(listOf(JsonPrimitive("string"), JsonPrimitive("null"))))
                         put("enum", JsonArray(listOf(
                             JsonPrimitive("created"),
                             JsonPrimitive("updated"),
@@ -130,15 +130,20 @@ class GitHubListRepositoriesTool(
                         put("description", "Sort repositories by: 'created', 'updated', 'pushed', or 'full_name' (default: 'updated')")
                     })
                     put("per_page", buildJsonObject {
-                        put("type", "integer")
+                        put("type", JsonArray(listOf(JsonPrimitive("integer"), JsonPrimitive("null"))))
                         put("description", "Number of results per page (1-100, default: 30)")
                     })
                     put("page", buildJsonObject {
-                        put("type", "integer")
+                        put("type", JsonArray(listOf(JsonPrimitive("integer"), JsonPrimitive("null"))))
                         put("description", "Page number for pagination (default: 1)")
                     })
                 })
-                put("required", JsonArray(emptyList()))
+                put("required", JsonArray(listOf(
+                    JsonPrimitive("visibility"),
+                    JsonPrimitive("sort"),
+                    JsonPrimitive("per_page"),
+                    JsonPrimitive("page")
+                )))
             }
         )
     }

@@ -121,15 +121,15 @@ class GitHubSearchCodeTool(
                         put("description", "Search query using GitHub search syntax. Examples: 'addClass in:file language:js', 'repo:owner/name extension:kt function', 'user:username language:python'. You can filter by: repo:, user:, org:, language:, extension:, path:, filename:, size:>1000, etc.")
                     })
                     put("per_page", buildJsonObject {
-                        put("type", "integer")
+                        put("type", JsonArray(listOf(JsonPrimitive("integer"), JsonPrimitive("null"))))
                         put("description", "Number of results per page (1-100, default: 30)")
                     })
                     put("page", buildJsonObject {
-                        put("type", "integer")
+                        put("type", JsonArray(listOf(JsonPrimitive("integer"), JsonPrimitive("null"))))
                         put("description", "Page number for pagination (default: 1)")
                     })
                 })
-                put("required", JsonArray(listOf(JsonPrimitive("query"))))
+                put("required", JsonArray(listOf(JsonPrimitive("query"), JsonPrimitive("per_page"), JsonPrimitive("page"))))
             }
         )
     }

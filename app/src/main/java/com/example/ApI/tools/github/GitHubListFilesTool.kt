@@ -154,15 +154,15 @@ class GitHubListFilesTool(
                         put("description", "The repository name")
                     })
                     put("path", buildJsonObject {
-                        put("type", "string")
+                        put("type", JsonArray(listOf(JsonPrimitive("string"), JsonPrimitive("null"))))
                         put("description", "Optional: the directory path to list (defaults to root directory)")
                     })
                     put("ref", buildJsonObject {
-                        put("type", "string")
+                        put("type", JsonArray(listOf(JsonPrimitive("string"), JsonPrimitive("null"))))
                         put("description", "Optional: branch name, tag, or commit SHA (defaults to repository's default branch)")
                     })
                 })
-                put("required", JsonArray(listOf(JsonPrimitive("owner"), JsonPrimitive("repo"))))
+                put("required", JsonArray(listOf(JsonPrimitive("owner"), JsonPrimitive("repo"), JsonPrimitive("path"), JsonPrimitive("ref"))))
             }
         )
     }

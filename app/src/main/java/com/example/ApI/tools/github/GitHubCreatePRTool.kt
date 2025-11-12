@@ -119,7 +119,7 @@ class GitHubCreatePRTool(
                         put("description", "The title of the pull request")
                     })
                     put("body", buildJsonObject {
-                        put("type", "string")
+                        put("type", JsonArray(listOf(JsonPrimitive("string"), JsonPrimitive("null"))))
                         put("description", "Optional: the description/body of the pull request (supports markdown)")
                     })
                     put("head", buildJsonObject {
@@ -131,7 +131,7 @@ class GitHubCreatePRTool(
                         put("description", "The name of the branch you want to merge into (target branch, usually 'main' or 'develop')")
                     })
                     put("draft", buildJsonObject {
-                        put("type", "boolean")
+                        put("type", JsonArray(listOf(JsonPrimitive("boolean"), JsonPrimitive("null"))))
                         put("description", "Optional: whether to create as a draft PR (default: false)")
                     })
                 })
@@ -139,8 +139,10 @@ class GitHubCreatePRTool(
                     JsonPrimitive("owner"),
                     JsonPrimitive("repo"),
                     JsonPrimitive("title"),
+                    JsonPrimitive("body"),
                     JsonPrimitive("head"),
-                    JsonPrimitive("base")
+                    JsonPrimitive("base"),
+                    JsonPrimitive("draft")
                 )))
             }
         )
