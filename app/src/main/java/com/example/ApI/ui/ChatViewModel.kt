@@ -1585,30 +1585,40 @@ class ChatViewModel(
     }
     
     fun renameChatWithAI(chat: Chat) {
+        // Close the menu immediately
+        hideChatContextMenu()
+
+        // Add chat to renaming set to show loading indicator
+        _uiState.value = _uiState.value.copy(
+            renamingChatIds = _uiState.value.renamingChatIds + chat.chat_id
+        )
+
         viewModelScope.launch {
             try {
                 val currentUser = _appSettings.value.current_user
                 val titleGenerationSettings = _appSettings.value.titleGenerationSettings
                 val providerToUse = if (titleGenerationSettings.provider == "auto") null else titleGenerationSettings.provider
-                
+
                 // Generate title using our helper function
                 val generatedTitle = repository.generateConversationTitle(
                     username = currentUser,
                     conversationId = chat.chat_id,
                     provider = providerToUse
                 )
-                
+
                 // Update the conversation title if we got a valid response
                 if (generatedTitle.isNotBlank() && generatedTitle != "שיחה חדשה") {
                     updateChatPreviewName(chat.chat_id, generatedTitle)
                 }
-                
-                hideChatContextMenu()
-                
+
             } catch (e: Exception) {
-                // If title generation fails, just hide the menu
-                hideChatContextMenu()
+                // If title generation fails, just log the error
                 println("AI rename failed: ${e.message}")
+            } finally {
+                // Remove chat from renaming set
+                _uiState.value = _uiState.value.copy(
+                    renamingChatIds = _uiState.value.renamingChatIds - chat.chat_id
+                )
             }
         }
     }

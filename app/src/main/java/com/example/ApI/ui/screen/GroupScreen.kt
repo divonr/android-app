@@ -288,7 +288,8 @@ fun GroupScreen(
                                     },
                                     onLongClick = { offset ->
                                         viewModel.showChatContextMenu(chat, offset)
-                                    }
+                                    },
+                                    isRenaming = uiState.renamingChatIds.contains(chat.chat_id)
                                 )
                             }
                         }
@@ -502,7 +503,8 @@ fun GroupChatHistoryItem(
     chat: Chat,
     onClick: () -> Unit,
     onLongClick: (DpOffset) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isRenaming: Boolean = false
 ) {
     var itemTopLeft by remember { mutableStateOf(Offset.Zero) }
     var itemSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
@@ -571,14 +573,28 @@ fun GroupChatHistoryItem(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = chat.title,
-                    color = OnSurface,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (isRenaming) {
+                    // Show loading spinner when renaming
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.height(24.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Primary,
+                            strokeWidth = 2.dp
+                        )
+                    }
+                } else {
+                    Text(
+                        text = chat.title,
+                        color = OnSurface,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
 

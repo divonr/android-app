@@ -325,7 +325,8 @@ fun ChatHistoryScreen(
                                 },
                                 onLongClick = { offset ->
                                     viewModel.showChatContextMenu(searchResult.chat, offset)
-                                }
+                                },
+                                isRenaming = uiState.renamingChatIds.contains(searchResult.chat.chat_id)
                             )
                         }
                     }
@@ -406,7 +407,8 @@ fun ChatHistoryScreen(
                                                 onLongClick = { offset ->
                                                     viewModel.showChatContextMenu(chat, offset)
                                                 },
-                                                modifier = Modifier.padding(start = 32.dp) // Indent grouped chats
+                                                modifier = Modifier.padding(start = 32.dp), // Indent grouped chats
+                                                isRenaming = uiState.renamingChatIds.contains(chat.chat_id)
                                             )
                                         }
                                     }
@@ -422,7 +424,8 @@ fun ChatHistoryScreen(
                                             },
                                             onLongClick = { offset ->
                                                 viewModel.showChatContextMenu(item.chat, offset)
-                                            }
+                                            },
+                                            isRenaming = uiState.renamingChatIds.contains(item.chat.chat_id)
                                         )
                                     }
                                 }
@@ -716,7 +719,8 @@ fun ChatHistoryItem(
     chat: Chat,
     onClick: () -> Unit,
     onLongClick: (DpOffset) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isRenaming: Boolean = false
 ) {
     var itemPosition by remember { mutableStateOf(DpOffset.Zero) }
     var itemTopLeft by remember { mutableStateOf(Offset.Zero) }
@@ -788,14 +792,28 @@ fun ChatHistoryItem(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = chat.title,
-                    color = OnSurface,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (isRenaming) {
+                    // Show loading spinner when renaming
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.height(24.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Primary,
+                            strokeWidth = 2.dp
+                        )
+                    }
+                } else {
+                    Text(
+                        text = chat.title,
+                        color = OnSurface,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 
                 Spacer(modifier = Modifier.height(4.dp))
                 
@@ -1094,7 +1112,8 @@ fun SearchResultItem(
     searchResult: SearchResult,
     onClick: () -> Unit,
     onLongClick: (DpOffset) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isRenaming: Boolean = false
 ) {
     var itemPosition by remember { mutableStateOf(DpOffset.Zero) }
     var itemTopLeft by remember { mutableStateOf(Offset.Zero) }
@@ -1166,24 +1185,38 @@ fun SearchResultItem(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                // Title with highlighting if it's a title match
-                val titleText = when (searchResult.matchType) {
-                    SearchMatchType.TITLE -> createHighlightedText(
-                        searchResult.chat.title, 
-                        searchResult.highlightRanges, 
-                        AccentBlue
+                if (isRenaming) {
+                    // Show loading spinner when renaming
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.height(24.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Primary,
+                            strokeWidth = 2.dp
+                        )
+                    }
+                } else {
+                    // Title with highlighting if it's a title match
+                    val titleText = when (searchResult.matchType) {
+                        SearchMatchType.TITLE -> createHighlightedText(
+                            searchResult.chat.title,
+                            searchResult.highlightRanges,
+                            AccentBlue
+                        )
+                        else -> AnnotatedString(searchResult.chat.title)
+                    }
+
+                    Text(
+                        text = titleText,
+                        color = OnSurface,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    else -> AnnotatedString(searchResult.chat.title)
                 }
-                
-                Text(
-                    text = titleText,
-                    color = OnSurface,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
                 
                 Spacer(modifier = Modifier.height(4.dp))
                 

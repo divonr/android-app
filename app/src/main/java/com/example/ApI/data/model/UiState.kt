@@ -59,7 +59,8 @@ data class ChatUiState(
     val searchResults: List<SearchResult> = emptyList(),
     val searchContext: SearchResult? = null, // Context for jumping to search results
     val executingToolCall: ExecutingToolInfo? = null, // Track currently executing tool
-    val textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO // Text direction mode for message bubbles
+    val textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO, // Text direction mode for message bubbles
+    val renamingChatIds: Set<String> = emptySet() // Track chats currently being renamed with AI
 )
 
 data class ChatContextMenuState(
