@@ -1046,7 +1046,7 @@ private fun AnnotatedString.Builder.appendInlineContent(
                     length
                 )
             }
-            is SoftLineBreak -> append(" ")
+            is SoftLineBreak -> append("\n")
             is HardLineBreak -> append("\n")
             else -> appendInlineContent(child, style, enableInlineLatex, latexContentMap)
         }

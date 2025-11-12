@@ -9,7 +9,11 @@
       "mcp__playwright__browser_click",
       "mcp__playwright__browser_fill_form",
       "mcp__playwright__browser_close",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(.gradlew assembleDebug:*)",
+      "Bash(gradlew assembleDebug:*)",
+      "Bash(cmd /c \"gradlew.bat assembleDebug\")",
+      "Bash(powershell -Command \".\\gradlew.bat assembleDebug\")"
     ],
     "deny": [],
     "ask": []
