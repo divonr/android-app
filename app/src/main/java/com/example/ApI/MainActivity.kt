@@ -180,4 +180,17 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
             )
         }
     }
+
+    // Show corrupted history backup dialog if needed
+    if (uiState.corruptedHistoryBackup != null) {
+        com.example.ApI.ui.components.CorruptedHistoryBackupDialog(
+            onDownloadBackup = {
+                viewModel.downloadBackupFile()
+                // Don't dismiss yet - let user see the snackbar message
+            },
+            onDismiss = {
+                viewModel.dismissBackupWarning()
+            }
+        )
+    }
 }

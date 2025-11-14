@@ -647,6 +647,95 @@ fun DeleteApiKeyConfirmationDialog(
     }
 }
 
+@Composable
+fun CorruptedHistoryBackupDialog(
+    onDownloadBackup: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = Surface,
+                shadowElevation = 8.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(28.dp)
+                        .fillMaxWidth()
+                ) {
+                    Text(
+                        text = "תקלה בטעינת היסטוריה",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = OnSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Text(
+                        text = "ארעה תקלה כשניסינו לטעון את היסטוריית השיחות שלך! שמרנו גיבוי, אבל כעת ההיסטוריה תתאפס.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = OnSurface
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // Action buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color.Transparent,
+                            border = BorderStroke(1.dp, Primary),
+                            modifier = Modifier.clickable {
+                                onDownloadBackup()
+                            }
+                        ) {
+                            Text(
+                                text = "להורדת הגיבוי",
+                                color = Primary,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Primary,
+                            modifier = Modifier.clickable { onDismiss() }
+                        ) {
+                            Text(
+                                text = "אישור",
+                                color = OnPrimary,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Info text at the bottom
+                    Text(
+                        text = "הגיבוי לא יימחק, ויהיה זמין להורדה גם בהמשך.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatExportDialog(

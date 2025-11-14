@@ -93,20 +93,29 @@ class ChatViewModel(
             }
             
                          // Load existing chat history
-            val chatHistory = repository.loadChatHistory(settings.current_user)
+            val chatHistoryResult = repository.loadChatHistoryWithResult(settings.current_user)
+            val chatHistory = when (chatHistoryResult) {
+                is ChatHistoryLoadResult.Success -> chatHistoryResult.chatHistory
+                is ChatHistoryLoadResult.CorruptedWithBackup -> chatHistoryResult.chatHistory
+            }
+            val backupFileName = when (chatHistoryResult) {
+                is ChatHistoryLoadResult.CorruptedWithBackup -> chatHistoryResult.backupFileName
+                else -> null
+            }
+
             val currentChat = if (chatHistory.chat_history.isNotEmpty()) {
                 chatHistory.chat_history.last() // Load the most recent chat
             } else {
                 null
             }
-            
+
             val webSearchSupport = getWebSearchSupport(currentProvider?.provider ?: "", currentModel)
             val webSearchEnabled = when (webSearchSupport) {
                 WebSearchSupport.REQUIRED -> true
                 WebSearchSupport.OPTIONAL -> false // Default to off for optional models
                 WebSearchSupport.UNSUPPORTED -> false
             }
-            
+
             _uiState.value = _uiState.value.copy(
                 availableProviders = providers,
                 currentProvider = currentProvider,
@@ -117,7 +126,8 @@ class ChatViewModel(
                 groups = chatHistory.groups,
                 webSearchSupport = webSearchSupport,
                 webSearchEnabled = webSearchEnabled,
-                showChatHistory = true
+                showChatHistory = true,
+                corruptedHistoryBackup = backupFileName
             )
             
             // Debug log
@@ -707,6 +717,36 @@ class ChatViewModel(
                 groups = chatHistory.groups
             )
         }
+    }
+
+    /**
+     * Download the backup file to device Downloads folder
+     */
+    fun downloadBackupFile() {
+        viewModelScope.launch {
+            val backupFileName = _uiState.value.corruptedHistoryBackup
+            if (backupFileName != null) {
+                val downloadPath = repository.downloadBackupToDevice(backupFileName)
+                if (downloadPath != null) {
+                    _uiState.value = _uiState.value.copy(
+                        snackbarMessage = "הגיבוי הורד בהצלחה למכשיר"
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        snackbarMessage = "שגיאה בהורדת הגיבוי"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Dismiss the backup warning dialog
+     */
+    fun dismissBackupWarning() {
+        _uiState.value = _uiState.value.copy(
+            corruptedHistoryBackup = null
+        )
     }
 
     fun selectProvider(provider: Provider) {

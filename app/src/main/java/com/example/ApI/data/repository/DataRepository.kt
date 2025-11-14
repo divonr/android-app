@@ -170,19 +170,48 @@ class DataRepository(private val context: Context) {
     }
     
     // Chat History
-    fun loadChatHistory(username: String): UserChatHistory {
+    /**
+     * Load chat history with detailed result indicating if backup was created
+     * Use this when you need to know if the file was corrupted and backed up
+     */
+    fun loadChatHistoryWithResult(username: String): ChatHistoryLoadResult {
         val file = File(internalDir, "chat_history_$username.json")
         return if (file.exists()) {
             try {
                 val content = file.readText()
-                json.decodeFromString<UserChatHistory>(content)
+                val history = json.decodeFromString<UserChatHistory>(content)
+                ChatHistoryLoadResult.Success(history)
             } catch (e: Exception) {
                 android.util.Log.e("DataRepository", "Failed to load chat history", e)
-                UserChatHistory(username, emptyList(), emptyList())
+
+                // Create backup of corrupted file
+                val backupFileName = "backup_chat_history_$username.json"
+                val backupFile = File(internalDir, backupFileName)
+                try {
+                    file.copyTo(backupFile, overwrite = true)
+                    android.util.Log.i("DataRepository", "Created backup: $backupFileName")
+                } catch (backupError: Exception) {
+                    android.util.Log.e("DataRepository", "Failed to create backup", backupError)
+                }
+
+                // Return empty history with backup info
+                val emptyHistory = UserChatHistory(username, emptyList(), emptyList())
+                ChatHistoryLoadResult.CorruptedWithBackup(emptyHistory, backupFileName)
             }
         } else {
-            android.util.Log.e("DataRepository", "Failed to load chat history, file doesn't exist")
-            UserChatHistory(username, emptyList(), emptyList())
+            android.util.Log.d("DataRepository", "Chat history file doesn't exist, creating new")
+            ChatHistoryLoadResult.Success(UserChatHistory(username, emptyList(), emptyList()))
+        }
+    }
+
+    /**
+     * Load chat history and return just the UserChatHistory data
+     * This is a convenience wrapper for most cases where you don't need to handle backup scenarios
+     */
+    fun loadChatHistory(username: String): UserChatHistory {
+        return when (val result = loadChatHistoryWithResult(username)) {
+            is ChatHistoryLoadResult.Success -> result.chatHistory
+            is ChatHistoryLoadResult.CorruptedWithBackup -> result.chatHistory
         }
     }
     
@@ -214,6 +243,36 @@ class DataRepository(private val context: Context) {
             exportFile.writeText(content)
             exportFile.absolutePath
         } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Download backup chat history file to device Downloads folder
+     * @param backupFileName The name of the backup file (e.g., "backup_chat_history_username.json")
+     * @return The absolute path of the downloaded file, or null on error
+     */
+    fun downloadBackupToDevice(backupFileName: String): String? {
+        return try {
+            val backupFile = File(internalDir, backupFileName)
+            if (!backupFile.exists()) {
+                android.util.Log.e("DataRepository", "Backup file not found: $backupFileName")
+                return null
+            }
+
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!downloadsDir.exists()) {
+                downloadsDir.mkdirs()
+            }
+
+            val timestamp = System.currentTimeMillis()
+            val downloadFile = File(downloadsDir, "backup_${timestamp}.json")
+            backupFile.copyTo(downloadFile, overwrite = true)
+
+            android.util.Log.i("DataRepository", "Backup downloaded to: ${downloadFile.absolutePath}")
+            downloadFile.absolutePath
+        } catch (e: Exception) {
+            android.util.Log.e("DataRepository", "Failed to download backup", e)
             null
         }
     }

@@ -72,3 +72,15 @@ data class ChatGroup(
     val group_attachments: List<Attachment> = emptyList(),
     val is_project: Boolean = false
 )
+
+/**
+ * Result of loading chat history, indicating whether the file was loaded successfully
+ * or if it was corrupted and a backup was created
+ */
+sealed class ChatHistoryLoadResult {
+    data class Success(val chatHistory: UserChatHistory) : ChatHistoryLoadResult()
+    data class CorruptedWithBackup(
+        val chatHistory: UserChatHistory, // Empty history
+        val backupFileName: String
+    ) : ChatHistoryLoadResult()
+}
