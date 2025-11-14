@@ -1399,6 +1399,81 @@ fun MessageBubble(
         }
         }
 
+        // Branch navigation (if message has branches)
+        if (message.hasBranches) {
+            val branches = message.branches
+            val activeBranchIndex = branches.indexOfFirst { it.is_active }
+            val currentBranchNumber = if (activeBranchIndex >= 0) activeBranchIndex + 1 else 1
+            val totalBranches = branches.size
+
+            Row(
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .padding(horizontal = if (isUser) 0.dp else 40.dp), // Align with message, account for avatar
+                horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = SurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(4.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        // Previous branch button
+                        IconButton(
+                            onClick = {
+                                if (activeBranchIndex > 0) {
+                                    val previousBranch = branches[activeBranchIndex - 1]
+                                    viewModel.switchBranch(message, previousBranch.branch_chat_id)
+                                }
+                            },
+                            enabled = activeBranchIndex > 0,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Previous branch",
+                                tint = if (activeBranchIndex > 0) OnSurface else OnSurfaceVariant.copy(alpha = 0.3f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+
+                        // Branch counter
+                        Text(
+                            text = "$currentBranchNumber/$totalBranches",
+                            fontSize = 12.sp,
+                            color = OnSurfaceVariant,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+
+                        // Next branch button
+                        IconButton(
+                            onClick = {
+                                if (activeBranchIndex < branches.size - 1) {
+                                    val nextBranch = branches[activeBranchIndex + 1]
+                                    viewModel.switchBranch(message, nextBranch.branch_chat_id)
+                                }
+                            },
+                            enabled = activeBranchIndex < branches.size - 1,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Next branch",
+                                tint = if (activeBranchIndex < branches.size - 1) OnSurface else OnSurfaceVariant.copy(alpha = 0.3f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Context menu
         Box {
             DropdownMenu(
