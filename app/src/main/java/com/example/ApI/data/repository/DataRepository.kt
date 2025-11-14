@@ -615,7 +615,153 @@ class DataRepository(private val context: Context) {
         saveChatHistory(updatedHistory)
         return updatedChat
     }
-    
+
+    // Branch management for message edit history
+
+    // Create a new branch chat from a specific message point
+    fun createBranchFromMessage(
+        username: String,
+        parentChatId: String,
+        fromMessage: Message,
+        editedMessage: Message? = null
+    ): Chat? {
+        val chatHistory = loadChatHistory(username)
+        val parentChat = chatHistory.chat_history.find { it.chat_id == parentChatId } ?: return null
+
+        // Find the index of the message to branch from
+        val messageIndex = parentChat.messages.indexOf(fromMessage)
+        if (messageIndex == -1) return null
+
+        // Create messages for the new branch
+        // Take all messages before the branch point, then add the edited message (or original if no edit)
+        val messagesUpToPoint = parentChat.messages.take(messageIndex)
+        val messageAtPoint = editedMessage ?: fromMessage
+        val branchMessages = messagesUpToPoint + messageAtPoint
+
+        // Generate new branch chat ID
+        val branchChatId = "${parentChatId}_branch_${System.currentTimeMillis()}"
+
+        // Create new branch chat
+        val branchChat = Chat(
+            chat_id = branchChatId,
+            preview_name = parentChat.preview_name,
+            messages = branchMessages,
+            systemPrompt = parentChat.systemPrompt,
+            group = parentChat.group,
+            is_branch = true
+        )
+
+        // Add branch chat to history
+        val updatedHistory = chatHistory.copy(
+            chat_history = chatHistory.chat_history + branchChat
+        )
+        saveChatHistory(updatedHistory)
+
+        return branchChat
+    }
+
+    // Add a branch to a specific message in a chat
+    fun addBranchToMessage(
+        username: String,
+        chatId: String,
+        message: Message,
+        branchChatId: String,
+        makeActive: Boolean = true
+    ): Chat? {
+        val chatHistory = loadChatHistory(username)
+        val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
+
+        // Update the message with the new branch
+        val updatedMessages = targetChat.messages.map { msg ->
+            if (msg == message) {
+                // Deactivate all existing branches if making this one active
+                val updatedBranches = if (makeActive) {
+                    msg.branches.map { it.copy(is_active = false) } +
+                    MessageBranch(branch_chat_id = branchChatId, is_active = true)
+                } else {
+                    msg.branches + MessageBranch(branch_chat_id = branchChatId, is_active = false)
+                }
+                msg.copy(branches = updatedBranches)
+            } else {
+                msg
+            }
+        }
+
+        val updatedChat = targetChat.copy(messages = updatedMessages)
+        val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
+
+        val updatedHistory = chatHistory.copy(
+            chat_history = otherChats + updatedChat
+        )
+
+        saveChatHistory(updatedHistory)
+        return updatedChat
+    }
+
+    // Switch the active branch for a message
+    fun switchActiveBranch(
+        username: String,
+        chatId: String,
+        message: Message,
+        branchChatId: String
+    ): Chat? {
+        val chatHistory = loadChatHistory(username)
+        val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
+
+        val updatedMessages = targetChat.messages.map { msg ->
+            if (msg == message) {
+                val updatedBranches = msg.branches.map { branch ->
+                    branch.copy(is_active = branch.branch_chat_id == branchChatId)
+                }
+                msg.copy(branches = updatedBranches)
+            } else {
+                msg
+            }
+        }
+
+        val updatedChat = targetChat.copy(messages = updatedMessages)
+        val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
+
+        val updatedHistory = chatHistory.copy(
+            chat_history = otherChats + updatedChat
+        )
+
+        saveChatHistory(updatedHistory)
+        return updatedChat
+    }
+
+    // Get a branch chat by ID (including branch chats)
+    fun getBranchChat(username: String, branchChatId: String): Chat? {
+        val chatHistory = loadChatHistory(username)
+        return chatHistory.chat_history.find { it.chat_id == branchChatId }
+    }
+
+    // Get chat with active branch merged in (for display purposes)
+    fun getChatWithActiveBranch(username: String, chatId: String): Chat? {
+        val chatHistory = loadChatHistory(username)
+        val mainChat = chatHistory.chat_history.find { it.chat_id == chatId && !it.is_branch } ?: return null
+
+        // Find the first message with an active branch
+        val messageWithActiveBranch = mainChat.messages.find { it.activeBranch != null }
+
+        if (messageWithActiveBranch == null) {
+            // No active branches, return the main chat as is
+            return mainChat
+        }
+
+        val activeBranch = messageWithActiveBranch.activeBranch!!
+        val branchChat = getBranchChat(username, activeBranch.branch_chat_id) ?: return mainChat
+
+        // Find the index of the message with the branch
+        val branchPointIndex = mainChat.messages.indexOf(messageWithActiveBranch)
+
+        // Create merged messages: messages up to branch point from main chat,
+        // then all messages from branch chat (which already includes the edited message)
+        val mergedMessages = mainChat.messages.take(branchPointIndex) + branchChat.messages.drop(branchPointIndex)
+
+        return mainChat.copy(messages = mergedMessages)
+    }
+
     // API Communication
     suspend fun sendMessage(
         provider: Provider,

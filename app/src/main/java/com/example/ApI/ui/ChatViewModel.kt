@@ -113,7 +113,7 @@ class ChatViewModel(
                 currentModel = currentModel,
                 systemPrompt = currentChat?.systemPrompt ?: "",
                 currentChat = currentChat,
-                chatHistory = chatHistory.chat_history,
+                chatHistory = chatHistory.main_chats,
                 groups = chatHistory.groups,
                 webSearchSupport = webSearchSupport,
                 webSearchEnabled = webSearchEnabled,
@@ -411,7 +411,7 @@ class ChatViewModel(
                     
                     _uiState.value = _uiState.value.copy(
                         currentChat = refreshedCurrentChat,
-                        chatHistory = refreshedChatHistory.chat_history,
+                        chatHistory = refreshedChatHistory.main_chats,
                         isLoading = false  // Set to false since streaming will handle the rest
                     )
 
@@ -598,7 +598,7 @@ class ChatViewModel(
                     val refreshedCurrentChat = refreshed.chat_history.find { it.chat_id == currentChat.chat_id } ?: currentChat
                     _uiState.value = _uiState.value.copy(
                         currentChat = refreshedCurrentChat,
-                        chatHistory = refreshed.chat_history
+                        chatHistory = refreshed.main_chats
                     )
                 } catch (e: Exception) {
                     _uiState.value = _uiState.value.copy(
@@ -703,7 +703,7 @@ class ChatViewModel(
             val currentUser = _appSettings.value.current_user
             val chatHistory = repository.loadChatHistory(currentUser)
             _uiState.value = _uiState.value.copy(
-                chatHistory = chatHistory.chat_history,
+                chatHistory = chatHistory.main_chats,
                 groups = chatHistory.groups
             )
         }
@@ -1019,7 +1019,7 @@ class ChatViewModel(
                     val chatHistory = repository.loadChatHistory(currentUser)
                     val currentChat = chatHistory.chat_history.lastOrNull()
                     _uiState.value = _uiState.value.copy(
-                        chatHistory = chatHistory.chat_history,
+                        chatHistory = chatHistory.main_chats,
                         groups = chatHistory.groups,
                         currentChat = currentChat
                     )
@@ -1180,23 +1180,40 @@ class ChatViewModel(
         if (newText.isEmpty()) return
 
         // Create the updated message
-        val updatedMessage = editingMessage.copy(text = newText)
+        val updatedMessage = editingMessage.copy(text = newText, datetime = getCurrentDateTimeISO())
 
-        // Replace the message in the repository
-        val updatedChat = repository.replaceMessageInChat(
+        // Create a new branch from this message point with the edited message
+        val branchChat = repository.createBranchFromMessage(
             currentUser,
             currentChat.chat_id,
             editingMessage,
             updatedMessage
         ) ?: return
 
+        // Find the parent chat (main chat if current is already a branch, or current chat if it's main)
+        val parentChatId = if (currentChat.is_branch) {
+            // Extract parent chat ID from branch ID (format: "parent_id_branch_timestamp")
+            currentChat.chat_id.substringBeforeLast("_branch_")
+        } else {
+            currentChat.chat_id
+        }
+
+        // Add the branch to the original message in the parent chat
+        repository.addBranchToMessage(
+            currentUser,
+            parentChatId,
+            editingMessage,
+            branchChat.chat_id,
+            makeActive = true
+        )
+
         // Update chat history in UI
-        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+        val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
         _uiState.value = _uiState.value.copy(
             editingMessage = null,
             isEditMode = false,
             currentMessage = "",
-            currentChat = updatedChat,
+            currentChat = branchChat,
             chatHistory = updatedChatHistory
         )
 
@@ -1212,38 +1229,94 @@ class ChatViewModel(
             currentMessage = ""
         )
     }
+
+    // Switch to a different branch of a message
+    fun switchBranch(message: Message, branchChatId: String) {
+        val currentChat = _uiState.value.currentChat ?: return
+        val currentUser = _appSettings.value.current_user
+
+        viewModelScope.launch {
+            // Find the parent chat
+            val parentChatId = if (currentChat.is_branch) {
+                currentChat.chat_id.substringBeforeLast("_branch_")
+            } else {
+                currentChat.chat_id
+            }
+
+            // Update which branch is active
+            repository.switchActiveBranch(
+                currentUser,
+                parentChatId,
+                message,
+                branchChatId
+            )
+
+            // Load the branch chat and make it the current chat
+            val branchChat = repository.getBranchChat(currentUser, branchChatId)
+            if (branchChat != null) {
+                val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
+                _uiState.value = _uiState.value.copy(
+                    currentChat = branchChat,
+                    chatHistory = updatedChatHistory
+                )
+            }
+        }
+    }
+
+    // Get the active branch for a message (if any)
+    fun getActiveBranchForMessage(message: Message): MessageBranch? {
+        return message.activeBranch
+    }
+
+    // Get all branches for a message
+    fun getBranchesForMessage(message: Message): List<MessageBranch> {
+        return message.branches
+    }
     
     // Resend from a specific message point
     fun resendFromMessage(message: Message) {
         val currentChat = _uiState.value.currentChat ?: return
         val currentUser = _appSettings.value.current_user
-        
+
         viewModelScope.launch {
-            // Delete all messages from this point onwards
-            val updatedChat = repository.deleteMessagesFromPoint(
-                currentUser, 
-                currentChat.chat_id, 
-                message
+            // Create a new branch from this message point
+            val branchChat = repository.createBranchFromMessage(
+                currentUser,
+                currentChat.chat_id,
+                message,
+                null  // No edited message, just resend as-is
             ) ?: return@launch
-            
+
+            // Find the parent chat (main chat if current is already a branch, or current chat if it's main)
+            val parentChatId = if (currentChat.is_branch) {
+                // Extract parent chat ID from branch ID (format: "parent_id_branch_timestamp")
+                currentChat.chat_id.substringBeforeLast("_branch_")
+            } else {
+                currentChat.chat_id
+            }
+
+            // Add the branch to the original message in the parent chat
+            repository.addBranchToMessage(
+                currentUser,
+                parentChatId,
+                message,
+                branchChat.chat_id,
+                makeActive = true
+            )
+
             // Update chat history
-            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
-            
-            // Update UI state
+            val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
+
+            // Update UI state with the new branch as current chat
             _uiState.value = _uiState.value.copy(
-                currentChat = updatedChat,
+                currentChat = branchChat,
                 chatHistory = updatedChatHistory
             )
-            
-            // Resend the message by adding it back and calling the API
-            val messageToResend = message
-            val resendUpdatedChat = repository.addMessageToChat(
-                currentUser,
-                updatedChat.chat_id,
-                messageToResend
-            )
-            
-            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+
+            // Continue with the branch chat for sending the message
+            val resendUpdatedChat = branchChat
+
+            val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
             
             _uiState.value = _uiState.value.copy(
                 currentChat = resendUpdatedChat,
@@ -1765,7 +1838,7 @@ class ChatViewModel(
             val chatHistory = repository.loadChatHistory(currentUser)
             _uiState.value = _uiState.value.copy(
                 groups = chatHistory.groups,
-                chatHistory = chatHistory.chat_history,
+                chatHistory = chatHistory.main_chats,
                 expandedGroups = _uiState.value.expandedGroups + newGroup.group_id,
                 pendingChatForGroup = null
             )
@@ -1791,7 +1864,7 @@ class ChatViewModel(
                 // Update UI state
                 val chatHistory = repository.loadChatHistory(currentUser)
                 _uiState.value = _uiState.value.copy(
-                    chatHistory = chatHistory.chat_history,
+                    chatHistory = chatHistory.main_chats,
                     groups = chatHistory.groups
                 )
 
@@ -1816,7 +1889,7 @@ class ChatViewModel(
                 // Update UI state
                 val chatHistory = repository.loadChatHistory(currentUser)
                 _uiState.value = _uiState.value.copy(
-                    chatHistory = chatHistory.chat_history,
+                    chatHistory = chatHistory.main_chats,
                     groups = chatHistory.groups
                 )
 
@@ -1858,7 +1931,7 @@ class ChatViewModel(
             val currentUser = _appSettings.value.current_user
             val chatHistory = repository.loadChatHistory(currentUser)
             _uiState.value = _uiState.value.copy(
-                chatHistory = chatHistory.chat_history,
+                chatHistory = chatHistory.main_chats,
                 groups = chatHistory.groups
             )
         }

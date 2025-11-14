@@ -8,7 +8,10 @@ data class UserChatHistory(
     val user_name: String,
     val chat_history: List<Chat>,
     val groups: List<ChatGroup> = emptyList()
-)
+) {
+    // Get only main chats (exclude branches)
+    val main_chats: List<Chat> get() = chat_history.filter { !it.is_branch }
+}
 
 @Serializable
 data class Chat(
@@ -16,7 +19,8 @@ data class Chat(
     val preview_name: String,
     val messages: List<Message>,
     val systemPrompt: String = "",
-    val group: String? = null
+    val group: String? = null,
+    val is_branch: Boolean = false
 ) {
     // Convenience properties
     val title: String get() = preview_name
@@ -33,6 +37,12 @@ data class Chat(
 }
 
 @Serializable
+data class MessageBranch(
+    val branch_chat_id: String,
+    val is_active: Boolean
+)
+
+@Serializable
 data class Message(
     val role: String, // "user", "assistant", "system", "tool_call", "tool_response"
     val text: String,
@@ -42,16 +52,23 @@ data class Message(
     val toolCall: ToolCallInfo? = null, // Tool call information if this is a tool call message
     val toolCallId: String? = null, // For providers like OpenAI that require linking tool call results
     val toolResponseCallId: String? = null, // For tool_response messages - links back to the tool_call
-    val toolResponseOutput: String? = null // For tool_response messages - the actual tool output
+    val toolResponseOutput: String? = null, // For tool_response messages - the actual tool output
+    val branches: List<MessageBranch> = emptyList() // List of branch chat IDs created from editing/resending this message
 ) {
     // Convenience property
     val content: String get() = text
-    
+
     // Check if this is a tool call message
     val isToolCall: Boolean get() = role == "tool_call" || toolCall != null
-    
+
     // Check if this is a tool response message
     val isToolResponse: Boolean get() = role == "tool_response" || toolResponseCallId != null
+
+    // Check if this message has branches
+    val hasBranches: Boolean get() = branches.isNotEmpty()
+
+    // Get the active branch
+    val activeBranch: MessageBranch? get() = branches.find { it.is_active }
 }
 
 @Serializable
