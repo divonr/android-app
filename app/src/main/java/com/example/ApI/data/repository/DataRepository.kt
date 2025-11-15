@@ -618,6 +618,11 @@ class DataRepository(private val context: Context) {
 
     // Branch management for message edit history
 
+    // Helper function to get the root parent chat ID (removes all _branch_ suffixes)
+    private fun getRootParentChatId(chatId: String): String {
+        return chatId.split("_branch_").first()
+    }
+
     // Create a new branch chat from a specific message point
     fun createBranchFromMessage(
         username: String,
@@ -672,8 +677,11 @@ class DataRepository(private val context: Context) {
         val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
 
         // Update the message with the new branch
+        // Use field comparison instead of object equality
         val updatedMessages = targetChat.messages.map { msg ->
-            if (msg == message) {
+            if (msg.datetime == message.datetime &&
+                msg.role == message.role &&
+                msg.text == message.text) {
                 // Deactivate all existing branches if making this one active
                 val updatedBranches = if (makeActive) {
                     msg.branches.map { it.copy(is_active = false) } +
@@ -708,8 +716,11 @@ class DataRepository(private val context: Context) {
         val chatHistory = loadChatHistory(username)
         val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
 
+        // Use field comparison instead of object equality
         val updatedMessages = targetChat.messages.map { msg ->
-            if (msg == message) {
+            if (msg.datetime == message.datetime &&
+                msg.role == message.role &&
+                msg.text == message.text) {
                 val updatedBranches = msg.branches.map { branch ->
                     branch.copy(is_active = branch.branch_chat_id == branchChatId)
                 }
