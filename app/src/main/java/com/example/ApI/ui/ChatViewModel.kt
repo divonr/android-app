@@ -1179,19 +1179,19 @@ class ChatViewModel(
         val newText = _uiState.value.currentMessage.trim()
         if (newText.isEmpty()) return
 
-        // Create the updated message
-        val updatedMessage = editingMessage.copy(text = newText, datetime = getCurrentDateTimeISO())
+        // Find the root parent chat ID (removes all _branch_ suffixes)
+        val rootParentChatId = currentChat.chat_id.split("_branch_").first()
 
-        // Create a new branch from this message point with the edited message
+        // Create the updated message (keep original datetime to match root parent)
+        val updatedMessage = editingMessage.copy(text = newText)
+
+        // Create a new branch from the ROOT PARENT (not current chat which might be a branch)
         val branchChat = repository.createBranchFromMessage(
             currentUser,
-            currentChat.chat_id,
+            rootParentChatId,  // Always branch from root parent
             editingMessage,
             updatedMessage
         ) ?: return
-
-        // Find the root parent chat ID (removes all _branch_ suffixes)
-        val rootParentChatId = currentChat.chat_id.split("_branch_").first()
 
         // Add the branch to the original message in the root parent chat
         repository.addBranchToMessage(
@@ -1288,16 +1288,16 @@ class ChatViewModel(
         val currentUser = _appSettings.value.current_user
 
         viewModelScope.launch {
-            // Create a new branch from this message point
+            // Find the root parent chat ID (removes all _branch_ suffixes)
+            val rootParentChatId = currentChat.chat_id.split("_branch_").first()
+
+            // Create a new branch from the ROOT PARENT (not current chat which might be a branch)
             val branchChat = repository.createBranchFromMessage(
                 currentUser,
-                currentChat.chat_id,
+                rootParentChatId,  // Always branch from root parent
                 message,
                 null  // No edited message, just resend as-is
             ) ?: return@launch
-
-            // Find the root parent chat ID (removes all _branch_ suffixes)
-            val rootParentChatId = currentChat.chat_id.split("_branch_").first()
 
             // Add the branch to the original message in the root parent chat
             repository.addBranchToMessage(
