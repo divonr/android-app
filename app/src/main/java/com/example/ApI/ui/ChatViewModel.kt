@@ -196,7 +196,7 @@ class ChatViewModel(
             )
 
             // Update chat history as well
-            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+            val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
 
             _uiState.value = _uiState.value.copy(
                 currentChat = updatedChat,
@@ -290,7 +290,7 @@ class ChatViewModel(
                                     assistantMessage
                                 )
 
-                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+                                val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -322,7 +322,7 @@ class ChatViewModel(
                                     errorMessage
                                 )
 
-                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+                                val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -375,7 +375,7 @@ class ChatViewModel(
                             updatedChat = tempChat
                             
                             // Reload chat history
-                            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+                            val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
                             
                             // Update UI
                             _uiState.value = _uiState.value.copy(
@@ -431,7 +431,7 @@ class ChatViewModel(
                         errorMessage
                     )
 
-                    val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+                    val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
 
                     _uiState.value = _uiState.value.copy(
                         currentChat = finalUpdatedChat,
@@ -494,7 +494,7 @@ class ChatViewModel(
                                     assistantMessage
                                 )
 
-                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+                                val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -525,7 +525,7 @@ class ChatViewModel(
                                     errorMessage
                                 )
 
-                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+                                val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -567,7 +567,7 @@ class ChatViewModel(
                             )
                             
                             // Reload chat history
-                            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+                            val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
                             
                             // Update UI
                             _uiState.value = _uiState.value.copy(
@@ -635,7 +635,7 @@ class ChatViewModel(
     fun createNewChat(previewName: String = "שיחה חדשה"): Chat {
         val currentUser = _appSettings.value.current_user
         val newChat = repository.createNewChat(currentUser, previewName, "")  // Reset system prompt
-        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+        val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
         
         _uiState.value = _uiState.value.copy(
             currentChat = newChat,
@@ -659,7 +659,7 @@ class ChatViewModel(
 
         // Create new chat with empty system prompt (group system prompt will be handled separately)
         val newChat = repository.createNewChatInGroup(currentUser, previewName, groupId, "")
-        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+        val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
 
         _uiState.value = _uiState.value.copy(
             currentChat = newChat,
@@ -779,7 +779,7 @@ class ChatViewModel(
         } else {
             // If no current chat, create a new one with the system prompt
             val newChat = repository.createNewChat(currentUser, "שיחה חדשה", prompt)
-            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+            val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
             
             _uiState.value = _uiState.value.copy(
                 currentChat = newChat,
@@ -1159,7 +1159,7 @@ class ChatViewModel(
         )
         
         // Update chat history
-        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+        val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
         
         // Clear edit mode and update UI state
         _uiState.value = _uiState.value.copy(
@@ -1259,9 +1259,27 @@ class ChatViewModel(
         return message.activeBranch
     }
 
-    // Get all branches for a message
+    // Get all branches for a message (works even when in a branch chat)
     fun getBranchesForMessage(message: Message): List<MessageBranch> {
-        return message.branches
+        val currentChat = _uiState.value.currentChat ?: return emptyList()
+        val currentUser = _appSettings.value.current_user
+
+        // If we're in a branch chat, we need to get the branches from the root parent
+        val rootParentChatId = currentChat.chat_id.split("_branch_").first()
+
+        // Load the root parent chat
+        val chatHistory = repository.loadChatHistory(currentUser)
+        val rootParentChat = chatHistory.chat_history.find { it.chat_id == rootParentChatId }
+            ?: return message.branches // Fallback to message branches if root not found
+
+        // Find the matching message in the root parent chat
+        val matchingMessage = rootParentChat.messages.find { msg ->
+            msg.datetime == message.datetime &&
+            msg.role == message.role &&
+            msg.text == message.text
+        }
+
+        return matchingMessage?.branches ?: emptyList()
     }
     
     // Resend from a specific message point
@@ -1343,7 +1361,7 @@ class ChatViewModel(
                                     assistantMessage
                                 )
 
-                                val finalHistory = repository.loadChatHistory(currentUser).chat_history
+                                val finalHistory = repository.loadChatHistory(currentUser).main_chats
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -1371,7 +1389,7 @@ class ChatViewModel(
                                     errorMessage
                                 )
 
-                                val finalHistory = repository.loadChatHistory(currentUser).chat_history
+                                val finalHistory = repository.loadChatHistory(currentUser).main_chats
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -1413,7 +1431,7 @@ class ChatViewModel(
                             )
                             
                             // Reload chat history
-                            val finalHistory = repository.loadChatHistory(currentUser).chat_history
+                            val finalHistory = repository.loadChatHistory(currentUser).main_chats
                             
                             // Update UI
                             _uiState.value = _uiState.value.copy(
@@ -1536,7 +1554,7 @@ class ChatViewModel(
         repository.saveChatHistory(updatedHistory)
         
         // Update UI state
-        val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+        val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
         val updatedCurrentChat = finalChatHistory.find { it.chat_id == chatId }
         
         _uiState.value = _uiState.value.copy(
@@ -1612,7 +1630,7 @@ class ChatViewModel(
             repository.saveChatHistory(updatedHistory)
 
             // Update UI
-            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+            val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
 
             // If we're deleting the current chat, switch to the most recent one or null
             val newCurrentChat = if (finalChatHistory.isNotEmpty()) {
@@ -1695,7 +1713,7 @@ class ChatViewModel(
             repository.saveChatHistory(updatedHistory)
             
             // Update UI
-            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+            val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
             
             // If we're deleting the current chat, switch to the most recent one or null
             val newCurrentChat = if (_uiState.value.currentChat?.chat_id == chat.chat_id) {

@@ -1400,10 +1400,16 @@ fun MessageBubble(
         }
 
         // Branch navigation (if message has branches)
-        if (message.hasBranches) {
-            val branches = message.branches
-            val activeBranchIndex = branches.indexOfFirst { it.is_active }
-            val currentBranchNumber = if (activeBranchIndex >= 0) activeBranchIndex + 1 else 1
+        // Use viewModel to get branches - works even when in a branch chat
+        val branches = viewModel.getBranchesForMessage(message)
+        if (branches.isNotEmpty()) {
+            // Find which branch we're currently viewing
+            val currentChatId = uiState.currentChat?.chat_id
+            val currentBranchIndex = branches.indexOfFirst { it.branch_chat_id == currentChatId }
+
+            // If we're not in a branch chat, use the active branch
+            val displayBranchIndex = if (currentBranchIndex >= 0) currentBranchIndex else branches.indexOfFirst { it.is_active }
+            val currentBranchNumber = if (displayBranchIndex >= 0) displayBranchIndex + 1 else 1
             val totalBranches = branches.size
 
             Row(
@@ -1426,18 +1432,18 @@ fun MessageBubble(
                         // Previous branch button
                         IconButton(
                             onClick = {
-                                if (activeBranchIndex > 0) {
-                                    val previousBranch = branches[activeBranchIndex - 1]
+                                if (displayBranchIndex > 0) {
+                                    val previousBranch = branches[displayBranchIndex - 1]
                                     viewModel.switchBranch(message, previousBranch.branch_chat_id)
                                 }
                             },
-                            enabled = activeBranchIndex > 0,
+                            enabled = displayBranchIndex > 0,
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Previous branch",
-                                tint = if (activeBranchIndex > 0) OnSurface else OnSurfaceVariant.copy(alpha = 0.3f),
+                                tint = if (displayBranchIndex > 0) OnSurface else OnSurfaceVariant.copy(alpha = 0.3f),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -1454,18 +1460,18 @@ fun MessageBubble(
                         // Next branch button
                         IconButton(
                             onClick = {
-                                if (activeBranchIndex < branches.size - 1) {
-                                    val nextBranch = branches[activeBranchIndex + 1]
+                                if (displayBranchIndex < branches.size - 1) {
+                                    val nextBranch = branches[displayBranchIndex + 1]
                                     viewModel.switchBranch(message, nextBranch.branch_chat_id)
                                 }
                             },
-                            enabled = activeBranchIndex < branches.size - 1,
+                            enabled = displayBranchIndex < branches.size - 1,
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                                 contentDescription = "Next branch",
-                                tint = if (activeBranchIndex < branches.size - 1) OnSurface else OnSurfaceVariant.copy(alpha = 0.3f),
+                                tint = if (displayBranchIndex < branches.size - 1) OnSurface else OnSurfaceVariant.copy(alpha = 0.3f),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
