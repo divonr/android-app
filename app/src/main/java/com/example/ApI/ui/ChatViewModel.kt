@@ -113,7 +113,7 @@ class ChatViewModel(
                 currentModel = currentModel,
                 systemPrompt = currentChat?.systemPrompt ?: "",
                 currentChat = currentChat,
-                chatHistory = chatHistory.main_chats,
+                chatHistory = chatHistory.chat_history,
                 groups = chatHistory.groups,
                 webSearchSupport = webSearchSupport,
                 webSearchEnabled = webSearchEnabled,
@@ -196,7 +196,7 @@ class ChatViewModel(
             )
 
             // Update chat history as well
-            val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
+            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
 
             _uiState.value = _uiState.value.copy(
                 currentChat = updatedChat,
@@ -290,7 +290,7 @@ class ChatViewModel(
                                     assistantMessage
                                 )
 
-                                val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -322,7 +322,7 @@ class ChatViewModel(
                                     errorMessage
                                 )
 
-                                val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -375,7 +375,7 @@ class ChatViewModel(
                             updatedChat = tempChat
                             
                             // Reload chat history
-                            val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+                            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
                             
                             // Update UI
                             _uiState.value = _uiState.value.copy(
@@ -411,7 +411,7 @@ class ChatViewModel(
                     
                     _uiState.value = _uiState.value.copy(
                         currentChat = refreshedCurrentChat,
-                        chatHistory = refreshedChatHistory.main_chats,
+                        chatHistory = refreshedChatHistory.chat_history,
                         isLoading = false  // Set to false since streaming will handle the rest
                     )
 
@@ -431,7 +431,7 @@ class ChatViewModel(
                         errorMessage
                     )
 
-                    val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+                    val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
 
                     _uiState.value = _uiState.value.copy(
                         currentChat = finalUpdatedChat,
@@ -494,7 +494,7 @@ class ChatViewModel(
                                     assistantMessage
                                 )
 
-                                val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -525,7 +525,7 @@ class ChatViewModel(
                                     errorMessage
                                 )
 
-                                val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -567,7 +567,7 @@ class ChatViewModel(
                             )
                             
                             // Reload chat history
-                            val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+                            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
                             
                             // Update UI
                             _uiState.value = _uiState.value.copy(
@@ -598,7 +598,7 @@ class ChatViewModel(
                     val refreshedCurrentChat = refreshed.chat_history.find { it.chat_id == currentChat.chat_id } ?: currentChat
                     _uiState.value = _uiState.value.copy(
                         currentChat = refreshedCurrentChat,
-                        chatHistory = refreshed.main_chats
+                        chatHistory = refreshed.chat_history
                     )
                 } catch (e: Exception) {
                     _uiState.value = _uiState.value.copy(
@@ -635,7 +635,7 @@ class ChatViewModel(
     fun createNewChat(previewName: String = "שיחה חדשה"): Chat {
         val currentUser = _appSettings.value.current_user
         val newChat = repository.createNewChat(currentUser, previewName, "")  // Reset system prompt
-        val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
+        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
         
         _uiState.value = _uiState.value.copy(
             currentChat = newChat,
@@ -659,7 +659,7 @@ class ChatViewModel(
 
         // Create new chat with empty system prompt (group system prompt will be handled separately)
         val newChat = repository.createNewChatInGroup(currentUser, previewName, groupId, "")
-        val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
+        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
 
         _uiState.value = _uiState.value.copy(
             currentChat = newChat,
@@ -703,7 +703,7 @@ class ChatViewModel(
             val currentUser = _appSettings.value.current_user
             val chatHistory = repository.loadChatHistory(currentUser)
             _uiState.value = _uiState.value.copy(
-                chatHistory = chatHistory.main_chats,
+                chatHistory = chatHistory.chat_history,
                 groups = chatHistory.groups
             )
         }
@@ -779,7 +779,7 @@ class ChatViewModel(
         } else {
             // If no current chat, create a new one with the system prompt
             val newChat = repository.createNewChat(currentUser, "שיחה חדשה", prompt)
-            val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
+            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
             
             _uiState.value = _uiState.value.copy(
                 currentChat = newChat,
@@ -1019,7 +1019,7 @@ class ChatViewModel(
                     val chatHistory = repository.loadChatHistory(currentUser)
                     val currentChat = chatHistory.chat_history.lastOrNull()
                     _uiState.value = _uiState.value.copy(
-                        chatHistory = chatHistory.main_chats,
+                        chatHistory = chatHistory.chat_history,
                         groups = chatHistory.groups,
                         currentChat = currentChat
                     )
@@ -1159,7 +1159,7 @@ class ChatViewModel(
         )
         
         // Update chat history
-        val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
+        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
         
         // Clear edit mode and update UI state
         _uiState.value = _uiState.value.copy(
@@ -1203,7 +1203,7 @@ class ChatViewModel(
         )
 
         // Update chat history in UI
-        val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
+        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
         _uiState.value = _uiState.value.copy(
             editingMessage = null,
             isEditMode = false,
@@ -1245,7 +1245,7 @@ class ChatViewModel(
             // Load the branch chat and make it the current chat
             val branchChat = repository.getBranchChat(currentUser, branchChatId)
             if (branchChat != null) {
-                val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
+                val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
                 _uiState.value = _uiState.value.copy(
                     currentChat = branchChat,
                     chatHistory = updatedChatHistory
@@ -1309,7 +1309,7 @@ class ChatViewModel(
             )
 
             // Update chat history
-            val updatedChatHistory = repository.loadChatHistory(currentUser).main_chats
+            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
 
             // Update UI state with the new branch as current chat
             _uiState.value = _uiState.value.copy(
@@ -1320,7 +1320,7 @@ class ChatViewModel(
             // Continue with the branch chat for sending the message
             val resendUpdatedChat = branchChat
 
-            val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
             
             _uiState.value = _uiState.value.copy(
                 currentChat = resendUpdatedChat,
@@ -1361,7 +1361,7 @@ class ChatViewModel(
                                     assistantMessage
                                 )
 
-                                val finalHistory = repository.loadChatHistory(currentUser).main_chats
+                                val finalHistory = repository.loadChatHistory(currentUser).chat_history
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -1389,7 +1389,7 @@ class ChatViewModel(
                                     errorMessage
                                 )
 
-                                val finalHistory = repository.loadChatHistory(currentUser).main_chats
+                                val finalHistory = repository.loadChatHistory(currentUser).chat_history
 
                                 _uiState.value = _uiState.value.copy(
                                     currentChat = finalUpdatedChat,
@@ -1431,7 +1431,7 @@ class ChatViewModel(
                             )
                             
                             // Reload chat history
-                            val finalHistory = repository.loadChatHistory(currentUser).main_chats
+                            val finalHistory = repository.loadChatHistory(currentUser).chat_history
                             
                             // Update UI
                             _uiState.value = _uiState.value.copy(
@@ -1554,7 +1554,7 @@ class ChatViewModel(
         repository.saveChatHistory(updatedHistory)
         
         // Update UI state
-        val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+        val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
         val updatedCurrentChat = finalChatHistory.find { it.chat_id == chatId }
         
         _uiState.value = _uiState.value.copy(
@@ -1630,7 +1630,7 @@ class ChatViewModel(
             repository.saveChatHistory(updatedHistory)
 
             // Update UI
-            val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
 
             // If we're deleting the current chat, switch to the most recent one or null
             val newCurrentChat = if (finalChatHistory.isNotEmpty()) {
@@ -1713,7 +1713,7 @@ class ChatViewModel(
             repository.saveChatHistory(updatedHistory)
             
             // Update UI
-            val finalChatHistory = repository.loadChatHistory(currentUser).main_chats
+            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
             
             // If we're deleting the current chat, switch to the most recent one or null
             val newCurrentChat = if (_uiState.value.currentChat?.chat_id == chat.chat_id) {
@@ -1842,7 +1842,7 @@ class ChatViewModel(
             val chatHistory = repository.loadChatHistory(currentUser)
             _uiState.value = _uiState.value.copy(
                 groups = chatHistory.groups,
-                chatHistory = chatHistory.main_chats,
+                chatHistory = chatHistory.chat_history,
                 expandedGroups = _uiState.value.expandedGroups + newGroup.group_id,
                 pendingChatForGroup = null
             )
@@ -1868,7 +1868,7 @@ class ChatViewModel(
                 // Update UI state
                 val chatHistory = repository.loadChatHistory(currentUser)
                 _uiState.value = _uiState.value.copy(
-                    chatHistory = chatHistory.main_chats,
+                    chatHistory = chatHistory.chat_history,
                     groups = chatHistory.groups
                 )
 
@@ -1893,7 +1893,7 @@ class ChatViewModel(
                 // Update UI state
                 val chatHistory = repository.loadChatHistory(currentUser)
                 _uiState.value = _uiState.value.copy(
-                    chatHistory = chatHistory.main_chats,
+                    chatHistory = chatHistory.chat_history,
                     groups = chatHistory.groups
                 )
 
@@ -1935,7 +1935,7 @@ class ChatViewModel(
             val currentUser = _appSettings.value.current_user
             val chatHistory = repository.loadChatHistory(currentUser)
             _uiState.value = _uiState.value.copy(
-                chatHistory = chatHistory.main_chats,
+                chatHistory = chatHistory.chat_history,
                 groups = chatHistory.groups
             )
         }

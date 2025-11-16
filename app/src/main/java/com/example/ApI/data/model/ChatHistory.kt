@@ -8,10 +8,7 @@ data class UserChatHistory(
     val user_name: String,
     val chat_history: List<Chat>,
     val groups: List<ChatGroup> = emptyList()
-) {
-    // Get only main chats (exclude branches)
-    val main_chats: List<Chat> get() = chat_history.filter { !it.is_branch }
-}
+)
 
 @Serializable
 data class Chat(

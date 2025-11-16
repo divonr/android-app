@@ -67,7 +67,10 @@ fun ChatHistoryScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val searchFocusRequester = remember { FocusRequester() }
-    
+
+    // Filter out branch chats - only show main chats in the list
+    val displayedChats = uiState.chatHistory.filter { !it.is_branch }
+
     // Handle back button press to exit search mode
     BackHandler(enabled = uiState.searchMode) {
         viewModel.exitSearchMode()
@@ -333,7 +336,7 @@ fun ChatHistoryScreen(
                 }
             } else {
                 // Normal mode content - show chat history
-                if (uiState.chatHistory.isEmpty()) {
+                if (displayedChats.isEmpty()) {
                     // Empty state
                     Column(
                         modifier = Modifier
@@ -367,7 +370,7 @@ fun ChatHistoryScreen(
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
                         // Organize and sort all items (groups and individual chats) by most recent activity
-                        val sortedItems = organizeAndSortAllItems(uiState.chatHistory, uiState.groups)
+                        val sortedItems = organizeAndSortAllItems(displayedChats, uiState.groups)
 
                         sortedItems.forEach { item ->
                             when (item) {
