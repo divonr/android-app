@@ -15,7 +15,9 @@
       "Bash(cmd /c \"gradlew.bat assembleDebug\")",
       "Bash(powershell -Command \".\\gradlew.bat assembleDebug\")",
       "WebSearch",
-      "WebFetch(domain:platform.openai.com)"
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

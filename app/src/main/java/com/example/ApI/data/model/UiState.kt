@@ -60,7 +60,10 @@ data class ChatUiState(
     val searchContext: SearchResult? = null, // Context for jumping to search results
     val executingToolCall: ExecutingToolInfo? = null, // Track currently executing tool
     val textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO, // Text direction mode for message bubbles
-    val renamingChatIds: Set<String> = emptySet() // Track chats currently being renamed with AI
+    val renamingChatIds: Set<String> = emptySet(), // Track chats currently being renamed with AI
+    // Branching support
+    val lastEditedMessageId: String? = null, // Track last edited message for edit+resend detection
+    val currentBranchMessageId: String? = null // Track which message we're branching from for streaming
 )
 
 data class ChatContextMenuState(

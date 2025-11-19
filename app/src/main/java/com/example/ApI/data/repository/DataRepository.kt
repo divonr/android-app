@@ -597,21 +597,331 @@ class DataRepository(private val context: Context) {
     fun deleteMessagesFromPoint(username: String, chatId: String, fromMessage: Message): Chat? {
         val chatHistory = loadChatHistory(username)
         val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
-        
+
         // Find the index of the message to delete from
         val messageIndex = targetChat.messages.indexOf(fromMessage)
         if (messageIndex == -1) return targetChat // Message not found
-        
+
         // Keep only messages before this index
         val updatedMessages = targetChat.messages.take(messageIndex)
-        
+
         val updatedChat = targetChat.copy(messages = updatedMessages)
         val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
-        
+
         val updatedHistory = chatHistory.copy(
             chat_history = otherChats + updatedChat
         )
-        
+
+        saveChatHistory(updatedHistory)
+        return updatedChat
+    }
+
+    // ==================== Branching Operations ====================
+
+    /**
+     * Find a message by ID in a chat's messages list
+     */
+    private fun findMessageById(messages: List<Message>, messageId: String): Pair<Int, Message>? {
+        for ((index, message) in messages.withIndex()) {
+            if (message.id == messageId) {
+                return Pair(index, message)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Create a branch at a specific message
+     * @param username User's name
+     * @param chatId Chat ID
+     * @param messageId ID of the message to branch from
+     * @param newContent New content for this message variant
+     * @param newAttachments New attachments for this variant
+     * @param reason Reason for branching ("edit", "resend")
+     * @return Updated chat or null if failed
+     */
+    fun createBranchAtMessage(
+        username: String,
+        chatId: String,
+        messageId: String,
+        newContent: String,
+        newAttachments: List<Attachment>,
+        reason: String
+    ): Chat? {
+        val chatHistory = loadChatHistory(username)
+        val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
+
+        val (messageIndex, targetMessage) = findMessageById(targetChat.messages, messageId) ?: return null
+
+        val currentTime = java.time.Instant.now().toString()
+
+        val updatedMessage = if (targetMessage.branches == null || targetMessage.branches.isEmpty()) {
+            // First time branching - create original branch and new branch
+            val continuation = targetChat.messages.drop(messageIndex + 1)
+
+            val originalBranch = MessageBranch(
+                branchId = UUID.randomUUID().toString(),
+                content = targetMessage.text,
+                attachments = targetMessage.attachments,
+                continuation = continuation,
+                createdAt = targetMessage.datetime ?: currentTime,
+                reason = "original"
+            )
+
+            val newBranch = MessageBranch(
+                branchId = UUID.randomUUID().toString(),
+                content = newContent,
+                attachments = newAttachments,
+                continuation = emptyList(), // Will be filled after API response
+                createdAt = currentTime,
+                reason = reason
+            )
+
+            targetMessage.copy(
+                branches = listOf(originalBranch, newBranch),
+                activeBranchIndex = 1 // Switch to new branch
+            )
+        } else {
+            // Already has branches - add new branch
+            val newBranch = MessageBranch(
+                branchId = UUID.randomUUID().toString(),
+                content = newContent,
+                attachments = newAttachments,
+                continuation = emptyList(),
+                createdAt = currentTime,
+                reason = reason
+            )
+
+            targetMessage.copy(
+                branches = targetMessage.branches + newBranch,
+                activeBranchIndex = targetMessage.branches.size // Switch to new branch (0-indexed)
+            )
+        }
+
+        // Update messages list - keep only up to and including the branched message
+        val updatedMessages = targetChat.messages.take(messageIndex) + updatedMessage
+
+        val updatedChat = targetChat.copy(messages = updatedMessages)
+        val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
+
+        val updatedHistory = chatHistory.copy(
+            chat_history = otherChats + updatedChat
+        )
+
+        saveChatHistory(updatedHistory)
+        return updatedChat
+    }
+
+    /**
+     * Switch the active branch at a specific message
+     */
+    fun switchBranch(username: String, chatId: String, messageId: String, branchIndex: Int): Chat? {
+        val chatHistory = loadChatHistory(username)
+        val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
+
+        val (messageIdx, targetMessage) = findMessageById(targetChat.messages, messageId) ?: return null
+
+        if (targetMessage.branches == null || branchIndex >= targetMessage.branches.size) {
+            return null
+        }
+
+        val updatedMessage = targetMessage.copy(activeBranchIndex = branchIndex)
+
+        val updatedMessages = targetChat.messages.toMutableList()
+        updatedMessages[messageIdx] = updatedMessage
+
+        val updatedChat = targetChat.copy(messages = updatedMessages)
+        val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
+
+        val updatedHistory = chatHistory.copy(
+            chat_history = otherChats + updatedChat
+        )
+
+        saveChatHistory(updatedHistory)
+        return updatedChat
+    }
+
+    /**
+     * Update the continuation of a specific branch (used during streaming)
+     */
+    fun updateBranchContinuation(
+        username: String,
+        chatId: String,
+        messageId: String,
+        branchIndex: Int,
+        newContinuation: List<Message>
+    ): Chat? {
+        val chatHistory = loadChatHistory(username)
+        val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
+
+        val (messageIdx, targetMessage) = findMessageById(targetChat.messages, messageId) ?: return null
+
+        if (targetMessage.branches == null || branchIndex >= targetMessage.branches.size) {
+            return null
+        }
+
+        val updatedBranches = targetMessage.branches.toMutableList()
+        updatedBranches[branchIndex] = updatedBranches[branchIndex].copy(continuation = newContinuation)
+
+        val updatedMessage = targetMessage.copy(branches = updatedBranches)
+
+        val updatedMessages = targetChat.messages.toMutableList()
+        updatedMessages[messageIdx] = updatedMessage
+
+        val updatedChat = targetChat.copy(messages = updatedMessages)
+        val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
+
+        val updatedHistory = chatHistory.copy(
+            chat_history = otherChats + updatedChat
+        )
+
+        saveChatHistory(updatedHistory)
+        return updatedChat
+    }
+
+    /**
+     * Add a message to the continuation of the active branch
+     */
+    fun addMessageToBranchContinuation(
+        username: String,
+        chatId: String,
+        branchMessageId: String,
+        newMessage: Message
+    ): Chat? {
+        val chatHistory = loadChatHistory(username)
+        val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
+
+        val (messageIdx, targetMessage) = findMessageById(targetChat.messages, branchMessageId) ?: return null
+
+        if (targetMessage.branches == null) {
+            return null
+        }
+
+        val branchIndex = targetMessage.activeBranchIndex
+        val currentContinuation = targetMessage.branches[branchIndex].continuation
+        val updatedContinuation = currentContinuation + newMessage
+
+        val updatedBranches = targetMessage.branches.toMutableList()
+        updatedBranches[branchIndex] = updatedBranches[branchIndex].copy(continuation = updatedContinuation)
+
+        val updatedMessage = targetMessage.copy(branches = updatedBranches)
+
+        val updatedMessages = targetChat.messages.toMutableList()
+        updatedMessages[messageIdx] = updatedMessage
+
+        val updatedChat = targetChat.copy(messages = updatedMessages)
+        val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
+
+        val updatedHistory = chatHistory.copy(
+            chat_history = otherChats + updatedChat
+        )
+
+        saveChatHistory(updatedHistory)
+        return updatedChat
+    }
+
+    /**
+     * Get the active conversation path (flattened messages following active branches)
+     * This recursively follows activeBranchIndex for messages with branches
+     */
+    fun getActiveConversationPath(chat: Chat): List<Message> {
+        return buildActivePathRecursive(chat.messages)
+    }
+
+    private fun buildActivePathRecursive(messages: List<Message>): List<Message> {
+        val result = mutableListOf<Message>()
+
+        for (message in messages) {
+            if (message.hasBranches) {
+                // Create a display version of this message with active content
+                val activeBranch = message.branches!![message.activeBranchIndex]
+                val displayMessage = message.copy(
+                    text = activeBranch.content,
+                    attachments = activeBranch.attachments
+                )
+                result.add(displayMessage)
+
+                // Recursively process the continuation
+                result.addAll(buildActivePathRecursive(activeBranch.continuation))
+
+                // Stop processing further messages at this level since we're following the branch
+                break
+            } else {
+                result.add(message)
+            }
+        }
+
+        return result
+    }
+
+    /**
+     * Find the last branching message ID in the active path (for tracking edit+resend)
+     */
+    fun findLastBranchingMessageId(chat: Chat): String? {
+        return findLastBranchingRecursive(chat.messages)
+    }
+
+    private fun findLastBranchingRecursive(messages: List<Message>): String? {
+        var lastBranchingId: String? = null
+
+        for (message in messages) {
+            if (message.hasBranches) {
+                lastBranchingId = message.id
+                // Continue into the branch to find deeper branching
+                val activeBranch = message.branches!![message.activeBranchIndex]
+                val deeperId = findLastBranchingRecursive(activeBranch.continuation)
+                if (deeperId != null) {
+                    lastBranchingId = deeperId
+                }
+                break
+            }
+        }
+
+        return lastBranchingId
+    }
+
+    /**
+     * Update the last message in the active branch's continuation (for streaming updates)
+     */
+    fun updateLastMessageInBranch(
+        username: String,
+        chatId: String,
+        branchMessageId: String,
+        updatedLastMessage: Message
+    ): Chat? {
+        val chatHistory = loadChatHistory(username)
+        val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
+
+        val (messageIdx, targetMessage) = findMessageById(targetChat.messages, branchMessageId) ?: return null
+
+        if (targetMessage.branches == null) {
+            return null
+        }
+
+        val branchIndex = targetMessage.activeBranchIndex
+        val currentContinuation = targetMessage.branches[branchIndex].continuation
+
+        if (currentContinuation.isEmpty()) {
+            return null
+        }
+
+        val updatedContinuation = currentContinuation.dropLast(1) + updatedLastMessage
+
+        val updatedBranches = targetMessage.branches.toMutableList()
+        updatedBranches[branchIndex] = updatedBranches[branchIndex].copy(continuation = updatedContinuation)
+
+        val updatedMessage = targetMessage.copy(branches = updatedBranches)
+
+        val updatedMessages = targetChat.messages.toMutableList()
+        updatedMessages[messageIdx] = updatedMessage
+
+        val updatedChat = targetChat.copy(messages = updatedMessages)
+        val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
+
+        val updatedHistory = chatHistory.copy(
+            chat_history = otherChats + updatedChat
+        )
+
         saveChatHistory(updatedHistory)
         return updatedChat
     }

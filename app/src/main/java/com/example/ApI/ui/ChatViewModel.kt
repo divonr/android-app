@@ -1144,30 +1144,30 @@ class ChatViewModel(
         val currentChat = _uiState.value.currentChat ?: return
         val currentUser = _appSettings.value.current_user
         val newText = _uiState.value.currentMessage.trim()
-        
+
         if (newText.isEmpty()) return
-        
-        // Create the updated message
-        val updatedMessage = editingMessage.copy(text = newText)
-        
-        // Replace the message in the repository
-        val updatedChat = repository.replaceMessageInChat(
-            currentUser, 
-            currentChat.chat_id, 
-            editingMessage, 
-            updatedMessage
+
+        // Create branch with the edited content
+        val updatedChat = repository.createBranchAtMessage(
+            currentUser,
+            currentChat.chat_id,
+            editingMessage.id,
+            newText,
+            editingMessage.attachments,
+            "edit"
         )
-        
+
         // Update chat history
         val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
-        
-        // Clear edit mode and update UI state
+
+        // Clear edit mode, mark the edited message ID, and update UI state
         _uiState.value = _uiState.value.copy(
             editingMessage = null,
             isEditMode = false,
             currentMessage = "",
             currentChat = updatedChat,
-            chatHistory = updatedChatHistory
+            chatHistory = updatedChatHistory,
+            lastEditedMessageId = editingMessage.id
         )
     }
 
@@ -1179,15 +1179,14 @@ class ChatViewModel(
         val newText = _uiState.value.currentMessage.trim()
         if (newText.isEmpty()) return
 
-        // Create the updated message
-        val updatedMessage = editingMessage.copy(text = newText)
-
-        // Replace the message in the repository
-        val updatedChat = repository.replaceMessageInChat(
+        // Create branch with the edited content
+        val updatedChat = repository.createBranchAtMessage(
             currentUser,
             currentChat.chat_id,
-            editingMessage,
-            updatedMessage
+            editingMessage.id,
+            newText,
+            editingMessage.attachments,
+            "edit_and_resend"
         ) ?: return
 
         // Update chat history in UI
@@ -1197,11 +1196,201 @@ class ChatViewModel(
             isEditMode = false,
             currentMessage = "",
             currentChat = updatedChat,
-            chatHistory = updatedChatHistory
+            chatHistory = updatedChatHistory,
+            lastEditedMessageId = editingMessage.id,
+            currentBranchMessageId = editingMessage.id
         )
 
-        // Immediately resend from the updated message
-        resendFromMessage(updatedMessage)
+        // Create a message with the new content to send
+        val messageToSend = editingMessage.copy(
+            text = newText,
+            datetime = getCurrentDateTimeISO()
+        )
+
+        // Send to API (resendFromMessage will skip creating another branch because lastEditedMessageId matches)
+        resendFromMessageInternal(messageToSend, editingMessage.id)
+    }
+
+    // Internal function for resending that can skip branch creation
+    private fun resendFromMessageInternal(message: Message, branchMessageId: String) {
+        val currentChat = _uiState.value.currentChat ?: return
+        val currentUser = _appSettings.value.current_user
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                isLoading = true,
+                isStreaming = true,
+                streamingText = "",
+                currentBranchMessageId = branchMessageId
+            )
+
+            // Send API request
+            val currentProvider = _uiState.value.currentProvider
+            val currentModel = _uiState.value.currentModel
+            val systemPrompt = getEffectiveSystemPrompt()
+
+            if (currentProvider != null && currentModel.isNotEmpty()) {
+                try {
+                    val streamingCallback = createBranchStreamingCallback(
+                        currentUser,
+                        currentChat.chat_id,
+                        branchMessageId,
+                        currentModel
+                    )
+
+                    // Get the active conversation path for sending to API
+                    val messagesToSend = repository.getActiveConversationPath(currentChat)
+
+                    // Get project attachments if this chat belongs to a project
+                    val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
+
+                    repository.sendMessage(
+                        provider = currentProvider,
+                        modelName = currentModel,
+                        messages = messagesToSend,
+                        systemPrompt = systemPrompt,
+                        username = currentUser,
+                        chatId = currentChat.chat_id,
+                        projectAttachments = projectAttachments,
+                        webSearchEnabled = _uiState.value.webSearchEnabled,
+                        enabledTools = getEnabledToolSpecifications(),
+                        callback = streamingCallback
+                    )
+
+                } catch (e: Exception) {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        isStreaming = false,
+                        streamingText = "",
+                        currentBranchMessageId = null
+                    )
+                }
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    isStreaming = false,
+                    streamingText = "",
+                    currentBranchMessageId = null
+                )
+            }
+        }
+    }
+
+    // Create streaming callback for branch operations
+    private fun createBranchStreamingCallback(
+        currentUser: String,
+        chatId: String,
+        branchMessageId: String,
+        currentModel: String
+    ): StreamingCallback {
+        return object : StreamingCallback {
+            override fun onPartialResponse(text: String) {
+                val currentStreamingText = _uiState.value.streamingText
+                _uiState.value = _uiState.value.copy(
+                    streamingText = currentStreamingText + text
+                )
+            }
+
+            override fun onComplete(fullText: String) {
+                viewModelScope.launch {
+                    val assistantMessage = Message(
+                        role = "assistant",
+                        text = fullText,
+                        attachments = emptyList(),
+                        model = currentModel,
+                        datetime = getCurrentDateTimeISO()
+                    )
+
+                    // Add to branch continuation
+                    val finalUpdatedChat = repository.addMessageToBranchContinuation(
+                        currentUser,
+                        chatId,
+                        branchMessageId,
+                        assistantMessage
+                    )
+
+                    val finalHistory = repository.loadChatHistory(currentUser).chat_history
+
+                    _uiState.value = _uiState.value.copy(
+                        currentChat = finalUpdatedChat,
+                        isLoading = false,
+                        isStreaming = false,
+                        streamingText = "",
+                        chatHistory = finalHistory,
+                        lastEditedMessageId = null,
+                        currentBranchMessageId = null
+                    )
+                }
+            }
+
+            override fun onError(error: String) {
+                viewModelScope.launch {
+                    val errorMessage = Message(
+                        role = "assistant",
+                        text = "שגיאה: $error",
+                        attachments = emptyList(),
+                        model = currentModel,
+                        datetime = getCurrentDateTimeISO()
+                    )
+
+                    val finalUpdatedChat = repository.addMessageToBranchContinuation(
+                        currentUser,
+                        chatId,
+                        branchMessageId,
+                        errorMessage
+                    )
+
+                    val finalHistory = repository.loadChatHistory(currentUser).chat_history
+
+                    _uiState.value = _uiState.value.copy(
+                        currentChat = finalUpdatedChat,
+                        isLoading = false,
+                        isStreaming = false,
+                        streamingText = "",
+                        chatHistory = finalHistory,
+                        lastEditedMessageId = null,
+                        currentBranchMessageId = null
+                    )
+                }
+            }
+
+            override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+                _uiState.value = _uiState.value.copy(
+                    executingToolCall = ExecutingToolInfo(
+                        toolId = toolCall.toolId,
+                        toolName = toolCall.toolId,
+                        startTime = getCurrentDateTimeISO()
+                    )
+                )
+                val result = executeToolCall(toolCall)
+                _uiState.value = _uiState.value.copy(executingToolCall = null)
+                return result
+            }
+
+            override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message) {
+                // Save tool messages to branch continuation
+                repository.addMessageToBranchContinuation(
+                    currentUser,
+                    chatId,
+                    branchMessageId,
+                    toolCallMessage
+                )
+
+                val tempChat = repository.addMessageToBranchContinuation(
+                    currentUser,
+                    chatId,
+                    branchMessageId,
+                    toolResponseMessage
+                )
+
+                val finalHistory = repository.loadChatHistory(currentUser).chat_history
+
+                _uiState.value = _uiState.value.copy(
+                    currentChat = tempChat,
+                    chatHistory = finalHistory
+                )
+            }
+        }
     }
     
     // Cancel editing without saving changes
@@ -1217,184 +1406,61 @@ class ChatViewModel(
     fun resendFromMessage(message: Message) {
         val currentChat = _uiState.value.currentChat ?: return
         val currentUser = _appSettings.value.current_user
-        
-        viewModelScope.launch {
-            // Delete all messages from this point onwards
-            val updatedChat = repository.deleteMessagesFromPoint(
-                currentUser, 
-                currentChat.chat_id, 
-                message
-            ) ?: return@launch
-            
-            // Update chat history
-            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
-            
-            // Update UI state
-            _uiState.value = _uiState.value.copy(
-                currentChat = updatedChat,
-                chatHistory = updatedChatHistory
-            )
-            
-            // Resend the message by adding it back and calling the API
-            val messageToResend = message
-            val resendUpdatedChat = repository.addMessageToChat(
-                currentUser,
-                updatedChat.chat_id,
-                messageToResend
-            )
-            
-            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-            
-            _uiState.value = _uiState.value.copy(
-                currentChat = resendUpdatedChat,
-                chatHistory = finalChatHistory,
-                isLoading = true,
-                isStreaming = true,
-                streamingText = ""
-            )
-            
-            // Send API request for the resent message
-            val currentProvider = _uiState.value.currentProvider
-            val currentModel = _uiState.value.currentModel
-            val systemPrompt = getEffectiveSystemPrompt()
+        val lastEditedId = _uiState.value.lastEditedMessageId
 
-            if (currentProvider != null && currentModel.isNotEmpty()) {
-                try {
-                    val streamingCallback = object : StreamingCallback {
-                        override fun onPartialResponse(text: String) {
-                            val currentStreamingText = _uiState.value.streamingText
-                            _uiState.value = _uiState.value.copy(
-                                streamingText = currentStreamingText + text
-                            )
-                        }
-
-                        override fun onComplete(fullText: String) {
-                            viewModelScope.launch {
-                                val assistantMessage = Message(
-                                    role = "assistant",
-                                    text = fullText,
-                                    attachments = emptyList(),
-                                    model = currentModel,
-                                    datetime = getCurrentDateTimeISO()
-                                )
-
-                                val finalUpdatedChat = repository.addMessageToChat(
-                                    currentUser,
-                                    resendUpdatedChat!!.chat_id,
-                                    assistantMessage
-                                )
-
-                                val finalHistory = repository.loadChatHistory(currentUser).chat_history
-
-                                _uiState.value = _uiState.value.copy(
-                                    currentChat = finalUpdatedChat,
-                                    isLoading = false,
-                                    isStreaming = false,
-                                    streamingText = "",
-                                    chatHistory = finalHistory
-                                )
-                            }
-                        }
-
-                        override fun onError(error: String) {
-                            viewModelScope.launch {
-                                val errorMessage = Message(
-                                    role = "assistant",
-                                    text = "שגיאה: $error",
-                                    attachments = emptyList(),
-                                    model = currentModel,
-                                    datetime = getCurrentDateTimeISO()
-                                )
-
-                                val finalUpdatedChat = repository.addMessageToChat(
-                                    currentUser,
-                                    resendUpdatedChat!!.chat_id,
-                                    errorMessage
-                                )
-
-                                val finalHistory = repository.loadChatHistory(currentUser).chat_history
-
-                                _uiState.value = _uiState.value.copy(
-                                    currentChat = finalUpdatedChat,
-                                    isLoading = false,
-                                    isStreaming = false,
-                                    streamingText = "",
-                                    chatHistory = finalHistory
-                                )
-                            }
-                        }
-                        
-                        override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
-                            _uiState.value = _uiState.value.copy(
-                                executingToolCall = ExecutingToolInfo(
-                                    toolId = toolCall.toolId,
-                                    toolName = toolCall.toolId,
-                                    startTime = getCurrentDateTimeISO()
-                                )
-                            )
-                            val result = executeToolCall(toolCall)
-                            _uiState.value = _uiState.value.copy(executingToolCall = null)
-                            return result
-                        }
-                        
-                        override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message) {
-                            // Save tool messages to chat history
-                            // Add tool_call message
-                            var tempChat = repository.addMessageToChat(
-                                currentUser,
-                                resendUpdatedChat!!.chat_id,
-                                toolCallMessage
-                            )
-                            
-                            // Add tool_response message
-                            tempChat = repository.addMessageToChat(
-                                currentUser,
-                                resendUpdatedChat.chat_id,
-                                toolResponseMessage
-                            )
-                            
-                            // Reload chat history
-                            val finalHistory = repository.loadChatHistory(currentUser).chat_history
-                            
-                            // Update UI
-                            _uiState.value = _uiState.value.copy(
-                                currentChat = tempChat,
-                                chatHistory = finalHistory
-                            )
-                        }
-                    }
-
-                    // Get project attachments if this chat belongs to a project
-                    val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
-
-                    repository.sendMessage(
-                        provider = currentProvider,
-                        modelName = currentModel,
-                        messages = resendUpdatedChat!!.messages,
-                        systemPrompt = systemPrompt,
-                        username = currentUser,
-                        chatId = resendUpdatedChat.chat_id,
-                        projectAttachments = projectAttachments,
-                        webSearchEnabled = _uiState.value.webSearchEnabled,
-                        enabledTools = getEnabledToolSpecifications(),
-                        callback = streamingCallback
-                    )
-
-                } catch (e: Exception) {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        isStreaming = false,
-                        streamingText = ""
-                    )
-                }
-            } else {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    isStreaming = false,
-                    streamingText = ""
-                )
-            }
+        // Check if this is a resend after edit (same message)
+        if (lastEditedId == message.id) {
+            // Use the existing branch, just send to API
+            resendFromMessageInternal(message, message.id)
+            return
         }
+
+        // Create a new branch for this resend
+        val updatedChat = repository.createBranchAtMessage(
+            currentUser,
+            currentChat.chat_id,
+            message.id,
+            message.text,
+            message.attachments,
+            "resend"
+        ) ?: return
+
+        // Update UI state
+        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+        _uiState.value = _uiState.value.copy(
+            currentChat = updatedChat,
+            chatHistory = updatedChatHistory,
+            lastEditedMessageId = null
+        )
+
+        // Send to API
+        resendFromMessageInternal(message, message.id)
+    }
+
+    // Switch between branches at a specific message
+    fun switchMessageBranch(messageId: String, newBranchIndex: Int) {
+        val currentChat = _uiState.value.currentChat ?: return
+        val currentUser = _appSettings.value.current_user
+
+        val updatedChat = repository.switchBranch(
+            currentUser,
+            currentChat.chat_id,
+            messageId,
+            newBranchIndex
+        ) ?: return
+
+        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+
+        _uiState.value = _uiState.value.copy(
+            currentChat = updatedChat,
+            chatHistory = updatedChatHistory
+        )
+    }
+
+    // Get the display messages (active conversation path)
+    fun getDisplayMessages(): List<Message> {
+        val currentChat = _uiState.value.currentChat ?: return emptyList()
+        return repository.getActiveConversationPath(currentChat)
     }
     
     // Title Generation and User Settings methods

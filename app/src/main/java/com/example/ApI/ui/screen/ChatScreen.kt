@@ -27,6 +27,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
@@ -596,7 +598,9 @@ fun ChatScreen(
                             }
                         }
                         
-                        uiState.currentChat?.messages?.let { messages ->
+                        // Use getDisplayMessages to get the active conversation path
+                        val messages = viewModel.getDisplayMessages()
+                        if (messages.isNotEmpty()) {
                             val reversedMessages = messages.reversed()
                             itemsIndexed(reversedMessages) { index, message ->
                                 // Skip tool_call messages - they should not be displayed
@@ -634,7 +638,7 @@ fun ChatScreen(
                                     viewModel = viewModel,
                                     modifier = Modifier.padding(top = topPadding, bottom = bottomPadding),
                                     isEditMode = uiState.isEditMode,
-                                    isBeingEdited = uiState.editingMessage == message,
+                                    isBeingEdited = uiState.editingMessage?.id == message.id,
                                     searchHighlight = searchHighlight
                                 )
                             }
@@ -1397,6 +1401,34 @@ fun MessageBubble(
                 }
             }
         }
+
+        // Show branch navigator for messages with multiple versions
+        if (message.hasBranches) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+            ) {
+                if (!isUser) {
+                    Spacer(modifier = Modifier.width(40.dp)) // Space for avatar alignment
+                }
+                BranchNavigator(
+                    currentBranch = message.activeBranchIndex,
+                    totalBranches = message.branchCount,
+                    onPrevious = {
+                        if (message.activeBranchIndex > 0) {
+                            viewModel.switchMessageBranch(message.id, message.activeBranchIndex - 1)
+                        }
+                    },
+                    onNext = {
+                        if (message.activeBranchIndex < message.branchCount - 1) {
+                            viewModel.switchMessageBranch(message.id, message.activeBranchIndex + 1)
+                        }
+                    }
+                )
+            }
+        }
         }
 
         // Context menu
@@ -1465,6 +1497,58 @@ fun MessageBubble(
                     }
                 )
             }
+        }
+    }
+}
+
+// Branch navigation control for messages with multiple versions
+@Composable
+fun BranchNavigator(
+    currentBranch: Int,
+    totalBranches: Int,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        // Previous branch arrow
+        IconButton(
+            onClick = onPrevious,
+            enabled = currentBranch > 0,
+            modifier = Modifier.size(24.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = "Previous version",
+                tint = if (currentBranch > 0) OnSurfaceVariant else OnSurfaceVariant.copy(alpha = 0.3f),
+                modifier = Modifier.size(16.dp)
+            )
+        }
+
+        // Branch indicator (e.g., "2/3")
+        Text(
+            text = "${currentBranch + 1}/$totalBranches",
+            color = OnSurfaceVariant,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
+
+        // Next branch arrow
+        IconButton(
+            onClick = onNext,
+            enabled = currentBranch < totalBranches - 1,
+            modifier = Modifier.size(24.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Next version",
+                tint = if (currentBranch < totalBranches - 1) OnSurfaceVariant else OnSurfaceVariant.copy(alpha = 0.3f),
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }
