@@ -1154,6 +1154,15 @@ fun MessageBubble(
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     
+    // Get branch info for this message (only for user messages)
+    val branchInfo = remember(message.id, uiState.currentChat?.currentVariantPath) {
+        if (isUser) {
+            viewModel.getBranchInfoForMessage(message)
+        } else {
+            null
+        }
+    }
+    
     // Format timestamp for display
     val timeString = remember(message.datetime) {
         message.datetime?.let {
@@ -1397,6 +1406,31 @@ fun MessageBubble(
                 }
             }
         }
+        }
+
+        // Show branch navigator BELOW user messages if there are multiple variants
+        if (isUser && branchInfo != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                ConditionalBranchNavigator(
+                    branchInfo = branchInfo,
+                    onPrevious = { 
+                        branchInfo.nodeId.let { nodeId ->
+                            viewModel.navigateToPreviousVariant(nodeId)
+                        }
+                    },
+                    onNext = {
+                        branchInfo.nodeId.let { nodeId ->
+                            viewModel.navigateToNextVariant(nodeId)
+                        }
+                    },
+                    compact = true
+                )
+            }
         }
 
         // Context menu

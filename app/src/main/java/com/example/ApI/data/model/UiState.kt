@@ -100,6 +100,21 @@ data class ExecutingToolInfo(
     val startTime: String // ISO 8601 format
 )
 
+/**
+ * Information about branch variants for a specific node
+ * Used by UI to display branch navigation controls
+ */
+data class BranchInfo(
+    val nodeId: String,
+    val currentVariantIndex: Int,
+    val totalVariants: Int,
+    val currentVariantId: String
+) {
+    val hasPrevious: Boolean get() = currentVariantIndex > 0
+    val hasNext: Boolean get() = currentVariantIndex < totalVariants - 1
+    val displayText: String get() = "${currentVariantIndex + 1}/$totalVariants"
+}
+
 data class ApiKeysUiState(
     val apiKeys: List<ApiKey> = emptyList(),
     val showAddKeyDialog: Boolean = false,
