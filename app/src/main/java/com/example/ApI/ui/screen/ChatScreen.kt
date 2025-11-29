@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.*
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
@@ -39,7 +40,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -557,25 +560,70 @@ fun ChatScreen(
                     }
                 }
 
-                // Chat Messages
+                // Chat Messages - Hybrid Fix (Visual + Physical)
                 Box(modifier = Modifier.weight(1f)) {
+                    val view = LocalView.current
+                    // משתנה לתיקון ויזואלי (Shift)
+                    var listTranslationY by remember { mutableFloatStateOf(0f) }
+
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 16.dp),
+                            .padding(horizontal = 16.dp)
+                            // שלב 1: ה-Modifier הזה מזיז את הרשימה ויזואלית
+                            // בהתאם לערך שחישבנו, עוד לפני שהגלילה האמיתית קורית
+                            .graphicsLayer { 
+                                translationY = listTranslationY 
+                            },
                         reverseLayout = true
                     ) {
-                        // Show streaming text if currently streaming
+                        // Streaming Message Bubble
                         if (uiState.isStreaming && uiState.streamingText.isNotEmpty()) {
                             item {
+                                var previousHeight by remember { mutableIntStateOf(0) }
+                                
                                 StreamingMessageBubble(
                                     text = uiState.streamingText,
                                     textDirectionMode = uiState.textDirectionMode,
-                                    modifier = Modifier.padding(vertical = 4.dp)
+                                    modifier = Modifier
+                                        .padding(vertical = 4.dp)
+                                        .onSizeChanged { size ->
+                                            val currentHeight = size.height
+                                            
+                                            // בדיקה אם היה שינוי גובה חיובי (גדילה)
+                                            if (previousHeight > 0 && currentHeight > previousHeight) {
+                                                val diff = (currentHeight - previousHeight).toFloat()
+                                                
+                                                // האם המשתמש קורא היסטוריה?
+                                                val isAtBottom = listState.firstVisibleItemIndex == 0 && 
+                                                               listState.firstVisibleItemScrollOffset == 0
+                                                
+                                                if (!isAtBottom) {
+                                                    // שלב 2: עדכון מיידי של התיקון הויזואלי.
+                                                    // זה יגרום לרשימה להיות מצוירת נמוך יותר בפריים הנוכחי,
+                                                    // ויבטל את הקפיצה למעלה שנוצרה מהגדילה.
+                                                    listTranslationY += diff
+                                                    
+                                                    // שלב 3: תזמון התיקון הפיזיקלי לרגע הבטוח הבא
+                                                    view.post {
+                                                        // ביצוע הגלילה האמיתית
+                                                        listState.dispatchRawDelta(diff)
+                                                        
+                                                        // ביטול התיקון הויזואלי (כי הגלילה האמיתית החליפה אותו)
+                                                        // אנחנו מחסרים את מה שהוספנו
+                                                        listTranslationY -= diff
+                                                    }
+                                                }
+                                            }
+                                            previousHeight = currentHeight
+                                        }
                                 )
                             }
                         }
+
+                        // ... (שאר הקוד של הכפתורים וההודעות נשאר זהה לחלוטין) ...
+                        
                         // Show temporary reply button bubble when multi-message mode is active
                         if (uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading) {
                             item {
@@ -599,14 +647,10 @@ fun ChatScreen(
                         uiState.currentChat?.messages?.let { messages ->
                             val reversedMessages = messages.reversed()
                             itemsIndexed(reversedMessages) { index, message ->
-                                // Skip tool_call messages - they should not be displayed
-                                if (message.role == "tool_call") {
-                                    return@itemsIndexed
-                                }
+                                if (message.role == "tool_call") return@itemsIndexed
                                 
                                 val isFirstMessage = index == 0
                                 val previousMessage = if (index > 0) {
-                                    // Find the previous visible message (skip tool_call messages)
                                     var prevIndex = index - 1
                                     while (prevIndex >= 0 && reversedMessages[prevIndex].role == "tool_call") {
                                         prevIndex--
@@ -617,11 +661,8 @@ fun ChatScreen(
 
                                 val topPadding = if (isFirstMessage || !isSameSpeaker) 4.dp else 0.dp
                                 val bottomPadding = if (!isSameSpeaker) 4.dp else 0.dp
-
-                                // Calculate original message index from reversed index
                                 val originalIndex = messages.size - 1 - index
                                 
-                                // Check if this message should be highlighted (find all search results for this message)
                                 val searchHighlight = if (uiState.searchMode && uiState.searchResults.isNotEmpty()) {
                                     uiState.searchResults.find { result ->
                                         result.matchType == SearchMatchType.CONTENT && 
@@ -641,32 +682,26 @@ fun ChatScreen(
                         }
                     }
 
-                    // Scroll-to-bottom button state management
+                    // Floating Scroll Buttons Logic
                     var showScrollButton by remember { mutableStateOf(false) }
                     var hideButtonJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
                     
-                    // Detect scroll state - show button when user scrolls away from bottom
                     LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
                         val isAtBottom = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
                         
                         if (!isAtBottom && !showScrollButton) {
-                            // User scrolled away from bottom, show button
                             showScrollButton = true
-                            
-                            // Start auto-hide timer
                             hideButtonJob?.cancel()
                             hideButtonJob = launch {
-                                kotlinx.coroutines.delay(3000) // Hide after 3 seconds
+                                kotlinx.coroutines.delay(3000)
                                 showScrollButton = false
                             }
                         } else if (isAtBottom) {
-                            // User is at bottom, hide button immediately
                             hideButtonJob?.cancel()
                             showScrollButton = false
                         }
                     }
 
-                    // Animated floating scroll buttons (Up and Down)
                     androidx.compose.animation.AnimatedVisibility(
                         visible = showScrollButton,
                         enter = fadeIn(),
@@ -678,7 +713,6 @@ fun ChatScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.padding(bottom = 16.dp)
                         ) {
-                            // Up arrow button - scroll to previous message
                             FloatingActionButton(
                                 onClick = {
                                     coroutineScope.launch {
@@ -689,7 +723,6 @@ fun ChatScreen(
                                             uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading
                                         )
                                     }
-                                    // Cancel auto-hide timer when button is clicked
                                     hideButtonJob?.cancel()
                                 },
                                 shape = CircleShape,
@@ -699,18 +732,16 @@ fun ChatScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.KeyboardArrowUp,
-                                    contentDescription = "Scroll to previous message",
+                                    contentDescription = "Previous",
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
 
-                            // Down arrow button - scroll to bottom (existing functionality)
                             FloatingActionButton(
                                 onClick = {
                                     coroutineScope.launch {
-                                        listState.animateScrollToItem(0) // Scroll to bottom (newest messages)
+                                        listState.animateScrollToItem(0)
                                     }
-                                    // Cancel auto-hide timer when button is clicked
                                     hideButtonJob?.cancel()
                                     showScrollButton = false
                                 },
@@ -721,7 +752,7 @@ fun ChatScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.KeyboardArrowDown,
-                                    contentDescription = "Scroll to bottom",
+                                    contentDescription = "Bottom",
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
