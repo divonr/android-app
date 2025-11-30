@@ -709,6 +709,16 @@ fun ChatHistoryScreen(
                     tonalElevation = 0.dp
                 )
             }
+
+            // Chat Import Choice Dialog
+            uiState.pendingChatImport?.let { pending ->
+                ChatImportChoiceDialog(
+                    fileName = pending.fileName,
+                    onLoadAsChat = { viewModel.importPendingChatJson() },
+                    onAttachAsFile = { viewModel.attachPendingJsonAsFile() },
+                    onDismiss = { viewModel.dismissChatImportDialog() }
+                )
+            }
         }
     }
 }

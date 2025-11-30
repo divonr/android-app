@@ -829,6 +829,63 @@ class DataRepository(private val context: Context) {
             // Ignore invalid import
         }
     }
+
+    /**
+     * Validates if JSON content represents a valid chat export.
+     * Returns true if the JSON can be parsed as Chat or UserChatHistory.
+     */
+    fun validateChatJson(jsonContent: String): Boolean {
+        return try {
+            // Try parsing as a single Chat first
+            json.decodeFromString<Chat>(jsonContent)
+            true
+        } catch (e: Exception) {
+            try {
+                // Try parsing as UserChatHistory
+                json.decodeFromString<UserChatHistory>(jsonContent)
+                true
+            } catch (e2: Exception) {
+                false
+            }
+        }
+    }
+
+    /**
+     * Import a single chat from JSON content. Sanitizes attachments.
+     * Returns the imported chat ID on success, null on failure.
+     */
+    fun importSingleChat(jsonContent: String, targetUsername: String): String? {
+        return try {
+            // Try parsing as a single Chat first
+            val chat = try {
+                json.decodeFromString<Chat>(jsonContent)
+            } catch (e: Exception) {
+                // If not a single chat, try as UserChatHistory and take first chat
+                val history = json.decodeFromString<UserChatHistory>(jsonContent)
+                history.chat_history.firstOrNull() ?: return null
+            }
+
+            // Sanitize: remove attachments
+            val sanitizedMessages = chat.messages.map { msg ->
+                msg.copy(attachments = emptyList())
+            }
+            val sanitizedChat = chat.copy(messages = sanitizedMessages)
+
+            // Load current chat history
+            val currentHistory = loadChatHistory(targetUsername)
+
+            // Add the imported chat to history
+            val updatedHistory = currentHistory.copy(
+                chat_history = currentHistory.chat_history + sanitizedChat
+            )
+
+            saveChatHistory(updatedHistory)
+            sanitizedChat.chat_id
+        } catch (e: Exception) {
+            println("Failed to import chat: ${e.message}")
+            null
+        }
+    }
     
     // File Upload functionality
     suspend fun uploadFile(

@@ -1890,7 +1890,7 @@ class ChatViewModel(
                     intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { uri ->
                         val fileName = getFileName(context, uri) ?: "shared_file"
                         val mimeType = intent.type ?: context.contentResolver.getType(uri) ?: "application/octet-stream"
-                        addFileFromUri(uri, fileName, mimeType)
+                        checkAndHandleJsonFile(uri, fileName, mimeType)
                     }
                 }
                 Intent.ACTION_SEND_MULTIPLE -> {
@@ -1898,10 +1898,56 @@ class ChatViewModel(
                     intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.forEach { uri ->
                         val fileName = getFileName(context, uri) ?: "shared_file"
                         val mimeType = intent.type ?: context.contentResolver.getType(uri) ?: "application/octet-stream"
-                        addFileFromUri(uri, fileName, mimeType)
+                        checkAndHandleJsonFile(uri, fileName, mimeType)
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Checks IMMEDIATELY if a shared file is a valid chat JSON.
+     * If it is, shows the import dialog right away.
+     * Otherwise, adds it as a regular file attachment (which waits for chat selection).
+     */
+    private fun checkAndHandleJsonFile(uri: Uri, fileName: String, mimeType: String) {
+        // Check if it's a JSON file by extension or MIME type
+        val isJsonFile = fileName.endsWith(".json", ignoreCase = true) ||
+                        mimeType == "application/json" ||
+                        mimeType == "text/json"
+
+        if (isJsonFile) {
+            viewModelScope.launch {
+                try {
+                    // Read the JSON content
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    val jsonContent = inputStream?.bufferedReader()?.use { it.readText() }
+
+                    if (jsonContent != null && repository.validateChatJson(jsonContent)) {
+                        // Valid chat JSON - show the import choice dialog IMMEDIATELY
+                        // Navigate to ChatHistory screen if not already there
+                        _currentScreen.value = Screen.ChatHistory
+
+                        _uiState.value = _uiState.value.copy(
+                            pendingChatImport = PendingChatImport(
+                                uri = uri,
+                                fileName = fileName,
+                                mimeType = mimeType,
+                                jsonContent = jsonContent
+                            )
+                        )
+                    } else {
+                        // Invalid chat JSON - treat as regular file attachment
+                        addFileFromUri(uri, fileName, mimeType)
+                    }
+                } catch (e: Exception) {
+                    // Error reading file - treat as regular file attachment
+                    addFileFromUri(uri, fileName, mimeType)
+                }
+            }
+        } else {
+            // Not a JSON file - treat as regular file attachment
+            addFileFromUri(uri, fileName, mimeType)
         }
     }
     
@@ -3046,6 +3092,67 @@ class ChatViewModel(
      */
     fun showSnackbar(message: String) {
         _uiState.value = _uiState.value.copy(snackbarMessage = message)
+    }
+
+    // ==================== Chat Import from JSON ====================
+
+    /**
+     * Handle user choice to import JSON as a chat
+     */
+    fun importPendingChatJson() {
+        val pending = _uiState.value.pendingChatImport ?: return
+
+        viewModelScope.launch {
+            try {
+                val currentUser = _appSettings.value.current_user
+                val importedChatId = repository.importSingleChat(pending.jsonContent, currentUser)
+
+                if (importedChatId != null) {
+                    // Reload chat history
+                    val chatHistory = repository.loadChatHistory(currentUser)
+                    _uiState.value = _uiState.value.copy(
+                        chatHistory = chatHistory.chat_history,
+                        groups = chatHistory.groups,
+                        pendingChatImport = null
+                    )
+
+                    // Find and select the imported chat
+                    val importedChat = chatHistory.chat_history.find { it.chat_id == importedChatId }
+                    if (importedChat != null) {
+                        selectChat(importedChat)
+                        navigateToScreen(Screen.Chat)
+                    }
+
+                    showSnackbar("הצ'אט יובא בהצלחה")
+                } else {
+                    _uiState.value = _uiState.value.copy(pendingChatImport = null)
+                    showSnackbar("שגיאה בייבוא הצ'אט")
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(pendingChatImport = null)
+                showSnackbar("שגיאה בייבוא הצ'אט: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Handle user choice to attach JSON as a regular file
+     */
+    fun attachPendingJsonAsFile() {
+        val pending = _uiState.value.pendingChatImport ?: return
+
+        // Clear the pending import
+        _uiState.value = _uiState.value.copy(pendingChatImport = null)
+
+        // Add as regular file attachment
+        addFileFromUri(pending.uri, pending.fileName, pending.mimeType)
+    }
+
+    /**
+     * Dismiss the chat import dialog without action
+     */
+    fun dismissChatImportDialog() {
+        _uiState.value = _uiState.value.copy(pendingChatImport = null)
     }
 
     // ==================== Branching System ====================

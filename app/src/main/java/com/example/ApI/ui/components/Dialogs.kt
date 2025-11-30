@@ -647,6 +647,88 @@ fun DeleteApiKeyConfirmationDialog(
     }
 }
 
+@Composable
+fun ChatImportChoiceDialog(
+    fileName: String,
+    onLoadAsChat: () -> Unit,
+    onAttachAsFile: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "קובץ צ'אט זוהה",
+                color = OnSurface,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "הקובץ ששותף מכיל צ'אט תקין. האם התכוונתם לטעון אותו להיסטוריית הצ'אט או להשתמש בו כקובץ מצורף?",
+                    color = OnSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = SurfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FilePresent,
+                            contentDescription = null,
+                            tint = Primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = fileName,
+                            color = OnSurface,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onLoadAsChat,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Primary,
+                    contentColor = OnPrimary
+                )
+            ) {
+                Text(
+                    text = "טעינה לצ'אט",
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onAttachAsFile,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = OnSurfaceVariant
+                )
+            ) {
+                Text(text = "קובץ מצורף")
+            }
+        },
+        containerColor = Surface,
+        tonalElevation = 0.dp
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatExportDialog(

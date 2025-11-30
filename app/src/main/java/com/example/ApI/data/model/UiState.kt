@@ -60,7 +60,8 @@ data class ChatUiState(
     val searchContext: SearchResult? = null, // Context for jumping to search results
     val executingToolCall: ExecutingToolInfo? = null, // Track currently executing tool
     val textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO, // Text direction mode for message bubbles
-    val renamingChatIds: Set<String> = emptySet() // Track chats currently being renamed with AI
+    val renamingChatIds: Set<String> = emptySet(), // Track chats currently being renamed with AI
+    val pendingChatImport: PendingChatImport? = null // Pending chat JSON file that needs user decision
 )
 
 data class ChatContextMenuState(
@@ -98,6 +99,13 @@ data class ExecutingToolInfo(
     val toolId: String,
     val toolName: String,
     val startTime: String // ISO 8601 format
+)
+
+data class PendingChatImport(
+    val uri: Uri,
+    val fileName: String,
+    val mimeType: String,
+    val jsonContent: String
 )
 
 /**
