@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -340,8 +341,40 @@ class ChatViewModel(
                             }
                         }
                         
-                        override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
-                            // Show tool execution indicator
+                        override suspend fun onToolCall(
+                            toolCall: com.example.ApI.tools.ToolCall,
+                            precedingText: String
+                        ): com.example.ApI.tools.ToolExecutionResult {
+                            // STEP 1: Save preceding text as assistant message (if exists)
+                            if (precedingText.isNotBlank()) {
+                                Log.d("TOOL_CALL_DEBUG", "ViewModel: Saving ${precedingText.length} chars of text before tool call")
+
+                                val precedingTextMessage = Message(
+                                    role = "assistant",
+                                    text = precedingText,
+                                    attachments = emptyList(),
+                                    model = currentModel,
+                                    datetime = getCurrentDateTimeISO()
+                                )
+
+                                val updatedChatAfterText = repository.addResponseToCurrentVariant(
+                                    currentUser,
+                                    updatedChat!!.chat_id,
+                                    precedingTextMessage
+                                )
+
+                                updatedChat = updatedChatAfterText
+
+                                // Update UI to show the text message and CLEAR streaming text
+                                val refreshedHistory = repository.loadChatHistory(currentUser).chat_history
+                                _uiState.value = _uiState.value.copy(
+                                    currentChat = updatedChatAfterText,
+                                    chatHistory = refreshedHistory,
+                                    streamingText = ""  // Clear accumulated streaming text
+                                )
+                            }
+
+                            // STEP 2: Show tool execution indicator
                             _uiState.value = _uiState.value.copy(
                                 executingToolCall = ExecutingToolInfo(
                                     toolId = toolCall.toolId,
@@ -350,10 +383,10 @@ class ChatViewModel(
                                 )
                             )
 
-                            // Execute the tool
+                            // STEP 3: Execute the tool
                             val result = executeToolCall(toolCall)
 
-                            // Clear tool execution indicator
+                            // STEP 4: Clear tool execution indicator
                             _uiState.value = _uiState.value.copy(executingToolCall = null)
 
                             return result
@@ -546,7 +579,35 @@ class ChatViewModel(
                             }
                         }
                         
-                        override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+                        override suspend fun onToolCall(
+                            toolCall: com.example.ApI.tools.ToolCall,
+                            precedingText: String
+                        ): com.example.ApI.tools.ToolExecutionResult {
+                            // Save preceding text as assistant message (if exists)
+                            if (precedingText.isNotBlank()) {
+                                val precedingTextMessage = Message(
+                                    role = "assistant",
+                                    text = precedingText,
+                                    attachments = emptyList(),
+                                    model = currentModel,
+                                    datetime = getCurrentDateTimeISO()
+                                )
+
+                                val updatedChatAfterText = repository.addResponseToCurrentVariant(
+                                    currentUser,
+                                    currentChat.chat_id,
+                                    precedingTextMessage
+                                )
+
+                                // Update UI and CLEAR streaming text
+                                val refreshedHistory = repository.loadChatHistory(currentUser).chat_history
+                                _uiState.value = _uiState.value.copy(
+                                    currentChat = updatedChatAfterText,
+                                    chatHistory = refreshedHistory,
+                                    streamingText = ""  // Clear accumulated streaming text
+                                )
+                            }
+
                             _uiState.value = _uiState.value.copy(
                                 executingToolCall = ExecutingToolInfo(
                                     toolId = toolCall.toolId,
@@ -1531,7 +1592,39 @@ class ChatViewModel(
                 }
             }
             
-            override suspend fun onToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+            override suspend fun onToolCall(
+                toolCall: com.example.ApI.tools.ToolCall,
+                precedingText: String
+            ): com.example.ApI.tools.ToolExecutionResult {
+                // Save preceding text as assistant message (if exists)
+                if (precedingText.isNotBlank()) {
+                    val precedingTextMessage = Message(
+                        role = "assistant",
+                        text = precedingText,
+                        attachments = emptyList(),
+                        model = modelName,
+                        datetime = getCurrentDateTimeISO()
+                    )
+
+                    val currentChat = repository.loadChatHistory(username).chat_history
+                        .find { it.chat_id == chatId }
+
+                    if (currentChat?.hasBranchingStructure == true) {
+                        repository.addResponseToCurrentVariant(username, chatId, precedingTextMessage)
+                    } else {
+                        repository.addMessageToChat(username, chatId, precedingTextMessage)
+                    }
+
+                    // Update UI and CLEAR streaming text
+                    val refreshedHistory = repository.loadChatHistory(username).chat_history
+                    val updatedChat = refreshedHistory.find { it.chat_id == chatId }
+                    _uiState.value = _uiState.value.copy(
+                        currentChat = updatedChat,
+                        chatHistory = refreshedHistory,
+                        streamingText = ""  // Clear accumulated streaming text
+                    )
+                }
+
                 _uiState.value = _uiState.value.copy(
                     executingToolCall = ExecutingToolInfo(
                         toolId = toolCall.toolId,

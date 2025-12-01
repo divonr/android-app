@@ -571,9 +571,12 @@ class ApiService(private val context: Context) {
                 is OpenAIStreamingResult.ToolCallDetected -> {
                     // Model wants to call a tool
                     Log.d("TOOL_CALL_DEBUG", "Streaming: Tool call detected - ${streamingResponse.toolCall.toolId}")
-                    
+
                     // Execute the tool via callback
-                    val toolResult = callback.onToolCall(streamingResponse.toolCall)
+                    val toolResult = callback.onToolCall(
+                        toolCall = streamingResponse.toolCall,
+                        precedingText = streamingResponse.precedingText
+                    )
                     Log.d("TOOL_CALL_DEBUG", "Streaming: Tool executed with result: $toolResult")
                     
                     // Create the tool messages
@@ -607,29 +610,118 @@ class ApiService(private val context: Context) {
                     
                     // Save the tool messages to chat history
                     callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
-                    
+
                     // Build follow-up request with tool result
-                    val messagesWithToolResult = messages + listOf(toolCallMessage, toolResponseMessage)
-                    
-                    Log.d("TOOL_CALL_DEBUG", "Streaming: Sending follow-up request with tool result")
-                    
-                    // Send follow-up streaming request
-                    val followUpResponse = makeOpenAIStreamingRequest(
-                        provider, modelName, messagesWithToolResult, systemPrompt, apiKey,
-                        webSearchEnabled, enabledTools, callback
+                    // IMPORTANT: Include preceding text message if it exists!
+                    val messagesToAdd = mutableListOf<Message>()
+                    if (streamingResponse.precedingText.isNotBlank()) {
+                        messagesToAdd.add(Message(
+                            role = "assistant",
+                            text = streamingResponse.precedingText,
+                            attachments = emptyList(),
+                            model = modelName,
+                            datetime = java.time.Instant.now().toString()
+                        ))
+                    }
+                    messagesToAdd.add(toolCallMessage)
+                    messagesToAdd.add(toolResponseMessage)
+                    val messagesWithToolResult = messages + messagesToAdd
+
+                    // Handle tool chaining with loop (supports up to 25 sequential tool calls)
+                    var currentMessages = messagesWithToolResult
+                    var currentResponse: OpenAIStreamingResult = makeOpenAIStreamingRequest(
+                        provider, modelName, currentMessages, systemPrompt, apiKey,
+                        webSearchEnabled, enabledTools, callback,
+                        maxToolDepth = 25,
+                        currentDepth = 1
                     )
-                    
-                    when (followUpResponse) {
+                    var toolDepth = 1
+
+                    // Loop to handle sequential tool calls
+                    while (currentResponse is OpenAIStreamingResult.ToolCallDetected && toolDepth < 25) {
+                        Log.d("TOOL_CALL_DEBUG", "Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
+
+                        // Execute the tool
+                        val toolResult = callback.onToolCall(
+                            toolCall = currentResponse.toolCall,
+                            precedingText = currentResponse.precedingText
+                        )
+
+                        // Create messages: assistant text (if exists), tool call, and tool response
+                        val messagesToAdd = mutableListOf<Message>()
+
+                        // Add preceding text as assistant message if it exists
+                        if (currentResponse.precedingText.isNotBlank()) {
+                            messagesToAdd.add(Message(
+                                role = "assistant",
+                                text = currentResponse.precedingText,
+                                attachments = emptyList(),
+                                model = modelName,
+                                datetime = java.time.Instant.now().toString()
+                            ))
+                        }
+
+                        // Create tool call message
+                        val toolCallMessage = Message(
+                            role = "tool_call",
+                            text = "Tool call: ${currentResponse.toolCall.toolId}",
+                            toolCallId = currentResponse.toolCall.id,
+                            toolCall = com.example.ApI.tools.ToolCallInfo(
+                                toolId = currentResponse.toolCall.toolId,
+                                toolName = currentResponse.toolCall.toolId,
+                                parameters = currentResponse.toolCall.parameters,
+                                result = toolResult,
+                                timestamp = java.time.Instant.now().toString()
+                            ),
+                            datetime = java.time.Instant.now().toString()
+                        )
+                        messagesToAdd.add(toolCallMessage)
+
+                        // Create tool response message
+                        val toolResponseMessage = Message(
+                            role = "tool_response",
+                            text = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            },
+                            toolResponseCallId = currentResponse.toolCall.id,
+                            toolResponseOutput = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            },
+                            datetime = java.time.Instant.now().toString()
+                        )
+                        messagesToAdd.add(toolResponseMessage)
+
+                        // Save tool messages (for UI display)
+                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+
+                        // Add ALL messages (including preceding text) to conversation history
+                        currentMessages = currentMessages + messagesToAdd
+                        toolDepth++
+
+                        // Send follow-up request
+                        Log.d("TOOL_CALL_DEBUG", "Streaming: Sending follow-up request (depth $toolDepth)")
+                        currentResponse = makeOpenAIStreamingRequest(
+                            provider, modelName, currentMessages, systemPrompt, apiKey,
+                            webSearchEnabled, enabledTools, callback,
+                            maxToolDepth = 25,
+                            currentDepth = toolDepth
+                        )
+                    }
+
+                    // Handle final response (either text or depth exceeded)
+                    when (currentResponse) {
                         is OpenAIStreamingResult.TextComplete -> {
-                            Log.d("TOOL_CALL_DEBUG", "Streaming: Got final text response")
-                            callback.onComplete(followUpResponse.fullText)
+                            Log.d("TOOL_CALL_DEBUG", "Streaming: Got final text response after $toolDepth tool calls")
+                            callback.onComplete(currentResponse.fullText)
                         }
                         is OpenAIStreamingResult.ToolCallDetected -> {
-                            // Model wants to call another tool - for now, just return an error
-                            callback.onError("Multiple tool calls not yet supported")
+                            Log.d("TOOL_CALL_DEBUG", "Streaming: Maximum tool depth (25) exceeded")
+                            callback.onError("Maximum tool call depth (25) exceeded")
                         }
                         is OpenAIStreamingResult.Error -> {
-                            callback.onError(followUpResponse.error)
+                            callback.onError(currentResponse.error)
                         }
                     }
                 }
@@ -654,7 +746,9 @@ class ApiService(private val context: Context) {
         apiKey: String,
         webSearchEnabled: Boolean,
         enabledTools: List<ToolSpecification>,
-        callback: StreamingCallback
+        callback: StreamingCallback,
+        maxToolDepth: Int = 25,
+        currentDepth: Int = 0
     ): OpenAIStreamingResult = withContext(Dispatchers.IO) {
         try {
             // Build request URL
@@ -841,7 +935,10 @@ class ApiService(private val context: Context) {
             
             // Return result based on what we found
             return@withContext when {
-                detectedToolCall != null -> OpenAIStreamingResult.ToolCallDetected(detectedToolCall!!)
+                detectedToolCall != null -> OpenAIStreamingResult.ToolCallDetected(
+                    toolCall = detectedToolCall!!,
+                    precedingText = fullResponse.toString()
+                )
                 fullResponse.isNotEmpty() -> OpenAIStreamingResult.TextComplete(fullResponse.toString())
                 else -> OpenAIStreamingResult.Error("Empty response from OpenAI")
             }
@@ -856,7 +953,10 @@ class ApiService(private val context: Context) {
      */
     private sealed class OpenAIStreamingResult {
         data class TextComplete(val fullText: String) : OpenAIStreamingResult()
-        data class ToolCallDetected(val toolCall: com.example.ApI.tools.ToolCall) : OpenAIStreamingResult()
+        data class ToolCallDetected(
+            val toolCall: com.example.ApI.tools.ToolCall,
+            val precedingText: String = ""
+        ) : OpenAIStreamingResult()
         data class Error(val error: String) : OpenAIStreamingResult()
     }
 
@@ -891,9 +991,12 @@ class ApiService(private val context: Context) {
                 is PoeStreamingResult.ToolCallDetected -> {
                     // Model wants to call a tool
                     Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool call detected - ${streamingResponse.toolCall.toolId}")
-                    
+
                     // Execute the tool via callback
-                    val toolResult = callback.onToolCall(streamingResponse.toolCall)
+                    val toolResult = callback.onToolCall(
+                        toolCall = streamingResponse.toolCall,
+                        precedingText = streamingResponse.precedingText
+                    )
                     Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool executed with result: $toolResult")
                     
                     // Create the tool messages (but don't add them to conversation history for Poe)
@@ -927,32 +1030,150 @@ class ApiService(private val context: Context) {
                     
                     // Save the tool messages to chat history (displayed separately from conversation)
                     callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
-                    
+
                     // For Poe: Send the tool_calls and tool_results in the follow-up request
                     // This is how Poe handles client-side tool execution
                     Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Sending follow-up request with tool_calls and tool_results")
-                    
-                    // Send follow-up streaming request with tool results
-                    val followUpResponse = makePoeStreamingRequestWithToolResults(
-                        provider, modelName, messages, systemPrompt, apiKey,
-                        webSearchEnabled, enabledTools,
-                        streamingResponse.toolCall,
-                        toolResult,
-                        callback
-                    )
-                    
-                    when (followUpResponse) {
-                        is PoeStreamingResult.TextComplete -> {
-                            Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Got final text response")
-                            callback.onComplete(followUpResponse.fullText)
+
+                    // Handle tool chaining with loop (supports up to 25 sequential tool calls)
+                    // For Poe: First call uses WithToolResults, subsequent calls use regular request
+                    // with tool results incorporated as bot messages
+                    var currentMessages = messages  // Start with original messages
+
+                    // Add preceding text if exists (Message 2 - before first tool call)
+                    if (streamingResponse.precedingText.isNotBlank()) {
+                        currentMessages = currentMessages + Message(
+                            role = "assistant",
+                            text = streamingResponse.precedingText,
+                            attachments = emptyList(),
+                            model = modelName,
+                            datetime = java.time.Instant.now().toString()
+                        )
+                    }
+
+                    var currentToolCall = streamingResponse.toolCall
+                    var currentToolResult = toolResult
+                    var currentResponse: PoeStreamingResult
+                    var toolDepth = 1
+
+                    // Loop to handle sequential tool calls
+                    while (toolDepth < 25) {
+                        Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool chain depth = $toolDepth")
+
+                        // FIRST iteration: Use WithToolResults (sends tool_calls and tool_results arrays)
+                        // SUBSEQUENT iterations: Use regular request (tool result already in conversation as bot message)
+                        currentResponse = if (toolDepth == 1) {
+                            makePoeStreamingRequestWithToolResults(
+                                provider, modelName, currentMessages, systemPrompt, apiKey,
+                                webSearchEnabled, enabledTools,
+                                currentToolCall,
+                                currentToolResult,
+                                callback,
+                                maxToolDepth = 25,
+                                currentDepth = toolDepth
+                            )
+                        } else {
+                            // For subsequent calls, use regular request
+                            // Tool result is already incorporated as bot message in currentMessages
+                            makePoeStreamingRequest(
+                                provider, modelName, currentMessages, systemPrompt, apiKey,
+                                webSearchEnabled, enabledTools, callback,
+                                maxToolDepth = 25,
+                                currentDepth = toolDepth
+                            )
                         }
-                        is PoeStreamingResult.ToolCallDetected -> {
-                            // Model wants to call another tool - for now, just return an error
-                            callback.onError("Multiple tool calls not yet supported")
+
+                        when (currentResponse) {
+                            is PoeStreamingResult.TextComplete -> {
+                                Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Got final text response")
+                                callback.onComplete(currentResponse.fullText)
+                                break  // Exit loop - conversation complete
+                            }
+                            is PoeStreamingResult.ToolCallDetected -> {
+                                // Model wants to call another tool
+                                Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
+
+                                // Add preceding text as bot message if exists
+                                if (currentResponse.precedingText.isNotBlank()) {
+                                    currentMessages = currentMessages + Message(
+                                        role = "assistant",
+                                        text = currentResponse.precedingText,
+                                        attachments = emptyList(),
+                                        model = modelName,
+                                        datetime = java.time.Instant.now().toString()
+                                    )
+                                }
+
+                                // Execute the tool
+                                val nextToolResult = callback.onToolCall(
+                                    toolCall = currentResponse.toolCall,
+                                    precedingText = currentResponse.precedingText
+                                )
+
+                                // Create and save the tool messages (for UI display only)
+                                val nextToolCallMessage = Message(
+                                    role = "tool_call",
+                                    text = "Tool call: ${currentResponse.toolCall.toolId}",
+                                    toolCallId = currentResponse.toolCall.id,
+                                    toolCall = com.example.ApI.tools.ToolCallInfo(
+                                        toolId = currentResponse.toolCall.toolId,
+                                        toolName = currentResponse.toolCall.toolId,
+                                        parameters = currentResponse.toolCall.parameters,
+                                        result = nextToolResult,
+                                        timestamp = java.time.Instant.now().toString()
+                                    ),
+                                    datetime = java.time.Instant.now().toString()
+                                )
+
+                                val nextToolResponseMessage = Message(
+                                    role = "tool_response",
+                                    text = when (nextToolResult) {
+                                        is com.example.ApI.tools.ToolExecutionResult.Success -> nextToolResult.result
+                                        is com.example.ApI.tools.ToolExecutionResult.Error -> nextToolResult.error
+                                    },
+                                    toolResponseCallId = currentResponse.toolCall.id,
+                                    toolResponseOutput = when (nextToolResult) {
+                                        is com.example.ApI.tools.ToolExecutionResult.Success -> nextToolResult.result
+                                        is com.example.ApI.tools.ToolExecutionResult.Error -> nextToolResult.error
+                                    },
+                                    datetime = java.time.Instant.now().toString()
+                                )
+
+                                callback.onSaveToolMessages(nextToolCallMessage, nextToolResponseMessage)
+
+                                // For Poe: Add tool RESULT as a bot message to conversation history
+                                // This is how Poe expects tool results - incorporated into conversation, not separate
+                                val toolResultText = when (nextToolResult) {
+                                    is com.example.ApI.tools.ToolExecutionResult.Success ->
+                                        "Tool ${currentResponse.toolCall.toolId} result: ${nextToolResult.result}"
+                                    is com.example.ApI.tools.ToolExecutionResult.Error ->
+                                        "Tool ${currentResponse.toolCall.toolId} error: ${nextToolResult.error}"
+                                }
+                                currentMessages = currentMessages + Message(
+                                    role = "assistant",
+                                    text = toolResultText,
+                                    attachments = emptyList(),
+                                    model = modelName,
+                                    datetime = java.time.Instant.now().toString()
+                                )
+
+                                // Prepare for next iteration
+                                currentToolCall = currentResponse.toolCall
+                                currentToolResult = nextToolResult
+                                toolDepth++
+
+                                // Continue loop for next potential tool call
+                            }
+                            is PoeStreamingResult.Error -> {
+                                callback.onError(currentResponse.error)
+                                break  // Exit loop on error
+                            }
                         }
-                        is PoeStreamingResult.Error -> {
-                            callback.onError(followUpResponse.error)
-                        }
+                    }
+
+                    // If we exited because depth limit reached
+                    if (toolDepth >= 25) {
+                        callback.onError("Maximum tool call depth (25) exceeded")
                     }
                 }
                 is PoeStreamingResult.Error -> {
@@ -979,7 +1200,9 @@ class ApiService(private val context: Context) {
         enabledTools: List<ToolSpecification>,
         toolCall: com.example.ApI.tools.ToolCall,
         toolResult: com.example.ApI.tools.ToolExecutionResult,
-        callback: StreamingCallback
+        callback: StreamingCallback,
+        maxToolDepth: Int = 25,
+        currentDepth: Int = 0
     ): PoeStreamingResult = withContext(Dispatchers.IO) {
         try {
             // Build request URL - replace {model_name} placeholder
@@ -1211,7 +1434,9 @@ class ApiService(private val context: Context) {
         apiKey: String,
         webSearchEnabled: Boolean,
         enabledTools: List<ToolSpecification>,
-        callback: StreamingCallback
+        callback: StreamingCallback,
+        maxToolDepth: Int = 25,
+        currentDepth: Int = 0
     ): PoeStreamingResult = withContext(Dispatchers.IO) {
         try {
             // Build request URL - replace {model_name} placeholder
@@ -1478,7 +1703,10 @@ class ApiService(private val context: Context) {
             
             // Return result based on what we found
             return@withContext when {
-                detectedToolCall != null -> PoeStreamingResult.ToolCallDetected(detectedToolCall!!)
+                detectedToolCall != null -> PoeStreamingResult.ToolCallDetected(
+                    toolCall = detectedToolCall!!,
+                    precedingText = fullResponse.toString()
+                )
                 fullResponse.isNotEmpty() -> PoeStreamingResult.TextComplete(fullResponse.toString())
                 else -> PoeStreamingResult.Error("Empty response from Poe")
             }
@@ -1493,7 +1721,10 @@ class ApiService(private val context: Context) {
      */
     private sealed class PoeStreamingResult {
         data class TextComplete(val fullText: String) : PoeStreamingResult()
-        data class ToolCallDetected(val toolCall: com.example.ApI.tools.ToolCall) : PoeStreamingResult()
+        data class ToolCallDetected(
+            val toolCall: com.example.ApI.tools.ToolCall,
+            val precedingText: String = ""
+        ) : PoeStreamingResult()
         data class Error(val error: String) : PoeStreamingResult()
     }
 
@@ -1530,7 +1761,10 @@ class ApiService(private val context: Context) {
                     Log.d("TOOL_CALL_DEBUG", "Google Streaming: Tool call detected - ${streamingResponse.toolCall.toolId}")
 
                     // Execute the tool via callback
-                    val toolResult = callback.onToolCall(streamingResponse.toolCall)
+                    val toolResult = callback.onToolCall(
+                        toolCall = streamingResponse.toolCall,
+                        precedingText = streamingResponse.precedingText
+                    )
                     Log.d("TOOL_CALL_DEBUG", "Google Streaming: Tool executed with result: $toolResult")
 
                     // Build tool messages
@@ -1566,27 +1800,116 @@ class ApiService(private val context: Context) {
                     callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
 
                     // Build follow-up request with tool result
-                    val messagesWithToolResult = messages + listOf(toolCallMessage, toolResponseMessage)
+                    // IMPORTANT: Include preceding text message if it exists!
+                    val messagesToAdd = mutableListOf<Message>()
+                    if (streamingResponse.precedingText.isNotBlank()) {
+                        messagesToAdd.add(Message(
+                            role = "assistant",
+                            text = streamingResponse.precedingText,
+                            attachments = emptyList(),
+                            model = modelName,
+                            datetime = java.time.Instant.now().toString()
+                        ))
+                    }
+                    messagesToAdd.add(toolCallMessage)
+                    messagesToAdd.add(toolResponseMessage)
+                    val messagesWithToolResult = messages + messagesToAdd
 
-                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Sending follow-up request with tool result")
-
-                    // Send follow-up streaming request
-                    val followUpResponse = makeGoogleStreamingRequest(
-                        provider, modelName, messagesWithToolResult, systemPrompt, apiKey,
-                        webSearchEnabled, enabledTools, callback
+                    // Handle tool chaining with loop (supports up to 25 sequential tool calls)
+                    var currentMessages = messagesWithToolResult
+                    var currentResponse: GoogleStreamingResult = makeGoogleStreamingRequest(
+                        provider, modelName, currentMessages, systemPrompt, apiKey,
+                        webSearchEnabled, enabledTools, callback,
+                        maxToolDepth = 25,
+                        currentDepth = 1
                     )
+                    var toolDepth = 1
 
-                    when (followUpResponse) {
+                    // Loop to handle sequential tool calls
+                    while (currentResponse is GoogleStreamingResult.ToolCallDetected && toolDepth < 25) {
+                        Log.d("TOOL_CALL_DEBUG", "Google Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
+
+                        // Execute the tool
+                        val toolResult = callback.onToolCall(
+                            toolCall = currentResponse.toolCall,
+                            precedingText = currentResponse.precedingText
+                        )
+
+                        // Create messages: assistant text (if exists), tool call, and tool response
+                        val messagesToAdd = mutableListOf<Message>()
+
+                        // Add preceding text as assistant message if it exists
+                        if (currentResponse.precedingText.isNotBlank()) {
+                            messagesToAdd.add(Message(
+                                role = "assistant",
+                                text = currentResponse.precedingText,
+                                attachments = emptyList(),
+                                model = modelName,
+                                datetime = java.time.Instant.now().toString()
+                            ))
+                        }
+
+                        // Create tool call message
+                        val toolCallMessage = Message(
+                            role = "tool_call",
+                            text = "Tool call: ${currentResponse.toolCall.toolId}",
+                            toolCallId = currentResponse.toolCall.id,
+                            toolCall = com.example.ApI.tools.ToolCallInfo(
+                                toolId = currentResponse.toolCall.toolId,
+                                toolName = currentResponse.toolCall.toolId,
+                                parameters = currentResponse.toolCall.parameters,
+                                result = toolResult,
+                                timestamp = java.time.Instant.now().toString()
+                            ),
+                            datetime = java.time.Instant.now().toString()
+                        )
+                        messagesToAdd.add(toolCallMessage)
+
+                        // Create tool response message
+                        val toolResponseMessage = Message(
+                            role = "tool_response",
+                            text = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            },
+                            toolResponseCallId = currentResponse.toolCall.id,
+                            toolResponseOutput = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            },
+                            datetime = java.time.Instant.now().toString()
+                        )
+                        messagesToAdd.add(toolResponseMessage)
+
+                        // Save tool messages (for UI display)
+                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+
+                        // Add ALL messages (including preceding text) to conversation history
+                        currentMessages = currentMessages + messagesToAdd
+                        toolDepth++
+
+                        // Send follow-up request
+                        Log.d("TOOL_CALL_DEBUG", "Google Streaming: Sending follow-up request (depth $toolDepth)")
+                        currentResponse = makeGoogleStreamingRequest(
+                            provider, modelName, currentMessages, systemPrompt, apiKey,
+                            webSearchEnabled, enabledTools, callback,
+                            maxToolDepth = 25,
+                            currentDepth = toolDepth
+                        )
+                    }
+
+                    // Handle final response (either text or depth exceeded)
+                    when (currentResponse) {
                         is GoogleStreamingResult.TextComplete -> {
-                            Log.d("TOOL_CALL_DEBUG", "Google Streaming: Got final text response")
-                            callback.onComplete(followUpResponse.fullText)
+                            Log.d("TOOL_CALL_DEBUG", "Google Streaming: Got final text response after $toolDepth tool calls")
+                            callback.onComplete(currentResponse.fullText)
                         }
                         is GoogleStreamingResult.ToolCallDetected -> {
-                            // Model wants to call another tool - for now, just return an error
-                            callback.onError("Multiple tool calls not yet supported")
+                            Log.d("TOOL_CALL_DEBUG", "Google Streaming: Maximum tool depth (25) exceeded")
+                            callback.onError("Maximum tool call depth (25) exceeded")
                         }
                         is GoogleStreamingResult.Error -> {
-                            callback.onError(followUpResponse.error)
+                            callback.onError(currentResponse.error)
                         }
                     }
                 }
@@ -1611,7 +1934,9 @@ class ApiService(private val context: Context) {
         apiKey: String,
         webSearchEnabled: Boolean,
         enabledTools: List<ToolSpecification>,
-        callback: StreamingCallback
+        callback: StreamingCallback,
+        maxToolDepth: Int = 25,
+        currentDepth: Int = 0
     ): GoogleStreamingResult = withContext(Dispatchers.IO) {
         try {
             // Build request URL - replace {model_name} placeholder and change to streaming endpoint
@@ -1778,7 +2103,10 @@ class ApiService(private val context: Context) {
 
             // Return result based on what we found
             return@withContext when {
-                detectedToolCall != null -> GoogleStreamingResult.ToolCallDetected(detectedToolCall!!)
+                detectedToolCall != null -> GoogleStreamingResult.ToolCallDetected(
+                    toolCall = detectedToolCall!!,
+                    precedingText = fullResponse.toString()
+                )
                 fullResponse.isNotEmpty() -> GoogleStreamingResult.TextComplete(fullResponse.toString())
                 else -> GoogleStreamingResult.Error("Empty response from Google")
             }
@@ -1793,7 +2121,10 @@ class ApiService(private val context: Context) {
      */
     private sealed class GoogleStreamingResult {
         data class TextComplete(val fullText: String) : GoogleStreamingResult()
-        data class ToolCallDetected(val toolCall: com.example.ApI.tools.ToolCall) : GoogleStreamingResult()
+        data class ToolCallDetected(
+            val toolCall: com.example.ApI.tools.ToolCall,
+            val precedingText: String = ""
+        ) : GoogleStreamingResult()
         data class Error(val error: String) : GoogleStreamingResult()
     }
 }

@@ -13,9 +13,10 @@ interface StreamingCallback {
      * Called when a tool call is detected in the response
      * The implementation should execute the tool and return the result
      * @param toolCall The tool call information from the model
+     * @param precedingText Optional text that appeared before the tool call
      * @return The result of executing the tool
      */
-    suspend fun onToolCall(toolCall: ToolCall): ToolExecutionResult {
+    suspend fun onToolCall(toolCall: ToolCall, precedingText: String = ""): ToolExecutionResult {
         // Default implementation returns an error
         return ToolExecutionResult.Error("Tool execution not supported")
     }

@@ -1,29 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./gradlew tasks:*)",
-      "Bash(./gradlew assembleDebug:*)",
-      "Bash(./gradlew build:*)",
-      "mcp__playwright__browser_navigate",
-      "mcp__playwright__browser_snapshot",
-      "mcp__playwright__browser_click",
-      "mcp__playwright__browser_fill_form",
-      "mcp__playwright__browser_close",
-      "Bash(cat:*)",
-      "Bash(.gradlew assembleDebug:*)",
-      "Bash(gradlew assembleDebug:*)",
-      "Bash(cmd /c \"gradlew.bat assembleDebug\")",
-      "Bash(powershell -Command \".\\gradlew.bat assembleDebug\")",
-      "WebSearch",
-      "WebFetch(domain:platform.openai.com)",
-      "Bash(adb devices:*)",
-      "Bash(adb shell pm list packages:*)",
-      "Bash(adb shell:*)",
-      "Bash(adb exec-out run-as:*)",
-      "Bash(chat_history_default.json)",
-      "Bash(adb push:*)",
-      "Bash(git add:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nAdd chat import functionality for shared JSON files\n\n- Added JSON validation to detect valid chat exports when files are shared\n- Created ChatImportChoiceDialog for user to choose between importing as chat or attaching as file\n- Implemented immediate validation on app open (before chat selection)\n- Added repository methods: validateChatJson() and importSingleChat()\n- Dialog appears instantly when valid chat JSON is shared with the app\n- User can choose \"טעינה לצ 'אט\" to import or \"קובץ מצורף\" to attach\n- Invalid JSON files are treated as regular attachments\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(./gradlew assembleDebug:*)"
     ],
     "deny": [],
     "ask": []
