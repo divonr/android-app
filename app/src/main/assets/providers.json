@@ -335,5 +335,154 @@
                 "uri": "{file_URI}"
             }
         }
+    },
+    {
+        "provider": "anthropic",
+        "models": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://api.anthropic.com/v1/messages",
+            "headers": {
+                "x-api-key": "{ANTHROPIC_API_KEY_HERE}",
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json"
+            },
+            "body": {
+                "model": "{model_name}",
+                "max_tokens": 8192,
+                "system": "{system_prompt}",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{user_first_prompt}"
+                            },
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "{mime_type}",
+                                    "data": "{base64_encoded_image}"
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{model_first_response}"
+                            }
+                        ]
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{user_second_prompt}"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "response_important_fields": {
+            "response_format": "server_sent_events",
+            "events": [
+                {
+                    "event": "message_start",
+                    "data": {
+                        "type": "message_start",
+                        "message": {
+                            "id": "{message_id}",
+                            "model": "{model_name}",
+                            "role": "assistant",
+                            "usage": {
+                                "input_tokens": "{input_tokens}",
+                                "output_tokens": "{output_tokens}"
+                            }
+                        }
+                    }
+                },
+                {
+                    "event": "content_block_start",
+                    "data": {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {
+                            "type": "text",
+                            "text": ""
+                        }
+                    }
+                },
+                {
+                    "event": "content_block_delta",
+                    "data": {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {
+                            "type": "text_delta",
+                            "text": "{partial_text_chunk}"
+                        }
+                    }
+                },
+                {
+                    "event": "content_block_stop",
+                    "data": {
+                        "type": "content_block_stop",
+                        "index": 0
+                    }
+                },
+                {
+                    "event": "content_block_start",
+                    "data": {
+                        "type": "content_block_start",
+                        "index": 1,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": "{tool_use_id}",
+                            "name": "{tool_name}",
+                            "input": {}
+                        }
+                    },
+                    "description": "Indicates model wants to use a tool"
+                },
+                {
+                    "event": "content_block_delta",
+                    "data": {
+                        "type": "content_block_delta",
+                        "index": 1,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": "{partial_json_input}"
+                        }
+                    },
+                    "description": "Streams tool input JSON"
+                },
+                {
+                    "event": "message_delta",
+                    "data": {
+                        "type": "message_delta",
+                        "delta": {
+                            "stop_reason": "tool_use",
+                            "stop_sequence": null
+                        },
+                        "usage": {
+                            "output_tokens": "{total_output_tokens}"
+                        }
+                    }
+                },
+                {
+                    "event": "message_stop",
+                    "data": {
+                        "type": "message_stop"
+                    }
+                }
+            ]
+        }
     }
 ]

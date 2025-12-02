@@ -397,6 +397,10 @@ private fun ApiKeyItem(
             Color(0xFFFBBC05).copy(alpha = 0.25f), // Yellow
             Color(0xFF34A853).copy(alpha = 0.25f)  // Green
         )
+        "anthropic" -> listOf(
+            Color(0xFFC6613F).copy(alpha = 0.25f), // Anthropic Orange
+            Color(0xFFC6613F).copy(alpha = 0.15f)
+        )
         else -> listOf(
             SurfaceVariant,
             SurfaceVariant
@@ -449,7 +453,10 @@ private fun ApiKeyItem(
                         text = apiKey.provider.uppercase(),
                         style = MaterialTheme.typography.titleMedium,
                         color = OnSurface,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.zIndex(1f),
+                        maxLines = 1,
+                        softWrap = false
                     )
 
                     Text(

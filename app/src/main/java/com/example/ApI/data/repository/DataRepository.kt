@@ -165,6 +165,32 @@ class DataRepository(private val context: Context) {
                 upload_files_response_important_fields = UploadResponseFields(
                     file = null
                 )
+            ),
+            Provider(
+                provider = "anthropic",
+                models = listOf(
+                    Model.SimpleModel("claude-sonnet-4-5"),
+                    Model.SimpleModel("claude-opus-4-5"),
+                    Model.SimpleModel("claude-haiku-4-5"),
+                    Model.SimpleModel("claude-sonnet-4-0"),
+                    Model.SimpleModel("claude-3-7-sonnet-latest")
+                ),
+                request = ApiRequest(
+                    request_type = "POST",
+                    base_url = "https://api.anthropic.com/v1/messages",
+                    headers = mapOf(
+                        "x-api-key" to "{ANTHROPIC_API_KEY_HERE}",
+                        "anthropic-version" to "2023-06-01",
+                        "Content-Type" to "application/json"
+                    ),
+                    body = null
+                ),
+                response_important_fields = ResponseFields(
+                    id = "{message_id}",
+                    model = "{model_name}"
+                ),
+                upload_files_request = null,
+                upload_files_response_important_fields = null
             )
         )
     }

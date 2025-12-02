@@ -12,6 +12,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.io.File
+import java.util.Base64
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -40,6 +42,7 @@ class ApiService(private val context: Context) {
             "openai" -> sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             "poe" -> sendPoeMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "anthropic" -> sendAnthropicMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             else -> {
                 callback.onError("Unknown provider: ${provider.provider}")
             }
@@ -2117,6 +2120,465 @@ class ApiService(private val context: Context) {
     }
 
     /**
+     * Send message to Anthropic Claude API with streaming and tool calling support
+     */
+    private suspend fun sendAnthropicMessage(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKeys: Map<String, String>,
+        webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList(),
+        callback: StreamingCallback
+    ) {
+        val apiKey = apiKeys["anthropic"] ?: run {
+            callback.onError("Anthropic API key is required")
+            return
+        }
+
+        try {
+            val conversationMessages = messages.toMutableList()
+            var fullResponseText = ""
+            val maxToolIterations = 25
+            var currentIteration = 0
+
+            while (currentIteration < maxToolIterations) {
+                currentIteration++
+
+                // Make streaming request
+                val result = makeAnthropicStreamingRequest(
+                    provider,
+                    modelName,
+                    conversationMessages,
+                    systemPrompt,
+                    apiKey,
+                    enabledTools,
+                    callback
+                )
+
+                when (result) {
+                    is AnthropicStreamingResult.TextResponse -> {
+                        // Got text response - we're done
+                        fullResponseText = result.text
+                        callback.onComplete(fullResponseText)
+                        return
+                    }
+
+                    is AnthropicStreamingResult.ToolCall -> {
+                        // Tool call detected - execute it
+                        val toolCall = result.toolCall
+                        val precedingText = result.precedingText
+
+                        println("[DEBUG] Executing tool: ${toolCall.toolId}")
+                        if (precedingText.isNotBlank()) {
+                            println("[DEBUG] Preceding text: $precedingText")
+                        }
+
+                        // Execute the tool
+                        val toolResult = callback.onToolCall(toolCall, precedingText)
+
+                        // Create assistant message with both text and tool_use (for Anthropic format)
+                        // Store preceding text in the message so we can reconstruct it later
+                        val toolCallMessage = Message(
+                            role = "tool_call",
+                            text = precedingText, // Store the preceding text here
+                            model = modelName,
+                            datetime = java.time.Instant.now().toString(),
+                            toolCall = com.example.ApI.tools.ToolCallInfo(
+                                toolId = toolCall.toolId,
+                                toolName = toolCall.toolId,
+                                parameters = toolCall.parameters,
+                                result = toolResult,
+                                timestamp = java.time.Instant.now().toString()
+                            ),
+                            toolCallId = toolCall.id
+                        )
+
+                        // Create tool response message
+                        val toolResponseMessage = Message(
+                            role = "tool_response",
+                            text = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            },
+                            datetime = java.time.Instant.now().toString(),
+                            toolResponseCallId = toolCall.id,
+                            toolResponseOutput = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            }
+                        )
+
+                        // Save tool messages to history
+                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+
+                        // Add tool response to conversation
+                        conversationMessages.add(toolCallMessage)
+                        conversationMessages.add(toolResponseMessage)
+
+                        // Continue loop to get Claude's response to the tool result
+                        fullResponseText = ""
+                    }
+
+                    is AnthropicStreamingResult.Error -> {
+                        // Error occurred
+                        callback.onError(result.message)
+                        return
+                    }
+                }
+            }
+
+            // Max iterations reached
+            callback.onError("Maximum tool calling iterations ($maxToolIterations) reached")
+        } catch (e: Exception) {
+            callback.onError("Failed to send Anthropic message: ${e.message}")
+        }
+    }
+
+    /**
+     * Make streaming request to Anthropic API and parse SSE events
+     */
+    private suspend fun makeAnthropicStreamingRequest(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        enabledTools: List<ToolSpecification>,
+        callback: StreamingCallback
+    ): AnthropicStreamingResult = withContext(Dispatchers.IO) {
+        try {
+            val url = URL(provider.request.base_url)
+            val connection = url.openConnection() as HttpURLConnection
+
+            // Set up request
+            connection.requestMethod = provider.request.request_type
+            connection.setRequestProperty("x-api-key", apiKey)
+            connection.setRequestProperty("anthropic-version", "2023-06-01")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.doOutput = true
+
+            // Build messages array
+            val anthropicMessages = buildAnthropicMessages(messages)
+
+            // Build request body
+            val requestBody = buildJsonObject {
+                put("model", modelName)
+                put("max_tokens", 8192)
+                put("messages", JsonArray(anthropicMessages))
+
+                // Add system prompt if present
+                if (systemPrompt.isNotBlank()) {
+                    put("system", systemPrompt)
+                }
+
+                put("stream", true)
+
+                // Add tools if any are enabled
+                if (enabledTools.isNotEmpty()) {
+                    put("tools", convertToolsToAnthropicFormat(enabledTools))
+                }
+            }
+
+            // Send request
+            connection.outputStream.write(requestBody.toString().toByteArray())
+            connection.outputStream.flush()
+
+            // Read streaming response
+            val reader = BufferedReader(InputStreamReader(connection.inputStream))
+            val fullResponse = StringBuilder()
+
+            // Track tool use
+            var currentToolUseId: String? = null
+            var currentToolName: String? = null
+            var currentToolInput = StringBuilder()
+            var isAccumulatingToolInput = false
+            var detectedToolCall: com.example.ApI.tools.ToolCall? = null
+
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val currentLine = line ?: continue
+
+                // Parse SSE format: "event: type" followed by "data: {json}"
+                if (currentLine.startsWith("event: ")) {
+                    val eventType = currentLine.substring(7).trim()
+
+                    // Read the next line which should be "data: {json}"
+                    val dataLine = reader.readLine() ?: continue
+                    if (!dataLine.startsWith("data: ")) continue
+
+                    val dataContent = dataLine.substring(6).trim()
+                    if (dataContent.isEmpty()) continue
+
+                    try {
+                        val chunkJson = json.parseToJsonElement(dataContent).jsonObject
+
+                        when (eventType) {
+                            "message_start" -> {
+                                // Message started - metadata received
+                                println("[DEBUG] Anthropic message started")
+                            }
+
+                            "content_block_start" -> {
+                                // New content block starting (text or tool_use)
+                                val contentBlock = chunkJson["content_block"]?.jsonObject
+                                val blockType = contentBlock?.get("type")?.jsonPrimitive?.content
+
+                                if (blockType == "tool_use") {
+                                    // Tool use detected
+                                    currentToolUseId = contentBlock?.get("id")?.jsonPrimitive?.content
+                                    currentToolName = contentBlock?.get("name")?.jsonPrimitive?.content
+                                    currentToolInput.clear()
+                                    
+                                    // Capture initial input if present (for tools with no/small parameters)
+                                    val initialInput = contentBlock?.get("input")?.jsonObject
+                                    if (initialInput != null) {
+                                        currentToolInput.append(initialInput.toString())
+                                    }
+                                    
+                                    isAccumulatingToolInput = true
+                                    println("[DEBUG] Tool use started: $currentToolName (id: $currentToolUseId), initial input: $initialInput")
+                                }
+                            }
+
+                            "content_block_delta" -> {
+                                // Content chunk received
+                                val delta = chunkJson["delta"]?.jsonObject
+                                val deltaType = delta?.get("type")?.jsonPrimitive?.content
+
+                                when (deltaType) {
+                                    "text_delta" -> {
+                                        // Text content chunk
+                                        val text = delta?.get("text")?.jsonPrimitive?.content ?: ""
+                                        fullResponse.append(text)
+                                        callback.onPartialResponse(text)
+                                    }
+                                    "input_json_delta" -> {
+                                        // Tool input JSON chunk
+                                        val partialJson = delta?.get("partial_json")?.jsonPrimitive?.content ?: ""
+                                        currentToolInput.append(partialJson)
+                                    }
+                                }
+                            }
+
+                            "content_block_stop" -> {
+                                // Content block finished
+                                if (isAccumulatingToolInput && currentToolUseId != null && currentToolName != null) {
+                                    // Tool use complete - parse the accumulated JSON
+                                    try {
+                                        // Handle empty input (tools with no parameters)
+                                        val inputString = currentToolInput.toString().ifEmpty { "{}" }
+                                        val toolInputJson = json.parseToJsonElement(inputString).jsonObject
+
+                                        detectedToolCall = com.example.ApI.tools.ToolCall(
+                                            id = currentToolUseId!!,
+                                            toolId = currentToolName!!,
+                                            parameters = toolInputJson,
+                                            provider = "anthropic"
+                                        )
+
+                                        println("[DEBUG] Tool call detected: $detectedToolCall")
+                                    } catch (e: Exception) {
+                                        println("[DEBUG] Error parsing tool input JSON: ${e.message}")
+                                        println("[DEBUG] Attempted to parse: ${currentToolInput}")
+                                    }
+
+                                    isAccumulatingToolInput = false
+                                }
+                            }
+
+                            "message_delta" -> {
+                                // Message metadata update (usage, stop_reason)
+                                val stopReason = chunkJson["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.content
+                                println("[DEBUG] Message delta - stop_reason: $stopReason")
+                            }
+
+                            "message_stop" -> {
+                                // Message complete
+                                println("[DEBUG] Anthropic message stopped")
+                                break
+                            }
+
+                            "error" -> {
+                                // Error occurred
+                                val error = chunkJson["error"]?.jsonObject
+                                val errorMessage = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
+                                callback.onError("Anthropic API error: $errorMessage")
+                                return@withContext AnthropicStreamingResult.Error(errorMessage)
+                            }
+                        }
+                    } catch (jsonException: Exception) {
+                        println("[DEBUG] Error parsing Anthropic SSE chunk: ${jsonException.message}")
+                        println("[DEBUG] Problematic chunk: $dataContent")
+                        continue
+                    }
+                }
+            }
+
+            reader.close()
+            connection.disconnect()
+
+            // Return tool call if detected, otherwise return text response
+            return@withContext when {
+                detectedToolCall != null -> AnthropicStreamingResult.ToolCall(
+                    toolCall = detectedToolCall!!,
+                    precedingText = fullResponse.toString()
+                )
+                fullResponse.isNotEmpty() -> AnthropicStreamingResult.TextResponse(fullResponse.toString())
+                else -> AnthropicStreamingResult.Error("Empty response from Anthropic")
+            }
+        } catch (e: Exception) {
+            callback.onError("Failed to make Anthropic streaming request: ${e.message}")
+            AnthropicStreamingResult.Error("Failed to make Anthropic streaming request: ${e.message}")
+        }
+    }
+
+    /**
+     * Build Anthropic Messages API format from Message objects
+     * Handles role mapping and on-demand file encoding
+     */
+    private suspend fun buildAnthropicMessages(messages: List<Message>): List<JsonObject> = withContext(Dispatchers.IO) {
+        val anthropicMessages = mutableListOf<JsonObject>()
+
+        messages.forEach { message ->
+            when (message.role) {
+                "user" -> {
+                    // Build content array with text and attachments
+                    val contentArray = buildJsonArray {
+                        // Add text content
+                        if (message.text.isNotBlank()) {
+                            add(buildJsonObject {
+                                put("type", "text")
+                                put("text", message.text)
+                            })
+                        }
+
+                        // Add attachments (encoded as base64)
+                        message.attachments.forEach { attachment ->
+                            attachment.local_file_path?.let { filePath ->
+                                try {
+                                    val file = File(filePath)
+                                    if (file.exists()) {
+                                        val bytes = file.readBytes()
+                                        val base64Data = Base64.getEncoder().encodeToString(bytes)
+
+                                        when {
+                                            attachment.mime_type.startsWith("image/") -> {
+                                                add(buildJsonObject {
+                                                    put("type", "image")
+                                                    put("source", buildJsonObject {
+                                                        put("type", "base64")
+                                                        put("media_type", attachment.mime_type)
+                                                        put("data", base64Data)
+                                                    })
+                                                })
+                                            }
+                                            attachment.mime_type == "application/pdf" -> {
+                                                add(buildJsonObject {
+                                                    put("type", "document")
+                                                    put("source", buildJsonObject {
+                                                        put("type", "base64")
+                                                        put("media_type", "application/pdf")
+                                                        put("data", base64Data)
+                                                    })
+                                                })
+                                            }
+                                            // Add more document types as needed
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    println("[DEBUG] Error encoding file ${attachment.file_name}: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+
+                    anthropicMessages.add(buildJsonObject {
+                        put("role", "user")
+                        put("content", contentArray)
+                    })
+                }
+                "assistant" -> {
+                    anthropicMessages.add(buildJsonObject {
+                        put("role", "assistant")
+                        put("content", buildJsonArray {
+                            add(buildJsonObject {
+                                put("type", "text")
+                                put("text", message.text)
+                            })
+                        })
+                    })
+                }
+                "tool_call" -> {
+                    // Reconstruct assistant message with both text and tool_use content blocks
+                    val contentArray = buildJsonArray {
+                        // Add text content if there was preceding text
+                        if (message.text.isNotBlank()) {
+                            add(buildJsonObject {
+                                put("type", "text")
+                                put("text", message.text)
+                            })
+                        }
+
+                        // Add tool_use content block
+                        message.toolCall?.let { toolCall ->
+                            add(buildJsonObject {
+                                put("type", "tool_use")
+                                put("id", message.toolCallId ?: "")
+                                put("name", toolCall.toolId)
+                                put("input", toolCall.parameters)
+                            })
+                        }
+                    }
+
+                    anthropicMessages.add(buildJsonObject {
+                        put("role", "assistant")
+                        put("content", contentArray)
+                    })
+                }
+                "tool_response" -> {
+                    // Tool results are sent as user messages with tool_result content
+                    anthropicMessages.add(buildJsonObject {
+                        put("role", "user")
+                        put("content", buildJsonArray {
+                            add(buildJsonObject {
+                                put("type", "tool_result")
+                                put("tool_use_id", message.toolResponseCallId ?: "")
+                                put("content", message.toolResponseOutput ?: "")
+                            })
+                        })
+                    })
+                }
+            }
+        }
+
+        anthropicMessages
+    }
+
+    /**
+     * Convert tool specifications to Anthropic's tool format
+     */
+    private fun convertToolsToAnthropicFormat(tools: List<ToolSpecification>): JsonArray {
+        return buildJsonArray {
+            tools.forEach { tool ->
+                add(buildJsonObject {
+                    put("name", tool.name)
+                    put("description", tool.description)
+                    put("input_schema", buildJsonObject {
+                        put("type", "object")
+                        tool.parameters?.let { params ->
+                            put("properties", params)
+                        } ?: put("properties", buildJsonObject {})
+                        // Anthropic doesn't strictly require "required" field
+                        put("required", buildJsonArray {})
+                    })
+                })
+            }
+        }
+    }
+
+    /**
      * Sealed class representing different types of Google streaming results
      */
     private sealed class GoogleStreamingResult {
@@ -2126,6 +2588,15 @@ class ApiService(private val context: Context) {
             val precedingText: String = ""
         ) : GoogleStreamingResult()
         data class Error(val error: String) : GoogleStreamingResult()
+    }
+
+    private sealed class AnthropicStreamingResult {
+        data class TextResponse(val text: String) : AnthropicStreamingResult()
+        data class ToolCall(
+            val toolCall: com.example.ApI.tools.ToolCall,
+            val precedingText: String = ""
+        ) : AnthropicStreamingResult()
+        data class Error(val message: String) : AnthropicStreamingResult()
     }
 }
 

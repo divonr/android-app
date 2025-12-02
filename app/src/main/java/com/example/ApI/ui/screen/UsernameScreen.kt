@@ -453,8 +453,19 @@ private fun TitleGenerationSettingsSection(
                                         ProviderOption(
                                             text = stringResource(R.string.google_gemini_flash_lite),
                                             isSelected = settings.provider == "google",
-                                            onClick = { 
+                                            onClick = {
                                                 onSettingsChange(settings.copy(provider = "google"))
+                                                showProviderSelector = false
+                                            }
+                                        )
+                                    }
+
+                                    if ("anthropic" in availableProviders) {
+                                        ProviderOption(
+                                            text = stringResource(R.string.anthropic_claude_haiku),
+                                            isSelected = settings.provider == "anthropic",
+                                            onClick = {
+                                                onSettingsChange(settings.copy(provider = "anthropic"))
                                                 showProviderSelector = false
                                             }
                                         )
@@ -537,6 +548,7 @@ private fun getProviderDisplayName(provider: String): String {
         "openai" -> stringResource(R.string.openai_gpt5_nano)
         "poe" -> stringResource(R.string.poe_gpt5_nano)
         "google" -> stringResource(R.string.google_gemini_flash_lite)
+        "anthropic" -> stringResource(R.string.anthropic_claude_haiku)
         else -> stringResource(R.string.auto_mode)
     }
 }
