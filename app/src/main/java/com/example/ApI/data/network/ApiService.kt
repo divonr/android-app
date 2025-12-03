@@ -2182,6 +2182,7 @@ class ApiService(private val context: Context) {
                     systemPrompt,
                     apiKey,
                     enabledTools,
+                    webSearchEnabled,
                     callback
                 )
 
@@ -2278,6 +2279,7 @@ class ApiService(private val context: Context) {
         systemPrompt: String,
         apiKey: String,
         enabledTools: List<ToolSpecification>,
+        webSearchEnabled: Boolean,
         callback: StreamingCallback
     ): AnthropicStreamingResult = withContext(Dispatchers.IO) {
         try {
@@ -2307,9 +2309,23 @@ class ApiService(private val context: Context) {
 
                 put("stream", true)
 
-                // Add tools if any are enabled
-                if (enabledTools.isNotEmpty()) {
-                    put("tools", convertToolsToAnthropicFormat(enabledTools))
+                // Add tools if any are enabled or web search is enabled
+                if (enabledTools.isNotEmpty() || webSearchEnabled) {
+                    put("tools", buildJsonArray {
+                        // Add web search tool if enabled
+                        if (webSearchEnabled) {
+                            add(buildJsonObject {
+                                put("type", "web_search_20250305")
+                                put("name", "web_search")
+                                // Optional: Add max_uses to limit searches per request
+                                // put("max_uses", 5)
+                            })
+                        }
+                        // Add regular tools
+                        if (enabledTools.isNotEmpty()) {
+                            convertToolsToAnthropicFormat(enabledTools).forEach { add(it) }
+                        }
+                    })
                 }
             }
 

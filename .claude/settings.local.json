@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(./gradlew assembleDebug:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "WebSearch",
+      "WebFetch(domain:platform.claude.com)"
     ],
     "deny": [],
     "ask": []
