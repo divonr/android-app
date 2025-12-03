@@ -4,7 +4,8 @@
       "Bash(./gradlew assembleDebug:*)",
       "Bash(find:*)",
       "WebSearch",
-      "WebFetch(domain:platform.claude.com)"
+      "WebFetch(domain:platform.claude.com)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

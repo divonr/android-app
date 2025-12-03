@@ -1972,11 +1972,8 @@ class ChatViewModel(
                 }
             }
             "anthropic" -> {
-                when (modelName) {
-                    "claude-sonnet-4-5-20250929", "claude-sonnet-4-20250514",
-                    "claude-haiku-4-5-20251001", "claude-opus-4-5-20251101" -> WebSearchSupport.OPTIONAL
-                    else -> WebSearchSupport.UNSUPPORTED
-                }
+                // All Claude models support web search as optional
+                WebSearchSupport.OPTIONAL
             }
             else -> WebSearchSupport.UNSUPPORTED
         }
