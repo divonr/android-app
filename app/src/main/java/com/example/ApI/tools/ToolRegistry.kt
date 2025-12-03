@@ -112,7 +112,17 @@ class ToolRegistry {
      * Get a tool by its ID
      */
     fun getTool(id: String): Tool? = tools[id]
-    
+
+    /**
+     * Get the display name for a tool by its ID
+     * This is the authoritative source for tool names shown in the UI
+     * @param toolId The tool ID (often same as tool name from provider)
+     * @return The tool's display name, or the toolId if tool not found
+     */
+    fun getToolDisplayName(toolId: String): String {
+        return tools[toolId]?.name ?: toolId
+    }
+
     /**
      * Get all registered tools
      */

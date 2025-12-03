@@ -1954,26 +1954,18 @@ fun ToolCallBubble(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            // Extract tool name - for tool_response messages, we need to find the corresponding tool_call
-                            // message to get the actual tool name
+                            // Get tool name from ToolCallInfo (the authoritative source)
                             val toolName = if (message.role == "tool_response") {
                                 // Find the corresponding tool_call message by toolResponseCallId
                                 val currentChat = uiState.currentChat
                                 val correspondingToolCall = currentChat?.messages?.find {
                                     it.role == "tool_call" && it.toolCallId == message.toolResponseCallId
                                 }
-                                correspondingToolCall?.text?.removePrefix("Tool call: ") ?: "Tool Call"
+                                // Use toolCall.toolName from the corresponding message, not text field
+                                correspondingToolCall?.toolCall?.toolName ?: "Tool Call"
                             } else {
-                                // For tool_call messages, extract from text
-                                message.text.let { text ->
-                                    if (text.startsWith("Tool call: ")) {
-                                        text.removePrefix("Tool call: ")
-                                    } else if (text.isNotBlank()) {
-                                        text
-                                    } else {
-                                        "Tool Call"
-                                    }
-                                }
+                                // For tool_call messages, use toolCall.toolName directly
+                                message.toolCall?.toolName ?: "Tool Call"
                             }
                             
                             Text(
@@ -2007,26 +1999,19 @@ fun ToolCallBubble(
                     }
                     
                     Spacer(modifier = Modifier.height(8.dp))
-                    
-                    // Show tool name instead of result preview
+
+                    // Get tool name from ToolCallInfo (the authoritative source)
                     val toolName = if (message.role == "tool_response") {
                         // Find the corresponding tool_call message by toolResponseCallId
                         val currentChat = uiState.currentChat
                         val correspondingToolCall = currentChat?.messages?.find {
                             it.role == "tool_call" && it.toolCallId == message.toolResponseCallId
                         }
-                        correspondingToolCall?.text?.removePrefix("Tool call: ") ?: "Tool Call"
+                        // Use toolCall.toolName from the corresponding message, not text field
+                        correspondingToolCall?.toolCall?.toolName ?: "Tool Call"
                     } else {
-                        // For tool_call messages, extract from text
-                        message.text.let { text ->
-                            if (text.startsWith("Tool call: ")) {
-                                text.removePrefix("Tool call: ")
-                            } else if (text.isNotBlank()) {
-                                text
-                            } else {
-                                "Tool Call"
-                            }
-                        }
+                        // For tool_call messages, use toolCall.toolName directly
+                        message.toolCall?.toolName ?: "Tool Call"
                     }
                     
                     Surface(

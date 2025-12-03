@@ -608,10 +608,14 @@ class ChatViewModel(
                                 )
                             }
 
+                            // Get the canonical tool display name from ToolRegistry
+                            val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
+                                .getToolDisplayName(toolCall.toolId)
+
                             _uiState.value = _uiState.value.copy(
                                 executingToolCall = ExecutingToolInfo(
                                     toolId = toolCall.toolId,
-                                    toolName = toolCall.toolId,
+                                    toolName = toolDisplayName,  // Use canonical name from registry
                                     startTime = getCurrentDateTimeISO()
                                 )
                             )

@@ -83,15 +83,19 @@ class ApiService(private val context: Context) {
                     // Execute the tool via callback
                     val toolResult = callback.onToolCall(initialResponse.toolCall)
                     Log.d("TOOL_CALL_DEBUG", "Non-streaming: Tool executed with result: $toolResult")
-                    
+
+                    // Get canonical tool name from registry
+                    val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
+                        .getToolDisplayName(initialResponse.toolCall.toolId)
+
                     // Create the tool messages
                     val toolCallMessage = Message(
                         role = "tool_call",
-                        text = "Tool call: ${initialResponse.toolCall.toolId}",
+                        text = "Tool call: $toolDisplayName",
                         toolCallId = initialResponse.toolCall.id,
                         toolCall = com.example.ApI.tools.ToolCallInfo(
                             toolId = initialResponse.toolCall.toolId,
-                            toolName = initialResponse.toolCall.toolId,
+                            toolName = toolDisplayName,  // Use canonical name from registry
                             parameters = initialResponse.toolCall.parameters,
                             result = toolResult,
                             timestamp = java.time.Instant.now().toString()
@@ -581,15 +585,19 @@ class ApiService(private val context: Context) {
                         precedingText = streamingResponse.precedingText
                     )
                     Log.d("TOOL_CALL_DEBUG", "Streaming: Tool executed with result: $toolResult")
-                    
+
+                    // Get canonical tool name from registry
+                    val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
+                        .getToolDisplayName(streamingResponse.toolCall.toolId)
+
                     // Create the tool messages
                     val toolCallMessage = Message(
                         role = "tool_call",
-                        text = "Tool call: ${streamingResponse.toolCall.toolId}",
+                        text = "Tool call: $toolDisplayName",
                         toolCallId = streamingResponse.toolCall.id,
                         toolCall = com.example.ApI.tools.ToolCallInfo(
                             toolId = streamingResponse.toolCall.toolId,
-                            toolName = streamingResponse.toolCall.toolId,
+                            toolName = toolDisplayName,  // Use canonical name from registry
                             parameters = streamingResponse.toolCall.parameters,
                             result = toolResult,
                             timestamp = java.time.Instant.now().toString()
@@ -664,14 +672,18 @@ class ApiService(private val context: Context) {
                             ))
                         }
 
+                        // Get canonical tool name from registry
+                        val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
+                            .getToolDisplayName(currentResponse.toolCall.toolId)
+
                         // Create tool call message
                         val toolCallMessage = Message(
                             role = "tool_call",
-                            text = "Tool call: ${currentResponse.toolCall.toolId}",
+                            text = "Tool call: $toolDisplayName",
                             toolCallId = currentResponse.toolCall.id,
                             toolCall = com.example.ApI.tools.ToolCallInfo(
                                 toolId = currentResponse.toolCall.toolId,
-                                toolName = currentResponse.toolCall.toolId,
+                                toolName = toolDisplayName,  // Use canonical name from registry
                                 parameters = currentResponse.toolCall.parameters,
                                 result = toolResult,
                                 timestamp = java.time.Instant.now().toString()
@@ -1002,14 +1014,18 @@ class ApiService(private val context: Context) {
                     )
                     Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool executed with result: $toolResult")
                     
+                    // Get canonical tool name from registry
+                    val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
+                        .getToolDisplayName(streamingResponse.toolCall.toolId)
+
                     // Create the tool messages (but don't add them to conversation history for Poe)
                     val toolCallMessage = Message(
                         role = "tool_call",
-                        text = "Tool call: ${streamingResponse.toolCall.toolId}",
+                        text = "Tool call: $toolDisplayName",
                         toolCallId = streamingResponse.toolCall.id,
                         toolCall = com.example.ApI.tools.ToolCallInfo(
                             toolId = streamingResponse.toolCall.toolId,
-                            toolName = streamingResponse.toolCall.toolId,
+                            toolName = toolDisplayName,  // Use canonical name from registry
                             parameters = streamingResponse.toolCall.parameters,
                             result = toolResult,
                             timestamp = java.time.Instant.now().toString()
@@ -1113,14 +1129,18 @@ class ApiService(private val context: Context) {
                                     precedingText = currentResponse.precedingText
                                 )
 
+                                // Get canonical tool name from registry
+                                val nextToolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
+                                    .getToolDisplayName(currentResponse.toolCall.toolId)
+
                                 // Create and save the tool messages (for UI display only)
                                 val nextToolCallMessage = Message(
                                     role = "tool_call",
-                                    text = "Tool call: ${currentResponse.toolCall.toolId}",
+                                    text = "Tool call: $nextToolDisplayName",
                                     toolCallId = currentResponse.toolCall.id,
                                     toolCall = com.example.ApI.tools.ToolCallInfo(
                                         toolId = currentResponse.toolCall.toolId,
-                                        toolName = currentResponse.toolCall.toolId,
+                                        toolName = nextToolDisplayName,  // Use canonical name from registry
                                         parameters = currentResponse.toolCall.parameters,
                                         result = nextToolResult,
                                         timestamp = java.time.Instant.now().toString()
@@ -1770,14 +1790,18 @@ class ApiService(private val context: Context) {
                     )
                     Log.d("TOOL_CALL_DEBUG", "Google Streaming: Tool executed with result: $toolResult")
 
+                    // Get canonical tool name from registry
+                    val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
+                        .getToolDisplayName(streamingResponse.toolCall.toolId)
+
                     // Build tool messages
                     val toolCallMessage = Message(
                         role = "tool_call",
-                        text = "Tool call: ${streamingResponse.toolCall.toolId}",
+                        text = "Tool call: $toolDisplayName",
                         toolCallId = streamingResponse.toolCall.id,
                         toolCall = com.example.ApI.tools.ToolCallInfo(
                             toolId = streamingResponse.toolCall.toolId,
-                            toolName = streamingResponse.toolCall.toolId,
+                            toolName = toolDisplayName,  // Use canonical name from registry
                             parameters = streamingResponse.toolCall.parameters,
                             result = toolResult,
                             timestamp = java.time.Instant.now().toString()
@@ -1852,14 +1876,18 @@ class ApiService(private val context: Context) {
                             ))
                         }
 
+                        // Get canonical tool name from registry
+                        val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
+                            .getToolDisplayName(currentResponse.toolCall.toolId)
+
                         // Create tool call message
                         val toolCallMessage = Message(
                             role = "tool_call",
-                            text = "Tool call: ${currentResponse.toolCall.toolId}",
+                            text = "Tool call: $toolDisplayName",
                             toolCallId = currentResponse.toolCall.id,
                             toolCall = com.example.ApI.tools.ToolCallInfo(
                                 toolId = currentResponse.toolCall.toolId,
-                                toolName = currentResponse.toolCall.toolId,
+                                toolName = toolDisplayName,  // Use canonical name from registry
                                 parameters = currentResponse.toolCall.parameters,
                                 result = toolResult,
                                 timestamp = java.time.Instant.now().toString()
@@ -2180,6 +2208,10 @@ class ApiService(private val context: Context) {
 
                         // Create assistant message with both text and tool_use (for Anthropic format)
                         // Store preceding text in the message so we can reconstruct it later
+                        // Get canonical tool name from registry
+                        val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
+                            .getToolDisplayName(toolCall.toolId)
+
                         val toolCallMessage = Message(
                             role = "tool_call",
                             text = precedingText, // Store the preceding text here
@@ -2187,7 +2219,7 @@ class ApiService(private val context: Context) {
                             datetime = java.time.Instant.now().toString(),
                             toolCall = com.example.ApI.tools.ToolCallInfo(
                                 toolId = toolCall.toolId,
-                                toolName = toolCall.toolId,
+                                toolName = toolDisplayName,  // Use canonical name from registry
                                 parameters = toolCall.parameters,
                                 result = toolResult,
                                 timestamp = java.time.Instant.now().toString()
