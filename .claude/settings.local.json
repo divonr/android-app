@@ -5,7 +5,9 @@
       "Bash(find:*)",
       "WebSearch",
       "WebFetch(domain:platform.claude.com)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(dir:*)",
+      "Bash(keytool:*)"
     ],
     "deny": [],
     "ask": []
