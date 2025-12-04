@@ -15,12 +15,14 @@ This guide demonstrates how to add a new LLM provider to the app, based on the r
 
 ## Overview
 
-Adding a new provider requires changes across 6 main files:
+Adding a new provider requires changes across 8 main files:
 - `app/src/main/assets/providers.json` - Provider API configuration
 - `app/src/main/java/com/example/ApI/data/network/ApiService.kt` - Network/streaming logic
 - `app/src/main/java/com/example/ApI/data/repository/DataRepository.kt` - Provider registration
 - `app/src/main/java/com/example/ApI/ui/screen/ApiKeysScreen.kt` - API key UI styling
 - `app/src/main/java/com/example/ApI/ui/screen/UsernameScreen.kt` - Auto-naming settings
+- `app/src/main/java/com/example/ApI/ui/screen/ChatScreen.kt` - Provider display name in chat
+- `app/src/main/java/com/example/ApI/ui/components/Dialogs.kt` - Provider display name in selection menus
 - `app/src/main/res/values/strings.xml` - String resources
 
 ---
@@ -788,6 +790,55 @@ Text(
 
 **⚠️ WARNING**: If you skip this step, your provider will display as "OpenAI" in the chat interface due to the fallback in the `else` clause!
 
+### 4.5: Add Provider Display Name to Dialogs.kt
+
+**File**: `app/src/main/java/com/example/ApI/ui/components/Dialogs.kt`
+
+**CRITICAL**: There are two `when` statements in this file that map provider names to display strings. You must update both:
+
+#### ProviderSelectorDialog (around line 286):
+
+```kotlin
+Text(
+    text = stringResource(id = when(provider.provider) {
+        "openai" -> R.string.provider_openai
+        "poe" -> R.string.provider_poe
+        "google" -> R.string.provider_google
+        "anthropic" -> R.string.provider_anthropic
+        "cohere" -> R.string.provider_cohere          // ← ADD THIS
+        else -> R.string.provider_openai
+    }),
+    // ... rest of Text properties
+)
+```
+
+#### AddApiKeyDialog (around line 494):
+
+```kotlin
+DropdownMenuItem(
+    text = {
+        Text(
+            text = stringResource(id = when(provider.provider) {
+                "openai" -> R.string.provider_openai
+                "poe" -> R.string.provider_poe
+                "google" -> R.string.provider_google
+                "anthropic" -> R.string.provider_anthropic
+                "cohere" -> R.string.provider_cohere  // ← ADD THIS
+                else -> R.string.provider_openai
+            }),
+            color = OnSurface
+        )
+    },
+    // ...
+)
+```
+
+**⚠️ WARNING**: If you skip this step, your provider will display as "OpenAI" in:
+- The provider selection dialog (when choosing which provider to use)
+- The API key add dialog dropdown (when adding a new API key)
+
+The correct name will only appear **after** selection, causing confusing UX!
+
 ---
 
 ## Step 5: Optional Features
@@ -987,6 +1038,7 @@ Adding a new provider requires:
 5. ✅ Add to settings in `UsernameScreen.kt`
 6. ✅ Add string resources in `strings.xml`
 7. ✅ **Add provider display name to `ChatScreen.kt`** ⚠️ (Critical - provider will show as "OpenAI" if skipped!)
-8. ✅ Test thoroughly
+8. ✅ **Add provider display name to `Dialogs.kt`** ⚠️ (Critical - provider will show as "OpenAI" in selection menus if skipped!)
+9. ✅ Test thoroughly
 
 The app's architecture handles the rest (chat history, tool calling, UI rendering, etc.) automatically once you implement these components correctly.
