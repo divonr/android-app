@@ -384,9 +384,9 @@ fun ChatScreen(
                                             text = uiState.currentProvider?.provider?.let { provider ->
                                                 stringResource(id = when(provider) {
                                                     "openai" -> R.string.provider_openai
-                                                    "poe" -> R.string.provider_poe
-                                                    "google" -> R.string.provider_google
                                                     "anthropic" -> R.string.provider_anthropic
+                                                    "google" -> R.string.provider_google
+                                                    "poe" -> R.string.provider_poe
                                                     "cohere" -> R.string.provider_cohere
                                                     else -> R.string.provider_openai
                                                 })

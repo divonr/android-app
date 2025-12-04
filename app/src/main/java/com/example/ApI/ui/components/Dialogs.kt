@@ -288,6 +288,7 @@ fun ProviderSelectorDialog(
                                         "poe" -> R.string.provider_poe
                                         "google" -> R.string.provider_google
                                         "anthropic" -> R.string.provider_anthropic
+                                        "cohere" -> R.string.provider_cohere
                                         else -> R.string.provider_openai
                                     }),
                                     color = OnSurface,
@@ -488,13 +489,14 @@ fun AddApiKeyDialog(
                         ) {
                             providers.forEach { provider ->
                                 DropdownMenuItem(
-                                    text = { 
+                                    text = {
                                         Text(
                                             text = stringResource(id = when(provider.provider) {
                                                 "openai" -> R.string.provider_openai
                                                 "poe" -> R.string.provider_poe
                                                 "google" -> R.string.provider_google
                                                 "anthropic" -> R.string.provider_anthropic
+                                                "cohere" -> R.string.provider_cohere
                                                 else -> R.string.provider_openai
                                             }),
                                             color = OnSurface

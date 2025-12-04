@@ -83,6 +83,71 @@ class DataRepository(private val context: Context) {
                 )
             ),
             Provider(
+                provider = "anthropic",
+                models = listOf(
+                    Model.SimpleModel("claude-sonnet-4-5"),
+                    Model.SimpleModel("claude-opus-4-5"),
+                    Model.SimpleModel("claude-haiku-4-5"),
+                    Model.SimpleModel("claude-sonnet-4-0"),
+                    Model.SimpleModel("claude-3-7-sonnet-latest")
+                ),
+                request = ApiRequest(
+                    request_type = "POST",
+                    base_url = "https://api.anthropic.com/v1/messages",
+                    headers = mapOf(
+                        "x-api-key" to "{ANTHROPIC_API_KEY_HERE}",
+                        "anthropic-version" to "2023-06-01",
+                        "Content-Type" to "application/json"
+                    ),
+                    body = null
+                ),
+                response_important_fields = ResponseFields(
+                    id = "{message_id}",
+                    model = "{model_name}"
+                ),
+                upload_files_request = null,
+                upload_files_response_important_fields = null
+            ),
+            Provider(
+                provider = "google",
+                models = listOf(
+                    Model.SimpleModel("gemini-2.5-pro"),
+                    Model.SimpleModel("gemini-2.5-flash"),
+                    Model.SimpleModel("gemini-1.5-pro-latest"),
+                    Model.SimpleModel("gemini-1.5-flash-latest")
+                ),
+                request = ApiRequest(
+                    request_type = "POST",
+                    base_url = "https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+                    headers = mapOf(
+                        "Content-Type" to "application/json"
+                    ),
+                    params = mapOf(
+                        "key" to "{GOOGLE_API_KEY_HERE}"
+                    ),
+                    body = null
+                ),
+                response_important_fields = ResponseFields(
+                    candidates = emptyList(),
+                    usageMetadata = null,
+                    modelVersion = "{model_name}",
+                    responseId = "{response_id}"
+                ),
+                upload_files_request = UploadRequest(
+                    request_type = "POST",
+                    base_url = "https://generativelanguage.googleapis.com/upload/v1beta/files",
+                    headers = mapOf(
+                        "Content-Type" to "{mime_type}"
+                    ),
+                    params = mapOf(
+                        "key" to "{GOOGLE_API_KEY_HERE}"
+                    )
+                ),
+                upload_files_response_important_fields = UploadResponseFields(
+                    file = null
+                )
+            ),
+            Provider(
                 provider = "poe",
                 models = listOf(
                     Model.ComplexModel(name = "GPT-5", min_points = 250),
@@ -126,71 +191,6 @@ class DataRepository(private val context: Context) {
                     attachment_url = "{file_URL}",
                     mime_type = "{mime_type}"
                 )
-            ),
-            Provider(
-                provider = "google",
-                models = listOf(
-                    Model.SimpleModel("gemini-2.5-pro"),
-                    Model.SimpleModel("gemini-2.5-flash"),
-                    Model.SimpleModel("gemini-1.5-pro-latest"),
-                    Model.SimpleModel("gemini-1.5-flash-latest")
-                ),
-                request = ApiRequest(
-                    request_type = "POST",
-                    base_url = "https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
-                    headers = mapOf(
-                        "Content-Type" to "application/json"
-                    ),
-                    params = mapOf(
-                        "key" to "{GOOGLE_API_KEY_HERE}"
-                    ),
-                    body = null
-                ),
-                response_important_fields = ResponseFields(
-                    candidates = emptyList(),
-                    usageMetadata = null,
-                    modelVersion = "{model_name}",
-                    responseId = "{response_id}"
-                ),
-                upload_files_request = UploadRequest(
-                    request_type = "POST",
-                    base_url = "https://generativelanguage.googleapis.com/upload/v1beta/files",
-                    headers = mapOf(
-                        "Content-Type" to "{mime_type}"
-                    ),
-                    params = mapOf(
-                        "key" to "{GOOGLE_API_KEY_HERE}"
-                    )
-                ),
-                upload_files_response_important_fields = UploadResponseFields(
-                    file = null
-                )
-            ),
-            Provider(
-                provider = "anthropic",
-                models = listOf(
-                    Model.SimpleModel("claude-sonnet-4-5"),
-                    Model.SimpleModel("claude-opus-4-5"),
-                    Model.SimpleModel("claude-haiku-4-5"),
-                    Model.SimpleModel("claude-sonnet-4-0"),
-                    Model.SimpleModel("claude-3-7-sonnet-latest")
-                ),
-                request = ApiRequest(
-                    request_type = "POST",
-                    base_url = "https://api.anthropic.com/v1/messages",
-                    headers = mapOf(
-                        "x-api-key" to "{ANTHROPIC_API_KEY_HERE}",
-                        "anthropic-version" to "2023-06-01",
-                        "Content-Type" to "application/json"
-                    ),
-                    body = null
-                ),
-                response_important_fields = ResponseFields(
-                    id = "{message_id}",
-                    model = "{model_name}"
-                ),
-                upload_files_request = null,
-                upload_files_response_important_fields = null
             ),
             Provider(
                 provider = "cohere",
