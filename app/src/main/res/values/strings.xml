@@ -36,6 +36,7 @@
     <string name="provider_poe">Poe</string>
     <string name="provider_google">Google</string>
     <string name="provider_anthropic">Anthropic</string>
+    <string name="provider_cohere">Cohere</string>
 
     <!-- Permissions and errors -->
     <string name="camera_permission_required">נדרשת הרשאת מצלמה</string>
@@ -54,6 +55,7 @@
     <string name="poe_gpt5_nano">gpt-5-nano via POE</string>
     <string name="google_gemini_flash_lite">gemini-2.5-flash-lite via Google</string>
     <string name="anthropic_claude_haiku">claude-3-5-haiku via Anthropic</string>
+    <string name="cohere_command_a">command-a via Cohere</string>
     
     <!-- Import chat history -->
     <string name="import_chat_history">ייבוא היסטוריית צ\'אט מקובץ...</string>

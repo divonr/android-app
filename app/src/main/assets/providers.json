@@ -484,5 +484,94 @@
                 }
             ]
         }
+    },
+    {
+        "provider": "cohere",
+        "models": ["command-a-03-2025", "command-r-plus-08-2024", "command-r-08-2024"],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://api.cohere.ai/v2/chat",
+            "headers": {
+                "Authorization": "Bearer {COHERE_API_KEY_HERE}",
+                "Content-Type": "application/json"
+            },
+            "body": {
+                "model": "{model_name}",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "{system_prompt}"
+                    },
+                    {
+                        "role": "user",
+                        "content": "{user_first_prompt}"
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "{model_first_response}"
+                    }
+                ],
+                "stream": true
+            }
+        },
+        "response_important_fields": {
+            "response_format": "server_sent_events",
+            "events": [
+                {
+                    "event": "message-start",
+                    "data": {
+                        "type": "message-start",
+                        "id": "{message_id}",
+                        "delta": {
+                            "message": {
+                                "role": "assistant"
+                            }
+                        }
+                    }
+                },
+                {
+                    "event": "content-delta",
+                    "data": {
+                        "type": "content-delta",
+                        "index": 0,
+                        "delta": {
+                            "message": {
+                                "content": {
+                                    "text": "{partial_text_chunk}"
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "event": "tool-call-start",
+                    "data": {
+                        "type": "tool-call-start",
+                        "index": 0,
+                        "delta": {
+                            "message": {
+                                "tool_calls": {
+                                    "id": "{tool_call_id}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "{tool_name}",
+                                        "arguments": ""
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "event": "message-end",
+                    "data": {
+                        "type": "message-end",
+                        "delta": {
+                            "finish_reason": "COMPLETE"
+                        }
+                    }
+                }
+            ]
+        }
     }
 ]

@@ -387,6 +387,7 @@ fun ChatScreen(
                                                     "poe" -> R.string.provider_poe
                                                     "google" -> R.string.provider_google
                                                     "anthropic" -> R.string.provider_anthropic
+                                                    "cohere" -> R.string.provider_cohere
                                                     else -> R.string.provider_openai
                                                 })
                                             } ?: "",

@@ -43,6 +43,7 @@ class ApiService(private val context: Context) {
             "poe" -> sendPoeMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             "anthropic" -> sendAnthropicMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "cohere" -> sendCohereMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             else -> {
                 callback.onError("Unknown provider: ${provider.provider}")
             }
@@ -2626,6 +2627,552 @@ class ApiService(private val context: Context) {
         }
     }
 
+    // ==================== COHERE IMPLEMENTATION ====================
+
+    /**
+     * Send message to Cohere API with streaming and tool calling support
+     */
+    private suspend fun sendCohereMessage(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKeys: Map<String, String>,
+        webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList(),
+        callback: StreamingCallback
+    ) {
+        val apiKey = apiKeys["cohere"] ?: run {
+            callback.onError("Cohere API key is required")
+            return
+        }
+
+        try {
+            val conversationMessages = messages.toMutableList()
+            var fullResponseText = ""
+            val maxToolIterations = 25
+            var currentIteration = 0
+
+            while (currentIteration < maxToolIterations) {
+                currentIteration++
+
+                // Make streaming request
+                val result = makeCohereStreamingRequest(
+                    provider,
+                    modelName,
+                    conversationMessages,
+                    systemPrompt,
+                    apiKey,
+                    enabledTools,
+                    webSearchEnabled,
+                    callback
+                )
+
+                when (result) {
+                    is CohereStreamingResult.TextResponse -> {
+                        // Got text response - we're done
+                        fullResponseText = result.text
+                        callback.onComplete(fullResponseText)
+                        return
+                    }
+
+                    is CohereStreamingResult.ToolCall -> {
+                        // Tool call detected - execute it
+                        val toolCall = result.toolCall
+                        val precedingText = result.precedingText
+
+                        println("[DEBUG] Cohere executing tool: ${toolCall.toolId}")
+                        if (precedingText.isNotBlank()) {
+                            println("[DEBUG] Preceding text: $precedingText")
+                        }
+
+                        // Execute the tool
+                        val toolResult = callback.onToolCall(toolCall, precedingText)
+
+                        // Get canonical tool name from registry
+                        val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
+                            .getToolDisplayName(toolCall.toolId)
+
+                        val toolCallMessage = Message(
+                            role = "tool_call",
+                            text = precedingText,
+                            model = modelName,
+                            datetime = java.time.Instant.now().toString(),
+                            toolCall = com.example.ApI.tools.ToolCallInfo(
+                                toolId = toolCall.toolId,
+                                toolName = toolDisplayName,
+                                parameters = toolCall.parameters,
+                                result = toolResult,
+                                timestamp = java.time.Instant.now().toString()
+                            ),
+                            toolCallId = toolCall.id
+                        )
+
+                        // Create tool response message
+                        val toolResponseMessage = Message(
+                            role = "tool_response",
+                            text = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            },
+                            datetime = java.time.Instant.now().toString(),
+                            toolResponseCallId = toolCall.id,
+                            toolResponseOutput = when (toolResult) {
+                                is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
+                                is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
+                            }
+                        )
+
+                        // Save tool messages to history
+                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+
+                        // Add tool response to conversation
+                        conversationMessages.add(toolCallMessage)
+                        conversationMessages.add(toolResponseMessage)
+
+                        // Continue loop to get Cohere's response to the tool result
+                        fullResponseText = ""
+                    }
+
+                    is CohereStreamingResult.Error -> {
+                        // Error occurred
+                        callback.onError(result.message)
+                        return
+                    }
+                }
+            }
+
+            // Max iterations reached
+            callback.onError("Maximum tool calling iterations ($maxToolIterations) reached")
+        } catch (e: Exception) {
+            callback.onError("Failed to send Cohere message: ${e.message}")
+        }
+    }
+
+    /**
+     * Make streaming request to Cohere API and parse SSE events
+     */
+    private suspend fun makeCohereStreamingRequest(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        enabledTools: List<ToolSpecification>,
+        webSearchEnabled: Boolean,
+        callback: StreamingCallback
+    ): CohereStreamingResult = withContext(Dispatchers.IO) {
+        try {
+            val url = URL(provider.request.base_url)
+            val connection = url.openConnection() as HttpURLConnection
+
+            // Set up request
+            connection.requestMethod = provider.request.request_type
+            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.doOutput = true
+
+            // Build messages array
+            val cohereMessages = buildCohereMessages(messages, systemPrompt)
+
+            // Build request body
+            val requestBody = buildJsonObject {
+                put("model", modelName)
+                put("messages", JsonArray(cohereMessages))
+                put("stream", true)
+
+                // Add tools if any are enabled
+                if (enabledTools.isNotEmpty()) {
+                    put("tools", convertToolsToCohereFormat(enabledTools))
+                }
+
+                // Add web search connector if enabled
+                if (webSearchEnabled) {
+                    put("connectors", buildJsonArray {
+                        add(buildJsonObject {
+                            put("id", "web-search")
+                        })
+                    })
+                }
+            }
+
+            println("[DEBUG] Cohere request body: $requestBody")
+
+            // Send request
+            connection.outputStream.write(requestBody.toString().toByteArray())
+            connection.outputStream.flush()
+
+            // Check response code
+            val responseCode = connection.responseCode
+            if (responseCode >= 400) {
+                val errorReader = BufferedReader(InputStreamReader(connection.errorStream))
+                val errorResponse = errorReader.readText()
+                errorReader.close()
+                connection.disconnect()
+                return@withContext CohereStreamingResult.Error("HTTP $responseCode: $errorResponse")
+            }
+
+            // Read streaming response
+            val reader = BufferedReader(InputStreamReader(connection.inputStream))
+            val fullResponse = StringBuilder()
+
+            // Track tool calls
+            var currentToolCallId: String? = null
+            var currentToolName: String? = null
+            var currentToolArguments = StringBuilder()
+            var detectedToolCall: com.example.ApI.tools.ToolCall? = null
+            var toolPlanText = StringBuilder()
+
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val currentLine = line ?: continue
+
+                // Skip empty lines
+                if (currentLine.isBlank()) continue
+
+                // Check for final [DONE] marker
+                if (currentLine == "data: [DONE]") {
+                    println("[DEBUG] Cohere stream complete")
+                    break
+                }
+
+                // Parse SSE format: "event: type" followed by "data: {json}"
+                if (currentLine.startsWith("event: ")) {
+                    val eventType = currentLine.substring(7).trim()
+
+                    // Read the next line which should be "data: {json}"
+                    val dataLine = reader.readLine() ?: continue
+                    if (!dataLine.startsWith("data: ")) continue
+
+                    val dataContent = dataLine.substring(6).trim()
+                    if (dataContent.isEmpty() || dataContent == "[DONE]") continue
+
+                    try {
+                        val chunkJson = json.parseToJsonElement(dataContent).jsonObject
+
+                        when (eventType) {
+                            "message-start" -> {
+                                println("[DEBUG] Cohere message started")
+                            }
+
+                            "content-start" -> {
+                                // Content block starting
+                                println("[DEBUG] Cohere content block started")
+                            }
+
+                            "content-delta" -> {
+                                // Text chunk received - Cohere v2 format: delta.message.content.text
+                                try {
+                                    val delta = chunkJson["delta"]?.jsonObject
+                                    val message = delta?.get("message")?.jsonObject
+                                    val contentElement = message?.get("content")
+
+                                    // Content can be an object with text field
+                                    val text = when (contentElement) {
+                                        is JsonObject -> contentElement["text"]?.jsonPrimitive?.contentOrNull ?: ""
+                                        is JsonPrimitive -> contentElement.contentOrNull ?: ""
+                                        else -> ""
+                                    }
+
+                                    if (text.isNotEmpty()) {
+                                        fullResponse.append(text)
+                                        callback.onPartialResponse(text)
+                                    }
+                                } catch (e: Exception) {
+                                    println("[DEBUG] Error parsing content-delta: ${e.message}")
+                                }
+                            }
+
+                            "content-end" -> {
+                                // Content block ended
+                                println("[DEBUG] Cohere content block ended")
+                            }
+
+                            "tool-plan-delta" -> {
+                                // Tool planning text (not main content, just model reasoning)
+                                val delta = chunkJson["delta"]?.jsonObject
+                                val message = delta?.get("message")?.jsonObject
+                                val toolPlan = message?.get("tool_plan")?.jsonPrimitive?.content ?: ""
+                                if (toolPlan.isNotEmpty()) {
+                                    toolPlanText.append(toolPlan)
+                                }
+                            }
+
+                            "tool-call-start" -> {
+                                // Tool call starting
+                                try {
+                                    val delta = chunkJson["delta"]?.jsonObject
+                                    val message = delta?.get("message")?.jsonObject
+                                    val toolCallsElement = message?.get("tool_calls")
+
+                                    // tool_calls can be an object (single call) or we just get the first one
+                                    val toolCalls = when (toolCallsElement) {
+                                        is JsonObject -> toolCallsElement
+                                        is JsonArray -> toolCallsElement.firstOrNull() as? JsonObject
+                                        else -> null
+                                    }
+
+                                    currentToolCallId = toolCalls?.get("id")?.jsonPrimitive?.contentOrNull
+                                    val function = toolCalls?.get("function")?.jsonObject
+                                    currentToolName = function?.get("name")?.jsonPrimitive?.contentOrNull
+                                    currentToolArguments.clear()
+
+                                    // Get initial arguments if present
+                                    val initialArgs = function?.get("arguments")?.jsonPrimitive?.contentOrNull
+                                    if (!initialArgs.isNullOrEmpty()) {
+                                        currentToolArguments.append(initialArgs)
+                                    }
+
+                                    println("[DEBUG] Cohere tool call started: $currentToolName (id: $currentToolCallId)")
+                                } catch (e: Exception) {
+                                    println("[DEBUG] Error parsing tool-call-start: ${e.message}")
+                                }
+                            }
+
+                            "tool-call-delta" -> {
+                                // Tool call arguments streaming (if supported by model)
+                                try {
+                                    val delta = chunkJson["delta"]?.jsonObject
+                                    val message = delta?.get("message")?.jsonObject
+                                    val toolCallsElement = message?.get("tool_calls")
+                                    val toolCalls = when (toolCallsElement) {
+                                        is JsonObject -> toolCallsElement
+                                        is JsonArray -> toolCallsElement.firstOrNull() as? JsonObject
+                                        else -> null
+                                    }
+                                    val function = toolCalls?.get("function")?.jsonObject
+                                    val argsChunk = function?.get("arguments")?.jsonPrimitive?.contentOrNull ?: ""
+                                    if (argsChunk.isNotEmpty()) {
+                                        currentToolArguments.append(argsChunk)
+                                    }
+                                } catch (e: Exception) {
+                                    println("[DEBUG] Error parsing tool-call-delta: ${e.message}")
+                                }
+                            }
+
+                            "tool-call-end" -> {
+                                // Tool call complete
+                                if (currentToolCallId != null && currentToolName != null) {
+                                    try {
+                                        val inputString = currentToolArguments.toString().ifEmpty { "{}" }
+                                        val toolInputJson = json.parseToJsonElement(inputString).jsonObject
+
+                                        detectedToolCall = com.example.ApI.tools.ToolCall(
+                                            id = currentToolCallId!!,
+                                            toolId = currentToolName!!,
+                                            parameters = toolInputJson,
+                                            provider = "cohere"
+                                        )
+
+                                        println("[DEBUG] Cohere tool call detected: $detectedToolCall")
+                                    } catch (e: Exception) {
+                                        println("[DEBUG] Error parsing Cohere tool input JSON: ${e.message}")
+                                    }
+                                }
+                            }
+
+                            "message-end" -> {
+                                // Message complete - check finish reason
+                                val delta = chunkJson["delta"]?.jsonObject
+                                val finishReason = delta?.get("finish_reason")?.jsonPrimitive?.content
+                                println("[DEBUG] Cohere message ended with finish_reason: $finishReason")
+                                break
+                            }
+                        }
+                    } catch (jsonException: Exception) {
+                        println("[DEBUG] Error parsing Cohere SSE chunk: ${jsonException.message}")
+                        continue
+                    }
+                }
+            }
+
+            reader.close()
+            connection.disconnect()
+
+            // Return result based on what we accumulated
+            return@withContext when {
+                detectedToolCall != null -> CohereStreamingResult.ToolCall(
+                    toolCall = detectedToolCall!!,
+                    precedingText = fullResponse.toString()
+                )
+                fullResponse.isNotEmpty() -> CohereStreamingResult.TextResponse(fullResponse.toString())
+                else -> CohereStreamingResult.Error("Empty response from Cohere")
+            }
+        } catch (e: Exception) {
+            callback.onError("Failed to make Cohere streaming request: ${e.message}")
+            CohereStreamingResult.Error("Failed to make streaming request: ${e.message}")
+        }
+    }
+
+    /**
+     * Build Cohere messages format from Message objects
+     */
+    private suspend fun buildCohereMessages(messages: List<Message>, systemPrompt: String): List<JsonObject> = withContext(Dispatchers.IO) {
+        val cohereMessages = mutableListOf<JsonObject>()
+
+        // Add system prompt as system role message (Cohere v2 format)
+        if (systemPrompt.isNotBlank()) {
+            cohereMessages.add(buildJsonObject {
+                put("role", "system")
+                put("content", systemPrompt)
+            })
+        }
+
+        messages.forEach { message ->
+            when (message.role) {
+                "user" -> {
+                    // For Cohere, images are sent as content array with text and image_url
+                    if (message.attachments.isEmpty()) {
+                        cohereMessages.add(buildJsonObject {
+                            put("role", "user")
+                            put("content", message.text)
+                        })
+                    } else {
+                        // Build content array with text and images
+                        cohereMessages.add(buildJsonObject {
+                            put("role", "user")
+                            put("content", buildJsonArray {
+                                // Add text part
+                                if (message.text.isNotBlank()) {
+                                    add(buildJsonObject {
+                                        put("type", "text")
+                                        put("text", message.text)
+                                    })
+                                }
+                                // Add image attachments - Cohere v2 uses image_url object format
+                                message.attachments.forEach { attachment ->
+                                    if (attachment.mime_type.startsWith("image/")) {
+                                        attachment.local_file_path?.let { filePath ->
+                                            try {
+                                                val file = File(filePath)
+                                                if (file.exists()) {
+                                                    val bytes = file.readBytes()
+                                                    val base64Data = Base64.getEncoder().encodeToString(bytes)
+                                                    val dataUrl = "data:${attachment.mime_type};base64,$base64Data"
+                                                    add(buildJsonObject {
+                                                        put("type", "image_url")
+                                                        put("image_url", buildJsonObject {
+                                                            put("url", dataUrl)
+                                                        })
+                                                    })
+                                                }
+                                            } catch (e: Exception) {
+                                                println("[DEBUG] Error encoding image for Cohere: ${e.message}")
+                                            }
+                                        }
+                                    }
+                                }
+                            })
+                        })
+                    }
+                }
+                "assistant" -> {
+                    cohereMessages.add(buildJsonObject {
+                        put("role", "assistant")
+                        put("content", message.text)
+                    })
+                }
+                "tool_call" -> {
+                    // Cohere assistant message with tool_calls
+                    cohereMessages.add(buildJsonObject {
+                        put("role", "assistant")
+                        if (message.text.isNotBlank()) {
+                            put("content", message.text)
+                        }
+                        put("tool_calls", buildJsonArray {
+                            message.toolCall?.let { toolCall ->
+                                add(buildJsonObject {
+                                    put("id", message.toolCallId ?: "")
+                                    put("type", "function")
+                                    put("function", buildJsonObject {
+                                        put("name", toolCall.toolId)
+                                        put("arguments", toolCall.parameters.toString())
+                                    })
+                                })
+                            }
+                        })
+                    })
+                }
+                "tool_response" -> {
+                    // Cohere tool result message
+                    cohereMessages.add(buildJsonObject {
+                        put("role", "tool")
+                        put("tool_call_id", message.toolResponseCallId ?: "")
+                        put("content", message.toolResponseOutput ?: "")
+                    })
+                }
+            }
+        }
+
+        cohereMessages
+    }
+
+    /**
+     * Convert tool specifications to Cohere's v2 tool format
+     */
+    private fun convertToolsToCohereFormat(tools: List<ToolSpecification>): JsonArray {
+        return buildJsonArray {
+            tools.forEach { tool ->
+                add(buildJsonObject {
+                    put("type", "function")
+                    put("function", buildJsonObject {
+                        put("name", tool.name)
+                        put("description", tool.description)
+                        put("parameters", buildJsonObject {
+                            put("type", "object")
+                            tool.parameters?.let { params ->
+                                // Get properties from the schema
+                                val properties = params["properties"]?.jsonObject
+                                if (properties != null) {
+                                    put("properties", buildJsonObject {
+                                        properties.forEach { (paramName, paramDef) ->
+                                            try {
+                                                val paramObj = paramDef.jsonObject
+                                                // Handle type - can be a string or array (for union types)
+                                                val typeValue = paramObj["type"]
+                                                val typeString = when {
+                                                    typeValue == null -> "string"
+                                                    typeValue is JsonPrimitive -> typeValue.content
+                                                    typeValue is JsonArray && typeValue.isNotEmpty() -> {
+                                                        typeValue.mapNotNull {
+                                                            (it as? JsonPrimitive)?.contentOrNull
+                                                        }.firstOrNull { it != "null" } ?: "string"
+                                                    }
+                                                    else -> "string"
+                                                }
+                                                put(paramName, buildJsonObject {
+                                                    put("type", typeString)
+                                                    paramObj["description"]?.jsonPrimitive?.contentOrNull?.let {
+                                                        put("description", it)
+                                                    }
+                                                })
+                                            } catch (e: Exception) {
+                                                println("[DEBUG] Error converting tool parameter $paramName: ${e.message}")
+                                            }
+                                        }
+                                    })
+                                } else {
+                                    put("properties", buildJsonObject {})
+                                }
+                                // Add required array if present
+                                try {
+                                    val requiredParams = params["required"]?.jsonArray
+                                    if (requiredParams != null && requiredParams.isNotEmpty()) {
+                                        put("required", requiredParams)
+                                    }
+                                } catch (e: Exception) {
+                                    // No required params or invalid format
+                                }
+                            } ?: run {
+                                put("properties", buildJsonObject {})
+                            }
+                        })
+                    })
+                })
+            }
+        }
+    }
+
     /**
      * Sealed class representing different types of Google streaming results
      */
@@ -2645,6 +3192,15 @@ class ApiService(private val context: Context) {
             val precedingText: String = ""
         ) : AnthropicStreamingResult()
         data class Error(val message: String) : AnthropicStreamingResult()
+    }
+
+    private sealed class CohereStreamingResult {
+        data class TextResponse(val text: String) : CohereStreamingResult()
+        data class ToolCall(
+            val toolCall: com.example.ApI.tools.ToolCall,
+            val precedingText: String = ""
+        ) : CohereStreamingResult()
+        data class Error(val message: String) : CohereStreamingResult()
     }
 }
 

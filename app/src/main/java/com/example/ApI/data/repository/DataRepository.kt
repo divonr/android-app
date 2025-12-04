@@ -191,6 +191,28 @@ class DataRepository(private val context: Context) {
                 ),
                 upload_files_request = null,
                 upload_files_response_important_fields = null
+            ),
+            Provider(
+                provider = "cohere",
+                models = listOf(
+                    Model.SimpleModel("command-a-03-2025"),
+                    Model.SimpleModel("command-r-plus-08-2024"),
+                    Model.SimpleModel("command-r-08-2024")
+                ),
+                request = ApiRequest(
+                    request_type = "POST",
+                    base_url = "https://api.cohere.ai/v2/chat",
+                    headers = mapOf(
+                        "Authorization" to "Bearer {COHERE_API_KEY_HERE}",
+                        "Content-Type" to "application/json"
+                    ),
+                    body = null
+                ),
+                response_important_fields = ResponseFields(
+                    response_format = "server_sent_events"
+                ),
+                upload_files_request = null,  // Cohere uses inline base64, no separate upload
+                upload_files_response_important_fields = null
             )
         )
     }

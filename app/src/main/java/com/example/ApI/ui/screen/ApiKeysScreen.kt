@@ -401,6 +401,10 @@ private fun ApiKeyItem(
             Color(0xFFC6613F).copy(alpha = 0.25f), // Anthropic Orange
             Color(0xFFC6613F).copy(alpha = 0.15f)
         )
+        "cohere" -> listOf(
+            Color(0xFFD18EE2).copy(alpha = 0.25f), // Cohere Coral/Pink
+            Color(0xFF39594D).copy(alpha = 0.25f)  // Cohere Dark Teal
+        )
         else -> listOf(
             SurfaceVariant,
             SurfaceVariant
