@@ -473,7 +473,7 @@ private fun TitleGenerationSettingsSection(
 
                                     if ("cohere" in availableProviders) {
                                         ProviderOption(
-                                            text = stringResource(R.string.cohere_command_a),
+                                            text = stringResource(R.string.cohere_command_r7b),
                                             isSelected = settings.provider == "cohere",
                                             onClick = {
                                                 onSettingsChange(settings.copy(provider = "cohere"))
@@ -560,7 +560,7 @@ private fun getProviderDisplayName(provider: String): String {
         "poe" -> stringResource(R.string.poe_gpt5_nano)
         "google" -> stringResource(R.string.google_gemini_flash_lite)
         "anthropic" -> stringResource(R.string.anthropic_claude_haiku)
-        "cohere" -> stringResource(R.string.cohere_command_a)
+        "cohere" -> stringResource(R.string.cohere_command_r7b)
         else -> stringResource(R.string.auto_mode)
     }
 }

@@ -487,7 +487,7 @@
     },
     {
         "provider": "cohere",
-        "models": ["command-a-03-2025", "command-r-plus-08-2024", "command-r-08-2024"],
+        "models": ["command-a-03-2025", "command-r-plus-08-2024", "command-r-08-2024", "command-r7b-12-2024"],
         "request": {
             "request_type": "POST",
             "base_url": "https://api.cohere.ai/v2/chat",

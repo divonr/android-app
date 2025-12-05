@@ -1269,28 +1269,43 @@ class DataRepository(private val context: Context) {
     
     /**
      * Select provider and model based on priority and availability
+     * Uses cheapest models for title generation
      */
     private fun selectProviderAndModel(
         preferredProvider: String?,
         availableProviders: List<Provider>,
         apiKeys: Map<String, String>
     ): Pair<Provider, String>? {
-        // Helper to pick the first model name defined for a provider
-        fun firstModelName(p: Provider): String? = p.models.firstOrNull()?.name
+        // Map providers to their cheapest models for title generation
+        val cheapestModels = mapOf(
+            "openai" to "gpt-5-nano",
+            "google" to "gemini-2.5-flash-lite",
+            "poe" to "GPT-OSS-120B-T",
+            "anthropic" to "claude-3-haiku-20240307",
+            "cohere" to "command-r7b-12-2024"
+        )
+
+        // Helper to pick the cheapest model for a provider
+        fun cheapestModelName(p: Provider): String? {
+            val cheapest = cheapestModels[p.provider]
+            // Check if the cheapest model exists in the provider's models
+            val hasModel = p.models.any { it.name == cheapest }
+            return if (hasModel) cheapest else p.models.firstOrNull()?.name
+        }
 
         // If preferred provider is specified, try to use it when key exists
         if (preferredProvider != null && apiKeys.containsKey(preferredProvider)) {
             val provider = availableProviders.find { it.provider == preferredProvider }
-            val model = provider?.let { firstModelName(it) }
+            val model = provider?.let { cheapestModelName(it) }
             if (provider != null && model != null) return Pair(provider, model)
         }
 
-        // Priority order: OpenAI > Google > POE
-        val priorityOrder = listOf("openai", "google", "poe")
+        // Priority order: OpenAI > Google > Anthropic > Cohere > POE
+        val priorityOrder = listOf("openai", "google", "anthropic", "cohere", "poe")
         for (providerName in priorityOrder) {
             if (!apiKeys.containsKey(providerName)) continue
             val provider = availableProviders.find { it.provider == providerName } ?: continue
-            val model = firstModelName(provider) ?: continue
+            val model = cheapestModelName(provider) ?: continue
             return Pair(provider, model)
         }
 

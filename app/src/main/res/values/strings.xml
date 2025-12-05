@@ -54,8 +54,8 @@
     <string name="openai_gpt5_nano">gpt-5-nano via OpenAI</string>
     <string name="poe_gpt5_nano">gpt-5-nano via POE</string>
     <string name="google_gemini_flash_lite">gemini-2.5-flash-lite via Google</string>
-    <string name="anthropic_claude_haiku">claude-3-5-haiku via Anthropic</string>
-    <string name="cohere_command_a">command-a via Cohere</string>
+    <string name="anthropic_claude_haiku">claude-3-haiku via Anthropic</string>
+    <string name="cohere_command_r7b">command-r7b via Cohere</string>
     
     <!-- Import chat history -->
     <string name="import_chat_history">ייבוא היסטוריית צ\'אט מקובץ...</string>
