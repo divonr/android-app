@@ -1680,7 +1680,7 @@ class ChatViewModel(
             .filter { it.isActive }
             .map { it.provider }
         
-        return listOf("openai", "anthropic", "google", "poe", "cohere").filter { provider ->
+        return listOf("openai", "anthropic", "google", "poe", "cohere", "openrouter").filter { provider ->
             apiKeys.contains(provider)
         }
     }
@@ -1974,6 +1974,10 @@ class ChatViewModel(
             "anthropic" -> {
                 // All Claude models support web search as optional
                 WebSearchSupport.OPTIONAL
+            }
+            "openrouter" -> {
+                // OpenRouter web search depends on the underlying model
+                WebSearchSupport.UNSUPPORTED
             }
             else -> WebSearchSupport.UNSUPPORTED
         }

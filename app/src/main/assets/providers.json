@@ -573,5 +573,62 @@
                 }
             ]
         }
+    },
+    {
+        "provider": "openrouter",
+        "models": ["openai/gpt-4o", "openai/gpt-4-turbo", "anthropic/claude-3.5-sonnet", "anthropic/claude-3-opus", "google/gemini-pro-1.5", "meta-llama/llama-3.1-405b-instruct", "mistralai/mistral-large"],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://openrouter.ai/api/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {OPENROUTER_API_KEY_HERE}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/your-app",
+                "X-Title": "LLM Chat App"
+            },
+            "body": {
+                "model": "{model_name}",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "{system_prompt}"
+                    },
+                    {
+                        "role": "user",
+                        "content": "{user_first_prompt}"
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "{model_first_response}"
+                    }
+                ],
+                "stream": true
+            }
+        },
+        "response_important_fields": {
+            "response_format": "server_sent_events",
+            "events": [
+                {
+                    "data": {
+                        "id": "{chunk_id}",
+                        "object": "chat.completion.chunk",
+                        "model": "{model_name}",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "content": "{partial_text_chunk}"
+                                },
+                                "finish_reason": null
+                            }
+                        ]
+                    }
+                },
+                {
+                    "data": "[DONE]",
+                    "description": "End of stream marker"
+                }
+            ]
+        }
     }
 ]

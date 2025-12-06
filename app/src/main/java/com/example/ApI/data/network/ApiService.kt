@@ -44,6 +44,7 @@ class ApiService(private val context: Context) {
             "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             "anthropic" -> sendAnthropicMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             "cohere" -> sendCohereMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "openrouter" -> sendOpenRouterMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             else -> {
                 callback.onError("Unknown provider: ${provider.provider}")
             }
@@ -3201,6 +3202,239 @@ class ApiService(private val context: Context) {
             val precedingText: String = ""
         ) : CohereStreamingResult()
         data class Error(val message: String) : CohereStreamingResult()
+    }
+
+    // ==================== OpenRouter API ====================
+
+    private suspend fun sendOpenRouterMessage(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKeys: Map<String, String>,
+        webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList(),
+        callback: StreamingCallback
+    ) {
+        val apiKey = apiKeys["openrouter"] ?: run {
+            callback.onError("OpenRouter API key is required")
+            return
+        }
+
+        try {
+            // Make streaming request - OpenRouter uses OpenAI-compatible format
+            val result = makeOpenRouterStreamingRequest(
+                provider,
+                modelName,
+                messages,
+                systemPrompt,
+                apiKey,
+                callback
+            )
+
+            when (result) {
+                is OpenRouterStreamingResult.TextResponse -> {
+                    callback.onComplete(result.text)
+                }
+                is OpenRouterStreamingResult.Error -> {
+                    callback.onError(result.message)
+                }
+            }
+        } catch (e: Exception) {
+            callback.onError("Failed to send OpenRouter message: ${e.message}")
+        }
+    }
+
+    /**
+     * Make streaming request to OpenRouter API (OpenAI-compatible format)
+     */
+    private suspend fun makeOpenRouterStreamingRequest(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        callback: StreamingCallback
+    ): OpenRouterStreamingResult = withContext(Dispatchers.IO) {
+        try {
+            val url = URL(provider.request.base_url)
+            val connection = url.openConnection() as HttpURLConnection
+
+            // Set up request
+            connection.requestMethod = provider.request.request_type
+            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("HTTP-Referer", "https://github.com/your-app")
+            connection.setRequestProperty("X-Title", "LLM Chat App")
+            connection.doOutput = true
+
+            // Build messages array (OpenAI format)
+            val openRouterMessages = buildJsonArray {
+                // Add system prompt if provided
+                if (systemPrompt.isNotBlank()) {
+                    add(buildJsonObject {
+                        put("role", "system")
+                        put("content", systemPrompt)
+                    })
+                }
+
+                // Add conversation messages
+                messages.forEach { message ->
+                    when (message.role) {
+                        "user" -> {
+                            // Check if message has image attachments
+                            val hasImages = message.attachments.any {
+                                it.mime_type.startsWith("image/")
+                            }
+
+                            if (hasImages) {
+                                // Build multimodal content array
+                                add(buildJsonObject {
+                                    put("role", "user")
+                                    put("content", buildJsonArray {
+                                        // Add text content
+                                        add(buildJsonObject {
+                                            put("type", "text")
+                                            put("text", message.text)
+                                        })
+                                        // Add image attachments as base64
+                                        message.attachments.filter {
+                                            it.mime_type.startsWith("image/")
+                                        }.forEach { attachment ->
+                                            val base64Data = attachment.local_file_path?.let { path ->
+                                                try {
+                                                    val file = File(path)
+                                                    if (file.exists()) {
+                                                        Base64.getEncoder().encodeToString(file.readBytes())
+                                                    } else null
+                                                } catch (e: Exception) { null }
+                                            }
+                                            if (base64Data != null) {
+                                                add(buildJsonObject {
+                                                    put("type", "image_url")
+                                                    put("image_url", buildJsonObject {
+                                                        put("url", "data:${attachment.mime_type};base64,$base64Data")
+                                                    })
+                                                })
+                                            }
+                                        }
+                                    })
+                                })
+                            } else {
+                                add(buildJsonObject {
+                                    put("role", "user")
+                                    put("content", message.text)
+                                })
+                            }
+                        }
+                        "assistant" -> {
+                            add(buildJsonObject {
+                                put("role", "assistant")
+                                put("content", message.text)
+                            })
+                        }
+                        // Skip tool_call and tool_response for now
+                    }
+                }
+            }
+
+            // Build request body
+            val requestBody = buildJsonObject {
+                put("model", modelName)
+                put("messages", openRouterMessages)
+                put("stream", true)
+            }
+
+            Log.d("OpenRouter", "Request body: $requestBody")
+
+            // Send request
+            connection.outputStream.write(requestBody.toString().toByteArray())
+            connection.outputStream.flush()
+
+            // Check response code
+            val responseCode = connection.responseCode
+            if (responseCode >= 400) {
+                val errorReader = BufferedReader(InputStreamReader(connection.errorStream))
+                val errorResponse = errorReader.readText()
+                errorReader.close()
+                connection.disconnect()
+                return@withContext OpenRouterStreamingResult.Error("HTTP $responseCode: $errorResponse")
+            }
+
+            // Read streaming response
+            val reader = BufferedReader(InputStreamReader(connection.inputStream))
+            val fullResponse = StringBuilder()
+
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val currentLine = line ?: continue
+
+                // Skip empty lines and comments (OpenRouter sends ": OPENROUTER PROCESSING" keepalives)
+                if (currentLine.isBlank() || currentLine.startsWith(":")) continue
+
+                // Check for [DONE] marker
+                if (currentLine == "data: [DONE]") {
+                    Log.d("OpenRouter", "Stream complete")
+                    break
+                }
+
+                // Parse SSE format: "data: {json}"
+                if (currentLine.startsWith("data: ")) {
+                    val dataContent = currentLine.substring(6).trim()
+                    if (dataContent.isEmpty() || dataContent == "[DONE]") continue
+
+                    try {
+                        val chunkJson = json.parseToJsonElement(dataContent).jsonObject
+
+                        // Check for error in chunk
+                        val error = chunkJson["error"]?.jsonObject
+                        if (error != null) {
+                            val errorMessage = error["message"]?.jsonPrimitive?.contentOrNull ?: "Unknown error"
+                            reader.close()
+                            connection.disconnect()
+                            return@withContext OpenRouterStreamingResult.Error(errorMessage)
+                        }
+
+                        // Extract text from choices[0].delta.content
+                        val choices = chunkJson["choices"]?.jsonArray
+                        if (choices != null && choices.isNotEmpty()) {
+                            val delta = choices[0].jsonObject["delta"]?.jsonObject
+                            val content = delta?.get("content")?.jsonPrimitive?.contentOrNull
+
+                            if (!content.isNullOrEmpty()) {
+                                fullResponse.append(content)
+                                callback.onPartialResponse(content)
+                            }
+
+                            // Check finish_reason
+                            val finishReason = choices[0].jsonObject["finish_reason"]?.jsonPrimitive?.contentOrNull
+                            if (finishReason == "stop" || finishReason == "length") {
+                                Log.d("OpenRouter", "Finish reason: $finishReason")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("OpenRouter", "Error parsing chunk: ${e.message}")
+                        continue
+                    }
+                }
+            }
+
+            reader.close()
+            connection.disconnect()
+
+            return@withContext if (fullResponse.isNotEmpty()) {
+                OpenRouterStreamingResult.TextResponse(fullResponse.toString())
+            } else {
+                OpenRouterStreamingResult.Error("Empty response from OpenRouter")
+            }
+        } catch (e: Exception) {
+            OpenRouterStreamingResult.Error("OpenRouter request failed: ${e.message}")
+        }
+    }
+
+    private sealed class OpenRouterStreamingResult {
+        data class TextResponse(val text: String) : OpenRouterStreamingResult()
+        data class Error(val message: String) : OpenRouterStreamingResult()
     }
 }
 

@@ -289,6 +289,7 @@ fun ProviderSelectorDialog(
                                         "google" -> R.string.provider_google
                                         "anthropic" -> R.string.provider_anthropic
                                         "cohere" -> R.string.provider_cohere
+                                        "openrouter" -> R.string.provider_openrouter
                                         else -> R.string.provider_openai
                                     }),
                                     color = OnSurface,
@@ -497,6 +498,7 @@ fun AddApiKeyDialog(
                                                 "google" -> R.string.provider_google
                                                 "anthropic" -> R.string.provider_anthropic
                                                 "cohere" -> R.string.provider_cohere
+                                                "openrouter" -> R.string.provider_openrouter
                                                 else -> R.string.provider_openai
                                             }),
                                             color = OnSurface

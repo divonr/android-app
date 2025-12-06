@@ -213,6 +213,34 @@ class DataRepository(private val context: Context) {
                 ),
                 upload_files_request = null,  // Cohere uses inline base64, no separate upload
                 upload_files_response_important_fields = null
+            ),
+            Provider(
+                provider = "openrouter",
+                models = listOf(
+                    Model.SimpleModel("openai/gpt-4o"),
+                    Model.SimpleModel("openai/gpt-4-turbo"),
+                    Model.SimpleModel("anthropic/claude-3.5-sonnet"),
+                    Model.SimpleModel("anthropic/claude-3-opus"),
+                    Model.SimpleModel("google/gemini-pro-1.5"),
+                    Model.SimpleModel("meta-llama/llama-3.1-405b-instruct"),
+                    Model.SimpleModel("mistralai/mistral-large")
+                ),
+                request = ApiRequest(
+                    request_type = "POST",
+                    base_url = "https://openrouter.ai/api/v1/chat/completions",
+                    headers = mapOf(
+                        "Authorization" to "Bearer {OPENROUTER_API_KEY_HERE}",
+                        "Content-Type" to "application/json",
+                        "HTTP-Referer" to "https://github.com/your-app",
+                        "X-Title" to "LLM Chat App"
+                    ),
+                    body = null
+                ),
+                response_important_fields = ResponseFields(
+                    response_format = "server_sent_events"
+                ),
+                upload_files_request = null,  // OpenRouter uses inline base64 for images
+                upload_files_response_important_fields = null
             )
         )
     }
@@ -1282,7 +1310,8 @@ class DataRepository(private val context: Context) {
             "google" to "gemini-2.5-flash-lite",
             "poe" to "GPT-OSS-120B-T",
             "anthropic" to "claude-3-haiku-20240307",
-            "cohere" to "command-r7b-12-2024"
+            "cohere" to "command-r7b-12-2024",
+            "openrouter" to "meta-llama/llama-3.1-8b-instruct"
         )
 
         // Helper to pick the cheapest model for a provider
@@ -1300,8 +1329,8 @@ class DataRepository(private val context: Context) {
             if (provider != null && model != null) return Pair(provider, model)
         }
 
-        // Priority order: OpenAI > Google > Anthropic > Cohere > POE
-        val priorityOrder = listOf("openai", "google", "anthropic", "cohere", "poe")
+        // Priority order: OpenAI > Google > Anthropic > Cohere > OpenRouter > POE
+        val priorityOrder = listOf("openai", "google", "anthropic", "cohere", "openrouter", "poe")
         for (providerName in priorityOrder) {
             if (!apiKeys.containsKey(providerName)) continue
             val provider = availableProviders.find { it.provider == providerName } ?: continue
