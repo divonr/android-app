@@ -1680,7 +1680,7 @@ class ChatViewModel(
             .filter { it.isActive }
             .map { it.provider }
         
-        return listOf("openai", "poe", "google").filter { provider ->
+        return listOf("openai", "anthropic", "google", "poe", "cohere").filter { provider ->
             apiKeys.contains(provider)
         }
     }
