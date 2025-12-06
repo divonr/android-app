@@ -3343,6 +3343,7 @@ class ApiService(private val context: Context) {
                 put("model", modelName)
                 put("messages", openRouterMessages)
                 put("stream", true)
+                put("max_tokens", 15000)
             }
 
             Log.d("OpenRouter", "Request body: $requestBody")
