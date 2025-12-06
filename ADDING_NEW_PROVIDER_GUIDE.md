@@ -15,12 +15,13 @@ This guide demonstrates how to add a new LLM provider to the app, based on the r
 
 ## Overview
 
-Adding a new provider requires changes across 8 main files:
+Adding a new provider requires changes across 9 main files:
 - `app/src/main/assets/providers.json` - Provider API configuration
 - `app/src/main/java/com/example/ApI/data/network/ApiService.kt` - Network/streaming logic
 - `app/src/main/java/com/example/ApI/data/repository/DataRepository.kt` - Provider registration
 - `app/src/main/java/com/example/ApI/ui/screen/ApiKeysScreen.kt` - API key UI styling
-- `app/src/main/java/com/example/ApI/ui/screen/UsernameScreen.kt` - Auto-naming settings
+- `app/src/main/java/com/example/ApI/ui/ChatViewModel.kt` - Title generation provider list
+- `app/src/main/java/com/example/ApI/ui/screen/UsernameScreen.kt` - Auto-naming settings UI
 - `app/src/main/java/com/example/ApI/ui/screen/ChatScreen.kt` - Provider display name in chat
 - `app/src/main/java/com/example/ApI/ui/components/Dialogs.kt` - Provider display name in selection menus
 - `app/src/main/res/values/strings.xml` - String resources
@@ -710,7 +711,28 @@ private fun ApiKeyItem(
 }
 ```
 
-### 4.2: Username Screen - Add Auto-Naming Option
+### 4.2: ChatViewModel - Add Provider to Title Generation List
+
+**File**: `app/src/main/java/com/example/ApI/ui/ChatViewModel.kt`
+
+**CRITICAL**: Find the `getAvailableProvidersForTitleGeneration()` function and add your provider to the list:
+
+```kotlin
+fun getAvailableProvidersForTitleGeneration(): List<String> {
+    val currentUser = _appSettings.value.current_user
+    val apiKeys = repository.loadApiKeys(currentUser)
+        .filter { it.isActive }
+        .map { it.provider }
+
+    return listOf("openai", "anthropic", "google", "poe", "cohere", "yourprovider").filter { provider ->
+        apiKeys.contains(provider)
+    }
+}
+```
+
+**⚠️ WARNING**: If you skip this step, your provider will NOT appear in the title generation dropdown in Advanced Settings, even if you add it to `UsernameScreen.kt`!
+
+### 4.3: Username Screen - Add Auto-Naming Option
 
 **File**: `app/src/main/java/com/example/ApI/ui/screen/UsernameScreen.kt`
 
@@ -750,7 +772,7 @@ private fun getProviderDisplayName(provider: String): String {
 }
 ```
 
-### 4.3: Add String Resources
+### 4.4: Add String Resources
 
 **File**: `app/src/main/res/values/strings.xml`
 
@@ -766,7 +788,7 @@ private fun getProviderDisplayName(provider: String): String {
 </resources>
 ```
 
-### 4.4: Add Provider Display Name to ChatScreen
+### 4.5: Add Provider Display Name to ChatScreen
 
 **File**: `app/src/main/java/com/example/ApI/ui/screen/ChatScreen.kt`
 
@@ -790,7 +812,7 @@ Text(
 
 **⚠️ WARNING**: If you skip this step, your provider will display as "OpenAI" in the chat interface due to the fallback in the `else` clause!
 
-### 4.5: Add Provider Display Name to Dialogs.kt
+### 4.6: Add Provider Display Name to Dialogs.kt
 
 **File**: `app/src/main/java/com/example/ApI/ui/components/Dialogs.kt`
 
@@ -1035,10 +1057,11 @@ Adding a new provider requires:
 2. ✅ Implement streaming parser in `ApiService.kt`
 3. ✅ Register provider in `DataRepository.kt`
 4. ✅ Add UI branding in `ApiKeysScreen.kt`
-5. ✅ Add to settings in `UsernameScreen.kt`
-6. ✅ Add string resources in `strings.xml`
-7. ✅ **Add provider display name to `ChatScreen.kt`** ⚠️ (Critical - provider will show as "OpenAI" if skipped!)
-8. ✅ **Add provider display name to `Dialogs.kt`** ⚠️ (Critical - provider will show as "OpenAI" in selection menus if skipped!)
-9. ✅ Test thoroughly
+5. ✅ **Add provider to title generation list in `ChatViewModel.kt`** ⚠️ (Critical - provider won't appear in title generation dropdown if skipped!)
+6. ✅ Add to settings UI in `UsernameScreen.kt`
+7. ✅ Add string resources in `strings.xml`
+8. ✅ **Add provider display name to `ChatScreen.kt`** ⚠️ (Critical - provider will show as "OpenAI" if skipped!)
+9. ✅ **Add provider display name to `Dialogs.kt`** ⚠️ (Critical - provider will show as "OpenAI" in selection menus if skipped!)
+10. ✅ Test thoroughly
 
 The app's architecture handles the rest (chat history, tool calling, UI rendering, etc.) automatically once you implement these components correctly.
