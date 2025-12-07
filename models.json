@@ -10,35 +10,7 @@
       { "name": "o3" },
       { "name": "o4-mini" },
       { "name": "o4-mini-deep-research" }
-    ],
-    "request": {
-      "request_type": "POST",
-      "base_url": "https://api.openai.com/v1/responses",
-      "headers": {
-        "Authorization": "Bearer {OPENAI_API_KEY_HERE}",
-        "Content-Type": "application/json"
-      },
-      "body": null
-    },
-    "response_important_fields": {
-      "id": "{response_id}",
-      "model": "{model_name}",
-      "output": []
-    },
-    "upload_files_request": {
-      "request_type": "POST",
-      "base_url": "https://api.openai.com/v1/files",
-      "headers": {
-        "Authorization": "Bearer {OPENAI_API_KEY_HERE}",
-        "Content-Type": "multipart/form-data"
-      },
-      "data": {
-        "purpose": "assistants"
-      }
-    },
-    "upload_files_response_important_fields": {
-      "id": "{file_ID}"
-    }
+    ]
   },
   {
     "provider": "anthropic",
@@ -48,23 +20,7 @@
       { "name": "claude-haiku-4-5" },
       { "name": "claude-sonnet-4-0" },
       { "name": "claude-3-7-sonnet-latest" }
-    ],
-    "request": {
-      "request_type": "POST",
-      "base_url": "https://api.anthropic.com/v1/messages",
-      "headers": {
-        "x-api-key": "{ANTHROPIC_API_KEY_HERE}",
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json"
-      },
-      "body": null
-    },
-    "response_important_fields": {
-      "id": "{message_id}",
-      "model": "{model_name}"
-    },
-    "upload_files_request": null,
-    "upload_files_response_important_fields": null
+    ]
   },
   {
     "provider": "google",
@@ -73,37 +29,7 @@
       { "name": "gemini-2.5-flash" },
       { "name": "gemini-1.5-pro-latest" },
       { "name": "gemini-1.5-flash-latest" }
-    ],
-    "request": {
-      "request_type": "POST",
-      "base_url": "https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
-      "headers": {
-        "Content-Type": "application/json"
-      },
-      "params": {
-        "key": "{GOOGLE_API_KEY_HERE}"
-      },
-      "body": null
-    },
-    "response_important_fields": {
-      "candidates": [],
-      "usageMetadata": null,
-      "modelVersion": "{model_name}",
-      "responseId": "{response_id}"
-    },
-    "upload_files_request": {
-      "request_type": "POST",
-      "base_url": "https://generativelanguage.googleapis.com/upload/v1beta/files",
-      "headers": {
-        "Content-Type": "{mime_type}"
-      },
-      "params": {
-        "key": "{GOOGLE_API_KEY_HERE}"
-      }
-    },
-    "upload_files_response_important_fields": {
-      "file": null
-    }
+    ]
   },
   {
     "provider": "poe",
@@ -123,32 +49,7 @@
       { "name": "DeepSeek-V3-FW", "min_points": 300 },
       { "name": "DeepSeek-R1", "min_points": 600 },
       { "name": "Kimi-K2", "min_points": 200 }
-    ],
-    "request": {
-      "request_type": "POST",
-      "base_url": "https://api.poe.com/bot/{model_name}",
-      "headers": {
-        "Authorization": "Bearer {POE_API_KEY_HERE}",
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      "body": null
-    },
-    "response_important_fields": {
-      "response_format": "server_sent_events"
-    },
-    "upload_files_request": {
-      "request_type": "POST",
-      "base_url": "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST",
-      "headers": {
-        "Authorization": "{POE_API_KEY_HERE}"
-      }
-    },
-    "upload_files_response_important_fields": {
-      "file_id": "{file_ID}",
-      "attachment_url": "{file_URL}",
-      "mime_type": "{mime_type}"
-    }
+    ]
   },
   {
     "provider": "cohere",
@@ -156,21 +57,7 @@
       { "name": "command-a-03-2025" },
       { "name": "command-r-plus-08-2024" },
       { "name": "command-r-08-2024" }
-    ],
-    "request": {
-      "request_type": "POST",
-      "base_url": "https://api.cohere.ai/v2/chat",
-      "headers": {
-        "Authorization": "Bearer {COHERE_API_KEY_HERE}",
-        "Content-Type": "application/json"
-      },
-      "body": null
-    },
-    "response_important_fields": {
-      "response_format": "server_sent_events"
-    },
-    "upload_files_request": null,
-    "upload_files_response_important_fields": null
+    ]
   },
   {
     "provider": "openrouter",
@@ -182,22 +69,6 @@
       { "name": "google/gemini-pro-1.5" },
       { "name": "meta-llama/llama-3.1-405b-instruct" },
       { "name": "mistralai/mistral-large" }
-    ],
-    "request": {
-      "request_type": "POST",
-      "base_url": "https://openrouter.ai/api/v1/chat/completions",
-      "headers": {
-        "Authorization": "Bearer {OPENROUTER_API_KEY_HERE}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/your-app",
-        "X-Title": "LLM Chat App"
-      },
-      "body": null
-    },
-    "response_important_fields": {
-      "response_format": "server_sent_events"
-    },
-    "upload_files_request": null,
-    "upload_files_response_important_fields": null
+    ]
   }
 ]
