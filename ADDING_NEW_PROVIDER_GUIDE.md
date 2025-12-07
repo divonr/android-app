@@ -763,14 +763,20 @@ private fun TitleGenerationSettingsSection(...) {
 @Composable
 private fun getProviderDisplayName(provider: String): String {
     return when (provider) {
+        "auto" -> stringResource(R.string.auto_mode)
         "openai" -> stringResource(R.string.openai_gpt5_nano)
         "poe" -> stringResource(R.string.poe_gpt5_nano)
         "google" -> stringResource(R.string.google_gemini_flash_lite)
-        "anthropic" -> stringResource(R.string.anthropic_claude_haiku)  // ← ADD THIS
+        "anthropic" -> stringResource(R.string.anthropic_claude_haiku)
+        "cohere" -> stringResource(R.string.cohere_command_r7b)
+        "openrouter" -> stringResource(R.string.openrouter_llama)
+        "yourprovider" -> stringResource(R.string.yourprovider_model)  // ← ADD THIS
         else -> stringResource(R.string.auto_mode)
     }
 }
 ```
+
+**⚠️ WARNING**: If you skip this step, your provider will display as "Auto" in the title generation settings!
 
 ### 4.4: Add String Resources
 
@@ -799,10 +805,12 @@ Text(
     text = uiState.currentProvider?.provider?.let { provider ->
         stringResource(id = when(provider) {
             "openai" -> R.string.provider_openai
-            "poe" -> R.string.provider_poe
-            "google" -> R.string.provider_google
             "anthropic" -> R.string.provider_anthropic
-            "cohere" -> R.string.provider_cohere          // ← ADD THIS
+            "google" -> R.string.provider_google
+            "poe" -> R.string.provider_poe
+            "cohere" -> R.string.provider_cohere
+            "openrouter" -> R.string.provider_openrouter
+            "yourprovider" -> R.string.provider_yourprovider  // ← ADD THIS
             else -> R.string.provider_openai
         })
     } ?: "",
@@ -810,7 +818,7 @@ Text(
 )
 ```
 
-**⚠️ WARNING**: If you skip this step, your provider will display as "OpenAI" in the chat interface due to the fallback in the `else` clause!
+**⚠️ WARNING**: If you skip this step, your provider will display as "OpenAI" in the chat interface due to the fallback in the `else` clause! This is a common bug - make sure to add your provider to ALL `when` statements that map provider IDs to display names.
 
 ### 4.6: Add Provider Display Name to Dialogs.kt
 
@@ -824,10 +832,12 @@ Text(
 Text(
     text = stringResource(id = when(provider.provider) {
         "openai" -> R.string.provider_openai
-        "poe" -> R.string.provider_poe
-        "google" -> R.string.provider_google
         "anthropic" -> R.string.provider_anthropic
-        "cohere" -> R.string.provider_cohere          // ← ADD THIS
+        "google" -> R.string.provider_google
+        "poe" -> R.string.provider_poe
+        "cohere" -> R.string.provider_cohere
+        "openrouter" -> R.string.provider_openrouter
+        "yourprovider" -> R.string.provider_yourprovider  // ← ADD THIS
         else -> R.string.provider_openai
     }),
     // ... rest of Text properties
@@ -842,10 +852,12 @@ DropdownMenuItem(
         Text(
             text = stringResource(id = when(provider.provider) {
                 "openai" -> R.string.provider_openai
-                "poe" -> R.string.provider_poe
-                "google" -> R.string.provider_google
                 "anthropic" -> R.string.provider_anthropic
-                "cohere" -> R.string.provider_cohere  // ← ADD THIS
+                "google" -> R.string.provider_google
+                "poe" -> R.string.provider_poe
+                "cohere" -> R.string.provider_cohere
+                "openrouter" -> R.string.provider_openrouter
+                "yourprovider" -> R.string.provider_yourprovider  // ← ADD THIS
                 else -> R.string.provider_openai
             }),
             color = OnSurface
@@ -860,6 +872,8 @@ DropdownMenuItem(
 - The API key add dialog dropdown (when adding a new API key)
 
 The correct name will only appear **after** selection, causing confusing UX!
+
+**💡 TIP**: Search for `else -> R.string.provider_openai` across the codebase to find all `when` statements that need updating when adding a new provider.
 
 ---
 
