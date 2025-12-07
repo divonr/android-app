@@ -388,6 +388,7 @@ fun ChatScreen(
                                                     "google" -> R.string.provider_google
                                                     "poe" -> R.string.provider_poe
                                                     "cohere" -> R.string.provider_cohere
+                                                    "openrouter" -> R.string.provider_openrouter
                                                     else -> R.string.provider_openai
                                                 })
                                             } ?: "",

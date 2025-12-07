@@ -561,6 +561,7 @@ private fun getProviderDisplayName(provider: String): String {
         "google" -> stringResource(R.string.google_gemini_flash_lite)
         "anthropic" -> stringResource(R.string.anthropic_claude_haiku)
         "cohere" -> stringResource(R.string.cohere_command_r7b)
+        "openrouter" -> stringResource(R.string.openrouter_llama)
         else -> stringResource(R.string.auto_mode)
     }
 }
