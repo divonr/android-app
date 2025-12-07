@@ -83,6 +83,9 @@ class ChatViewModel(
             val settings = repository.loadAppSettings()
             _appSettings.value = settings
 
+            // Refresh models from remote if needed (24-hour cache)
+            repository.refreshModelsIfNeeded()
+
             val providers = repository.loadProviders()
             val currentProvider = providers.find { it.provider == settings.selected_provider } 
                 ?: providers.firstOrNull()

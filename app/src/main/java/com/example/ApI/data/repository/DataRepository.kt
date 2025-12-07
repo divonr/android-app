@@ -20,6 +20,13 @@ import java.net.URL
 import java.util.UUID
 
 class DataRepository(private val context: Context) {
+
+    companion object {
+        private const val MODELS_JSON_URL = "https://raw.githubusercontent.com/divonr/android-app/main/models.json"
+        private const val MODELS_CACHE_FILE = "models_cache.json"
+        private const val MODELS_CACHE_METADATA_FILE = "models_cache_metadata.json"
+        private const val CACHE_VALIDITY_MS = 24 * 60 * 60 * 1000L // 24 hours in milliseconds
+    }
     
     private val json = Json {
         prettyPrint = true
@@ -37,22 +44,231 @@ class DataRepository(private val context: Context) {
             internalDir.mkdirs()
         }
     }
-    
+
+    // ============ Remote Models Fetching ============
+
+    /**
+     * Loads the cached models metadata to check last fetch time
+     */
+    private fun loadModelsCacheMetadata(): ModelsCacheMetadata? {
+        val file = File(internalDir, MODELS_CACHE_METADATA_FILE)
+        return if (file.exists()) {
+            try {
+                json.decodeFromString<ModelsCacheMetadata>(file.readText())
+            } catch (e: Exception) {
+                android.util.Log.e("DataRepository", "Failed to load models cache metadata", e)
+                null
+            }
+        } else {
+            null
+        }
+    }
+
+    /**
+     * Saves the models cache metadata with current timestamp
+     */
+    private fun saveModelsCacheMetadata() {
+        val file = File(internalDir, MODELS_CACHE_METADATA_FILE)
+        try {
+            val metadata = ModelsCacheMetadata(
+                lastFetchTimestamp = System.currentTimeMillis()
+            )
+            file.writeText(json.encodeToString(metadata))
+        } catch (e: Exception) {
+            android.util.Log.e("DataRepository", "Failed to save models cache metadata", e)
+        }
+    }
+
+    /**
+     * Loads cached models from local storage
+     */
+    private fun loadCachedModels(): List<RemoteProviderModels>? {
+        val file = File(internalDir, MODELS_CACHE_FILE)
+        return if (file.exists()) {
+            try {
+                json.decodeFromString<List<RemoteProviderModels>>(file.readText())
+            } catch (e: Exception) {
+                android.util.Log.e("DataRepository", "Failed to load cached models", e)
+                null
+            }
+        } else {
+            null
+        }
+    }
+
+    /**
+     * Saves fetched models to local cache
+     */
+    private fun saveCachedModels(models: List<RemoteProviderModels>) {
+        val file = File(internalDir, MODELS_CACHE_FILE)
+        try {
+            file.writeText(json.encodeToString(models))
+        } catch (e: Exception) {
+            android.util.Log.e("DataRepository", "Failed to save cached models", e)
+        }
+    }
+
+    /**
+     * Checks if the cache is still valid (less than 24 hours old)
+     */
+    private fun isCacheValid(): Boolean {
+        val metadata = loadModelsCacheMetadata() ?: return false
+        val currentTime = System.currentTimeMillis()
+        return (currentTime - metadata.lastFetchTimestamp) < CACHE_VALIDITY_MS
+    }
+
+    /**
+     * Fetches models from the remote GitHub URL
+     * Returns null if the fetch fails
+     */
+    private suspend fun fetchModelsFromRemote(): List<RemoteProviderModels>? = withContext(Dispatchers.IO) {
+        try {
+            val url = URL(MODELS_JSON_URL)
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+
+            val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                val response = StringBuilder()
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    response.append(line)
+                }
+                reader.close()
+
+                val models = json.decodeFromString<List<RemoteProviderModels>>(response.toString())
+                android.util.Log.i("DataRepository", "Successfully fetched ${models.size} providers from remote")
+                models
+            } else {
+                android.util.Log.e("DataRepository", "Failed to fetch models: HTTP $responseCode")
+                null
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("DataRepository", "Failed to fetch models from remote", e)
+            null
+        }
+    }
+
+    /**
+     * Refreshes models from remote if cache is expired
+     * Should be called on app startup
+     * Returns true if models were refreshed, false otherwise
+     */
+    suspend fun refreshModelsIfNeeded(): Boolean = withContext(Dispatchers.IO) {
+        if (isCacheValid()) {
+            android.util.Log.i("DataRepository", "Models cache is still valid, skipping refresh")
+            return@withContext false
+        }
+
+        android.util.Log.i("DataRepository", "Models cache expired or missing, fetching from remote...")
+        val remoteModels = fetchModelsFromRemote()
+
+        if (remoteModels != null) {
+            saveCachedModels(remoteModels)
+            saveModelsCacheMetadata()
+            android.util.Log.i("DataRepository", "Models cache updated successfully")
+            return@withContext true
+        }
+
+        android.util.Log.w("DataRepository", "Failed to refresh models, will use existing cache or defaults")
+        return@withContext false
+    }
+
+    /**
+     * Force refresh models from remote regardless of cache status
+     */
+    suspend fun forceRefreshModels(): Boolean = withContext(Dispatchers.IO) {
+        android.util.Log.i("DataRepository", "Force refreshing models from remote...")
+        val remoteModels = fetchModelsFromRemote()
+
+        if (remoteModels != null) {
+            saveCachedModels(remoteModels)
+            saveModelsCacheMetadata()
+            android.util.Log.i("DataRepository", "Models force refreshed successfully")
+            return@withContext true
+        }
+
+        return@withContext false
+    }
+
+    /**
+     * Gets the cached remote models, or null if not available
+     */
+    private fun getRemoteModels(): List<RemoteProviderModels>? {
+        return loadCachedModels()
+    }
+
+    // ============ Providers ============
+
+    /**
+     * Converts remote models to internal Model format
+     */
+    private fun remoteModelsToModels(remoteModels: List<RemoteModel>): List<Model> {
+        return remoteModels.map { remote ->
+            if (remote.min_points != null) {
+                Model.ComplexModel(name = remote.name, min_points = remote.min_points)
+            } else {
+                Model.SimpleModel(remote.name)
+            }
+        }
+    }
+
+    /**
+     * Gets models for a specific provider from cache, or returns default models
+     */
+    private fun getModelsForProvider(providerName: String, defaultModels: List<Model>): List<Model> {
+        val cachedModels = getRemoteModels()
+        val providerModels = cachedModels?.find { it.provider == providerName }
+
+        return if (providerModels != null && providerModels.models.isNotEmpty()) {
+            android.util.Log.d("DataRepository", "Using cached models for $providerName: ${providerModels.models.size} models")
+            remoteModelsToModels(providerModels.models)
+        } else {
+            android.util.Log.d("DataRepository", "Using default models for $providerName: ${defaultModels.size} models")
+            defaultModels
+        }
+    }
+
+    // Default models (fallback when cache is not available)
+    private val defaultOpenAIModels = listOf(
+        Model.SimpleModel("gpt-4o"),
+        Model.SimpleModel("gpt-4-turbo")
+    )
+
+    private val defaultAnthropicModels = listOf(
+        Model.SimpleModel("claude-sonnet-4-5"),
+        Model.SimpleModel("claude-3-7-sonnet-latest")
+    )
+
+    private val defaultGoogleModels = listOf(
+        Model.SimpleModel("gemini-2.5-pro"),
+        Model.SimpleModel("gemini-1.5-pro-latest")
+    )
+
+    private val defaultPoeModels = listOf(
+        Model.ComplexModel(name = "GPT-4o", min_points = 250),
+        Model.ComplexModel(name = "Claude-Sonnet-3.5", min_points = 270)
+    )
+
+    private val defaultCohereModels = listOf(
+        Model.SimpleModel("command-a-03-2025"),
+        Model.SimpleModel("command-r-plus-08-2024")
+    )
+
+    private val defaultOpenRouterModels = listOf(
+        Model.SimpleModel("openai/gpt-4o"),
+        Model.SimpleModel("anthropic/claude-3.5-sonnet")
+    )
+
     // Providers
     fun loadProviders(): List<Provider> {
         return listOf(
             Provider(
                 provider = "openai",
-                models = listOf(
-                    Model.SimpleModel("gpt-4o"),
-                    Model.SimpleModel("gpt-5"),
-                    Model.SimpleModel("gpt-4.1"),
-                    Model.SimpleModel("o1"),
-                    Model.SimpleModel("o1-pro"),
-                    Model.SimpleModel("o3"),
-                    Model.SimpleModel("o4-mini"),
-                    Model.SimpleModel("o4-mini-deep-research"),
-                ),
+                models = getModelsForProvider("openai", defaultOpenAIModels),
                 request = ApiRequest(
                     request_type = "POST",
                     base_url = "https://api.openai.com/v1/responses",
@@ -84,13 +300,7 @@ class DataRepository(private val context: Context) {
             ),
             Provider(
                 provider = "anthropic",
-                models = listOf(
-                    Model.SimpleModel("claude-sonnet-4-5"),
-                    Model.SimpleModel("claude-opus-4-5"),
-                    Model.SimpleModel("claude-haiku-4-5"),
-                    Model.SimpleModel("claude-sonnet-4-0"),
-                    Model.SimpleModel("claude-3-7-sonnet-latest")
-                ),
+                models = getModelsForProvider("anthropic", defaultAnthropicModels),
                 request = ApiRequest(
                     request_type = "POST",
                     base_url = "https://api.anthropic.com/v1/messages",
@@ -110,12 +320,7 @@ class DataRepository(private val context: Context) {
             ),
             Provider(
                 provider = "google",
-                models = listOf(
-                    Model.SimpleModel("gemini-2.5-pro"),
-                    Model.SimpleModel("gemini-2.5-flash"),
-                    Model.SimpleModel("gemini-1.5-pro-latest"),
-                    Model.SimpleModel("gemini-1.5-flash-latest")
-                ),
+                models = getModelsForProvider("google", defaultGoogleModels),
                 request = ApiRequest(
                     request_type = "POST",
                     base_url = "https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
@@ -149,23 +354,7 @@ class DataRepository(private val context: Context) {
             ),
             Provider(
                 provider = "poe",
-                models = listOf(
-                    Model.ComplexModel(name = "GPT-5", min_points = 250),
-                    Model.ComplexModel(name = "GPT-4.1", min_points = 206),
-                    Model.ComplexModel(name = "o3", min_points = 401),
-                    Model.ComplexModel(name = "o4-mini", min_points = 243),
-                    Model.ComplexModel(name = "Claude-Sonnet-4-Search", min_points = 870),
-                    Model.ComplexModel(name = "Claude-Sonnet-4-Reasoning", min_points = 1628),
-                    Model.ComplexModel(name = "Claude-Sonnet-3.5", min_points = 270),
-                    Model.ComplexModel(name = "GLM-4.5", min_points = 180),
-                    Model.ComplexModel(name = "Gemini-2.5-Pro", min_points = 335),
-                    Model.ComplexModel(name = "Grok-3", min_points = 856),
-                    Model.ComplexModel(name = "Grok-4", min_points = 773),
-                    Model.ComplexModel(name = "GPT-OSS-120B-T", min_points = 50),
-                    Model.ComplexModel(name = "DeepSeek-V3-FW", min_points = 300),
-                    Model.ComplexModel(name = "DeepSeek-R1", min_points = 600),
-                    Model.ComplexModel(name = "Kimi-K2", min_points = 200)
-                ),
+                models = getModelsForProvider("poe", defaultPoeModels),
                 request = ApiRequest(
                     request_type = "POST",
                     base_url = "https://api.poe.com/bot/{model_name}",
@@ -194,11 +383,7 @@ class DataRepository(private val context: Context) {
             ),
             Provider(
                 provider = "cohere",
-                models = listOf(
-                    Model.SimpleModel("command-a-03-2025"),
-                    Model.SimpleModel("command-r-plus-08-2024"),
-                    Model.SimpleModel("command-r-08-2024")
-                ),
+                models = getModelsForProvider("cohere", defaultCohereModels),
                 request = ApiRequest(
                     request_type = "POST",
                     base_url = "https://api.cohere.ai/v2/chat",
@@ -216,15 +401,7 @@ class DataRepository(private val context: Context) {
             ),
             Provider(
                 provider = "openrouter",
-                models = listOf(
-                    Model.SimpleModel("openai/gpt-4o"),
-                    Model.SimpleModel("openai/gpt-4-turbo"),
-                    Model.SimpleModel("anthropic/claude-3.5-sonnet"),
-                    Model.SimpleModel("anthropic/claude-3-opus"),
-                    Model.SimpleModel("google/gemini-pro-1.5"),
-                    Model.SimpleModel("meta-llama/llama-3.1-405b-instruct"),
-                    Model.SimpleModel("mistralai/mistral-large")
-                ),
+                models = getModelsForProvider("openrouter", defaultOpenRouterModels),
                 request = ApiRequest(
                     request_type = "POST",
                     base_url = "https://openrouter.ai/api/v1/chat/completions",
