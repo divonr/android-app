@@ -106,10 +106,7 @@ dependencies {
 
     // Security Crypto
     implementation(libs.androidx.security.crypto)
-
-    // Chrome Custom Tabs
-    implementation(libs.androidx.browser)
-
+    
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

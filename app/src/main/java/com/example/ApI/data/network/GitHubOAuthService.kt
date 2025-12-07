@@ -1,10 +1,11 @@
 package com.example.ApI.data.network
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import com.example.ApI.data.model.GitHubAuth
 import com.example.ApI.data.model.GitHubOAuthConfig
-import com.example.ApI.util.CustomTabsHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -65,9 +66,11 @@ class GitHubOAuthService(private val context: Context) {
         Log.d(TAG, "Starting OAuth flow with state: $state")
         Log.d(TAG, "Authorization URL: $authUrl")
 
-        // Open in Chrome Custom Tabs (with fallback to browser)
-        val usedCustomTabs = CustomTabsHelper.launchUrl(context, authUrl)
-        Log.d(TAG, "Used Chrome Custom Tabs: $usedCustomTabs")
+        // Open browser with authorization URL
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        context.startActivity(intent)
 
         return state
     }
