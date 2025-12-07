@@ -3030,12 +3030,21 @@ class ChatViewModel(
     // GitHub Integration Methods
 
     /**
-     * Start GitHub OAuth flow
+     * Start GitHub OAuth flow (opens external browser)
      * @return OAuth state parameter for verification
      */
     fun connectGitHub(): String {
         val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
         return oauthService.startAuthorizationFlow()
+    }
+
+    /**
+     * Get GitHub OAuth URL and state for in-app WebView authentication.
+     * @return Pair of (authUrl, state)
+     */
+    fun getGitHubAuthUrl(): Pair<String, String> {
+        val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
+        return oauthService.getAuthorizationUrlAndState()
     }
 
     /**

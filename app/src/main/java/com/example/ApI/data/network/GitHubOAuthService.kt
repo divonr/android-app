@@ -76,6 +76,21 @@ class GitHubOAuthService(private val context: Context) {
     }
 
     /**
+     * Get the authorization URL and state for OAuth flow.
+     * Use this for in-app WebView authentication.
+     * @return Pair of (authUrl, state)
+     */
+    fun getAuthorizationUrlAndState(): Pair<String, String> {
+        val state = generateState()
+        val authUrl = config.getAuthorizationUrl(state)
+
+        Log.d(TAG, "Generated OAuth URL with state: $state")
+        Log.d(TAG, "Authorization URL: $authUrl")
+
+        return Pair(authUrl, state)
+    }
+
+    /**
      * Exchange authorization code for access token
      * @param code The authorization code from the callback
      * @return Result containing GitHubAuth or error

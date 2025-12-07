@@ -22,6 +22,8 @@ import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.ui.theme.*
 import com.example.ApI.tools.ToolRegistry
+import com.example.ApI.ui.components.GitHubOAuthWebViewDialog
+import com.example.ApI.ui.components.OAuthResult
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,13 +33,45 @@ fun IntegrationsScreen(
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // State for GitHub OAuth WebView dialog
+    var showGitHubOAuthDialog by remember { mutableStateOf(false) }
+    var gitHubAuthUrl by remember { mutableStateOf("") }
+    var gitHubAuthState by remember { mutableStateOf("") }
+
+    // Show GitHub OAuth WebView dialog
+    if (showGitHubOAuthDialog && gitHubAuthUrl.isNotEmpty()) {
+        GitHubOAuthWebViewDialog(
+            authUrl = gitHubAuthUrl,
+            onResult = { result ->
+                when (result) {
+                    is OAuthResult.Success -> {
+                        // Handle successful OAuth - exchange code for token
+                        viewModel.handleGitHubCallback(result.code, result.state)
+                    }
+                    is OAuthResult.Error -> {
+                        // Show error message
+                        viewModel.showSnackbar("שגיאת התחברות: ${result.message}")
+                    }
+                    is OAuthResult.Cancelled -> {
+                        // User cancelled - do nothing
+                    }
+                }
+            },
+            onDismiss = {
+                showGitHubOAuthDialog = false
+                gitHubAuthUrl = ""
+                gitHubAuthState = ""
+            }
+        )
+    }
+
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        
+
         // Handle Android back button
         BackHandler {
             onBackClick()
         }
-        
+
         Column(
             modifier = modifier
                 .fillMaxSize()
@@ -142,8 +176,11 @@ fun IntegrationsScreen(
                             githubConnection = viewModel.getGitHubConnection(),
                             onToggle = { shouldConnect ->
                                 if (shouldConnect) {
-                                    // Start OAuth flow
-                                    viewModel.connectGitHub()
+                                    // Start OAuth flow with in-app WebView
+                                    val (authUrl, state) = viewModel.getGitHubAuthUrl()
+                                    gitHubAuthUrl = authUrl
+                                    gitHubAuthState = state
+                                    showGitHubOAuthDialog = true
                                 } else {
                                     // Disconnect
                                     viewModel.disconnectGitHub()
