@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -195,7 +196,7 @@ fun ApiKeysScreen(
                     // Get API Key Button (right, half width, subtle green)
                     Surface(
                         shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFFCBE9BF),
+                        color = Color(0xFF4A7C59),
                         modifier = Modifier
                             .weight(1f)
                             .clickable { showWelcomeDialog = true }
@@ -207,10 +208,17 @@ fun ApiKeysScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color(0xFFB8E6C7),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "קבל מפתח API",
                                 style = MaterialTheme.typography.labelLarge,
-                                color = Color(0xFF2D5A27),
+                                color = Color(0xFFB8E6C7),
                                 fontWeight = FontWeight.Medium
                             )
                         }
