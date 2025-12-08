@@ -86,8 +86,16 @@ class ChatViewModel(
             // Refresh models from remote if needed (24-hour cache)
             repository.refreshModelsIfNeeded()
 
-            val providers = repository.loadProviders()
-            val currentProvider = providers.find { it.provider == settings.selected_provider } 
+            // Load providers and filter by active API keys
+            val allProviders = repository.loadProviders()
+            val activeApiKeyProviders = repository.loadApiKeys(settings.current_user)
+                .filter { it.isActive }
+                .map { it.provider }
+            val providers = allProviders.filter { provider ->
+                activeApiKeyProviders.contains(provider.provider)
+            }
+
+            val currentProvider = providers.find { it.provider == settings.selected_provider }
                 ?: providers.firstOrNull()
             
             // Ensure we have a valid model
@@ -1051,7 +1059,62 @@ class ChatViewModel(
     }
 
     fun navigateToScreen(screen: Screen) {
+        // Refresh available providers when navigating away from API keys screen
+        // since user may have added/removed/toggled keys
+        if (_currentScreen.value == Screen.ApiKeys && screen != Screen.ApiKeys) {
+            refreshAvailableProviders()
+        }
         _currentScreen.value = screen
+    }
+
+    /**
+     * Refresh the available providers list based on active API keys.
+     * Called when returning from API keys screen to update provider selection.
+     */
+    fun refreshAvailableProviders() {
+        viewModelScope.launch {
+            val currentUser = _appSettings.value.current_user
+            val allProviders = repository.loadProviders()
+            val activeApiKeyProviders = repository.loadApiKeys(currentUser)
+                .filter { it.isActive }
+                .map { it.provider }
+            val filteredProviders = allProviders.filter { provider ->
+                activeApiKeyProviders.contains(provider.provider)
+            }
+
+            // Check if current provider is still available
+            val currentProvider = _uiState.value.currentProvider
+            val newCurrentProvider = if (currentProvider != null &&
+                activeApiKeyProviders.contains(currentProvider.provider)) {
+                currentProvider
+            } else {
+                filteredProviders.firstOrNull()
+            }
+
+            // Update model if provider changed
+            val newCurrentModel = if (newCurrentProvider?.provider != currentProvider?.provider) {
+                newCurrentProvider?.models?.firstOrNull()?.name ?: ""
+            } else {
+                _uiState.value.currentModel
+            }
+
+            _uiState.value = _uiState.value.copy(
+                availableProviders = filteredProviders,
+                currentProvider = newCurrentProvider,
+                currentModel = newCurrentModel
+            )
+
+            // Update app settings if provider/model changed
+            if (newCurrentProvider?.provider != _appSettings.value.selected_provider ||
+                newCurrentModel != _appSettings.value.selected_model) {
+                val updatedSettings = _appSettings.value.copy(
+                    selected_provider = newCurrentProvider?.provider ?: "",
+                    selected_model = newCurrentModel
+                )
+                repository.saveAppSettings(updatedSettings)
+                _appSettings.value = updatedSettings
+            }
+        }
     }
     
     fun exportChatHistory() {
