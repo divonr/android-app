@@ -60,7 +60,7 @@ object ProviderApiKeyConfigs {
         "anthropic" to ProviderApiKeyConfig(
             providerId = "anthropic",
             displayName = "Anthropic",
-            apiKeyUrl = "https://console.anthropic.com/settings/keys",
+            apiKeyUrl = "https://platform.claude.com/settings/keys",
             keyPattern = Regex("^sk-ant-[a-zA-Z0-9-]{90,}$"),
             keyDescription = "Anthropic API key (starts with sk-ant-)"
         ),
@@ -81,7 +81,7 @@ object ProviderApiKeyConfigs {
         "openrouter" to ProviderApiKeyConfig(
             providerId = "openrouter",
             displayName = "OpenRouter",
-            apiKeyUrl = "https://openrouter.ai/keys",
+            apiKeyUrl = "https://openrouter.ai/settings/keys",
             keyPattern = Regex("^sk-or-[a-zA-Z0-9-]{40,}$"),
             keyDescription = "OpenRouter API key (starts with sk-or-)"
         )
