@@ -21,7 +21,8 @@ data class AppSettings(
     val multiMessageMode: Boolean = false,
     val childLockSettings: ChildLockSettings = ChildLockSettings(),
     val enabledTools: List<String> = emptyList(), // List of enabled tool IDs
-    val githubConnections: Map<String, GitHubConnectionInfo> = emptyMap() // GitHub connections per user (username -> connection info)
+    val githubConnections: Map<String, GitHubConnectionInfo> = emptyMap(), // GitHub connections per user (username -> connection info)
+    val skipWelcomeScreen: Boolean = false // Whether to skip the welcome/onboarding screen
 )
 
 /**

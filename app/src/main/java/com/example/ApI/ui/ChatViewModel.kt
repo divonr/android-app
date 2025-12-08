@@ -138,9 +138,9 @@ class ChatViewModel(
             println("DEBUG: Current provider: ${currentProvider?.provider}")
             println("DEBUG: Current model: $currentModel")
             println("DEBUG: Loaded ${chatHistory.chat_history.size} existing chats")
-            
+
             // Update settings if we changed anything
-            if (currentModel != settings.selected_model || 
+            if (currentModel != settings.selected_model ||
                 (currentProvider?.provider != settings.selected_provider)) {
                 val updatedSettings = settings.copy(
                     selected_provider = currentProvider?.provider ?: "openai",
@@ -148,6 +148,11 @@ class ChatViewModel(
                 )
                 repository.saveAppSettings(updatedSettings)
                 _appSettings.value = updatedSettings
+            }
+
+            // Show welcome screen if not skipped
+            if (!settings.skipWelcomeScreen) {
+                _currentScreen.value = Screen.Welcome
             }
         }
     }
@@ -1065,6 +1070,12 @@ class ChatViewModel(
             refreshAvailableProviders()
         }
         _currentScreen.value = screen
+    }
+
+    fun updateSkipWelcomeScreen(skip: Boolean) {
+        val updatedSettings = _appSettings.value.copy(skipWelcomeScreen = skip)
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
     }
 
     /**
