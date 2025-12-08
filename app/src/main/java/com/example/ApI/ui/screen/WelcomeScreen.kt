@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -108,8 +109,8 @@ fun WelcomeScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var skipWelcome by remember { mutableStateOf(false) }
 
-    // Track which provider was selected for Custom Tabs
-    var pendingProviderId by remember { mutableStateOf<String?>(null) }
+    // Track which provider was selected for Custom Tabs (rememberSaveable survives process death)
+    var pendingProviderId by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Add API key dialog state
     var showAddApiKeyDialog by remember { mutableStateOf(false) }
