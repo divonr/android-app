@@ -47,43 +47,43 @@ object ProviderApiKeyConfigs {
             providerId = "google",
             displayName = "Google",
             apiKeyUrl = "https://aistudio.google.com/app/apikey",
-            keyPattern = Regex("^AIza[a-zA-Z0-9_-]{35}$"),
-            keyDescription = "Google API key (starts with AIza, 39 characters)"
+            keyPattern = Regex("^.{10,}$"),
+            keyDescription = "Google API key"
         ),
         "openai" to ProviderApiKeyConfig(
             providerId = "openai",
             displayName = "OpenAI",
             apiKeyUrl = "https://platform.openai.com/api-keys",
-            keyPattern = Regex("^sk-[a-zA-Z0-9_-]{20,}$"),
-            keyDescription = "OpenAI API key (starts with sk-)"
+            keyPattern = Regex("^.{10,}$"),
+            keyDescription = "OpenAI API key"
         ),
         "anthropic" to ProviderApiKeyConfig(
             providerId = "anthropic",
             displayName = "Anthropic",
             apiKeyUrl = "https://platform.claude.com/settings/keys",
-            keyPattern = Regex("^sk-ant-[a-zA-Z0-9-]{90,}$"),
-            keyDescription = "Anthropic API key (starts with sk-ant-)"
+            keyPattern = Regex("^.{10,}$"),
+            keyDescription = "Anthropic API key"
         ),
         "cohere" to ProviderApiKeyConfig(
             providerId = "cohere",
             displayName = "Cohere",
             apiKeyUrl = "https://dashboard.cohere.com/api-keys",
-            keyPattern = Regex("^[a-zA-Z0-9]{40}$"),
-            keyDescription = "Cohere API key (~40 characters)"
+            keyPattern = Regex("^.{10,}$"),
+            keyDescription = "Cohere API key"
         ),
         "poe" to ProviderApiKeyConfig(
             providerId = "poe",
             displayName = "Poe",
             apiKeyUrl = "https://poe.com/api_key",
-            keyPattern = Regex("^[a-zA-Z0-9_-]{40,50}$"),
-            keyDescription = "Poe API key (40-50 characters)"
+            keyPattern = Regex("^.{10,}$"),
+            keyDescription = "Poe API key"
         ),
         "openrouter" to ProviderApiKeyConfig(
             providerId = "openrouter",
             displayName = "OpenRouter",
             apiKeyUrl = "https://openrouter.ai/settings/keys",
-            keyPattern = Regex("^sk-or-[a-zA-Z0-9_-]{20,}$"),
-            keyDescription = "OpenRouter API key (starts with sk-or-)"
+            keyPattern = Regex("^.{10,}$"),
+            keyDescription = "OpenRouter API key"
         )
     )
 
