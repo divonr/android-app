@@ -139,7 +139,7 @@ fun WelcomeScreen(
                 val clip = clipboardManager.primaryClip
                 if (clip != null && clip.itemCount > 0) {
                     val text = clip.getItemAt(0).text?.toString()?.trim()
-                    if (text != null && config.keyPattern.matches(text)) {
+                    if (text != null && text.length >= 10) {
                         // Valid API key found in clipboard!
                         Toast.makeText(
                             context,

@@ -137,8 +137,8 @@ fun ApiKeyWebViewDialog(
 
                 Log.d(TAG, "Clipboard changed, checking pattern for ${config.providerId}")
 
-                // Validate against provider-specific pattern
-                if (config.keyPattern.matches(text)) {
+                // Validate - just check minimum length
+                if (text.length >= 10) {
                     Log.d(TAG, "Valid API key detected for ${config.providerId}")
                     hasDetectedKey = true
 
