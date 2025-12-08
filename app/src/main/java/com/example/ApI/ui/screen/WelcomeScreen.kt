@@ -110,8 +110,6 @@ fun WelcomeScreen(
 
     // Track which provider was selected for Custom Tabs
     var pendingProviderId by remember { mutableStateOf<String?>(null) }
-    var isWaitingForApiKey by remember { mutableStateOf(false) }
-    var hasLeftApp by remember { mutableStateOf(false) }
 
     // Add API key dialog state
     var showAddApiKeyDialog by remember { mutableStateOf(false) }
@@ -121,42 +119,30 @@ fun WelcomeScreen(
     // Track lifecycle state using Flow
     val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
 
-    // Detect when app goes to background (user left to Chrome Custom Tabs)
+    // Check clipboard when app resumes and we have a pending provider
     LaunchedEffect(lifecycleState) {
-        if (lifecycleState == Lifecycle.State.STARTED && isWaitingForApiKey) {
-            // App went to background while waiting - user is in Chrome
-            hasLeftApp = true
-        }
-    }
+        if (lifecycleState == Lifecycle.State.RESUMED && pendingProviderId != null) {
+            // User returned - check clipboard
+            val providerToCheck = pendingProviderId
+            pendingProviderId = null // Reset immediately to prevent multiple checks
 
-    // Check clipboard when app resumes AFTER user has left
-    LaunchedEffect(lifecycleState, hasLeftApp) {
-        if (lifecycleState == Lifecycle.State.RESUMED && hasLeftApp && isWaitingForApiKey && pendingProviderId != null) {
-            // User returned from Chrome - check clipboard
-            val config = ProviderApiKeyConfigs.getConfig(pendingProviderId!!)
-            if (config != null) {
-                val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clip = clipboardManager.primaryClip
-                if (clip != null && clip.itemCount > 0) {
-                    val text = clip.getItemAt(0).text?.toString()?.trim()
-                    if (text != null && text.length >= 10) {
-                        // Valid API key found in clipboard!
-                        Toast.makeText(
-                            context,
-                            "זוהתה העתקה של מפתח API",
-                            Toast.LENGTH_SHORT
-                        ).show()
+            val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = clipboardManager.primaryClip
+            if (clip != null && clip.itemCount > 0) {
+                val text = clip.getItemAt(0).text?.toString()?.trim()
+                if (text != null && text.length >= 10) {
+                    // Valid API key found in clipboard!
+                    Toast.makeText(
+                        context,
+                        "זוהתה העתקה של מפתח API",
+                        Toast.LENGTH_SHORT
+                    ).show()
 
-                        detectedApiKey = text
-                        detectedProvider = pendingProviderId
-                        showAddApiKeyDialog = true
-                    }
+                    detectedApiKey = text
+                    detectedProvider = providerToCheck
+                    showAddApiKeyDialog = true
                 }
             }
-            // Reset waiting state regardless of result
-            isWaitingForApiKey = false
-            pendingProviderId = null
-            hasLeftApp = false
         }
     }
 
@@ -166,7 +152,6 @@ fun WelcomeScreen(
         if (config != null) {
             // Store which provider we're waiting for
             pendingProviderId = providerId
-            isWaitingForApiKey = true
 
             // Show instruction toast
             Toast.makeText(
