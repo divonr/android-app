@@ -75,8 +75,8 @@ object ProviderApiKeyConfigs {
             providerId = "poe",
             displayName = "Poe",
             apiKeyUrl = "https://poe.com/api_key",
-            keyPattern = Regex("^.{43}$"),
-            keyDescription = "Poe API key (43 characters)"
+            keyPattern = Regex("^[a-zA-Z0-9_-]{40,50}$"),
+            keyDescription = "Poe API key (40-50 characters)"
         ),
         "openrouter" to ProviderApiKeyConfig(
             providerId = "openrouter",

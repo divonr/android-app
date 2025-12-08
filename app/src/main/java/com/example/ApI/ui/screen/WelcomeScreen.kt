@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.ApI.data.model.ApiKey
@@ -111,45 +111,52 @@ fun WelcomeScreen(
     // Track which provider was selected for Custom Tabs
     var pendingProviderId by remember { mutableStateOf<String?>(null) }
     var isWaitingForApiKey by remember { mutableStateOf(false) }
+    var hasLeftApp by remember { mutableStateOf(false) }
 
     // Add API key dialog state
     var showAddApiKeyDialog by remember { mutableStateOf(false) }
     var detectedApiKey by remember { mutableStateOf<String?>(null) }
     var detectedProvider by remember { mutableStateOf<String?>(null) }
 
-    // Check clipboard when app resumes (user returns from Chrome Custom Tabs)
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && isWaitingForApiKey && pendingProviderId != null) {
-                val config = ProviderApiKeyConfigs.getConfig(pendingProviderId!!)
-                if (config != null) {
-                    val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = clipboardManager.primaryClip
-                    if (clip != null && clip.itemCount > 0) {
-                        val text = clip.getItemAt(0).text?.toString()?.trim()
-                        if (text != null && config.keyPattern.matches(text)) {
-                            // Valid API key found in clipboard!
-                            Toast.makeText(
-                                context,
-                                "זוהתה העתקה של מפתח API",
-                                Toast.LENGTH_SHORT
-                            ).show()
+    // Track lifecycle state using Flow
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
 
-                            detectedApiKey = text
-                            detectedProvider = pendingProviderId
-                            showAddApiKeyDialog = true
+    // Detect when app goes to background (user left to Chrome Custom Tabs)
+    LaunchedEffect(lifecycleState) {
+        if (lifecycleState == Lifecycle.State.STARTED && isWaitingForApiKey) {
+            // App went to background while waiting - user is in Chrome
+            hasLeftApp = true
+        }
+    }
 
-                            // Reset waiting state
-                            isWaitingForApiKey = false
-                            pendingProviderId = null
-                        }
+    // Check clipboard when app resumes AFTER user has left
+    LaunchedEffect(lifecycleState, hasLeftApp) {
+        if (lifecycleState == Lifecycle.State.RESUMED && hasLeftApp && isWaitingForApiKey && pendingProviderId != null) {
+            // User returned from Chrome - check clipboard
+            val config = ProviderApiKeyConfigs.getConfig(pendingProviderId!!)
+            if (config != null) {
+                val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = clipboardManager.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val text = clip.getItemAt(0).text?.toString()?.trim()
+                    if (text != null && config.keyPattern.matches(text)) {
+                        // Valid API key found in clipboard!
+                        Toast.makeText(
+                            context,
+                            "זוהתה העתקה של מפתח API",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        detectedApiKey = text
+                        detectedProvider = pendingProviderId
+                        showAddApiKeyDialog = true
                     }
                 }
             }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+            // Reset waiting state regardless of result
+            isWaitingForApiKey = false
+            pendingProviderId = null
+            hasLeftApp = false
         }
     }
 
