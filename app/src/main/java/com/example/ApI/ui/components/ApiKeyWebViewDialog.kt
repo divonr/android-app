@@ -54,7 +54,7 @@ object ProviderApiKeyConfigs {
             providerId = "openai",
             displayName = "OpenAI",
             apiKeyUrl = "https://platform.openai.com/api-keys",
-            keyPattern = Regex("^sk-[a-zA-Z0-9]{48,}$"),
+            keyPattern = Regex("^sk-[a-zA-Z0-9_-]{20,}$"),
             keyDescription = "OpenAI API key (starts with sk-)"
         ),
         "anthropic" to ProviderApiKeyConfig(
@@ -82,7 +82,7 @@ object ProviderApiKeyConfigs {
             providerId = "openrouter",
             displayName = "OpenRouter",
             apiKeyUrl = "https://openrouter.ai/settings/keys",
-            keyPattern = Regex("^sk-or-[a-zA-Z0-9-]{40,}$"),
+            keyPattern = Regex("^sk-or-[a-zA-Z0-9_-]{20,}$"),
             keyDescription = "OpenRouter API key (starts with sk-or-)"
         )
     )
