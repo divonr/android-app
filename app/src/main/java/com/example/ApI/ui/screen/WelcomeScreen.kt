@@ -1,5 +1,9 @@
 package com.example.ApI.ui.screen
 
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,20 +18,33 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
+import com.example.ApI.data.model.ApiKey
+import com.example.ApI.data.model.Provider
+import com.example.ApI.data.repository.DataRepository
+import com.example.ApI.ui.components.AddApiKeyDialog
+import com.example.ApI.ui.components.ProviderApiKeyConfigs
+import com.example.ApI.ui.components.openInCustomTabs
 import com.example.ApI.ui.theme.*
 
-// Provider display info with colors
+// Provider display info with colors and logo
 data class ProviderDisplayInfo(
     val id: String,
     val displayName: String,
-    val backgroundColor: Color,
-    val textColor: Color
+    val logoFileName: String,
+    val backgroundColor: Color
 )
 
 // Provider colors and display names
@@ -35,38 +52,38 @@ private val providerDisplayInfoMap = mapOf(
     "google" to ProviderDisplayInfo(
         id = "google",
         displayName = "Google",
-        backgroundColor = Color(0xFFFFFFFF),
-        textColor = Color(0xFF4285F4)
+        logoFileName = "google.png",
+        backgroundColor = Color(0xFFFFFFFF)
     ),
     "poe" to ProviderDisplayInfo(
         id = "poe",
         displayName = "Poe",
-        backgroundColor = Color(0xFF5B4DC4),
-        textColor = Color.White
+        logoFileName = "poe.png",
+        backgroundColor = Color(0xFF694BC2)
     ),
     "cohere" to ProviderDisplayInfo(
         id = "cohere",
         displayName = "Cohere",
-        backgroundColor = Color(0xFFD18EE2),
-        textColor = Color.White
+        logoFileName = "cohere.png",
+        backgroundColor = Color(0xFFC8C8C8)
     ),
     "openai" to ProviderDisplayInfo(
         id = "openai",
         displayName = "OpenAI",
-        backgroundColor = Color(0xFFFFFFFF),
-        textColor = Color(0xFF10A37F)
+        logoFileName = "openai.png",
+        backgroundColor = Color(0xFFFFFFFF)
     ),
     "anthropic" to ProviderDisplayInfo(
         id = "anthropic",
         displayName = "Anthropic",
-        backgroundColor = Color(0xFFD4A574),
-        textColor = Color.White
+        logoFileName = "anthropic.png",
+        backgroundColor = Color(0xFFD4A574)
     ),
     "openrouter" to ProviderDisplayInfo(
         id = "openrouter",
         displayName = "OpenRouter",
-        backgroundColor = Color(0xFF1E1E2E),
-        textColor = Color(0xFF6366F1)
+        logoFileName = "openrouter.png",
+        backgroundColor = Color(0xFFFFFFFF)
     )
 )
 
@@ -82,9 +99,109 @@ fun WelcomeScreen(
     onNavigateToApiKeys: () -> Unit,
     onNavigateToMain: () -> Unit,
     onSkipWelcomeChanged: (Boolean) -> Unit,
+    repository: DataRepository,
+    currentUser: String,
+    providers: List<Provider>,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var skipWelcome by remember { mutableStateOf(false) }
+
+    // Track which provider was selected for Custom Tabs
+    var pendingProviderId by remember { mutableStateOf<String?>(null) }
+    var isWaitingForApiKey by remember { mutableStateOf(false) }
+
+    // Add API key dialog state
+    var showAddApiKeyDialog by remember { mutableStateOf(false) }
+    var detectedApiKey by remember { mutableStateOf<String?>(null) }
+    var detectedProvider by remember { mutableStateOf<String?>(null) }
+
+    // Check clipboard when app resumes (user returns from Chrome Custom Tabs)
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && isWaitingForApiKey && pendingProviderId != null) {
+                val config = ProviderApiKeyConfigs.getConfig(pendingProviderId!!)
+                if (config != null) {
+                    val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = clipboardManager.primaryClip
+                    if (clip != null && clip.itemCount > 0) {
+                        val text = clip.getItemAt(0).text?.toString()?.trim()
+                        if (text != null && config.keyPattern.matches(text)) {
+                            // Valid API key found in clipboard!
+                            Toast.makeText(
+                                context,
+                                "זוהתה העתקה של מפתח API",
+                                Toast.LENGTH_SHORT
+                            ).show()
+
+                            detectedApiKey = text
+                            detectedProvider = pendingProviderId
+                            showAddApiKeyDialog = true
+
+                            // Reset waiting state
+                            isWaitingForApiKey = false
+                            pendingProviderId = null
+                        }
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Handle provider card click - open Chrome Custom Tabs directly
+    val onProviderClick: (String) -> Unit = { providerId ->
+        val config = ProviderApiKeyConfigs.getConfig(providerId)
+        if (config != null) {
+            // Store which provider we're waiting for
+            pendingProviderId = providerId
+            isWaitingForApiKey = true
+
+            // Show instruction toast
+            Toast.makeText(
+                context,
+                "העתיקו את מפתח ה-API וחזרו לאפליקציה",
+                Toast.LENGTH_LONG
+            ).show()
+
+            // Open Chrome Custom Tabs
+            openInCustomTabs(context, config.apiKeyUrl)
+        } else {
+            Toast.makeText(context, "ספק זה אינו נתמך עדיין", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Show Add API Key dialog with pre-filled values
+    if (showAddApiKeyDialog) {
+        AddApiKeyDialog(
+            providers = providers,
+            onConfirm = { provider, key, customName ->
+                repository.addApiKey(
+                    currentUser,
+                    ApiKey(
+                        provider = provider,
+                        key = key,
+                        customName = customName
+                    )
+                )
+                showAddApiKeyDialog = false
+                detectedApiKey = null
+                detectedProvider = null
+                Toast.makeText(context, "מפתח API נשמר בהצלחה!", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = {
+                showAddApiKeyDialog = false
+                detectedApiKey = null
+                detectedProvider = null
+            },
+            initialProvider = detectedProvider,
+            initialApiKey = detectedApiKey
+        )
+    }
 
     // Force RTL layout for Hebrew text
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -92,6 +209,7 @@ fun WelcomeScreen(
             modifier = modifier
                 .fillMaxSize()
                 .background(Background)
+                .windowInsetsPadding(WindowInsets.systemBars)
         ) {
             Column(
                 modifier = Modifier
@@ -163,7 +281,10 @@ fun WelcomeScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Provider grid for first group
-                    ProviderGrid(providers = freeTrialProviders)
+                    ProviderGrid(
+                        providers = freeTrialProviders,
+                        onProviderClick = onProviderClick
+                    )
 
                     Spacer(modifier = Modifier.height(32.dp))
 
@@ -180,7 +301,10 @@ fun WelcomeScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Provider grid for second group
-                    ProviderGrid(providers = paidProviders)
+                    ProviderGrid(
+                        providers = paidProviders,
+                        onProviderClick = onProviderClick
+                    )
 
                     Spacer(modifier = Modifier.height(24.dp))
                 }
@@ -248,7 +372,10 @@ fun WelcomeScreen(
 }
 
 @Composable
-private fun ProviderGrid(providers: List<String>) {
+private fun ProviderGrid(
+    providers: List<String>,
+    onProviderClick: (String) -> Unit
+) {
     // Create rows of 2 providers each
     val rows = providers.chunked(2)
 
@@ -266,6 +393,7 @@ private fun ProviderGrid(providers: List<String>) {
                     if (info != null) {
                         ProviderCard(
                             info = info,
+                            onClick = { onProviderClick(providerId) },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -282,24 +410,30 @@ private fun ProviderGrid(providers: List<String>) {
 @Composable
 private fun ProviderCard(
     info: ProviderDisplayInfo,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+
     Box(
         modifier = modifier
             .height(80.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(info.backgroundColor)
-            .clickable {
-                // Non-functional for now - will open link to get API key
-            },
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = info.displayName,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = info.textColor,
-            textAlign = TextAlign.Center
+        Image(
+            painter = rememberAsyncImagePainter(
+                ImageRequest.Builder(context)
+                    .data("file:///android_asset/${info.logoFileName}")
+                    .build()
+            ),
+            contentDescription = info.displayName,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            contentScale = ContentScale.Fit
         )
     }
 }

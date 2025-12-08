@@ -7,7 +7,11 @@
       "WebFetch(domain:platform.claude.com)",
       "Bash(grep:*)",
       "Bash(dir:*)",
-      "Bash(keytool:*)"
+      "Bash(keytool:*)",
+      "Bash(if not exist \"C:\\Users\\DELL\\Documents\\Cursor\\chatGPT api\\android app\\app\\src\\main\\res\\drawable\" mkdir \"C:\\Users\\DELL\\Documents\\Cursor\\chatGPT api\\android app\\app\\src\\main\\res\\drawable\")",
+      "Bash(cmd /c:*)",
+      "Bash(xcopy:*)",
+      "Bash(powershell -Command:*)"
     ],
     "deny": [],
     "ask": []

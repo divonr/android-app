@@ -384,8 +384,8 @@ private fun ApiKeyItem(
     // Provider-specific background colors
     val providerBackgroundColors = when (apiKey.provider) {
         "poe" -> listOf(
-            Color(0xFF9C27B0).copy(alpha = 0.25f), // Purple
-            Color(0xFF9C27B0).copy(alpha = 0.15f)
+            Color(0xFF694BC2).copy(alpha = 0.25f), // Poe Purple
+            Color(0xFF694BC2).copy(alpha = 0.15f)
         )
         "openai" -> listOf(
             Color.White.copy(alpha = 0.35f),
@@ -402,8 +402,12 @@ private fun ApiKeyItem(
             Color(0xFFC6613F).copy(alpha = 0.15f)
         )
         "cohere" -> listOf(
-            Color(0xFFD18EE2).copy(alpha = 0.25f), // Cohere Coral/Pink
-            Color(0xFF39594D).copy(alpha = 0.25f)  // Cohere Dark Teal
+            Color(0xFF39594D).copy(alpha = 0.25f), // Cohere Green
+            Color(0xFF39594D).copy(alpha = 0.15f)
+        )
+        "openrouter" -> listOf(
+            Color.White.copy(alpha = 0.35f),
+            Color.White.copy(alpha = 0.20f)
         )
         else -> listOf(
             SurfaceVariant,

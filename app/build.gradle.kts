@@ -106,7 +106,10 @@ dependencies {
 
     // Security Crypto
     implementation(libs.androidx.security.crypto)
-    
+
+    // Chrome Custom Tabs (for WebView fallback)
+    implementation("androidx.browser:browser:1.7.0")
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

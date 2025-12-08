@@ -143,7 +143,10 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
             WelcomeScreen(
                 onNavigateToApiKeys = { viewModel.navigateToScreen(Screen.ApiKeys) },
                 onNavigateToMain = { viewModel.navigateToScreen(Screen.ChatHistory) },
-                onSkipWelcomeChanged = { skip -> viewModel.updateSkipWelcomeScreen(skip) }
+                onSkipWelcomeChanged = { skip -> viewModel.updateSkipWelcomeScreen(skip) },
+                repository = repository,
+                currentUser = appSettings.current_user,
+                providers = uiState.availableProviders
             )
         }
         is Screen.ChatHistory -> {

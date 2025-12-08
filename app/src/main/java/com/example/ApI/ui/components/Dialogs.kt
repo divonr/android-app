@@ -435,10 +435,12 @@ fun ModelSelectorDialog(
 fun AddApiKeyDialog(
     providers: List<Provider>,
     onConfirm: (String, String, String?) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    initialProvider: String? = null,
+    initialApiKey: String? = null
 ) {
-    var selectedProvider by remember { mutableStateOf("") }
-    var apiKey by remember { mutableStateOf("") }
+    var selectedProvider by remember { mutableStateOf(initialProvider ?: "") }
+    var apiKey by remember { mutableStateOf(initialApiKey ?: "") }
     var customName by remember { mutableStateOf("") }
     var showProviderDropdown by remember { mutableStateOf(false) }
 
