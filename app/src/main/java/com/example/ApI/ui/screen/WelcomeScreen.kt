@@ -103,11 +103,12 @@ fun WelcomeScreen(
     repository: DataRepository,
     currentUser: String,
     providers: List<Provider>,
+    initialSkipWelcome: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var skipWelcome by remember { mutableStateOf(false) }
+    var skipWelcome by remember { mutableStateOf(initialSkipWelcome) }
 
     // Track which provider was selected for Custom Tabs (rememberSaveable survives process death)
     var pendingProviderId by rememberSaveable { mutableStateOf<String?>(null) }

@@ -48,12 +48,18 @@ fun ApiKeysScreen(
     currentUser: String,
     providers: List<Provider>,
     onBackClick: () -> Unit,
+    onSkipWelcomeChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var apiKeys by remember { mutableStateOf(repository.loadApiKeys(currentUser)) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var keyToDelete by remember { mutableStateOf<ApiKey?>(null) }
+    var showWelcomeDialog by remember { mutableStateOf(false) }
+    
+    // Load initial skip welcome state from settings
+    val appSettings = remember { repository.loadAppSettings() }
+    var currentSkipWelcome by remember { mutableStateOf(appSettings.skipWelcomeScreen) }
     
     // Drag and drop state
     var draggedItemIndex by remember { mutableStateOf<Int?>(null) }
@@ -150,34 +156,64 @@ fun ApiKeysScreen(
             Column(
                 modifier = Modifier.padding(24.dp)
             ) {
-                // Modern Add API Key Button
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Primary,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showAddDialog = true }
+                // Two buttons side by side
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(
+                    // Add API Key Button (left, half width)
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Primary,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                            .weight(1f)
+                            .clickable { showAddDialog = true }
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            tint = OnPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = stringResource(R.string.add_api_key),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = OnPrimary,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                tint = OnPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(R.string.add_api_key),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = OnPrimary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    
+                    // Get API Key Button (right, half width, subtle green)
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFFCBE9BF),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { showWelcomeDialog = true }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "קבל מפתח API",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Color(0xFF2D5A27),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
 
@@ -279,6 +315,36 @@ fun ApiKeysScreen(
                 showDeleteDialog = false
             }
         )
+    }
+    
+    // Welcome Screen Dialog
+    if (showWelcomeDialog) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showWelcomeDialog = false },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
+            )
+        ) {
+            WelcomeScreen(
+                onNavigateToApiKeys = { 
+                    // Already on API keys screen, just close the dialog
+                    showWelcomeDialog = false 
+                },
+                onNavigateToMain = { 
+                    showWelcomeDialog = false 
+                },
+                onSkipWelcomeChanged = { skip -> 
+                    currentSkipWelcome = skip
+                    onSkipWelcomeChanged(skip)
+                },
+                repository = repository,
+                currentUser = currentUser,
+                providers = providers,
+                initialSkipWelcome = currentSkipWelcome
+            )
+        }
     }
 }
 
