@@ -953,21 +953,43 @@ fun ChatScreen(
                                         }
                                     }
                                 } else {
-                                    // Regular send
+                                    // Regular send or stop button
                                     Surface(
                                         shape = RoundedCornerShape(20.dp),
-                                        color = if ((uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty()) && !uiState.isLoading && !uiState.isStreaming) 
-                                            Primary else Primary.copy(alpha = 0.3f),
+                                        color = if (uiState.isLoading || uiState.isStreaming) {
+                                            // Active/clickable when streaming (for stop)
+                                            Primary
+                                        } else if (uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty()) {
+                                            Primary
+                                        } else {
+                                            Primary.copy(alpha = 0.3f)
+                                        },
                                         modifier = Modifier.size(40.dp).clickable(
-                                            enabled = (uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty()) && !uiState.isLoading && !uiState.isStreaming
-                                        ) { viewModel.sendMessage() }
+                                            enabled = (uiState.isLoading || uiState.isStreaming) ||
+                                                (uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty())
+                                        ) {
+                                            if (uiState.isLoading || uiState.isStreaming) {
+                                                // Stop streaming and save accumulated text
+                                                viewModel.stopStreamingAndSave()
+                                            } else {
+                                                viewModel.sendMessage()
+                                            }
+                                        }
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             if (uiState.isLoading || uiState.isStreaming) {
+                                                // Loading circle with stop icon inside
                                                 CircularProgressIndicator(
-                                                    modifier = Modifier.size(20.dp),
+                                                    modifier = Modifier.size(28.dp),
                                                     color = Color.White,
                                                     strokeWidth = 2.dp
+                                                )
+                                                // Stop icon (square) inside the loading circle
+                                                Icon(
+                                                    imageVector = Icons.Filled.Stop,
+                                                    contentDescription = "Stop streaming",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(14.dp)
                                                 )
                                             } else {
                                                 Icon(

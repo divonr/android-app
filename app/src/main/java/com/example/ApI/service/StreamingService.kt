@@ -266,6 +266,31 @@ class StreamingService : Service() {
     }
 
     /**
+     * Stop a request and mark it as completed (user stopped it gracefully).
+     * The ViewModel is responsible for saving the accumulated text.
+     * This just cancels the HTTP connection and cleans up without emitting any events
+     * (since the ViewModel handles the "completion" locally).
+     */
+    fun stopAndComplete(requestId: String) {
+        Log.d(TAG, "Stopping request and marking complete: $requestId")
+
+        // Cancel the job (which will close HTTP connection)
+        activeJobs[requestId]?.cancel()
+        activeJobs.remove(requestId)
+
+        // Remove from active requests without emitting events
+        // (ViewModel handles the UI state change)
+        activeRequests.remove(requestId)
+
+        // Update notification and possibly stop service
+        serviceScope.launch {
+            _activeRequestCount.emit(activeRequests.size)
+            updateNotification()
+            checkAndStopSelf()
+        }
+    }
+
+    /**
      * Get all active requests (for UI display)
      */
     fun getActiveRequests(): Map<String, StreamingRequest> = activeRequests.toMap()
@@ -399,6 +424,17 @@ class StreamingService : Service() {
                 enabledTools = enabledTools,
                 callback = callback
             )
+        } catch (e: CancellationException) {
+            // CancellationException is expected when user stops streaming - don't treat as error
+            Log.d(TAG, "Request was cancelled: requestId=$requestId")
+            // Just clean up without emitting error
+            activeRequests.remove(requestId)
+            activeJobs.remove(requestId)
+            serviceScope.launch {
+                _activeRequestCount.emit(activeRequests.size)
+                updateNotification()
+                checkAndStopSelf()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during streaming request", e)
             callback.onError("Exception: ${e.message}")

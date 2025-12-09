@@ -292,6 +292,62 @@ class ChatViewModel(
     }
 
     /**
+     * Stop streaming for current chat and save the accumulated text as a completed response.
+     * This treats the partial response as if it completed successfully.
+     */
+    fun stopStreamingAndSave() {
+        val currentChat = _uiState.value.currentChat ?: return
+        val chatId = currentChat.chat_id
+        val currentUser = _appSettings.value.current_user
+        val currentModel = _uiState.value.currentModel
+
+        // Get the accumulated streaming text for this chat
+        val accumulatedText = _uiState.value.streamingTextByChat[chatId] ?: ""
+
+        // Find and stop the active request in the service
+        val activeRequests = streamingService?.getActiveRequests()
+        val request = activeRequests?.values?.find { it.chatId == chatId }
+        if (request != null) {
+            streamingService?.stopAndComplete(request.requestId)
+        }
+
+        viewModelScope.launch {
+            // Only save if there's accumulated text
+            if (accumulatedText.isNotEmpty()) {
+                // Create assistant message with the accumulated text
+                val assistantMessage = Message(
+                    role = "assistant",
+                    text = accumulatedText,
+                    attachments = emptyList(),
+                    model = currentModel,
+                    datetime = getCurrentDateTimeISO()
+                )
+
+                // Save the message to chat history
+                repository.addResponseToCurrentVariant(currentUser, chatId, assistantMessage)
+            }
+
+            // Reload chat history
+            val refreshedHistory = repository.loadChatHistory(currentUser)
+            val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
+
+            // Clear streaming state for this chat
+            _uiState.value = _uiState.value.copy(
+                loadingChatIds = _uiState.value.loadingChatIds - chatId,
+                streamingChatIds = _uiState.value.streamingChatIds - chatId,
+                streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
+                chatHistory = refreshedHistory.chat_history,
+                currentChat = refreshedChat ?: currentChat
+            )
+
+            // Handle title generation if needed
+            if (refreshedChat != null && accumulatedText.isNotEmpty()) {
+                handleTitleGeneration(refreshedChat)
+            }
+        }
+    }
+
+    /**
      * Called when the ViewModel is cleared
      */
     override fun onCleared() {
