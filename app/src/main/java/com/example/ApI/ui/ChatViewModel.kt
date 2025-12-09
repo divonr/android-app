@@ -4,8 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.content.Context
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
+import android.content.ServiceConnection
 import android.net.Uri
+import android.os.Build
+import android.os.IBinder
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -21,8 +25,10 @@ import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.DeleteMessageResult
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.ParentalControlManager
+import com.example.ApI.service.StreamingService
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.tools.ToolExecutionResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +39,8 @@ import androidx.core.content.FileProvider
 import androidx.core.app.PendingIntentCompat
 import android.app.PendingIntent
 import android.os.Environment
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.InputStream
 import java.nio.charset.Charset
@@ -41,6 +49,7 @@ import java.time.format.DateTimeFormatter
 import java.time.ZoneId
 import java.time.LocalTime
 import java.time.LocalDateTime
+import java.util.UUID
 
 class ChatViewModel(
     private val repository: DataRepository,
@@ -57,6 +66,39 @@ class ChatViewModel(
     private val _appSettings = MutableStateFlow(AppSettings("default", "openai", "gpt-4o"))
     val appSettings: StateFlow<AppSettings> = _appSettings.asStateFlow()
 
+    // Service binding for streaming requests
+    private var streamingService: StreamingService? = null
+    private var serviceBound = false
+
+    private val json = Json {
+        prettyPrint = false
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+    }
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val localBinder = binder as StreamingService.LocalBinder
+            streamingService = localBinder.getService()
+            serviceBound = true
+            Log.d("ChatViewModel", "StreamingService connected")
+
+            // Start observing streaming events
+            viewModelScope.launch {
+                streamingService?.streamingEvents?.collect { event ->
+                    handleStreamingEvent(event)
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            streamingService = null
+            serviceBound = false
+            Log.d("ChatViewModel", "StreamingService disconnected")
+        }
+    }
+
     init {
         // Set a default provider immediately
         val defaultProvider = Provider(
@@ -72,10 +114,189 @@ class ChatViewModel(
         
         loadInitialData()
         handleSharedFiles()
+        bindToStreamingService()
     }
-    
+
     private fun getCurrentDateTimeISO(): String {
         return Instant.now().toString()
+    }
+
+    /**
+     * Bind to the StreamingService to receive streaming events
+     */
+    fun bindToStreamingService() {
+        if (!serviceBound) {
+            val intent = Intent(context, StreamingService::class.java)
+            context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        }
+    }
+
+    /**
+     * Unbind from the streaming service
+     */
+    fun unbindFromStreamingService() {
+        if (serviceBound) {
+            context.unbindService(serviceConnection)
+            serviceBound = false
+            streamingService = null
+        }
+    }
+
+    /**
+     * Handle streaming events from the StreamingService
+     */
+    private fun handleStreamingEvent(event: StreamingEvent) {
+        when (event) {
+            is StreamingEvent.PartialResponse -> {
+                // Update per-chat streaming text
+                val chatId = event.chatId
+                val currentText = _uiState.value.streamingTextByChat[chatId] ?: ""
+                _uiState.value = _uiState.value.copy(
+                    streamingTextByChat = _uiState.value.streamingTextByChat + (chatId to currentText + event.text)
+                )
+            }
+
+            is StreamingEvent.Complete -> {
+                val chatId = event.chatId
+                Log.d("ChatViewModel", "Streaming complete for chat: $chatId")
+
+                viewModelScope.launch {
+                    // Reload chat history to get the saved message
+                    val currentUser = _appSettings.value.current_user
+                    val refreshedHistory = repository.loadChatHistory(currentUser)
+                    val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
+
+                    // Clear streaming state for this chat
+                    _uiState.value = _uiState.value.copy(
+                        loadingChatIds = _uiState.value.loadingChatIds - chatId,
+                        streamingChatIds = _uiState.value.streamingChatIds - chatId,
+                        streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
+                        chatHistory = refreshedHistory.chat_history,
+                        currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat
+                    )
+
+                    // Handle title generation if this is the current chat
+                    if (refreshedChat != null && _uiState.value.currentChat?.chat_id == chatId) {
+                        handleTitleGeneration(refreshedChat)
+                    }
+                }
+            }
+
+            is StreamingEvent.Error -> {
+                val chatId = event.chatId
+                Log.e("ChatViewModel", "Streaming error for chat: $chatId - ${event.error}")
+
+                viewModelScope.launch {
+                    // Reload chat history
+                    val currentUser = _appSettings.value.current_user
+                    val refreshedHistory = repository.loadChatHistory(currentUser)
+                    val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
+
+                    // Clear streaming state for this chat
+                    _uiState.value = _uiState.value.copy(
+                        loadingChatIds = _uiState.value.loadingChatIds - chatId,
+                        streamingChatIds = _uiState.value.streamingChatIds - chatId,
+                        streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
+                        chatHistory = refreshedHistory.chat_history,
+                        currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat,
+                        snackbarMessage = "Error: ${event.error}"
+                    )
+                }
+            }
+
+            is StreamingEvent.StatusChange -> {
+                // Status changes are mainly for logging/debugging
+                Log.d("ChatViewModel", "Status change for ${event.chatId}: ${event.status}")
+            }
+
+            is StreamingEvent.ToolCallRequest -> {
+                val chatId = event.chatId
+                val requestId = event.requestId
+                Log.d("ChatViewModel", "Tool call request for chat: $chatId, tool: ${event.toolCall.toolId}")
+
+                viewModelScope.launch {
+                    // Show tool execution indicator
+                    _uiState.value = _uiState.value.copy(
+                        executingToolCall = ExecutingToolInfo(
+                            toolId = event.toolCall.toolId,
+                            toolName = event.toolCall.toolId,
+                            startTime = getCurrentDateTimeISO()
+                        )
+                    )
+
+                    // Execute the tool
+                    val result = executeToolCall(event.toolCall)
+
+                    // Clear tool execution indicator
+                    _uiState.value = _uiState.value.copy(executingToolCall = null)
+
+                    // Provide result back to service
+                    streamingService?.provideToolResult(requestId, result)
+                }
+            }
+        }
+    }
+
+    /**
+     * Start a streaming request via the foreground service
+     */
+    private fun startStreamingRequest(
+        requestId: String,
+        chatId: String,
+        username: String,
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        webSearchEnabled: Boolean,
+        projectAttachments: List<Attachment>,
+        enabledTools: List<ToolSpecification>
+    ) {
+        val intent = Intent(context, StreamingService::class.java).apply {
+            action = StreamingService.ACTION_START_REQUEST
+            putExtra(StreamingService.EXTRA_REQUEST_ID, requestId)
+            putExtra(StreamingService.EXTRA_CHAT_ID, chatId)
+            putExtra(StreamingService.EXTRA_USERNAME, username)
+            putExtra(StreamingService.EXTRA_PROVIDER_JSON, json.encodeToString(provider))
+            putExtra(StreamingService.EXTRA_MODEL_NAME, modelName)
+            putExtra(StreamingService.EXTRA_SYSTEM_PROMPT, systemPrompt)
+            putExtra(StreamingService.EXTRA_WEB_SEARCH_ENABLED, webSearchEnabled)
+            putExtra(StreamingService.EXTRA_MESSAGES_JSON, json.encodeToString(messages))
+            putExtra(StreamingService.EXTRA_PROJECT_ATTACHMENTS_JSON, json.encodeToString(projectAttachments))
+            putExtra(StreamingService.EXTRA_ENABLED_TOOLS_JSON, json.encodeToString(enabledTools))
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+    }
+
+    /**
+     * Cancel a streaming request
+     */
+    fun cancelStreamingRequest(chatId: String) {
+        // Find the request ID for this chat
+        val activeRequests = streamingService?.getActiveRequests() ?: return
+        val request = activeRequests.values.find { it.chatId == chatId } ?: return
+
+        streamingService?.cancelRequest(request.requestId)
+
+        // Update UI state
+        _uiState.value = _uiState.value.copy(
+            loadingChatIds = _uiState.value.loadingChatIds - chatId,
+            streamingChatIds = _uiState.value.streamingChatIds - chatId,
+            streamingTextByChat = _uiState.value.streamingTextByChat - chatId
+        )
+    }
+
+    /**
+     * Called when the ViewModel is cleared
+     */
+    override fun onCleared() {
+        super.onCleared()
+        unbindFromStreamingService()
     }
 
     private fun loadInitialData() {
@@ -177,14 +398,17 @@ class ChatViewModel(
             }
         )
 
+        val chatId = currentChat.chat_id
+
         viewModelScope.launch {
             val multiModeEnabled = _appSettings.value.multiMessageMode
             // In multi-message mode we do not start streaming immediately
             if (!multiModeEnabled) {
+                // Use per-chat loading state
                 _uiState.value = _uiState.value.copy(
-                    isLoading = true, 
-                    isStreaming = true,
-                    streamingText = "",
+                    loadingChatIds = _uiState.value.loadingChatIds + chatId,
+                    streamingChatIds = _uiState.value.streamingChatIds + chatId,
+                    streamingTextByChat = _uiState.value.streamingTextByChat + (chatId to ""),
                     currentMessage = ""
                 )
             } else {
@@ -282,224 +506,59 @@ class ChatViewModel(
                         updatedChat = updatedChatWithFiles
                     }
 
-                    // Send message with streaming - this will automatically re-upload files if provider changed
-                    val streamingCallback = object : StreamingCallback {
-                        override fun onPartialResponse(text: String) {
-                            // Update UI with streaming text
-                            val currentStreamingText = _uiState.value.streamingText
-                            _uiState.value = _uiState.value.copy(
-                                streamingText = currentStreamingText + text
-                            )
-                        }
-
-                        override fun onComplete(fullText: String) {
-                            // Stream is complete, add final message to chat
-                            viewModelScope.launch {
-                                val assistantMessage = Message(
-                                    role = "assistant",
-                                    text = fullText,
-                                    attachments = emptyList(),
-                                    model = currentModel,
-                                    datetime = getCurrentDateTimeISO()
-                                )
-
-                                // Always use branching-aware method
-                                val finalUpdatedChat = repository.addResponseToCurrentVariant(
-                                    currentUser,
-                                    updatedChat!!.chat_id,
-                                    assistantMessage
-                                )
-
-                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-
-                                _uiState.value = _uiState.value.copy(
-                                    currentChat = finalUpdatedChat,
-                                    isLoading = false,
-                                    isStreaming = false,
-                                    streamingText = "",
-                                    chatHistory = finalChatHistory
-                                )
-                                
-                                // Handle title generation after response completion
-                                if (finalUpdatedChat != null) {
-                                    handleTitleGeneration(finalUpdatedChat)
-                                }
-                            }
-                        }
-
-                        override fun onError(error: String) {
-                            // Handle streaming error
-                            viewModelScope.launch {
-                                val errorMessage = Message(
-                                    role = "assistant",
-                                    text = "שגיאה: $error",
-                                    attachments = emptyList(),
-                                    model = currentModel,
-                                    datetime = getCurrentDateTimeISO()
-                                )
-
-                                // Always use branching-aware method
-                                val finalUpdatedChat = repository.addResponseToCurrentVariant(
-                                    currentUser,
-                                    updatedChat!!.chat_id,
-                                    errorMessage
-                                )
-
-                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-
-                                _uiState.value = _uiState.value.copy(
-                                    currentChat = finalUpdatedChat,
-                                    isLoading = false,
-                                    isStreaming = false,
-                                    streamingText = "",
-                                    chatHistory = finalChatHistory
-                                )
-                            }
-                        }
-                        
-                        override suspend fun onToolCall(
-                            toolCall: com.example.ApI.tools.ToolCall,
-                            precedingText: String
-                        ): com.example.ApI.tools.ToolExecutionResult {
-                            // STEP 1: Save preceding text as assistant message (if exists)
-                            if (precedingText.isNotBlank()) {
-                                Log.d("TOOL_CALL_DEBUG", "ViewModel: Saving ${precedingText.length} chars of text before tool call")
-
-                                val precedingTextMessage = Message(
-                                    role = "assistant",
-                                    text = precedingText,
-                                    attachments = emptyList(),
-                                    model = currentModel,
-                                    datetime = getCurrentDateTimeISO()
-                                )
-
-                                val updatedChatAfterText = repository.addResponseToCurrentVariant(
-                                    currentUser,
-                                    updatedChat!!.chat_id,
-                                    precedingTextMessage
-                                )
-
-                                updatedChat = updatedChatAfterText
-
-                                // Update UI to show the text message and CLEAR streaming text
-                                val refreshedHistory = repository.loadChatHistory(currentUser).chat_history
-                                _uiState.value = _uiState.value.copy(
-                                    currentChat = updatedChatAfterText,
-                                    chatHistory = refreshedHistory,
-                                    streamingText = ""  // Clear accumulated streaming text
-                                )
-                            }
-
-                            // STEP 2: Show tool execution indicator
-                            _uiState.value = _uiState.value.copy(
-                                executingToolCall = ExecutingToolInfo(
-                                    toolId = toolCall.toolId,
-                                    toolName = toolCall.toolId,
-                                    startTime = getCurrentDateTimeISO()
-                                )
-                            )
-
-                            // STEP 3: Execute the tool
-                            val result = executeToolCall(toolCall)
-
-                            // STEP 4: Clear tool execution indicator
-                            _uiState.value = _uiState.value.copy(executingToolCall = null)
-
-                            return result
-                        }
-                        
-                        override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message) {
-                            // Save tool messages to chat history
-                            val currentChat = updatedChat ?: return
-                            
-                            // Always use branching-aware method
-                            var tempChat = repository.addResponseToCurrentVariant(
-                                currentUser,
-                                currentChat.chat_id,
-                                toolCallMessage
-                            )
-                            tempChat = repository.addResponseToCurrentVariant(
-                                currentUser,
-                                currentChat.chat_id,
-                                toolResponseMessage
-                            )
-                            
-                            // Update the updatedChat reference for next messages
-                            updatedChat = tempChat
-                            
-                            // Reload chat history
-                            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-                            
-                            // Update UI
-                            _uiState.value = _uiState.value.copy(
-                                currentChat = tempChat,
-                                chatHistory = finalChatHistory
-                            )
-                        }
-                    }
-
                     // Get project attachments if this chat belongs to a project
                     val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
 
-                    // Capture chat reference before callback to avoid smart cast issues
+                    // Capture chat reference before starting service request
                     val chatForRequest = updatedChat!!
-                    repository.sendMessage(
+
+                    // Generate unique request ID for this API call
+                    val requestId = UUID.randomUUID().toString()
+
+                    // Start streaming request via the foreground service
+                    // The service handles the API call and broadcasts events back to us
+                    startStreamingRequest(
+                        requestId = requestId,
+                        chatId = chatForRequest.chat_id,
+                        username = currentUser,
                         provider = currentProvider,
                         modelName = currentModel,
                         messages = chatForRequest.messages,
                         systemPrompt = systemPrompt,
-                        username = currentUser,
-                        chatId = chatForRequest.chat_id,
-                        projectAttachments = projectAttachments,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
-                        enabledTools = getEnabledToolSpecifications(),
-                        callback = streamingCallback
+                        projectAttachments = projectAttachments,
+                        enabledTools = getEnabledToolSpecifications()
                     )
-                    
+
                     // Reload chat to get any updated file IDs from re-uploads
                     val refreshedChatHistory = repository.loadChatHistory(currentUser)
-                    val refreshedCurrentChat = refreshedChatHistory.chat_history.find { 
-                        it.chat_id == chatForRequest.chat_id 
+                    val refreshedCurrentChat = refreshedChatHistory.chat_history.find {
+                        it.chat_id == chatForRequest.chat_id
                     } ?: chatForRequest
-                    
+
                     _uiState.value = _uiState.value.copy(
                         currentChat = refreshedCurrentChat,
-                        chatHistory = refreshedChatHistory.chat_history,
-                        isLoading = false  // Set to false since streaming will handle the rest
+                        chatHistory = refreshedChatHistory.chat_history
                     )
 
                 } catch (e: Exception) {
                     // Handle unexpected errors
-                    val errorMessage = Message(
-                        role = "assistant",
-                        text = "שגיאה לא צפויה: ${e.message}",
-                        attachments = emptyList(),
-                        model = currentModel,
-                        datetime = getCurrentDateTimeISO()
-                    )
+                    Log.e("ChatViewModel", "Error starting streaming request", e)
 
-                    // Always use branching-aware method
-                    val finalUpdatedChat = repository.addResponseToCurrentVariant(
-                        currentUser,
-                        updatedChat!!.chat_id,
-                        errorMessage
-                    )
-
-                    val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-
+                    // Clear loading state for this chat
                     _uiState.value = _uiState.value.copy(
-                        currentChat = finalUpdatedChat,
-                        isLoading = false,
-                        isStreaming = false,
-                        streamingText = "",
-                        chatHistory = finalChatHistory
+                        loadingChatIds = _uiState.value.loadingChatIds - chatId,
+                        streamingChatIds = _uiState.value.streamingChatIds - chatId,
+                        streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
+                        snackbarMessage = "Error: ${e.message}"
                     )
                 }
             } else {
+                // No provider selected, clear loading state
                 _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    isStreaming = false,
-                    streamingText = ""
+                    loadingChatIds = _uiState.value.loadingChatIds - chatId,
+                    streamingChatIds = _uiState.value.streamingChatIds - chatId,
+                    streamingTextByChat = _uiState.value.streamingTextByChat - chatId
                 )
             }
         }
@@ -508,12 +567,14 @@ class ChatViewModel(
     fun sendBufferedBatch() {
         val currentUser = _appSettings.value.current_user
         val currentChat = _uiState.value.currentChat ?: return
+        val chatId = currentChat.chat_id
 
         viewModelScope.launch {
+            // Use per-chat loading state
             _uiState.value = _uiState.value.copy(
-                isLoading = true,
-                isStreaming = true,
-                streamingText = "",
+                loadingChatIds = _uiState.value.loadingChatIds + chatId,
+                streamingChatIds = _uiState.value.streamingChatIds + chatId,
+                streamingTextByChat = _uiState.value.streamingTextByChat + (chatId to ""),
                 showReplyButton = false
             )
 
@@ -523,182 +584,47 @@ class ChatViewModel(
 
             if (currentProvider != null && currentModel.isNotEmpty()) {
                 try {
-                    // Send existing conversation with streaming
-                    val streamingCallback = object : StreamingCallback {
-                        override fun onPartialResponse(text: String) {
-                            val currentStreamingText = _uiState.value.streamingText
-                            _uiState.value = _uiState.value.copy(
-                                streamingText = currentStreamingText + text
-                            )
-                        }
-
-                        override fun onComplete(fullText: String) {
-                            viewModelScope.launch {
-                                val assistantMessage = Message(
-                                    role = "assistant",
-                                    text = fullText,
-                                    attachments = emptyList(),
-                                    model = currentModel,
-                                    datetime = getCurrentDateTimeISO()
-                                )
-
-                                // Always use branching-aware method
-                                val finalUpdatedChat = repository.addResponseToCurrentVariant(
-                                    currentUser,
-                                    currentChat.chat_id,
-                                    assistantMessage
-                                )
-
-                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-
-                                _uiState.value = _uiState.value.copy(
-                                    currentChat = finalUpdatedChat,
-                                    isLoading = false,
-                                    isStreaming = false,
-                                    streamingText = "",
-                                    chatHistory = finalChatHistory
-                                )
-
-                                // Handle title generation after response completion
-                                if (finalUpdatedChat != null) {
-                                    handleTitleGeneration(finalUpdatedChat)
-                                }
-                            }
-                        }
-
-                        override fun onError(error: String) {
-                            viewModelScope.launch {
-                                val errorMessage = Message(
-                                    role = "assistant",
-                                    text = "שגיאה: $error",
-                                    attachments = emptyList(),
-                                    model = currentModel,
-                                    datetime = getCurrentDateTimeISO()
-                                )
-
-                                // Always use branching-aware method
-                                val finalUpdatedChat = repository.addResponseToCurrentVariant(
-                                    currentUser,
-                                    currentChat.chat_id,
-                                    errorMessage
-                                )
-
-                                val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-
-                                _uiState.value = _uiState.value.copy(
-                                    currentChat = finalUpdatedChat,
-                                    isLoading = false,
-                                    isStreaming = false,
-                                    streamingText = "",
-                                    chatHistory = finalChatHistory
-                                )
-                            }
-                        }
-                        
-                        override suspend fun onToolCall(
-                            toolCall: com.example.ApI.tools.ToolCall,
-                            precedingText: String
-                        ): com.example.ApI.tools.ToolExecutionResult {
-                            // Save preceding text as assistant message (if exists)
-                            if (precedingText.isNotBlank()) {
-                                val precedingTextMessage = Message(
-                                    role = "assistant",
-                                    text = precedingText,
-                                    attachments = emptyList(),
-                                    model = currentModel,
-                                    datetime = getCurrentDateTimeISO()
-                                )
-
-                                val updatedChatAfterText = repository.addResponseToCurrentVariant(
-                                    currentUser,
-                                    currentChat.chat_id,
-                                    precedingTextMessage
-                                )
-
-                                // Update UI and CLEAR streaming text
-                                val refreshedHistory = repository.loadChatHistory(currentUser).chat_history
-                                _uiState.value = _uiState.value.copy(
-                                    currentChat = updatedChatAfterText,
-                                    chatHistory = refreshedHistory,
-                                    streamingText = ""  // Clear accumulated streaming text
-                                )
-                            }
-
-                            // Get the canonical tool display name from ToolRegistry
-                            val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
-                                .getToolDisplayName(toolCall.toolId)
-
-                            _uiState.value = _uiState.value.copy(
-                                executingToolCall = ExecutingToolInfo(
-                                    toolId = toolCall.toolId,
-                                    toolName = toolDisplayName,  // Use canonical name from registry
-                                    startTime = getCurrentDateTimeISO()
-                                )
-                            )
-                            val result = executeToolCall(toolCall)
-                            _uiState.value = _uiState.value.copy(executingToolCall = null)
-                            return result
-                        }
-                        
-                        override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message) {
-                            // Always use branching-aware method
-                            var tempChat = repository.addResponseToCurrentVariant(
-                                currentUser,
-                                currentChat.chat_id,
-                                toolCallMessage
-                            )
-                            tempChat = repository.addResponseToCurrentVariant(
-                                currentUser,
-                                currentChat.chat_id,
-                                toolResponseMessage
-                            )
-                            
-                            // Reload chat history
-                            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-                            
-                            // Update UI
-                            _uiState.value = _uiState.value.copy(
-                                currentChat = tempChat,
-                                chatHistory = finalChatHistory
-                            )
-                        }
-                    }
-
                     // Get project attachments if this chat belongs to a project
                     val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
 
-                    repository.sendMessage(
+                    // Generate unique request ID for this API call
+                    val requestId = UUID.randomUUID().toString()
+
+                    // Start streaming request via the foreground service
+                    startStreamingRequest(
+                        requestId = requestId,
+                        chatId = chatId,
+                        username = currentUser,
                         provider = currentProvider,
                         modelName = currentModel,
                         messages = currentChat.messages,
                         systemPrompt = systemPrompt,
-                        username = currentUser,
-                        chatId = currentChat.chat_id,
-                        projectAttachments = projectAttachments,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
-                        enabledTools = getEnabledToolSpecifications(),
-                        callback = streamingCallback
+                        projectAttachments = projectAttachments,
+                        enabledTools = getEnabledToolSpecifications()
                     )
 
                     // Optionally refresh chat after potential file re-uploads
                     val refreshed = repository.loadChatHistory(currentUser)
-                    val refreshedCurrentChat = refreshed.chat_history.find { it.chat_id == currentChat.chat_id } ?: currentChat
+                    val refreshedCurrentChat = refreshed.chat_history.find { it.chat_id == chatId } ?: currentChat
                     _uiState.value = _uiState.value.copy(
                         currentChat = refreshedCurrentChat,
                         chatHistory = refreshed.chat_history
                     )
                 } catch (e: Exception) {
+                    Log.e("ChatViewModel", "Error starting buffered batch request", e)
                     _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        isStreaming = false,
-                        streamingText = ""
+                        loadingChatIds = _uiState.value.loadingChatIds - chatId,
+                        streamingChatIds = _uiState.value.streamingChatIds - chatId,
+                        streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
+                        snackbarMessage = "Error: ${e.message}"
                     )
                 }
             } else {
                 _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    isStreaming = false,
-                    streamingText = ""
+                    loadingChatIds = _uiState.value.loadingChatIds - chatId,
+                    streamingChatIds = _uiState.value.streamingChatIds - chatId,
+                    streamingTextByChat = _uiState.value.streamingTextByChat - chatId
                 )
             }
         }
@@ -1504,20 +1430,21 @@ class ChatViewModel(
             
             val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
             
+            val chatId = resendUpdatedChat!!.chat_id
             _uiState.value = _uiState.value.copy(
                 currentChat = resendUpdatedChat,
                 chatHistory = finalChatHistory,
-                isLoading = true,
-                isStreaming = true,
-                streamingText = ""
+                loadingChatIds = _uiState.value.loadingChatIds + chatId,
+                streamingChatIds = _uiState.value.streamingChatIds + chatId,
+                streamingTextByChat = _uiState.value.streamingTextByChat + (chatId to "")
             )
-            
-            sendApiRequestForChat(resendUpdatedChat!!)
+
+            sendApiRequestForChat(resendUpdatedChat)
         }
     }
     
     /**
-     * Send API request for the current branch of a chat.
+     * Send API request for the current branch of a chat using the streaming service.
      * This is used when creating new branches or resending messages.
      */
     private fun sendApiRequestForCurrentBranch(chat: Chat) {
@@ -1525,220 +1452,56 @@ class ChatViewModel(
         val currentProvider = _uiState.value.currentProvider
         val currentModel = _uiState.value.currentModel
         val systemPrompt = getEffectiveSystemPrompt()
-        
+        val chatId = chat.chat_id
+
         if (currentProvider == null || currentModel.isEmpty()) {
             return
         }
-        
+
+        // Use per-chat loading state
         _uiState.value = _uiState.value.copy(
-            isLoading = true,
-            isStreaming = true,
-            streamingText = ""
+            loadingChatIds = _uiState.value.loadingChatIds + chatId,
+            streamingChatIds = _uiState.value.streamingChatIds + chatId,
+            streamingTextByChat = _uiState.value.streamingTextByChat + (chatId to "")
         )
-        
+
         viewModelScope.launch {
             try {
-                val streamingCallback = createStreamingCallback(chat.chat_id, currentModel, currentUser)
-                
                 val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
-                
-                repository.sendMessage(
+
+                // Generate unique request ID for this API call
+                val requestId = UUID.randomUUID().toString()
+
+                // Start streaming request via the foreground service
+                startStreamingRequest(
+                    requestId = requestId,
+                    chatId = chatId,
+                    username = currentUser,
                     provider = currentProvider,
                     modelName = currentModel,
                     messages = chat.messages,
                     systemPrompt = systemPrompt,
-                    username = currentUser,
-                    chatId = chat.chat_id,
-                    projectAttachments = projectAttachments,
                     webSearchEnabled = _uiState.value.webSearchEnabled,
-                    enabledTools = getEnabledToolSpecifications(),
-                    callback = streamingCallback
+                    projectAttachments = projectAttachments,
+                    enabledTools = getEnabledToolSpecifications()
                 )
             } catch (e: Exception) {
+                Log.e("ChatViewModel", "Error starting branch request", e)
                 _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    isStreaming = false,
-                    streamingText = ""
+                    loadingChatIds = _uiState.value.loadingChatIds - chatId,
+                    streamingChatIds = _uiState.value.streamingChatIds - chatId,
+                    streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
+                    snackbarMessage = "Error: ${e.message}"
                 )
             }
         }
     }
-    
+
     /**
      * Send API request for a chat (fallback for non-branching scenarios).
      */
     private fun sendApiRequestForChat(chat: Chat) {
         sendApiRequestForCurrentBranch(chat)
-    }
-    
-    /**
-     * Create a streaming callback for handling API responses.
-     */
-    private fun createStreamingCallback(
-        chatId: String,
-        modelName: String,
-        username: String
-    ): StreamingCallback {
-        return object : StreamingCallback {
-            override fun onPartialResponse(text: String) {
-                val currentStreamingText = _uiState.value.streamingText
-                _uiState.value = _uiState.value.copy(
-                    streamingText = currentStreamingText + text
-                )
-            }
-
-            override fun onComplete(fullText: String) {
-                viewModelScope.launch {
-                    val assistantMessage = Message(
-                        role = "assistant",
-                        text = fullText,
-                        attachments = emptyList(),
-                        model = modelName,
-                        datetime = getCurrentDateTimeISO()
-                    )
-                    
-                    // Check if chat has branching structure
-                    val currentChat = repository.loadChatHistory(username).chat_history
-                        .find { it.chat_id == chatId }
-                    
-                    val finalUpdatedChat = if (currentChat?.hasBranchingStructure == true) {
-                        // Add response to current variant
-                        repository.addResponseToCurrentVariant(
-                            username,
-                            chatId,
-                            assistantMessage
-                        )
-                    } else {
-                        // Fallback to regular message add
-                        repository.addMessageToChat(
-                            username,
-                            chatId,
-                            assistantMessage
-                        )
-                    }
-
-                    val finalHistory = repository.loadChatHistory(username).chat_history
-
-                    _uiState.value = _uiState.value.copy(
-                        currentChat = finalUpdatedChat,
-                        isLoading = false,
-                        isStreaming = false,
-                        streamingText = "",
-                        chatHistory = finalHistory
-                    )
-                    
-                    // Handle title generation
-                    if (finalUpdatedChat != null) {
-                        handleTitleGeneration(finalUpdatedChat)
-                    }
-                }
-            }
-
-            override fun onError(error: String) {
-                viewModelScope.launch {
-                    val errorMessage = Message(
-                        role = "assistant",
-                        text = "שגיאה: $error",
-                        attachments = emptyList(),
-                        model = modelName,
-                        datetime = getCurrentDateTimeISO()
-                    )
-                    
-                    val currentChat = repository.loadChatHistory(username).chat_history
-                        .find { it.chat_id == chatId }
-                    
-                    val finalUpdatedChat = if (currentChat?.hasBranchingStructure == true) {
-                        repository.addResponseToCurrentVariant(
-                            username,
-                            chatId,
-                            errorMessage
-                        )
-                    } else {
-                        repository.addMessageToChat(
-                            username,
-                            chatId,
-                            errorMessage
-                        )
-                    }
-
-                    val finalHistory = repository.loadChatHistory(username).chat_history
-
-                    _uiState.value = _uiState.value.copy(
-                        currentChat = finalUpdatedChat,
-                        isLoading = false,
-                        isStreaming = false,
-                        streamingText = "",
-                        chatHistory = finalHistory
-                    )
-                }
-            }
-            
-            override suspend fun onToolCall(
-                toolCall: com.example.ApI.tools.ToolCall,
-                precedingText: String
-            ): com.example.ApI.tools.ToolExecutionResult {
-                // Save preceding text as assistant message (if exists)
-                if (precedingText.isNotBlank()) {
-                    val precedingTextMessage = Message(
-                        role = "assistant",
-                        text = precedingText,
-                        attachments = emptyList(),
-                        model = modelName,
-                        datetime = getCurrentDateTimeISO()
-                    )
-
-                    val currentChat = repository.loadChatHistory(username).chat_history
-                        .find { it.chat_id == chatId }
-
-                    if (currentChat?.hasBranchingStructure == true) {
-                        repository.addResponseToCurrentVariant(username, chatId, precedingTextMessage)
-                    } else {
-                        repository.addMessageToChat(username, chatId, precedingTextMessage)
-                    }
-
-                    // Update UI and CLEAR streaming text
-                    val refreshedHistory = repository.loadChatHistory(username).chat_history
-                    val updatedChat = refreshedHistory.find { it.chat_id == chatId }
-                    _uiState.value = _uiState.value.copy(
-                        currentChat = updatedChat,
-                        chatHistory = refreshedHistory,
-                        streamingText = ""  // Clear accumulated streaming text
-                    )
-                }
-
-                _uiState.value = _uiState.value.copy(
-                    executingToolCall = ExecutingToolInfo(
-                        toolId = toolCall.toolId,
-                        toolName = toolCall.toolId,
-                        startTime = getCurrentDateTimeISO()
-                    )
-                )
-                val result = executeToolCall(toolCall)
-                _uiState.value = _uiState.value.copy(executingToolCall = null)
-                return result
-            }
-            
-            override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message) {
-                val currentChat = repository.loadChatHistory(username).chat_history
-                    .find { it.chat_id == chatId }
-                
-                if (currentChat?.hasBranchingStructure == true) {
-                    repository.addResponseToCurrentVariant(username, chatId, toolCallMessage)
-                    repository.addResponseToCurrentVariant(username, chatId, toolResponseMessage)
-                } else {
-                    repository.addMessageToChat(username, chatId, toolCallMessage)
-                    repository.addMessageToChat(username, chatId, toolResponseMessage)
-                }
-                
-                val finalHistory = repository.loadChatHistory(username).chat_history
-                val updatedChat = finalHistory.find { it.chat_id == chatId }
-                
-                _uiState.value = _uiState.value.copy(
-                    currentChat = updatedChat,
-                    chatHistory = finalHistory
-                )
-            }
-        }
     }
     
     // Title Generation and User Settings methods

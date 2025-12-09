@@ -16,9 +16,10 @@ enum class TextDirectionMode {
 
 data class ChatUiState(
     val currentMessage: String = "",
-    val isLoading: Boolean = false,
-    val isStreaming: Boolean = false,
-    val streamingText: String = "",
+    // Per-chat loading/streaming state (replaces global flags)
+    val loadingChatIds: Set<String> = emptySet(),
+    val streamingChatIds: Set<String> = emptySet(),
+    val streamingTextByChat: Map<String, String> = emptyMap(),
     val showProviderSelector: Boolean = false,
     val showModelSelector: Boolean = false,
     val showSystemPromptDialog: Boolean = false,
@@ -62,7 +63,17 @@ data class ChatUiState(
     val textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO, // Text direction mode for message bubbles
     val renamingChatIds: Set<String> = emptySet(), // Track chats currently being renamed with AI
     val pendingChatImport: PendingChatImport? = null // Pending chat JSON file that needs user decision
-)
+) {
+    // Helper functions for per-chat state checks
+    fun isLoadingChat(chatId: String): Boolean = chatId in loadingChatIds
+    fun isStreamingChat(chatId: String): Boolean = chatId in streamingChatIds
+    fun getStreamingText(chatId: String): String = streamingTextByChat[chatId] ?: ""
+
+    // Backward compatibility computed properties for current chat
+    val isLoading: Boolean get() = currentChat?.chat_id?.let { it in loadingChatIds } ?: false
+    val isStreaming: Boolean get() = currentChat?.chat_id?.let { it in streamingChatIds } ?: false
+    val streamingText: String get() = currentChat?.chat_id?.let { streamingTextByChat[it] } ?: ""
+}
 
 data class ChatContextMenuState(
     val chat: Chat,

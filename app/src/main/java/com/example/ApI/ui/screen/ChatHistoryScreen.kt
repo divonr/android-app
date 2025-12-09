@@ -409,7 +409,8 @@ fun ChatHistoryScreen(
                                                     viewModel.showChatContextMenu(chat, offset)
                                                 },
                                                 modifier = Modifier.padding(start = 32.dp), // Indent grouped chats
-                                                isRenaming = uiState.renamingChatIds.contains(chat.chat_id)
+                                                isRenaming = uiState.renamingChatIds.contains(chat.chat_id),
+                                                isStreaming = uiState.isStreamingChat(chat.chat_id)
                                             )
                                         }
                                     }
@@ -426,7 +427,8 @@ fun ChatHistoryScreen(
                                             onLongClick = { offset ->
                                                 viewModel.showChatContextMenu(item.chat, offset)
                                             },
-                                            isRenaming = uiState.renamingChatIds.contains(item.chat.chat_id)
+                                            isRenaming = uiState.renamingChatIds.contains(item.chat.chat_id),
+                                            isStreaming = uiState.isStreamingChat(item.chat.chat_id)
                                         )
                                     }
                                 }
@@ -731,7 +733,8 @@ fun ChatHistoryItem(
     onClick: () -> Unit,
     onLongClick: (DpOffset) -> Unit,
     modifier: Modifier = Modifier,
-    isRenaming: Boolean = false
+    isRenaming: Boolean = false,
+    isStreaming: Boolean = false // Show loading indicator when streaming response
 ) {
     var itemPosition by remember { mutableStateOf(DpOffset.Zero) }
     var itemTopLeft by remember { mutableStateOf(Offset.Zero) }
@@ -841,7 +844,17 @@ fun ChatHistoryItem(
             }
             
             Spacer(modifier = Modifier.width(8.dp))
-            
+
+            // Streaming indicator - show when this chat is receiving a response
+            if (isStreaming) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = Primary,
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+
             // Timestamp
             Column(
                 horizontalAlignment = Alignment.End
