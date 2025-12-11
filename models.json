@@ -36,7 +36,7 @@
   {
     "provider": "poe",
     "models": [
-      { "name": "Claude-Sonnet-4.5", "1k_input_points": 85, "1k_output_points": 425 }
+      { "name": "Claude-Sonnet-4.5", "min_points": 425 }
       { "name": "GPT-5", "min_points": 250 },
       { "name": "GPT-4.1", "min_points": 206 },
       { "name": "o3", "min_points": 401 },
