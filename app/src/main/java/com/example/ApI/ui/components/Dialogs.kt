@@ -251,7 +251,8 @@ fun SystemPromptDialog(
 fun ProviderSelectorDialog(
     providers: List<Provider>,
     onProviderSelected: (Provider) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onRefresh: (() -> Unit)? = null
 ) {
     Dialog(onDismissRequest = onDismiss) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -264,13 +265,33 @@ fun ProviderSelectorDialog(
                         .padding(16.dp)
                         .widthIn(max = 300.dp)
                 ) {
-                    Text(
-                        text = "Select Provider",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = OnSurface,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "בחירת ספק API",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = OnSurface,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        if (onRefresh != null) {
+                            IconButton(
+                                onClick = onRefresh,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh models",
+                                    tint = Primary
+                                )
+                            }
+                        }
+                    }
 
                     LazyColumn(
                         modifier = Modifier.heightIn(max = 400.dp)
@@ -313,10 +334,11 @@ fun ProviderSelectorDialog(
 fun ModelSelectorDialog(
     models: List<Model>,
     onModelSelected: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onRefresh: (() -> Unit)? = null
 ) {
     var customModelName by remember { mutableStateOf("") }
-    
+
     Dialog(onDismissRequest = onDismiss) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
             Surface(
@@ -328,17 +350,37 @@ fun ModelSelectorDialog(
                         .padding(16.dp)
                         .widthIn(max = 320.dp)
                 ) {
-                    Text(
-                        text = "Select Model",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = OnSurface,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "בחירת מודל",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = OnSurface,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        if (onRefresh != null) {
+                            IconButton(
+                                onClick = onRefresh,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh models",
+                                    tint = Primary
+                                )
+                            }
+                        }
+                    }
 
                     // Custom model input section
                     Text(
-                        text = "Or enter custom model:",
+                        text = "או הכנס שם מדויק:",
                         style = MaterialTheme.typography.bodyMedium,
                         color = OnSurface,
                         modifier = Modifier.padding(bottom = 8.dp)
@@ -350,7 +392,7 @@ fun ModelSelectorDialog(
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = {
                             Text(
-                                text = "Enter model name...",
+                                text = "הכנס שם מדויק...",
                                 color = OnSurface.copy(alpha = 0.7f)
                             )
                         },
@@ -387,7 +429,7 @@ fun ModelSelectorDialog(
                     
                     // Available models section
                     Text(
-                        text = "Available models:",
+                        text = "מודלים זמינים:",
                         style = MaterialTheme.typography.bodyMedium,
                         color = OnSurface,
                         modifier = Modifier.padding(bottom = 8.dp)
@@ -412,12 +454,18 @@ fun ModelSelectorDialog(
                                         color = OnSurface,
                                         style = MaterialTheme.typography.bodyLarge
                                     )
-                                    model.min_points?.let { points ->
-                                        Text(
-                                            text = "Min points: $points",
-                                            color = OnSurface.copy(alpha = 0.7f),
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
+                                    // Display pricing information for Poe models
+                                    model.pricing?.let { pricing ->
+                                        PricingText(pricing)
+                                    } ?: run {
+                                        // Fallback to legacy min_points if no pricing object
+                                        model.min_points?.let { points ->
+                                            Text(
+                                                text = "Min points: $points",
+                                                color = OnSurface.copy(alpha = 0.7f),
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -929,5 +977,64 @@ fun ChatExportDialog(
                 }
             }
         }
+    }
+}
+
+/**
+ * Displays pricing information for Poe models.
+ * Supports three pricing types:
+ * - Fixed pricing: exact points per message
+ * - Token-based pricing: points per 1k input/output tokens
+ * - Legacy pricing: minimum points (deprecated)
+ */
+@Composable
+private fun PricingText(pricing: PoePricing) {
+    when {
+        // Fixed pricing (exact points per message)
+        pricing.isFixedPricing -> {
+            Text(
+                text = "Points: ${pricing.points}",
+                color = OnSurface.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        // Token-based pricing (points per 1k tokens)
+        pricing.isTokenBasedPricing -> {
+            Column {
+                pricing.input_points_per_1k?.let { inputPoints ->
+                    Text(
+                        text = "Input: ${formatPoints(inputPoints)} pts/1k tokens",
+                        color = OnSurface.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                pricing.output_points_per_1k?.let { outputPoints ->
+                    Text(
+                        text = "Output: ${formatPoints(outputPoints)} pts/1k tokens",
+                        color = OnSurface.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+        // Legacy pricing (min_points)
+        pricing.isLegacyPricing -> {
+            Text(
+                text = "Min points: ${pricing.min_points}",
+                color = OnSurface.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+/**
+ * Formats points value, removing unnecessary decimal places
+ */
+private fun formatPoints(points: Double): String {
+    return if (points == points.toLong().toDouble()) {
+        points.toLong().toString()
+    } else {
+        String.format("%.2f", points)
     }
 }

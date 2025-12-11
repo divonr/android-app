@@ -179,19 +179,72 @@ class DataRepository(private val context: Context) {
 
     /**
      * Force refresh models from remote regardless of cache status
+     * Returns a Pair of (success: Boolean, errorMessage: String?)
      */
-    suspend fun forceRefreshModels(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun forceRefreshModels(): Pair<Boolean, String?> = withContext(Dispatchers.IO) {
         android.util.Log.i("DataRepository", "Force refreshing models from remote...")
-        val remoteModels = fetchModelsFromRemote()
 
-        if (remoteModels != null) {
-            saveCachedModels(remoteModels)
-            saveModelsCacheMetadata()
-            android.util.Log.i("DataRepository", "Models force refreshed successfully")
-            return@withContext true
+        try {
+            val url = URL(MODELS_JSON_URL)
+            android.util.Log.d("DataRepository", "Fetching from URL: $url")
+
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 15000
+            connection.readTimeout = 15000
+
+            val responseCode = connection.responseCode
+            android.util.Log.d("DataRepository", "Response code: $responseCode")
+
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                val reader = BufferedReader(InputStreamReader(connection.inputStream, "UTF-8"))
+                val response = StringBuilder()
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    response.append(line)
+                }
+                reader.close()
+
+                val jsonString = response.toString().trim()
+                android.util.Log.d("DataRepository", "Response length: ${jsonString.length}")
+                android.util.Log.d("DataRepository", "First 200 chars: ${jsonString.take(200)}")
+                android.util.Log.d("DataRepository", "Last 200 chars: ${jsonString.takeLast(200)}")
+
+                // Check if response is HTML instead of JSON
+                if (jsonString.startsWith("<") || jsonString.contains("<!DOCTYPE") || jsonString.contains("<html")) {
+                    val errorMsg = "Received HTML instead of JSON. Check URL and network access."
+                    android.util.Log.e("DataRepository", errorMsg)
+                    return@withContext Pair(false, errorMsg)
+                }
+
+                val remoteModels = try {
+                    json.decodeFromString<List<RemoteProviderModels>>(jsonString)
+                } catch (e: Exception) {
+                    val errorMsg = "JSON parsing failed: ${e.message}"
+                    android.util.Log.e("DataRepository", errorMsg)
+                    android.util.Log.e("DataRepository", "JSON stacktrace:", e)
+                    // Log first part of JSON to see what's wrong
+                    android.util.Log.e("DataRepository", "JSON preview (first 500 chars):\n${jsonString.take(500)}")
+                    return@withContext Pair(false, errorMsg)
+                }
+
+                android.util.Log.i("DataRepository", "Successfully parsed ${remoteModels.size} providers from remote")
+
+                saveCachedModels(remoteModels)
+                saveModelsCacheMetadata()
+                android.util.Log.i("DataRepository", "Models force refreshed successfully")
+
+                return@withContext Pair(true, null)
+            } else {
+                val errorMsg = "HTTP $responseCode"
+                android.util.Log.e("DataRepository", "Failed to fetch models: $errorMsg")
+                return@withContext Pair(false, errorMsg)
+            }
+        } catch (e: Exception) {
+            val errorMsg = e.message ?: e.javaClass.simpleName
+            android.util.Log.e("DataRepository", "Failed to fetch models from remote: $errorMsg", e)
+            return@withContext Pair(false, errorMsg)
         }
-
-        return@withContext false
     }
 
     /**
@@ -208,8 +261,22 @@ class DataRepository(private val context: Context) {
      */
     private fun remoteModelsToModels(remoteModels: List<RemoteModel>): List<Model> {
         return remoteModels.map { remote ->
-            if (remote.min_points != null) {
-                Model.ComplexModel(name = remote.name, min_points = remote.min_points)
+            // Check if any pricing info is available
+            val hasPricing = remote.min_points != null || remote.points != null ||
+                    remote.input_points_per_1k != null || remote.output_points_per_1k != null
+
+            if (hasPricing) {
+                val pricing = PoePricing(
+                    min_points = remote.min_points,
+                    points = remote.points,
+                    input_points_per_1k = remote.input_points_per_1k,
+                    output_points_per_1k = remote.output_points_per_1k
+                )
+                Model.ComplexModel(
+                    name = remote.name,
+                    min_points = remote.min_points,
+                    pricing = pricing
+                )
             } else {
                 Model.SimpleModel(remote.name)
             }
@@ -249,8 +316,8 @@ class DataRepository(private val context: Context) {
     )
 
     private val defaultPoeModels = listOf(
-        Model.ComplexModel(name = "GPT-4o", min_points = 250),
-        Model.ComplexModel(name = "Claude-Sonnet-3.5", min_points = 270)
+        Model.ComplexModel(name = "GPT-4o", min_points = 250, pricing = PoePricing(min_points = 250)),
+        Model.ComplexModel(name = "Claude-Sonnet-3.5", min_points = 270, pricing = PoePricing(min_points = 270))
     )
 
     private val defaultCohereModels = listOf(

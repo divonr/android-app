@@ -1030,7 +1030,8 @@ fun ChatScreen(
                 ProviderSelectorDialog(
                     providers = uiState.availableProviders,
                     onProviderSelected = { viewModel.selectProvider(it) },
-                    onDismiss = { viewModel.hideProviderSelector() }
+                    onDismiss = { viewModel.hideProviderSelector() },
+                    onRefresh = { viewModel.refreshModels() }
                 )
             }
 
@@ -1039,7 +1040,8 @@ fun ChatScreen(
                 ModelSelectorDialog(
                     models = uiState.currentProvider?.models ?: emptyList(),
                     onModelSelected = { viewModel.selectModel(it) },
-                    onDismiss = { viewModel.hideModelSelector() }
+                    onDismiss = { viewModel.hideModelSelector() },
+                    onRefresh = { viewModel.refreshModels() }
                 )
             }
 

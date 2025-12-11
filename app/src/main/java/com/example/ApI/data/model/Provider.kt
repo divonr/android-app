@@ -12,24 +12,67 @@ data class Provider(
     val upload_files_response_important_fields: UploadResponseFields? = null
 )
 
+/**
+ * Represents Poe pricing information for a model.
+ * Can be either fixed (exact points per message) or token-based (points per 1k tokens).
+ */
+@Serializable
+data class PoePricing(
+    // Fixed pricing - exact points per message (mutually exclusive with token-based)
+    val points: Int? = null,
+    // Legacy minimum points field (deprecated)
+    val min_points: Int? = null,
+    // Token-based pricing - points per 1000 input tokens
+    val input_points_per_1k: Double? = null,
+    // Token-based pricing - points per 1000 output tokens
+    val output_points_per_1k: Double? = null
+) {
+    /**
+     * Returns true if this is fixed pricing (exact points per message)
+     */
+    val isFixedPricing: Boolean
+        get() = points != null
+
+    /**
+     * Returns true if this is token-based pricing
+     */
+    val isTokenBasedPricing: Boolean
+        get() = input_points_per_1k != null || output_points_per_1k != null
+
+    /**
+     * Returns true if this uses the legacy min_points field
+     */
+    val isLegacyPricing: Boolean
+        get() = min_points != null && points == null && !isTokenBasedPricing
+
+    /**
+     * Returns true if any pricing information is available
+     */
+    val hasPricing: Boolean
+        get() = points != null || min_points != null || isTokenBasedPricing
+}
+
 @Serializable
 sealed class Model {
     abstract val name: String?
     abstract val min_points: Int?
-    
+    abstract val pricing: PoePricing?
+
     @Serializable
     data class SimpleModel(
         override val name: String,
-        override val min_points: Int? = null
+        override val min_points: Int? = null,
+        override val pricing: PoePricing? = null
     ) : Model()
-    
+
     @Serializable
     data class ComplexModel(
         override val name: String? = null,
         override val min_points: Int? = null,
+        override val pricing: PoePricing? = null,
         val other_fields: Map<String, kotlinx.serialization.json.JsonElement>? = null
     ) : Model()
-    
+
     override fun toString(): String = name ?: "Unknown Model"
 }
 

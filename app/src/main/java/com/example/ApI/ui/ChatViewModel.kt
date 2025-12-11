@@ -909,6 +909,79 @@ class ChatViewModel(
         _uiState.value = _uiState.value.copy(showModelSelector = false)
     }
 
+    fun refreshModels() {
+        viewModelScope.launch {
+            try {
+                // Show loading message
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "מעדכן את רשימת המודלים הזמינים...",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                android.util.Log.d("ChatViewModel", "Starting forceRefreshModels()")
+                val (success, errorMessage) = repository.forceRefreshModels()
+                android.util.Log.d("ChatViewModel", "forceRefreshModels() returned: success=$success, error=$errorMessage")
+
+                if (success) {
+                    // Reload providers with updated models
+                    val settings = repository.loadAppSettings()
+                    val allProviders = repository.loadProviders()
+                    val activeApiKeyProviders = repository.loadApiKeys(settings.current_user)
+                        .filter { it.isActive }
+                        .map { it.provider }
+                    val providers = allProviders.filter { provider ->
+                        activeApiKeyProviders.contains(provider.provider)
+                    }
+
+                    // Update UI state with refreshed providers
+                    _uiState.value = _uiState.value.copy(availableProviders = providers)
+
+                    // Update current provider with refreshed models
+                    val currentProvider = providers.find { it.provider == _uiState.value.currentProvider?.provider }
+                    if (currentProvider != null) {
+                        _uiState.value = _uiState.value.copy(currentProvider = currentProvider)
+                    }
+
+                    // Show success message
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "הרשימה עודכנה בהצלחה!",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                } else {
+                    // Show failure message with details
+                    withContext(Dispatchers.Main) {
+                        val message = if (errorMessage != null) {
+                            "שגיאה בעדכון הרשימה: $errorMessage"
+                        } else {
+                            "שגיאה בעדכון הרשימה. אנא נסה שוב."
+                        }
+                        android.widget.Toast.makeText(
+                            context,
+                            message,
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ChatViewModel", "Failed to refresh models", e)
+                // Show error message
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "שגיאה בעדכון הרשימה: ${e.message}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
     fun showSystemPromptDialog() {
         _uiState.value = _uiState.value.copy(showSystemPromptDialog = true)
     }
