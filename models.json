@@ -36,22 +36,7 @@
   {
     "provider": "poe",
     "models": [
-      { "name": "Claude-Sonnet-4.5", "min_points": 425 },
-      { "name": "GPT-5", "min_points": 250 },
-      { "name": "GPT-4.1", "min_points": 206 },
-      { "name": "o3", "min_points": 401 },
-      { "name": "o4-mini", "min_points": 243 },
-      { "name": "Claude-Sonnet-4-Search", "min_points": 870 },
-      { "name": "Claude-Sonnet-4-Reasoning", "min_points": 1628 },
-      { "name": "Claude-Sonnet-3.5", "min_points": 270 },
-      { "name": "GLM-4.5", "min_points": 180 },
-      { "name": "Gemini-2.5-Pro", "min_points": 335 },
-      { "name": "Grok-3", "min_points": 856 },
-      { "name": "Grok-4", "min_points": 773 },
-      { "name": "GPT-OSS-120B-T", "min_points": 50 },
-      { "name": "DeepSeek-V3-FW", "min_points": 300 },
-      { "name": "DeepSeek-R1", "min_points": 600 },
-      { "name": "Kimi-K2", "min_points": 200 }
+      { "name": "Claude-Sonnet-4.5", "points": 100 }
     ]
   },
   {
