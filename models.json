@@ -37,30 +37,33 @@
     "provider": "poe",
     "models": [
       { "name": "Claude-Sonnet-4.5", "1k_input_points": 85, "1k_output_points": 425 },
-      { "name": "GPT-5", "min_points": 250 },
-      { "name": "GPT-4.1", "min_points": 206 },
-      { "name": "o3", "min_points": 401 },
-      { "name": "o4-mini", "min_points": 243 },
-      { "name": "Claude-Sonnet-4-Search", "min_points": 870 },
-      { "name": "Claude-Sonnet-4-Reasoning", "min_points": 1628 },
-      { "name": "Claude-Sonnet-3.5", "min_points": 270 },
-      { "name": "GLM-4.5", "min_points": 180 },
-      { "name": "Gemini-2.5-Pro", "min_points": 335 },
-      { "name": "Grok-3", "min_points": 856 },
-      { "name": "Grok-4", "min_points": 773 },
-      { "name": "GPT-OSS-120B-T", "min_points": 50 },
-      { "name": "DeepSeek-V3-FW", "min_points": 300 },
-      { "name": "DeepSeek-R1", "min_points": 600 },
-      { "name": "Kimi-K2", "min_points": 200 }
+      { "name": "Claude-Opus-4.5", "1k_input_points": 142, "1k_output_points": 709 },
+      { "name": "Claude-Sonnet-4-Search", "1k_input_points": 85, "1k_output_points": 425 },
+      { "name": "Claude-Sonnet-3.5", "1k_input_points": 85, "1k_output_points": 425 },
+      { "name": "Gemini-3-Pro", "1k_input_points": 54, "1k_output_points": 320 },
+      { "name": "Gemini-2.5-Pro", "1k_input_points": 29, "1k_output_points": 234 },
+      { "name": "GPT-5.1", "1k_input_points": 38, "1k_output_points": 300 },
+      { "name": "GPT-4o", "1k_input_points": 75, "1k_output_points": 300 },
+      { "name": "GPT-4.1", "1k_input_points": 60, "1k_output_points": 240 },
+      { "name": "o3", "1k_input_points": 60, "1k_output_points": 240 },
+      { "name": "o4-mini", "1k_input_points": 33, "1k_output_points": 132 },
+      { "name": "Grok-4", "1k_input_points": 100, "1k_output_points": 500 },
+      { "name": "Grok-4.1-Fast-Reasoning", "1k_input_points": 7, "1k_output_points": 17 },
+      { "name": "Grok-Code-Fast-1", "1k_input_points": 7, "1k_output_points": 50 },
+      { "name": "GLM-4.6", "points": 220 },
+      { "name": "GPT-OSS-120B-T", "points": 50 },
+      { "name": "DeepSeek-V3.2", "1k_input_points": 9, "1k_output_points": 14 },
+      { "name": "DeepSeek-R1", "points": 600 },
+      { "name": "Kimi-K2-Instruct", "points": 200 }
     ]
   },
   {
     "provider": "cohere",
     "models": [
-      { "name": "command-a-03-2025" },
       { "name": "command-r-plus-08-2024" },
+      { "name": "command-a-vision-07-2025" },
       { "name": "command-r-08-2024" },
-      { "name": "command-a-vision-07-2025" }
+      { "name": "command-a-03-2025" }
     ]
   },
   {
