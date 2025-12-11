@@ -1,6 +1,9 @@
 package com.example.ApI.ui.screen
 
+import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
@@ -37,6 +41,20 @@ fun IntegrationsScreen(
     var showGitHubOAuthDialog by remember { mutableStateOf(false) }
     var gitHubAuthUrl by remember { mutableStateOf("") }
     var gitHubAuthState by remember { mutableStateOf("") }
+
+    // Google Sign-In ActivityResultLauncher
+    // Note: Google Sign-In does NOT return Activity.RESULT_OK on success!
+    // It returns RESULT_CANCELED (0) even when successful.
+    // The actual result is determined by parsing the intent data.
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        // Always try to process the result - don't check resultCode
+        // Google Sign-In SDK will determine success/failure from the intent data
+        result.data?.let { data ->
+            viewModel.handleGoogleSignInResult(data)
+        }
+    }
 
     // Show GitHub OAuth WebView dialog
     if (showGitHubOAuthDialog && gitHubAuthUrl.isNotEmpty()) {
@@ -172,7 +190,7 @@ fun IntegrationsScreen(
                         // GitHub Integration
                         GitHubIntegrationItem(
                             viewModel = viewModel,
-                            isConnected = viewModel.isGitHubConnected(),
+                            isConnected = appSettings.githubConnections.containsKey(appSettings.current_user),
                             githubConnection = viewModel.getGitHubConnection(),
                             onToggle = { shouldConnect ->
                                 if (shouldConnect) {
@@ -185,6 +203,31 @@ fun IntegrationsScreen(
                                     // Disconnect
                                     viewModel.disconnectGitHub()
                                 }
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Google Workspace Integration
+                        GoogleWorkspaceIntegrationItem(
+                            viewModel = viewModel,
+                            // Use appSettings to check connection status reactively
+                            isConnected = appSettings.googleWorkspaceConnections.containsKey(appSettings.current_user) &&
+                                    (appSettings.googleWorkspaceConnections[appSettings.current_user]?.let { 
+                                        // Also verify token validity if possible, or assume true if in settings
+                                        true 
+                                    } ?: false),
+                            googleWorkspaceConnection = viewModel.getGoogleWorkspaceConnection(),
+                            onConnect = {
+                                // Launch Google Sign-In
+                                val intent = viewModel.getGoogleSignInIntent()
+                                googleSignInLauncher.launch(intent)
+                            },
+                            onDisconnect = {
+                                viewModel.disconnectGoogleWorkspace()
+                            },
+                            onServicesChange = { gmail, calendar, drive ->
+                                viewModel.updateGoogleWorkspaceServices(gmail, calendar, drive)
                             }
                         )
                     }
@@ -396,5 +439,164 @@ private fun GitHubIntegrationItem(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun GoogleWorkspaceIntegrationItem(
+    viewModel: ChatViewModel,
+    isConnected: Boolean,
+    googleWorkspaceConnection: com.example.ApI.data.model.GoogleWorkspaceConnection?,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onServicesChange: (Boolean, Boolean, Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val services = googleWorkspaceConnection?.enabledServices
+        ?: com.example.ApI.data.model.EnabledGoogleServices()
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = SurfaceVariant.copy(alpha = 0.3f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            // Main parent switch row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "חיבור ל-Google Workspace",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OnSurface,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (isConnected) {
+                            "מחובר כ-${googleWorkspaceConnection?.user?.email ?: "משתמש"}"
+                        } else {
+                            "גישה ל-Gmail, Calendar ו-Drive"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurface.copy(alpha = 0.7f),
+                        lineHeight = 16.sp
+                    )
+                }
+
+                Switch(
+                    checked = isConnected,
+                    onCheckedChange = { shouldConnect ->
+                        if (shouldConnect) {
+                            onConnect()
+                        } else {
+                            onDisconnect()
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Primary,
+                        checkedTrackColor = Primary.copy(alpha = 0.5f)
+                    )
+                )
+            }
+
+            // Show sub-switches when connected
+            if (isConnected) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = OnSurface.copy(alpha = 0.1f)
+                )
+
+                Text(
+                    text = "שירותים מופעלים:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface.copy(alpha = 0.6f),
+                    fontWeight = FontWeight.Medium
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Gmail sub-toggle
+                ServiceToggleRow(
+                    name = "Gmail",
+                    description = "קריאה, שליחה וחיפוש אימיילים",
+                    isEnabled = services.gmail,
+                    onToggle = { enabled ->
+                        onServicesChange(enabled, services.calendar, services.drive)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Calendar sub-toggle
+                ServiceToggleRow(
+                    name = "Calendar",
+                    description = "רשימת אירועים, יצירה וצפייה",
+                    isEnabled = services.calendar,
+                    onToggle = { enabled ->
+                        onServicesChange(services.gmail, enabled, services.drive)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Drive sub-toggle
+                ServiceToggleRow(
+                    name = "Drive",
+                    description = "רשימה, קריאה, העלאה ומחיקה",
+                    isEnabled = services.drive,
+                    onToggle = { enabled ->
+                        onServicesChange(services.gmail, services.calendar, enabled)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ServiceToggleRow(
+    name: String,
+    description: String,
+    isEnabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.bodySmall,
+                color = OnSurface.copy(alpha = 0.8f),
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = OnSurface.copy(alpha = 0.5f),
+                fontSize = 11.sp
+            )
+        }
+
+        Switch(
+            checked = isEnabled,
+            onCheckedChange = onToggle,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Primary,
+                checkedTrackColor = Primary.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier.scale(0.8f)
+        )
     }
 }

@@ -52,6 +52,22 @@ android {
     buildFeatures {
         compose = true
     }
+    
+    packaging {
+        resources {
+            excludes += listOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/license.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/notice.txt",
+                "META-INF/ASL2.0",
+                "META-INF/*.kotlin_module"
+            )
+        }
+    }
 }
 
 dependencies {
@@ -109,6 +125,19 @@ dependencies {
 
     // Chrome Custom Tabs (for WebView fallback)
     implementation("androidx.browser:browser:1.7.0")
+
+    // Google Sign-In
+    implementation("com.google.android.gms:play-services-auth:21.0.0")
+    
+    // Coroutines for Play Services (await() extension)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+
+    // Google APIs Client (for Gmail, Calendar, Drive)
+    implementation("com.google.api-client:google-api-client-android:2.2.0")
+    implementation("com.google.apis:google-api-services-gmail:v1-rev20231218-2.0.0")
+    implementation("com.google.apis:google-api-services-calendar:v3-rev20231123-2.0.0")
+    implementation("com.google.apis:google-api-services-drive:v3-rev20231128-2.0.0")
+    implementation("com.google.http-client:google-http-client-gson:1.44.1")
 
     // Testing
     testImplementation(libs.junit)

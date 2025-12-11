@@ -22,6 +22,7 @@ data class AppSettings(
     val childLockSettings: ChildLockSettings = ChildLockSettings(),
     val enabledTools: List<String> = emptyList(), // List of enabled tool IDs
     val githubConnections: Map<String, GitHubConnectionInfo> = emptyMap(), // GitHub connections per user (username -> connection info)
+    val googleWorkspaceConnections: Map<String, GoogleWorkspaceConnectionInfo> = emptyMap(), // Google Workspace connections per user
     val skipWelcomeScreen: Boolean = false // Whether to skip the welcome/onboarding screen
 )
 

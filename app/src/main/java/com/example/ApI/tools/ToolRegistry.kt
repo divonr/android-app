@@ -1,7 +1,14 @@
 package com.example.ApI.tools
 
+import com.example.ApI.data.model.EnabledGoogleServices
 import com.example.ApI.data.network.GitHubApiService
+import com.example.ApI.data.network.GmailApiService
+import com.example.ApI.data.network.GoogleCalendarApiService
+import com.example.ApI.data.network.GoogleDriveApiService
 import com.example.ApI.tools.github.*
+import com.example.ApI.tools.google.gmail.*
+import com.example.ApI.tools.google.calendar.*
+import com.example.ApI.tools.google.drive.*
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
 
@@ -28,10 +35,25 @@ class ToolRegistry {
         const val GITHUB_CREATE_PR = "github_create_pr"
         const val GITHUB_GET_REPO_INFO = "github_get_repo_info"
         const val GITHUB_LIST_REPOS = "github_list_repositories"
+
+        // Google Workspace tool IDs
+        const val GMAIL_READ_EMAIL = "gmail_read_email"
+        const val GMAIL_SEND_EMAIL = "gmail_send_email"
+        const val GMAIL_SEARCH_EMAILS = "gmail_search_emails"
+        const val CALENDAR_LIST_EVENTS = "calendar_list_events"
+        const val CALENDAR_CREATE_EVENT = "calendar_create_event"
+        const val CALENDAR_GET_EVENT = "calendar_get_event"
+        const val DRIVE_LIST_FILES = "drive_list_files"
+        const val DRIVE_READ_FILE = "drive_read_file"
+        const val DRIVE_SEARCH_FILES = "drive_search_files"
+        const val DRIVE_UPLOAD_FILE = "drive_upload_file"
+        const val DRIVE_CREATE_FOLDER = "drive_create_folder"
+        const val DRIVE_DELETE_FILE = "drive_delete_file"
     }
 
     private val tools = mutableMapOf<String, Tool>()
     private var githubToolsRegistered = false
+    private var googleWorkspaceToolsRegistered = false
 
     init {
         // Register all available tools
@@ -100,6 +122,117 @@ class ToolRegistry {
         GITHUB_GET_REPO_INFO,
         GITHUB_LIST_REPOS
     )
+
+    /**
+     * Register Google Workspace tools with authentication
+     * @param gmailService Gmail API service (null if Gmail disabled)
+     * @param calendarService Calendar API service (null if Calendar disabled)
+     * @param driveService Drive API service (null if Drive disabled)
+     * @param googleEmail The authenticated Google email
+     * @param enabledServices Which services are enabled
+     */
+    fun registerGoogleWorkspaceTools(
+        gmailService: GmailApiService?,
+        calendarService: GoogleCalendarApiService?,
+        driveService: GoogleDriveApiService?,
+        googleEmail: String,
+        enabledServices: EnabledGoogleServices
+    ) {
+        // Remove existing Google Workspace tools if any
+        unregisterGoogleWorkspaceTools()
+
+        // Register Gmail tools if enabled
+        if (enabledServices.gmail && gmailService != null) {
+            registerTool(GmailReadEmailTool(gmailService, googleEmail))
+            registerTool(GmailSendEmailTool(gmailService, googleEmail))
+            registerTool(GmailSearchEmailsTool(gmailService, googleEmail))
+        }
+
+        // Register Calendar tools if enabled
+        if (enabledServices.calendar && calendarService != null) {
+            registerTool(CalendarListEventsTool(calendarService, googleEmail))
+            registerTool(CalendarCreateEventTool(calendarService, googleEmail))
+            registerTool(CalendarGetEventTool(calendarService, googleEmail))
+        }
+
+        // Register Drive tools if enabled
+        if (enabledServices.drive && driveService != null) {
+            registerTool(DriveListFilesTool(driveService, googleEmail))
+            registerTool(DriveReadFileTool(driveService, googleEmail))
+            registerTool(DriveSearchFilesTool(driveService, googleEmail))
+            registerTool(DriveUploadFileTool(driveService, googleEmail))
+            registerTool(DriveCreateFolderTool(driveService, googleEmail))
+            registerTool(DriveDeleteFileTool(driveService, googleEmail))
+        }
+
+        googleWorkspaceToolsRegistered = enabledServices.hasAnyEnabled()
+    }
+
+    /**
+     * Unregister all Google Workspace tools
+     */
+    fun unregisterGoogleWorkspaceTools() {
+        // Gmail tools
+        tools.remove(GMAIL_READ_EMAIL)
+        tools.remove(GMAIL_SEND_EMAIL)
+        tools.remove(GMAIL_SEARCH_EMAILS)
+
+        // Calendar tools
+        tools.remove(CALENDAR_LIST_EVENTS)
+        tools.remove(CALENDAR_CREATE_EVENT)
+        tools.remove(CALENDAR_GET_EVENT)
+
+        // Drive tools
+        tools.remove(DRIVE_LIST_FILES)
+        tools.remove(DRIVE_READ_FILE)
+        tools.remove(DRIVE_SEARCH_FILES)
+        tools.remove(DRIVE_UPLOAD_FILE)
+        tools.remove(DRIVE_CREATE_FOLDER)
+        tools.remove(DRIVE_DELETE_FILE)
+
+        googleWorkspaceToolsRegistered = false
+    }
+
+    /**
+     * Check if Google Workspace tools are currently registered
+     */
+    fun areGoogleWorkspaceToolsRegistered(): Boolean = googleWorkspaceToolsRegistered
+
+    /**
+     * Get Gmail tool IDs
+     */
+    fun getGmailToolIds(): List<String> = listOf(
+        GMAIL_READ_EMAIL,
+        GMAIL_SEND_EMAIL,
+        GMAIL_SEARCH_EMAILS
+    )
+
+    /**
+     * Get Calendar tool IDs
+     */
+    fun getCalendarToolIds(): List<String> = listOf(
+        CALENDAR_LIST_EVENTS,
+        CALENDAR_CREATE_EVENT,
+        CALENDAR_GET_EVENT
+    )
+
+    /**
+     * Get Drive tool IDs
+     */
+    fun getDriveToolIds(): List<String> = listOf(
+        DRIVE_LIST_FILES,
+        DRIVE_READ_FILE,
+        DRIVE_SEARCH_FILES,
+        DRIVE_UPLOAD_FILE,
+        DRIVE_CREATE_FOLDER,
+        DRIVE_DELETE_FILE
+    )
+
+    /**
+     * Get all Google Workspace tool IDs
+     */
+    fun getGoogleWorkspaceToolIds(): List<String> =
+        getGmailToolIds() + getCalendarToolIds() + getDriveToolIds()
     
     /**
      * Register a tool with the registry

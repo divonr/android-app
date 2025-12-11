@@ -431,6 +431,10 @@ class ChatViewModel(
             if (!settings.skipWelcomeScreen) {
                 _currentScreen.value = Screen.Welcome
             }
+
+            // Initialize integration tools if connected
+            initializeGitHubToolsIfConnected()
+            initializeGoogleWorkspaceToolsIfConnected()
         }
     }
 
@@ -3102,6 +3106,168 @@ class ChatViewModel(
      */
     fun showSnackbar(message: String) {
         _uiState.value = _uiState.value.copy(snackbarMessage = message)
+    }
+
+    // ==================== Google Workspace Integration ====================
+
+    private var googleWorkspaceAuthService: com.example.ApI.data.network.GoogleWorkspaceAuthService? = null
+
+    /**
+     * Initialize Google Workspace auth service
+     */
+    private fun initGoogleWorkspaceAuthService() {
+        if (googleWorkspaceAuthService == null) {
+            googleWorkspaceAuthService = com.example.ApI.data.network.GoogleWorkspaceAuthService(context)
+        }
+    }
+
+    /**
+     * Get Google Sign-In intent
+     * @return Intent to launch for Google Sign-In
+     */
+    fun getGoogleSignInIntent(): Intent {
+        initGoogleWorkspaceAuthService()
+        return googleWorkspaceAuthService!!.getSignInIntent()
+    }
+
+    /**
+     * Handle Google Sign-In result
+     * @param data Intent data from ActivityResult
+     */
+    fun handleGoogleSignInResult(data: Intent) {
+        viewModelScope.launch {
+            try {
+                initGoogleWorkspaceAuthService()
+                android.util.Log.d("ChatViewModel", "Handling Google Sign-In result intent")
+                val result = googleWorkspaceAuthService!!.handleSignInResult(data)
+
+                result.fold(
+                    onSuccess = { (auth, user) ->
+                        android.util.Log.d("ChatViewModel", "Google Sign-In success: ${user.email}")
+                        // Save connection
+                        val connection = GoogleWorkspaceConnection(auth = auth, user = user)
+                        val username = _appSettings.value.current_user
+                        
+                        // Save and reload settings to update UI
+                        val updatedSettings = withContext(Dispatchers.IO) {
+                            android.util.Log.d("ChatViewModel", "Saving connection to repository")
+                            repository.saveGoogleWorkspaceConnection(username, connection)
+                            android.util.Log.d("ChatViewModel", "Reloading app settings")
+                            repository.loadAppSettings()
+                        }
+                        
+                        _appSettings.value = updatedSettings
+                        android.util.Log.d("ChatViewModel", "Settings updated with new connection")
+
+                        // Register tools
+                        initializeGoogleWorkspaceToolsIfConnected()
+
+                        showSnackbar("מחובר ל-Google Workspace בהצלחה")
+                    },
+                    onFailure = { error ->
+                        android.util.Log.e("ChatViewModel", "Google Sign-In failed", error)
+                        showSnackbar("שגיאת התחברות: ${error.message}")
+                    }
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("ChatViewModel", "Exception in handleGoogleSignInResult", e)
+                showSnackbar("שגיאה: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Check if Google Workspace is connected
+     */
+    fun isGoogleWorkspaceConnected(): Boolean {
+        val username = _appSettings.value.current_user
+        return repository.isGoogleWorkspaceConnected(username)
+    }
+
+    /**
+     * Get current Google Workspace connection
+     */
+    fun getGoogleWorkspaceConnection(): GoogleWorkspaceConnection? {
+        val username = _appSettings.value.current_user
+        return repository.loadGoogleWorkspaceConnection(username)
+    }
+
+    /**
+     * Disconnect Google Workspace
+     */
+    fun disconnectGoogleWorkspace() {
+        viewModelScope.launch {
+            try {
+                initGoogleWorkspaceAuthService()
+                googleWorkspaceAuthService!!.signOut()
+
+                val username = _appSettings.value.current_user
+                repository.removeGoogleWorkspaceConnection(username)
+
+                // Unregister tools
+                ToolRegistry.getInstance().unregisterGoogleWorkspaceTools()
+
+                showSnackbar("התנתקת מ-Google Workspace")
+            } catch (e: Exception) {
+                showSnackbar("שגיאה בהתנתקות: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Update enabled Google Workspace services
+     * @param gmail Enable Gmail tools
+     * @param calendar Enable Calendar tools
+     * @param drive Enable Drive tools
+     */
+    fun updateGoogleWorkspaceServices(gmail: Boolean, calendar: Boolean, drive: Boolean) {
+        viewModelScope.launch {
+            try {
+                val username = _appSettings.value.current_user
+                val services = EnabledGoogleServices(gmail, calendar, drive)
+                repository.updateGoogleWorkspaceEnabledServices(username, services)
+
+                // Re-register tools with new configuration
+                initializeGoogleWorkspaceToolsIfConnected()
+
+                showSnackbar("הגדרות השירותים עודכנו")
+            } catch (e: Exception) {
+                showSnackbar("שגיאה בעדכון: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Initialize Google Workspace tools if connected
+     * Call this on app start and after connection/service changes
+     */
+    fun initializeGoogleWorkspaceToolsIfConnected() {
+        viewModelScope.launch {
+            try {
+                val username = _appSettings.value.current_user
+                val connection = repository.loadGoogleWorkspaceConnection(username) ?: return@launch
+
+                if (connection.auth.isExpired()) {
+                    // Token expired - user needs to reconnect
+                    return@launch
+                }
+
+                // Get API services based on enabled services
+                val apiServices = repository.getGoogleWorkspaceApiServices(username) ?: return@launch
+                val (gmailService, calendarService, driveService) = apiServices
+
+                // Register tools
+                ToolRegistry.getInstance().registerGoogleWorkspaceTools(
+                    gmailService = gmailService,
+                    calendarService = calendarService,
+                    driveService = driveService,
+                    googleEmail = connection.user.email,
+                    enabledServices = connection.enabledServices
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     // ==================== Chat Import from JSON ====================
