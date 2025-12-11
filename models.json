@@ -26,15 +26,17 @@
   {
     "provider": "google",
     "models": [
-      { "name": "gemini-2.5-pro" },
       { "name": "gemini-2.5-flash" },
-      { "name": "gemini-1.5-pro-latest" },
-      { "name": "gemini-1.5-flash-latest" }
+      { "name": "gemini-3-pro-preview" },
+      { "name": "gemini-2.5-pro" }
+      { "name": "gemini-2.5-flash-lite" }
+      { "name": "gemini-2.0-flash-lite" }
     ]
   },
   {
     "provider": "poe",
     "models": [
+      { "name": "Claude-Sonnet-4.5", "1k_input_points": 85, "1k_output_points": 425 }
       { "name": "GPT-5", "min_points": 250 },
       { "name": "GPT-4.1", "min_points": 206 },
       { "name": "o3", "min_points": 401 },
