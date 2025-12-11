@@ -192,6 +192,13 @@ class ChatViewModel(
                     val refreshedHistory = repository.loadChatHistory(currentUser)
                     val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
 
+                    // Check for Cohere image not supported error
+                    val errorMessage = if (event.error.contains("image content is not supported for this model")) {
+                        "שימו לב, אצל הספק Cohere יש לבחור מודל שתומך בקלט תמונה, למשל command-a-vision-07-2025."
+                    } else {
+                        "שגיאה: ${event.error}"
+                    }
+
                     // Clear streaming state for this chat
                     _uiState.value = _uiState.value.copy(
                         loadingChatIds = _uiState.value.loadingChatIds - chatId,
@@ -199,7 +206,7 @@ class ChatViewModel(
                         streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
                         chatHistory = refreshedHistory.chat_history,
                         currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat,
-                        snackbarMessage = "Error: ${event.error}"
+                        snackbarMessage = errorMessage
                     )
                 }
             }
@@ -2975,11 +2982,11 @@ class ChatViewModel(
                                 val toolRegistry = ToolRegistry.getInstance()
                                 toolRegistry.registerGitHubTools(apiService, auth.accessToken, user.login)
 
-                                // Enable GitHub tools in settings
-                                val currentSettings = _appSettings.value
+                                // Reload appSettings to get the updated githubConnections, then add tool IDs
+                                val freshSettings = repository.loadAppSettings()
                                 val githubToolIds = toolRegistry.getGitHubToolIds()
-                                val updatedEnabledTools = (currentSettings.enabledTools + githubToolIds).distinct()
-                                val updatedSettings = currentSettings.copy(enabledTools = updatedEnabledTools)
+                                val updatedEnabledTools = (freshSettings.enabledTools + githubToolIds).distinct()
+                                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
                                 repository.saveAppSettings(updatedSettings)
                                 _appSettings.value = updatedSettings
 
@@ -3031,11 +3038,11 @@ class ChatViewModel(
                 val toolRegistry = ToolRegistry.getInstance()
                 toolRegistry.unregisterGitHubTools()
 
-                // Disable all GitHub tools in settings
-                val currentSettings = _appSettings.value
+                // Reload appSettings to get the updated githubConnections (with removal), then remove tool IDs
+                val freshSettings = repository.loadAppSettings()
                 val githubToolIds = toolRegistry.getGitHubToolIds()
-                val updatedEnabledTools = currentSettings.enabledTools.filter { it !in githubToolIds }
-                val updatedSettings = currentSettings.copy(enabledTools = updatedEnabledTools)
+                val updatedEnabledTools = freshSettings.enabledTools.filter { it !in githubToolIds }
+                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
                 repository.saveAppSettings(updatedSettings)
                 _appSettings.value = updatedSettings
 
@@ -3205,7 +3212,16 @@ class ChatViewModel(
                 repository.removeGoogleWorkspaceConnection(username)
 
                 // Unregister tools
-                ToolRegistry.getInstance().unregisterGoogleWorkspaceTools()
+                val toolRegistry = ToolRegistry.getInstance()
+                toolRegistry.unregisterGoogleWorkspaceTools()
+
+                // Reload appSettings to get the updated googleWorkspaceConnections (with removal), then remove tool IDs
+                val freshSettings = repository.loadAppSettings()
+                val googleToolIds = toolRegistry.getGoogleWorkspaceToolIds()
+                val updatedEnabledTools = freshSettings.enabledTools.filter { it !in googleToolIds }
+                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
+                repository.saveAppSettings(updatedSettings)
+                _appSettings.value = updatedSettings
 
                 showSnackbar("התנתקת מ-Google Workspace")
             } catch (e: Exception) {
@@ -3256,14 +3272,37 @@ class ChatViewModel(
                 val apiServices = repository.getGoogleWorkspaceApiServices(username) ?: return@launch
                 val (gmailService, calendarService, driveService) = apiServices
 
+                val toolRegistry = ToolRegistry.getInstance()
+
                 // Register tools
-                ToolRegistry.getInstance().registerGoogleWorkspaceTools(
+                toolRegistry.registerGoogleWorkspaceTools(
                     gmailService = gmailService,
                     calendarService = calendarService,
                     driveService = driveService,
                     googleEmail = connection.user.email,
                     enabledServices = connection.enabledServices
                 )
+
+                // Add enabled Google Workspace tool IDs to appSettings.enabledTools
+                val enabledGoogleToolIds = mutableListOf<String>()
+                if (connection.enabledServices.gmail) {
+                    enabledGoogleToolIds.addAll(toolRegistry.getGmailToolIds())
+                }
+                if (connection.enabledServices.calendar) {
+                    enabledGoogleToolIds.addAll(toolRegistry.getCalendarToolIds())
+                }
+                if (connection.enabledServices.drive) {
+                    enabledGoogleToolIds.addAll(toolRegistry.getDriveToolIds())
+                }
+
+                // Update enabledTools: remove all Google Workspace IDs first, then add the currently enabled ones
+                val allGoogleToolIds = toolRegistry.getGoogleWorkspaceToolIds()
+                val freshSettings = repository.loadAppSettings()
+                val cleanedTools = freshSettings.enabledTools.filter { it !in allGoogleToolIds }
+                val updatedEnabledTools = (cleanedTools + enabledGoogleToolIds).distinct()
+                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
+                repository.saveAppSettings(updatedSettings)
+                _appSettings.value = updatedSettings
             } catch (e: Exception) {
                 e.printStackTrace()
             }
