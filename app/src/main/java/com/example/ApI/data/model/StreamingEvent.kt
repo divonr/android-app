@@ -55,4 +55,14 @@ sealed class StreamingEvent {
         val toolCall: ToolCall,
         val precedingText: String
     ) : StreamingEvent()
+
+    /**
+     * Messages were saved to chat history mid-stream (e.g., preceding text + tool messages).
+     * The ViewModel should reload chat history and clear streaming text so the UI
+     * shows the saved messages separately from new streaming content.
+     */
+    data class MessagesAdded(
+        val requestId: String,
+        val chatId: String
+    ) : StreamingEvent()
 }

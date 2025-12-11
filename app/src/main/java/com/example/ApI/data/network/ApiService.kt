@@ -119,9 +119,9 @@ class ApiService(private val context: Context) {
                         datetime = java.time.Instant.now().toString()
                     )
                     
-                    // Save the tool messages to chat history
-                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
-                    
+                    // Save the tool messages to chat history (no preceding text in non-streaming mode)
+                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, "")
+
                     // Build follow-up request with tool result
                     val messagesWithToolResult = messages + listOf(toolCallMessage, toolResponseMessage)
                     
@@ -620,9 +620,9 @@ class ApiService(private val context: Context) {
                         },
                         datetime = java.time.Instant.now().toString()
                     )
-                    
-                    // Save the tool messages to chat history
-                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+
+                    // Save the tool messages to chat history (including preceding text)
+                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, streamingResponse.precedingText)
 
                     // Build follow-up request with tool result
                     // IMPORTANT: Include preceding text message if it exists!
@@ -710,8 +710,8 @@ class ApiService(private val context: Context) {
                         )
                         messagesToAdd.add(toolResponseMessage)
 
-                        // Save tool messages (for UI display)
-                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+                        // Save tool messages (for UI display) - include preceding text
+                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, currentResponse.precedingText)
 
                         // Add ALL messages (including preceding text) to conversation history
                         currentMessages = currentMessages + messagesToAdd
@@ -1048,9 +1048,9 @@ class ApiService(private val context: Context) {
                         },
                         datetime = java.time.Instant.now().toString()
                     )
-                    
-                    // Save the tool messages to chat history (displayed separately from conversation)
-                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+
+                    // Save the tool messages to chat history (including preceding text)
+                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, streamingResponse.precedingText)
 
                     // For Poe: Send the tool_calls and tool_results in the follow-up request
                     // This is how Poe handles client-side tool execution
@@ -1164,7 +1164,7 @@ class ApiService(private val context: Context) {
                                     datetime = java.time.Instant.now().toString()
                                 )
 
-                                callback.onSaveToolMessages(nextToolCallMessage, nextToolResponseMessage)
+                                callback.onSaveToolMessages(nextToolCallMessage, nextToolResponseMessage, currentResponse.precedingText)
 
                                 // For Poe: Add tool RESULT as a bot message to conversation history
                                 // This is how Poe expects tool results - incorporated into conversation, not separate
@@ -1825,8 +1825,8 @@ class ApiService(private val context: Context) {
                         datetime = java.time.Instant.now().toString()
                     )
 
-                    // Save the tool messages to chat history
-                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+                    // Save the tool messages to chat history (including preceding text)
+                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, streamingResponse.precedingText)
 
                     // Build follow-up request with tool result
                     // IMPORTANT: Include preceding text message if it exists!
@@ -1914,8 +1914,8 @@ class ApiService(private val context: Context) {
                         )
                         messagesToAdd.add(toolResponseMessage)
 
-                        // Save tool messages (for UI display)
-                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+                        // Save tool messages (for UI display) - include preceding text
+                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, currentResponse.precedingText)
 
                         // Add ALL messages (including preceding text) to conversation history
                         currentMessages = currentMessages + messagesToAdd
@@ -2245,8 +2245,8 @@ class ApiService(private val context: Context) {
                             }
                         )
 
-                        // Save tool messages to history
-                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+                        // Save tool messages to history (including preceding text)
+                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, precedingText)
 
                         // Add tool response to conversation
                         conversationMessages.add(toolCallMessage)
@@ -2724,8 +2724,8 @@ class ApiService(private val context: Context) {
                             }
                         )
 
-                        // Save tool messages to history
-                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
+                        // Save tool messages to history (including preceding text)
+                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, precedingText)
 
                         // Add tool response to conversation
                         conversationMessages.add(toolCallMessage)

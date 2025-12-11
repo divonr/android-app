@@ -241,6 +241,29 @@ class ChatViewModel(
                     streamingService?.provideToolResult(requestId, result)
                 }
             }
+
+            is StreamingEvent.MessagesAdded -> {
+                // Messages were saved mid-stream (preceding text + tool messages)
+                // Reload chat history and clear streaming text so UI shows them separately
+                val chatId = event.chatId
+                Log.d("ChatViewModel", "Messages added mid-stream for chat: $chatId")
+
+                viewModelScope.launch {
+                    // Reload chat history to show the newly saved messages
+                    val currentUser = _appSettings.value.current_user
+                    val refreshedHistory = repository.loadChatHistory(currentUser)
+                    val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
+
+                    // Clear streaming text but keep streaming state active
+                    // This ensures saved messages appear as separate bubbles
+                    // and new streaming content starts fresh
+                    _uiState.value = _uiState.value.copy(
+                        streamingTextByChat = _uiState.value.streamingTextByChat + (chatId to ""),
+                        chatHistory = refreshedHistory.chat_history,
+                        currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat
+                    )
+                }
+            }
         }
     }
 

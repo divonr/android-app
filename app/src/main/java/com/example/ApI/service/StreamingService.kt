@@ -399,11 +399,26 @@ class StreamingService : Service() {
                 }
             }
 
-            override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message) {
+            override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message, precedingText: String) {
                 // Save tool messages to chat history
                 try {
+                    // First, save preceding text as assistant message if it exists
+                    if (precedingText.isNotBlank()) {
+                        val precedingMessage = Message(
+                            role = "assistant",
+                            text = precedingText,
+                            attachments = emptyList(),
+                            model = modelName,
+                            datetime = Instant.now().toString()
+                        )
+                        repository.addResponseToCurrentVariant(username, chatId, precedingMessage)
+                    }
                     repository.addResponseToCurrentVariant(username, chatId, toolCallMessage)
                     repository.addResponseToCurrentVariant(username, chatId, toolResponseMessage)
+
+                    // Notify ViewModel to reload chat history and clear streaming text
+                    // This ensures saved messages appear separately from new streaming content
+                    _streamingEvents.emit(StreamingEvent.MessagesAdded(requestId, chatId))
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to save tool messages", e)
                 }

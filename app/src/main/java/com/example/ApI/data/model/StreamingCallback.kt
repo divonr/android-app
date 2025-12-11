@@ -25,8 +25,9 @@ interface StreamingCallback {
      * Called when tool messages need to be saved to chat history
      * @param toolCallMessage The tool_call message to save
      * @param toolResponseMessage The tool_response message to save
+     * @param precedingText Optional text that appeared before the tool call (to save as assistant message)
      */
-    suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message) {
+    suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message, precedingText: String = "") {
         // Default implementation - no-op
     }
 }
