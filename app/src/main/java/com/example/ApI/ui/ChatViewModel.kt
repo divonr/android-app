@@ -193,10 +193,16 @@ class ChatViewModel(
                     val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
 
                     // Check for Cohere image not supported error
-                    val errorMessage = if (event.error.contains("image content is not supported for this model")) {
-                        "שימו לב, אצל הספק Cohere יש לבחור מודל שתומך בקלט תמונה, למשל command-a-vision-07-2025."
+                    if (event.error.contains("image content is not supported for this model")) {
+                        Toast.makeText(
+                            context,
+                            "שימו לב, אצל הספק Cohere יש לבחור מודל שתומך בקלט תמונה, למשל command-a-vision-07-2025.",
+                            Toast.LENGTH_LONG
+                        ).show()
                     } else {
-                        "שגיאה: ${event.error}"
+                        _uiState.value = _uiState.value.copy(
+                            snackbarMessage = "שגיאה: ${event.error}"
+                        )
                     }
 
                     // Clear streaming state for this chat
@@ -205,8 +211,7 @@ class ChatViewModel(
                         streamingChatIds = _uiState.value.streamingChatIds - chatId,
                         streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
                         chatHistory = refreshedHistory.chat_history,
-                        currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat,
-                        snackbarMessage = errorMessage
+                        currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat
                     )
                 }
             }
