@@ -1221,11 +1221,13 @@ class ChatViewModel(
         viewModelScope.launch {
             val currentUser = _appSettings.value.current_user
             val exportPath = repository.exportChatHistory(currentUser)
-            
+
             if (exportPath != null) {
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "היסטוריית הצ'אט יוצאה בהצלחה ל: $exportPath"
-                )
+                Toast.makeText(
+                    context,
+                    "היסטוריית הצ'אט יוצאה בהצלחה ל: $exportPath",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
@@ -2095,14 +2097,6 @@ class ChatViewModel(
             )
 
             hideGroupDialog()
-            val message = if (pendingChat != null) {
-                "קבוצה חדשה נוצרה והשיחה נוספה אליה: ${newGroup.group_name}"
-            } else {
-                "קבוצה חדשה נוצרה: ${newGroup.group_name}"
-            }
-            _uiState.value = _uiState.value.copy(
-                snackbarMessage = message
-            )
         }
     }
 
@@ -2120,9 +2114,6 @@ class ChatViewModel(
                 )
 
                 hideChatContextMenu()
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "השיחה נוספה לקבוצה"
-                )
             } else {
                 _uiState.value = _uiState.value.copy(
                     snackbarMessage = "שגיאה בהוספת השיחה לקבוצה"
@@ -2145,9 +2136,6 @@ class ChatViewModel(
                 )
 
                 hideChatContextMenu()
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "השיחה הוסרה מהקבוצה"
-                )
             }
         }
     }
@@ -2893,11 +2881,6 @@ class ChatViewModel(
 
                 repository.saveAppSettings(updatedSettings)
                 _appSettings.value = updatedSettings
-
-                // Show success message
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "מצב נעילת ילדים הופעל בהצלחה"
-                )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     snackbarMessage = "שגיאה בהגדרת נעילת ילדים: ${e.message}"
@@ -2924,11 +2907,6 @@ class ChatViewModel(
 
                 repository.saveAppSettings(updatedSettings)
                 _appSettings.value = updatedSettings
-
-                // Show success message
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "נעילת ילדים בוטלה בהצלחה"
-                )
                 true
             } else {
                 // Show error message
@@ -3001,10 +2979,6 @@ class ChatViewModel(
             )
             repository.saveAppSettings(updatedSettings)
             _appSettings.value = updatedSettings
-            
-            _uiState.value = _uiState.value.copy(
-                snackbarMessage = "הכלי הופעל בהצלחה"
-            )
         }
     }
 
@@ -3016,10 +2990,6 @@ class ChatViewModel(
             )
             repository.saveAppSettings(updatedSettings)
             _appSettings.value = updatedSettings
-            
-            _uiState.value = _uiState.value.copy(
-                snackbarMessage = "הכלי כובה בהצלחה"
-            )
         }
     }
 
@@ -3085,10 +3055,6 @@ class ChatViewModel(
                                 val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
                                 repository.saveAppSettings(updatedSettings)
                                 _appSettings.value = updatedSettings
-
-                                _uiState.value = _uiState.value.copy(
-                                    snackbarMessage = "GitHub connected successfully as ${user.login}"
-                                )
                             },
                             onFailure = { error ->
                                 _uiState.value = _uiState.value.copy(
@@ -3141,10 +3107,6 @@ class ChatViewModel(
                 val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
                 repository.saveAppSettings(updatedSettings)
                 _appSettings.value = updatedSettings
-
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "GitHub disconnected successfully"
-                )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     snackbarMessage = "Error disconnecting GitHub: ${e.message}"
@@ -3264,8 +3226,6 @@ class ChatViewModel(
 
                         // Register tools
                         initializeGoogleWorkspaceToolsIfConnected()
-
-                        showSnackbar("מחובר ל-Google Workspace בהצלחה")
                     },
                     onFailure = { error ->
                         android.util.Log.e("ChatViewModel", "Google Sign-In failed", error)
@@ -3318,8 +3278,6 @@ class ChatViewModel(
                 val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
                 repository.saveAppSettings(updatedSettings)
                 _appSettings.value = updatedSettings
-
-                showSnackbar("התנתקת מ-Google Workspace")
             } catch (e: Exception) {
                 showSnackbar("שגיאה בהתנתקות: ${e.message}")
             }
@@ -3341,8 +3299,6 @@ class ChatViewModel(
 
                 // Re-register tools with new configuration
                 initializeGoogleWorkspaceToolsIfConnected()
-
-                showSnackbar("הגדרות השירותים עודכנו")
             } catch (e: Exception) {
                 showSnackbar("שגיאה בעדכון: ${e.message}")
             }
@@ -3434,7 +3390,7 @@ class ChatViewModel(
                         navigateToScreen(Screen.Chat)
                     }
 
-                    showSnackbar("הצ'אט יובא בהצלחה")
+                    Toast.makeText(context, "הצ'אט יובא בהצלחה", Toast.LENGTH_SHORT).show()
                 } else {
                     _uiState.value = _uiState.value.copy(pendingChatImport = null)
                     showSnackbar("שגיאה בייבוא הצ'אט")
