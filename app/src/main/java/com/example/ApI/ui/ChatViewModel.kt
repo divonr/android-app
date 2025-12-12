@@ -197,7 +197,7 @@ class ChatViewModel(
                     if (event.error.contains("image content is not supported for this model")) {
                         Toast.makeText(
                             context,
-                            "שימו לב, אצל הספק Cohere יש לבחור מודל שתומך בקלט תמונה, למשל command-a-vision-07-2025.",
+                            "בחרו מודל שתומך בתמונה, כמו command-a-vision-07-2025",
                             Toast.LENGTH_LONG
                         ).show()
                     } else {
