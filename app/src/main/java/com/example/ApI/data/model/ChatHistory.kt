@@ -95,6 +95,13 @@ data class MessageVariant(
 }
 
 @Serializable
+enum class ThoughtsStatus {
+    NONE,        // Model did not think (no thoughts area shown)
+    PRESENT,     // Thoughts content is available (show expandable with content)
+    UNAVAILABLE  // Model thought but content not available (show with timer only)
+}
+
+@Serializable
 data class Message(
     val id: String = UUID.randomUUID().toString(),  // Unique identifier for the message
     val role: String, // "user", "assistant", "system", "tool_call", "tool_response"
@@ -107,14 +114,17 @@ data class Message(
     val toolResponseCallId: String? = null, // For tool_response messages - links back to the tool_call
     val toolResponseOutput: String? = null, // For tool_response messages - the actual tool output
     val nodeId: String? = null,  // Reference to the node this message belongs to (for branching)
-    val variantId: String? = null  // Reference to the variant this message belongs to (for branching)
+    val variantId: String? = null,  // Reference to the variant this message belongs to (for branching)
+    val thoughts: String? = null,  // Model's thinking/reasoning process (for models that support it)
+    val thinkingDurationSeconds: Float? = null,  // Duration of thinking phase in seconds
+    val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE  // Status of thoughts for UI display
 ) {
     // Convenience property
     val content: String get() = text
-    
+
     // Check if this is a tool call message
     val isToolCall: Boolean get() = role == "tool_call" || toolCall != null
-    
+
     // Check if this is a tool response message
     val isToolResponse: Boolean get() = role == "tool_response" || toolResponseCallId != null
 }

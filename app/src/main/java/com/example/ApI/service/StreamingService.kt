@@ -316,6 +316,7 @@ class StreamingService : Service() {
         // Create service-level callback
         val callback = object : StreamingCallback {
             private val accumulatedText = StringBuilder()
+            private var thoughtsData: Triple<String?, Float?, ThoughtsStatus>? = null
 
             override fun onPartialResponse(text: String) {
                 accumulatedText.append(text)
@@ -342,7 +343,10 @@ class StreamingService : Service() {
                             text = fullText,
                             attachments = emptyList(),
                             model = modelName,
-                            datetime = Instant.now().toString()
+                            datetime = Instant.now().toString(),
+                            thoughts = thoughtsData?.first,
+                            thinkingDurationSeconds = thoughtsData?.second,
+                            thoughtsStatus = thoughtsData?.third ?: ThoughtsStatus.NONE
                         )
                         repository.addResponseToCurrentVariant(username, chatId, assistantMessage)
 
@@ -421,6 +425,28 @@ class StreamingService : Service() {
                     _streamingEvents.emit(StreamingEvent.MessagesAdded(requestId, chatId))
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to save tool messages", e)
+                }
+            }
+
+            override fun onThinkingStarted() {
+                Log.d(TAG, "Thinking started: requestId=$requestId")
+                serviceScope.launch {
+                    _streamingEvents.emit(StreamingEvent.ThinkingStarted(requestId, chatId))
+                }
+            }
+
+            override fun onThinkingPartial(text: String) {
+                serviceScope.launch {
+                    _streamingEvents.emit(StreamingEvent.ThinkingPartial(requestId, chatId, text))
+                }
+            }
+
+            override fun onThinkingComplete(thoughts: String?, durationSeconds: Float, status: ThoughtsStatus) {
+                Log.d(TAG, "Thinking complete: requestId=$requestId, duration=${durationSeconds}s, status=$status")
+                // Store thoughts data for saving with the final message
+                thoughtsData = Triple(thoughts, durationSeconds, status)
+                serviceScope.launch {
+                    _streamingEvents.emit(StreamingEvent.ThinkingComplete(requestId, chatId, thoughts, durationSeconds, status))
                 }
             }
         }

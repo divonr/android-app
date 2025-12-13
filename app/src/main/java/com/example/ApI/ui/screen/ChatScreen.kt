@@ -585,10 +585,14 @@ fun ChatScreen(
                         if (uiState.isStreaming && uiState.streamingText.isNotEmpty()) {
                             item {
                                 var previousHeight by remember { mutableIntStateOf(0) }
-                                
+
+                                val currentChatId = uiState.currentChat?.chat_id
                                 StreamingMessageBubble(
                                     text = uiState.streamingText,
                                     textDirectionMode = uiState.textDirectionMode,
+                                    isThinking = currentChatId?.let { uiState.isThinking(it) } ?: false,
+                                    streamingThoughts = currentChatId?.let { uiState.getStreamingThoughts(it) } ?: "",
+                                    thinkingStartTime = currentChatId?.let { uiState.getThinkingStartTime(it) },
                                     modifier = Modifier
                                         .padding(vertical = 4.dp)
                                         .onSizeChanged { size ->
@@ -1187,6 +1191,130 @@ fun ChatScreen(
     }
 }
 
+/**
+ * Composable for displaying model thoughts/thinking in an expandable area
+ */
+@Composable
+fun ThoughtsBubble(
+    thoughts: String?,
+    durationSeconds: Float?,
+    status: ThoughtsStatus,
+    isStreaming: Boolean = false,
+    streamingThoughts: String = "",
+    streamingStartTime: Long? = null,
+    textDirectionMode: TextDirectionMode,
+    modifier: Modifier = Modifier
+) {
+    // Don't show anything if no thoughts
+    if (status == ThoughtsStatus.NONE) return
+
+    var isExpanded by remember { mutableStateOf(false) }
+
+    // Calculate live duration for streaming
+    val currentTime by produceState(initialValue = System.currentTimeMillis()) {
+        while (isStreaming && streamingStartTime != null) {
+            delay(100) // Update every 100ms
+            value = System.currentTimeMillis()
+        }
+    }
+
+    val displayDuration = when {
+        isStreaming && streamingStartTime != null -> (currentTime - streamingStartTime) / 1000f
+        durationSeconds != null -> durationSeconds
+        else -> 0f
+    }
+
+    val displayThoughts = if (isStreaming) streamingThoughts else thoughts
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Primary.copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, Primary.copy(alpha = 0.2f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(
+                enabled = status == ThoughtsStatus.PRESENT && !isStreaming,
+                onClick = { isExpanded = !isExpanded }
+            )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            // Header row
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Thinking icon
+                Icon(
+                    imageVector = Icons.Default.Lightbulb,
+                    contentDescription = "מחשבות",
+                    tint = Primary,
+                    modifier = Modifier.size(20.dp)
+                )
+
+                // Title with duration
+                Text(
+                    text = "מחשבות... (${String.format("%.1f", displayDuration)} שניות)",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Expand/collapse icon (only for PRESENT status and not streaming)
+                if (status == ThoughtsStatus.PRESENT && !isStreaming) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (isExpanded) "כווץ" else "הרחב",
+                        tint = OnSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Expandable content
+            AnimatedVisibility(
+                visible = (isExpanded && status == ThoughtsStatus.PRESENT && !isStreaming) || status == ThoughtsStatus.UNAVAILABLE || (isStreaming && displayThoughts.isNotBlank()),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    when {
+                        status == ThoughtsStatus.UNAVAILABLE -> {
+                            Text(
+                                text = "(מחשבות מודל זה לא זמינות)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = OnSurfaceVariant.copy(alpha = 0.7f),
+                                fontStyle = FontStyle.Italic
+                            )
+                        }
+                        status == ThoughtsStatus.PRESENT && !displayThoughts.isNullOrBlank() -> {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = SurfaceVariant,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                    MarkdownText(
+                                        markdown = displayThoughts,
+                                        style = TextStyle(
+                                            color = OnSurfaceVariant,
+                                            fontSize = 14.sp,
+                                            lineHeight = 18.sp
+                                        ),
+                                        textDirectionMode = textDirectionMode,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageBubble(
@@ -1326,7 +1454,23 @@ fun MessageBubble(
                         )
                     )
                 }
-                
+
+                // Show thoughts area for assistant messages
+                if (!isUser && message.thoughtsStatus != ThoughtsStatus.NONE) {
+                    ThoughtsBubble(
+                        thoughts = message.thoughts,
+                        durationSeconds = message.thinkingDurationSeconds,
+                        status = message.thoughtsStatus,
+                        textDirectionMode = uiState.textDirectionMode,
+                        modifier = Modifier.padding(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = if (message.model != null) 4.dp else 12.dp,
+                            bottom = 8.dp
+                        )
+                    )
+                }
+
                 // Show image attachments first (like WhatsApp) - fill the bubble
                 val imageAttachments = message.attachments.filter { 
                     it.mime_type.startsWith("image/") && it.local_file_path != null 
@@ -1692,7 +1836,10 @@ fun FilePreview(
 fun StreamingMessageBubble(
     text: String,
     textDirectionMode: TextDirectionMode,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isThinking: Boolean = false,
+    streamingThoughts: String = "",
+    thinkingStartTime: Long? = null
 ) {
     val bubbleColor = AssistantMessageBubble
     val alignment = Alignment.Start
@@ -1719,6 +1866,20 @@ fun StreamingMessageBubble(
                     vertical = 12.dp
                 )
             ) {
+                // Show thoughts area during thinking phase
+                if (isThinking || streamingThoughts.isNotBlank()) {
+                    ThoughtsBubble(
+                        thoughts = null,
+                        durationSeconds = null,
+                        status = ThoughtsStatus.PRESENT,
+                        isStreaming = true,
+                        streamingThoughts = streamingThoughts,
+                        streamingStartTime = thinkingStartTime,
+                        textDirectionMode = textDirectionMode,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+
                 MarkdownText(
                     markdown = text,
                     style = TextStyle(

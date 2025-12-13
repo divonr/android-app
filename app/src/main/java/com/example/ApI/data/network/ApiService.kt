@@ -2022,6 +2022,15 @@ class ApiService(private val context: Context) {
                     put("tools", toolsArray)
                 }
 
+                // Add thinkingConfig for all Google models except gemini-2.0-flash-lite
+                if (modelName != "gemini-2.0-flash-lite") {
+                    put("generationConfig", buildJsonObject {
+                        put("thinkingConfig", buildJsonObject {
+                            put("includeThoughts", true)
+                        })
+                    })
+                }
+
                 put("contents", JsonArray(contents))
             }
 
@@ -2050,6 +2059,11 @@ class ApiService(private val context: Context) {
             val fullResponse = StringBuilder()
             var detectedToolCall: com.example.ApI.tools.ToolCall? = null
             var line: String?
+
+            // Thinking state tracking
+            var isInThinkingPhase = false
+            var thinkingStartTime: Long = 0
+            val thoughtsBuilder = StringBuilder()
 
             // Google Gemini streams SSE JSON objects
             while (reader.readLine().also { line = it } != null) {
@@ -2092,32 +2106,63 @@ class ApiService(private val context: Context) {
                             val parts = content?.get("parts")?.jsonArray
 
                             if (parts != null && parts.isNotEmpty()) {
-                                val firstPart = parts[0].jsonObject
+                                // Iterate through ALL parts (not just the first one)
+                                for (partElement in parts) {
+                                    val part = partElement.jsonObject
 
-                                // Check for function call
-                                val functionCall = firstPart["functionCall"]?.jsonObject
-                                if (functionCall != null) {
-                                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found functionCall part: $functionCall")
-                                    val name = functionCall["name"]?.jsonPrimitive?.content
-                                    val args = functionCall["args"]?.jsonObject
+                                    // Check if this part is a thought
+                                    val isThought = part["thought"]?.jsonPrimitive?.booleanOrNull == true
+                                    val text = part["text"]?.jsonPrimitive?.contentOrNull
+                                    val functionCall = part["functionCall"]?.jsonObject
 
-                                    if (name != null && args != null) {
-                                        detectedToolCall = com.example.ApI.tools.ToolCall(
-                                            id = "google_${System.currentTimeMillis()}", // Google doesn't provide call IDs
-                                            toolId = name,
-                                            parameters = args,
-                                            provider = "google"
-                                        )
-                                        Log.d("TOOL_CALL_DEBUG", "Google Streaming: Detected tool call in chunk")
+                                    when {
+                                        // Handle thought parts
+                                        isThought && text != null -> {
+                                            if (!isInThinkingPhase) {
+                                                isInThinkingPhase = true
+                                                thinkingStartTime = System.currentTimeMillis()
+                                                callback.onThinkingStarted()
+                                            }
+                                            thoughtsBuilder.append(text)
+                                            callback.onThinkingPartial(text)
+                                        }
+
+                                        // Handle function calls
+                                        functionCall != null -> {
+                                            Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found functionCall part: $functionCall")
+                                            val name = functionCall["name"]?.jsonPrimitive?.content
+                                            val args = functionCall["args"]?.jsonObject
+
+                                            if (name != null && args != null) {
+                                                detectedToolCall = com.example.ApI.tools.ToolCall(
+                                                    id = "google_${System.currentTimeMillis()}", // Google doesn't provide call IDs
+                                                    toolId = name,
+                                                    parameters = args,
+                                                    provider = "google"
+                                                )
+                                                Log.d("TOOL_CALL_DEBUG", "Google Streaming: Detected tool call in chunk")
+                                            }
+                                        }
+
+                                        // Handle regular text parts (response content)
+                                        text != null -> {
+                                            // Transition from thinking to response
+                                            if (isInThinkingPhase) {
+                                                val duration = (System.currentTimeMillis() - thinkingStartTime) / 1000f
+                                                val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+                                                callback.onThinkingComplete(
+                                                    thoughts = thoughtsContent,
+                                                    durationSeconds = duration,
+                                                    status = if (thoughtsContent != null) ThoughtsStatus.PRESENT else ThoughtsStatus.UNAVAILABLE
+                                                )
+                                                isInThinkingPhase = false
+                                            }
+
+                                            Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found text part: '$text'")
+                                            fullResponse.append(text)
+                                            callback.onPartialResponse(text)
+                                        }
                                     }
-                                }
-
-                                // Check for text response
-                                val chunkText = firstPart["text"]?.jsonPrimitive?.content
-                                if (chunkText != null) {
-                                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found text part: '$chunkText'")
-                                    fullResponse.append(chunkText)
-                                    callback.onPartialResponse(chunkText)
                                 }
                             }
                         }
@@ -2140,7 +2185,17 @@ class ApiService(private val context: Context) {
                     toolCall = detectedToolCall!!,
                     precedingText = fullResponse.toString()
                 )
-                fullResponse.isNotEmpty() -> GoogleStreamingResult.TextComplete(fullResponse.toString())
+                fullResponse.isNotEmpty() -> GoogleStreamingResult.TextComplete(
+                    fullText = fullResponse.toString(),
+                    thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() },
+                    thinkingDurationSeconds = if (thoughtsBuilder.isNotEmpty()) {
+                        (thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f })
+                    } else null,
+                    thoughtsStatus = when {
+                        thoughtsBuilder.isNotEmpty() -> ThoughtsStatus.PRESENT
+                        else -> ThoughtsStatus.NONE
+                    }
+                )
                 else -> GoogleStreamingResult.Error("Empty response from Google")
             }
         } catch (e: Exception) {
@@ -3178,7 +3233,12 @@ class ApiService(private val context: Context) {
      * Sealed class representing different types of Google streaming results
      */
     private sealed class GoogleStreamingResult {
-        data class TextComplete(val fullText: String) : GoogleStreamingResult()
+        data class TextComplete(
+            val fullText: String,
+            val thoughts: String? = null,
+            val thinkingDurationSeconds: Float? = null,
+            val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
+        ) : GoogleStreamingResult()
         data class ToolCallDetected(
             val toolCall: com.example.ApI.tools.ToolCall,
             val precedingText: String = ""

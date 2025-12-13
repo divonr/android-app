@@ -65,4 +65,32 @@ sealed class StreamingEvent {
         val requestId: String,
         val chatId: String
     ) : StreamingEvent()
+
+    /**
+     * The model has started its thinking phase.
+     */
+    data class ThinkingStarted(
+        val requestId: String,
+        val chatId: String
+    ) : StreamingEvent()
+
+    /**
+     * A partial chunk of thinking content received during streaming.
+     */
+    data class ThinkingPartial(
+        val requestId: String,
+        val chatId: String,
+        val text: String
+    ) : StreamingEvent()
+
+    /**
+     * The thinking phase has completed.
+     */
+    data class ThinkingComplete(
+        val requestId: String,
+        val chatId: String,
+        val thoughts: String?,
+        val durationSeconds: Float,
+        val status: ThoughtsStatus
+    ) : StreamingEvent()
 }

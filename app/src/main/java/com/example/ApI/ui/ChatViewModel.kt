@@ -270,6 +270,34 @@ class ChatViewModel(
                     )
                 }
             }
+
+            is StreamingEvent.ThinkingStarted -> {
+                val chatId = event.chatId
+                Log.d("ChatViewModel", "Thinking started for chat: $chatId")
+                _uiState.value = _uiState.value.copy(
+                    thinkingChatIds = _uiState.value.thinkingChatIds + chatId,
+                    thinkingStartTimeByChat = _uiState.value.thinkingStartTimeByChat + (chatId to System.currentTimeMillis())
+                )
+            }
+
+            is StreamingEvent.ThinkingPartial -> {
+                val chatId = event.chatId
+                val currentThoughts = _uiState.value.streamingThoughtsTextByChat[chatId] ?: ""
+                _uiState.value = _uiState.value.copy(
+                    streamingThoughtsTextByChat = _uiState.value.streamingThoughtsTextByChat + (chatId to currentThoughts + event.text)
+                )
+            }
+
+            is StreamingEvent.ThinkingComplete -> {
+                val chatId = event.chatId
+                Log.d("ChatViewModel", "Thinking complete for chat: $chatId, duration: ${event.durationSeconds}s, status: ${event.status}")
+                // Clear thinking state (thoughts are now saved with the final message)
+                _uiState.value = _uiState.value.copy(
+                    thinkingChatIds = _uiState.value.thinkingChatIds - chatId,
+                    thinkingStartTimeByChat = _uiState.value.thinkingStartTimeByChat - chatId,
+                    streamingThoughtsTextByChat = _uiState.value.streamingThoughtsTextByChat - chatId
+                )
+            }
         }
     }
 

@@ -20,6 +20,10 @@ data class ChatUiState(
     val loadingChatIds: Set<String> = emptySet(),
     val streamingChatIds: Set<String> = emptySet(),
     val streamingTextByChat: Map<String, String> = emptyMap(),
+    // Per-chat thinking state
+    val thinkingChatIds: Set<String> = emptySet(),
+    val thinkingStartTimeByChat: Map<String, Long> = emptyMap(),
+    val streamingThoughtsTextByChat: Map<String, String> = emptyMap(),
     val showProviderSelector: Boolean = false,
     val showModelSelector: Boolean = false,
     val showSystemPromptDialog: Boolean = false,
@@ -68,6 +72,11 @@ data class ChatUiState(
     fun isLoadingChat(chatId: String): Boolean = chatId in loadingChatIds
     fun isStreamingChat(chatId: String): Boolean = chatId in streamingChatIds
     fun getStreamingText(chatId: String): String = streamingTextByChat[chatId] ?: ""
+
+    // Helper functions for thinking state
+    fun isThinking(chatId: String): Boolean = chatId in thinkingChatIds
+    fun getThinkingStartTime(chatId: String): Long? = thinkingStartTimeByChat[chatId]
+    fun getStreamingThoughts(chatId: String): String = streamingThoughtsTextByChat[chatId] ?: ""
 
     // Backward compatibility computed properties for current chat
     val isLoading: Boolean get() = currentChat?.chat_id?.let { it in loadingChatIds } ?: false
