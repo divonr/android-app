@@ -4,8 +4,10 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -70,6 +72,7 @@ import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.components.*
 import com.example.ApI.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.time.Instant
@@ -1274,7 +1277,7 @@ fun ThoughtsBubble(
 
             // Expandable content
             AnimatedVisibility(
-                visible = (isExpanded && status == ThoughtsStatus.PRESENT && !isStreaming) || status == ThoughtsStatus.UNAVAILABLE || (isStreaming && displayThoughts.isNotBlank()),
+                visible = (isExpanded && status == ThoughtsStatus.PRESENT && !isStreaming) || status == ThoughtsStatus.UNAVAILABLE || (isStreaming && !displayThoughts.isNullOrBlank()),
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
