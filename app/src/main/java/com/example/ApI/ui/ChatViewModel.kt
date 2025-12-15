@@ -167,11 +167,13 @@ class ChatViewModel(
                     val refreshedHistory = repository.loadChatHistory(currentUser)
                     val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
 
-                    // Clear streaming state for this chat
+                    // Clear streaming state for this chat (including thoughts state)
                     _uiState.value = _uiState.value.copy(
                         loadingChatIds = _uiState.value.loadingChatIds - chatId,
                         streamingChatIds = _uiState.value.streamingChatIds - chatId,
                         streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
+                        streamingThoughtsTextByChat = _uiState.value.streamingThoughtsTextByChat - chatId,
+                        completedThinkingDurationByChat = _uiState.value.completedThinkingDurationByChat - chatId,
                         chatHistory = refreshedHistory.chat_history,
                         currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat
                     )
@@ -206,11 +208,15 @@ class ChatViewModel(
                         )
                     }
 
-                    // Clear streaming state for this chat
+                    // Clear streaming state for this chat (including thoughts state)
                     _uiState.value = _uiState.value.copy(
                         loadingChatIds = _uiState.value.loadingChatIds - chatId,
                         streamingChatIds = _uiState.value.streamingChatIds - chatId,
                         streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
+                        streamingThoughtsTextByChat = _uiState.value.streamingThoughtsTextByChat - chatId,
+                        completedThinkingDurationByChat = _uiState.value.completedThinkingDurationByChat - chatId,
+                        thinkingChatIds = _uiState.value.thinkingChatIds - chatId,
+                        thinkingStartTimeByChat = _uiState.value.thinkingStartTimeByChat - chatId,
                         chatHistory = refreshedHistory.chat_history,
                         currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat
                     )
@@ -291,11 +297,13 @@ class ChatViewModel(
             is StreamingEvent.ThinkingComplete -> {
                 val chatId = event.chatId
                 Log.d("ChatViewModel", "Thinking complete for chat: $chatId, duration: ${event.durationSeconds}s, status: ${event.status}")
-                // Clear thinking state (thoughts are now saved with the final message)
+                // Mark thinking as done but KEEP the thoughts text visible during response streaming
+                // Store the completed duration for display (no longer live counting)
                 _uiState.value = _uiState.value.copy(
                     thinkingChatIds = _uiState.value.thinkingChatIds - chatId,
                     thinkingStartTimeByChat = _uiState.value.thinkingStartTimeByChat - chatId,
-                    streamingThoughtsTextByChat = _uiState.value.streamingThoughtsTextByChat - chatId
+                    // DON'T clear streamingThoughtsTextByChat - keep it visible during response streaming
+                    completedThinkingDurationByChat = _uiState.value.completedThinkingDurationByChat + (chatId to event.durationSeconds)
                 )
             }
         }

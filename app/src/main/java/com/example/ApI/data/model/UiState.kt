@@ -25,6 +25,7 @@ data class ChatUiState(
     val thinkingChatIds: Set<String> = emptySet(),
     val thinkingStartTimeByChat: Map<String, Long> = emptyMap(),
     val streamingThoughtsTextByChat: Map<String, String> = emptyMap(),
+    val completedThinkingDurationByChat: Map<String, Float> = emptyMap(),
     val showProviderSelector: Boolean = false,
     val showModelSelector: Boolean = false,
     val showSystemPromptDialog: Boolean = false,
@@ -82,6 +83,7 @@ data class ChatUiState(
     fun isThinking(chatId: String): Boolean = chatId in thinkingChatIds
     fun getThinkingStartTime(chatId: String): Long? = thinkingStartTimeByChat[chatId]
     fun getStreamingThoughts(chatId: String): String = streamingThoughtsTextByChat[chatId] ?: ""
+    fun getCompletedThinkingDuration(chatId: String): Float? = completedThinkingDurationByChat[chatId]
 
     // Backward compatibility computed properties for current chat
     val isLoading: Boolean get() = currentChat?.chat_id?.let { it in loadingChatIds } ?: false

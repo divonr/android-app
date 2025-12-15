@@ -171,8 +171,12 @@ fun ChatScreen(
             // First try to scroll to the item
             try {
                 // Account for streaming bubble (1) + reply button (1) if present
-                val adjustedIndex = reversedIndex + 
-                    (if (uiState.isStreaming && uiState.streamingText.isNotEmpty()) 1 else 0) +
+                val chatIdForSearch = uiState.currentChat?.chat_id
+                val hasThinkingForSearch = chatIdForSearch?.let {
+                    uiState.isThinking(it) || uiState.getStreamingThoughts(it).isNotBlank()
+                } ?: false
+                val adjustedIndex = reversedIndex +
+                    (if (uiState.isStreaming && (uiState.streamingText.isNotEmpty() || hasThinkingForSearch)) 1 else 0) +
                     (if (uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading) 1 else 0)
                 
                 println("DEBUG SEARCH: Scrolling to message index ${searchContext.messageIndex}, reversedIndex: $reversedIndex, adjustedIndex: $adjustedIndex, total messages: ${currentChat.messages.size}")
@@ -629,18 +633,23 @@ fun ChatScreen(
                             },
                         reverseLayout = true
                     ) {
-                        // Streaming Message Bubble
-                        if (uiState.isStreaming && uiState.streamingText.isNotEmpty()) {
+                        // Streaming Message Bubble (show during thinking phase even if streamingText is empty)
+                        val currentChatIdForStreaming = uiState.currentChat?.chat_id
+                        val hasThinkingContent = currentChatIdForStreaming?.let {
+                            uiState.isThinking(it) || uiState.getStreamingThoughts(it).isNotBlank()
+                        } ?: false
+                        if (uiState.isStreaming && (uiState.streamingText.isNotEmpty() || hasThinkingContent)) {
                             item {
                                 var previousHeight by remember { mutableIntStateOf(0) }
 
-                                val currentChatId = uiState.currentChat?.chat_id
+                                val currentChatId = currentChatIdForStreaming
                                 StreamingMessageBubble(
                                     text = uiState.streamingText,
                                     textDirectionMode = uiState.textDirectionMode,
                                     isThinking = currentChatId?.let { uiState.isThinking(it) } ?: false,
                                     streamingThoughts = currentChatId?.let { uiState.getStreamingThoughts(it) } ?: "",
                                     thinkingStartTime = currentChatId?.let { uiState.getThinkingStartTime(it) },
+                                    completedThinkingDuration = currentChatId?.let { uiState.getCompletedThinkingDuration(it) },
                                     modifier = Modifier
                                         .padding(vertical = 4.dp)
                                         .onSizeChanged { size ->
@@ -1496,7 +1505,9 @@ fun ThoughtsBubble(
         else -> 0f
     }
 
-    val displayThoughts = if (isStreaming) streamingThoughts else thoughts
+    // Use streamingThoughts if available (even after thinking is done but response is streaming)
+    // Fall back to thoughts for completed messages from history
+    val displayThoughts = streamingThoughts.ifBlank { thoughts }
 
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -2111,7 +2122,8 @@ fun StreamingMessageBubble(
     modifier: Modifier = Modifier,
     isThinking: Boolean = false,
     streamingThoughts: String = "",
-    thinkingStartTime: Long? = null
+    thinkingStartTime: Long? = null,
+    completedThinkingDuration: Float? = null
 ) {
     val bubbleColor = AssistantMessageBubble
     val alignment = Alignment.Start
@@ -2138,13 +2150,13 @@ fun StreamingMessageBubble(
                     vertical = 12.dp
                 )
             ) {
-                // Show thoughts area during thinking phase
+                // Show thoughts area during thinking phase and while response is streaming
                 if (isThinking || streamingThoughts.isNotBlank()) {
                     ThoughtsBubble(
                         thoughts = null,
-                        durationSeconds = null,
+                        durationSeconds = completedThinkingDuration,  // Use completed duration when available
                         status = ThoughtsStatus.PRESENT,
-                        isStreaming = true,
+                        isStreaming = isThinking,  // Only live timer if still thinking
                         streamingThoughts = streamingThoughts,
                         streamingStartTime = thinkingStartTime,
                         textDirectionMode = textDirectionMode,
