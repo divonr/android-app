@@ -2465,6 +2465,13 @@ class ApiService(private val context: Context) {
             var isAccumulatingToolInput = false
             var detectedToolCall: com.example.ApI.tools.ToolCall? = null
 
+            // Thinking state tracking
+            var isInThinkingPhase = false
+            var thinkingStartTime: Long = 0
+            val thoughtsBuilder = StringBuilder()
+            var currentBlockIndex: Int = -1
+            var currentBlockType: String? = null
+
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 val currentLine = line ?: continue
@@ -2490,24 +2497,64 @@ class ApiService(private val context: Context) {
                             }
 
                             "content_block_start" -> {
-                                // New content block starting (text or tool_use)
+                                // New content block starting (thinking, text, or tool_use)
                                 val contentBlock = chunkJson["content_block"]?.jsonObject
                                 val blockType = contentBlock?.get("type")?.jsonPrimitive?.content
+                                currentBlockIndex = chunkJson["index"]?.jsonPrimitive?.intOrNull ?: -1
+                                currentBlockType = blockType
 
-                                if (blockType == "tool_use") {
-                                    // Tool use detected
-                                    currentToolUseId = contentBlock?.get("id")?.jsonPrimitive?.content
-                                    currentToolName = contentBlock?.get("name")?.jsonPrimitive?.content
-                                    currentToolInput.clear()
-                                    
-                                    // Capture initial input if present (for tools with no/small parameters)
-                                    val initialInput = contentBlock?.get("input")?.jsonObject
-                                    if (initialInput != null) {
-                                        currentToolInput.append(initialInput.toString())
+                                when (blockType) {
+                                    "thinking" -> {
+                                        // Thinking block started
+                                        if (!isInThinkingPhase) {
+                                            isInThinkingPhase = true
+                                            thinkingStartTime = System.currentTimeMillis()
+                                            callback.onThinkingStarted()
+                                            println("[DEBUG] Anthropic thinking started")
+                                        }
                                     }
-                                    
-                                    isAccumulatingToolInput = true
-                                    println("[DEBUG] Tool use started: $currentToolName (id: $currentToolUseId), initial input: $initialInput")
+                                    "text" -> {
+                                        // Text block started - complete thinking if we were in thinking phase
+                                        if (isInThinkingPhase) {
+                                            val duration = (System.currentTimeMillis() - thinkingStartTime) / 1000f
+                                            val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+                                            callback.onThinkingComplete(
+                                                thoughts = thoughtsContent,
+                                                durationSeconds = duration,
+                                                status = if (thoughtsContent != null) ThoughtsStatus.PRESENT else ThoughtsStatus.UNAVAILABLE
+                                            )
+                                            isInThinkingPhase = false
+                                            println("[DEBUG] Anthropic thinking completed, duration: ${duration}s")
+                                        }
+                                    }
+                                    "tool_use" -> {
+                                        // Complete thinking if we were in thinking phase
+                                        if (isInThinkingPhase) {
+                                            val duration = (System.currentTimeMillis() - thinkingStartTime) / 1000f
+                                            val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+                                            callback.onThinkingComplete(
+                                                thoughts = thoughtsContent,
+                                                durationSeconds = duration,
+                                                status = if (thoughtsContent != null) ThoughtsStatus.PRESENT else ThoughtsStatus.UNAVAILABLE
+                                            )
+                                            isInThinkingPhase = false
+                                            println("[DEBUG] Anthropic thinking completed before tool use, duration: ${duration}s")
+                                        }
+
+                                        // Tool use detected
+                                        currentToolUseId = contentBlock?.get("id")?.jsonPrimitive?.content
+                                        currentToolName = contentBlock?.get("name")?.jsonPrimitive?.content
+                                        currentToolInput.clear()
+
+                                        // Capture initial input if present (for tools with no/small parameters)
+                                        val initialInput = contentBlock?.get("input")?.jsonObject
+                                        if (initialInput != null) {
+                                            currentToolInput.append(initialInput.toString())
+                                        }
+
+                                        isAccumulatingToolInput = true
+                                        println("[DEBUG] Tool use started: $currentToolName (id: $currentToolUseId), initial input: $initialInput")
+                                    }
                                 }
                             }
 
@@ -2517,6 +2564,14 @@ class ApiService(private val context: Context) {
                                 val deltaType = delta?.get("type")?.jsonPrimitive?.content
 
                                 when (deltaType) {
+                                    "thinking_delta" -> {
+                                        // Thinking content chunk
+                                        val thinkingText = delta?.get("thinking")?.jsonPrimitive?.content ?: ""
+                                        if (thinkingText.isNotEmpty()) {
+                                            thoughtsBuilder.append(thinkingText)
+                                            callback.onThinkingPartial(thinkingText)
+                                        }
+                                    }
                                     "text_delta" -> {
                                         // Text content chunk
                                         val text = delta?.get("text")?.jsonPrimitive?.content ?: ""
@@ -2527,6 +2582,9 @@ class ApiService(private val context: Context) {
                                         // Tool input JSON chunk
                                         val partialJson = delta?.get("partial_json")?.jsonPrimitive?.content ?: ""
                                         currentToolInput.append(partialJson)
+                                    }
+                                    "signature_delta" -> {
+                                        // Signature for thinking block - ignore for display purposes
                                     }
                                 }
                             }
@@ -2588,13 +2646,32 @@ class ApiService(private val context: Context) {
             reader.close()
             connection.disconnect()
 
+            // Calculate thoughts status and duration
+            val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+            val thinkingDuration = if (thinkingStartTime > 0) {
+                (System.currentTimeMillis() - thinkingStartTime) / 1000f
+            } else null
+            val thoughtsStatus = when {
+                thoughtsContent != null -> ThoughtsStatus.PRESENT
+                thinkingStartTime > 0 -> ThoughtsStatus.UNAVAILABLE // Thinking happened but no content
+                else -> ThoughtsStatus.NONE
+            }
+
             // Return tool call if detected, otherwise return text response
             return@withContext when {
                 detectedToolCall != null -> AnthropicStreamingResult.ToolCall(
                     toolCall = detectedToolCall!!,
-                    precedingText = fullResponse.toString()
+                    precedingText = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus
                 )
-                fullResponse.isNotEmpty() -> AnthropicStreamingResult.TextResponse(fullResponse.toString())
+                fullResponse.isNotEmpty() -> AnthropicStreamingResult.TextResponse(
+                    text = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus
+                )
                 else -> AnthropicStreamingResult.Error("Empty response from Anthropic")
             }
         } catch (e: Exception) {
@@ -3311,10 +3388,18 @@ class ApiService(private val context: Context) {
     }
 
     private sealed class AnthropicStreamingResult {
-        data class TextResponse(val text: String) : AnthropicStreamingResult()
+        data class TextResponse(
+            val text: String,
+            val thoughts: String? = null,
+            val thinkingDurationSeconds: Float? = null,
+            val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
+        ) : AnthropicStreamingResult()
         data class ToolCall(
             val toolCall: com.example.ApI.tools.ToolCall,
-            val precedingText: String = ""
+            val precedingText: String = "",
+            val thoughts: String? = null,
+            val thinkingDurationSeconds: Float? = null,
+            val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
         ) : AnthropicStreamingResult()
         data class Error(val message: String) : AnthropicStreamingResult()
     }
