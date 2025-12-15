@@ -314,7 +314,8 @@ class ChatViewModel(
         systemPrompt: String,
         webSearchEnabled: Boolean,
         projectAttachments: List<Attachment>,
-        enabledTools: List<ToolSpecification>
+        enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None
     ) {
         val intent = Intent(context, StreamingService::class.java).apply {
             action = StreamingService.ACTION_START_REQUEST
@@ -328,6 +329,10 @@ class ChatViewModel(
             putExtra(StreamingService.EXTRA_MESSAGES_JSON, json.encodeToString(messages))
             putExtra(StreamingService.EXTRA_PROJECT_ATTACHMENTS_JSON, json.encodeToString(projectAttachments))
             putExtra(StreamingService.EXTRA_ENABLED_TOOLS_JSON, json.encodeToString(enabledTools))
+            // Add thinking budget if not None
+            if (thinkingBudget != ThinkingBudgetValue.None) {
+                putExtra(StreamingService.EXTRA_THINKING_BUDGET_JSON, json.encodeToString(thinkingBudget))
+            }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -651,7 +656,8 @@ class ChatViewModel(
                         systemPrompt = systemPrompt,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
                         projectAttachments = projectAttachments,
-                        enabledTools = getEnabledToolSpecifications()
+                        enabledTools = getEnabledToolSpecifications(),
+                        thinkingBudget = _uiState.value.thinkingBudgetValue
                     )
 
                     // Reload chat to get any updated file IDs from re-uploads
@@ -725,7 +731,8 @@ class ChatViewModel(
                         systemPrompt = systemPrompt,
                         webSearchEnabled = _uiState.value.webSearchEnabled,
                         projectAttachments = projectAttachments,
-                        enabledTools = getEnabledToolSpecifications()
+                        enabledTools = getEnabledToolSpecifications(),
+                        thinkingBudget = _uiState.value.thinkingBudgetValue
                     )
 
                     // Optionally refresh chat after potential file re-uploads
@@ -1682,7 +1689,8 @@ class ChatViewModel(
                     systemPrompt = systemPrompt,
                     webSearchEnabled = _uiState.value.webSearchEnabled,
                     projectAttachments = projectAttachments,
-                    enabledTools = getEnabledToolSpecifications()
+                    enabledTools = getEnabledToolSpecifications(),
+                    thinkingBudget = _uiState.value.thinkingBudgetValue
                 )
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Error starting branch request", e)
@@ -2519,6 +2527,94 @@ class ChatViewModel(
         _uiState.value = _uiState.value.copy(
             quickSettingsExpanded = !_uiState.value.quickSettingsExpanded
         )
+    }
+
+    // Thinking Budget Control
+    /**
+     * Handle click on the thinking budget control button.
+     * Shows appropriate UI based on current provider/model thinking support.
+     */
+    fun onThinkingBudgetButtonClick() {
+        val budgetType = _uiState.value.getThinkingBudgetType()
+
+        when (budgetType) {
+            is ThinkingBudgetType.NotSupported -> {
+                // Show toast that this model doesn't support thinking
+                Toast.makeText(context, "מודל זה אינו תומך במצב חשיבה", Toast.LENGTH_SHORT).show()
+            }
+            is ThinkingBudgetType.InDevelopment -> {
+                // Show toast that support is in development
+                Toast.makeText(context, "נכון לעכשיו התמיכה בפרמטר למודל זה עדיין בפיתוח", Toast.LENGTH_SHORT).show()
+            }
+            is ThinkingBudgetType.Discrete, is ThinkingBudgetType.Continuous -> {
+                // Toggle popup visibility
+                _uiState.value = _uiState.value.copy(
+                    showThinkingBudgetPopup = !_uiState.value.showThinkingBudgetPopup
+                )
+
+                // Initialize with default value if currently None
+                if (_uiState.value.thinkingBudgetValue == ThinkingBudgetValue.None) {
+                    val provider = _uiState.value.currentProvider?.provider ?: return
+                    val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, _uiState.value.currentModel)
+                    _uiState.value = _uiState.value.copy(thinkingBudgetValue = defaultValue)
+                }
+            }
+        }
+    }
+
+    /**
+     * Show the thinking budget popup.
+     */
+    fun showThinkingBudgetPopup() {
+        _uiState.value = _uiState.value.copy(showThinkingBudgetPopup = true)
+    }
+
+    /**
+     * Hide the thinking budget popup.
+     */
+    fun hideThinkingBudgetPopup() {
+        _uiState.value = _uiState.value.copy(showThinkingBudgetPopup = false)
+    }
+
+    /**
+     * Set the thinking budget value.
+     */
+    fun setThinkingBudgetValue(value: ThinkingBudgetValue) {
+        _uiState.value = _uiState.value.copy(thinkingBudgetValue = value)
+    }
+
+    /**
+     * Set discrete thinking effort level.
+     */
+    fun setThinkingEffort(level: String) {
+        _uiState.value = _uiState.value.copy(
+            thinkingBudgetValue = ThinkingBudgetValue.Effort(level)
+        )
+    }
+
+    /**
+     * Set continuous thinking token budget.
+     */
+    fun setThinkingTokenBudget(tokens: Int) {
+        _uiState.value = _uiState.value.copy(
+            thinkingBudgetValue = ThinkingBudgetValue.Tokens(tokens)
+        )
+    }
+
+    /**
+     * Reset thinking budget to model default when provider/model changes.
+     */
+    fun resetThinkingBudgetToDefault() {
+        val provider = _uiState.value.currentProvider?.provider
+        val model = _uiState.value.currentModel
+
+        if (provider != null) {
+            val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, model)
+            _uiState.value = _uiState.value.copy(
+                thinkingBudgetValue = defaultValue,
+                showThinkingBudgetPopup = false
+            )
+        }
     }
 
     fun openChatExportDialog() {

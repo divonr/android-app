@@ -947,6 +947,7 @@ class DataRepository(private val context: Context) {
         projectAttachments: List<Attachment> = emptyList(),
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback
     ) {
         val apiKeys = loadApiKeys(username)
@@ -977,7 +978,7 @@ class DataRepository(private val context: Context) {
             updatedMessages
         }
 
-        apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+        apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, callback)
     }
 
     // Check and upload project files for current provider

@@ -1,6 +1,7 @@
 package com.example.ApI.data.model
 
 import android.net.Uri
+import androidx.compose.ui.unit.DpOffset
 
 enum class WebSearchSupport {
     UNSUPPORTED,
@@ -66,7 +67,11 @@ data class ChatUiState(
     val executingToolCall: ExecutingToolInfo? = null, // Track currently executing tool
     val textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO, // Text direction mode for message bubbles
     val renamingChatIds: Set<String> = emptySet(), // Track chats currently being renamed with AI
-    val pendingChatImport: PendingChatImport? = null // Pending chat JSON file that needs user decision
+    val pendingChatImport: PendingChatImport? = null, // Pending chat JSON file that needs user decision
+    // Thinking budget state
+    val showThinkingBudgetPopup: Boolean = false,
+    val thinkingBudgetPopupAnchor: DpOffset = DpOffset.Zero, // Position anchor for the popup
+    val thinkingBudgetValue: ThinkingBudgetValue = ThinkingBudgetValue.None
 ) {
     // Helper functions for per-chat state checks
     fun isLoadingChat(chatId: String): Boolean = chatId in loadingChatIds
@@ -82,6 +87,12 @@ data class ChatUiState(
     val isLoading: Boolean get() = currentChat?.chat_id?.let { it in loadingChatIds } ?: false
     val isStreaming: Boolean get() = currentChat?.chat_id?.let { it in streamingChatIds } ?: false
     val streamingText: String get() = currentChat?.chat_id?.let { streamingTextByChat[it] } ?: ""
+
+    // Helper function for thinking budget type based on current provider/model
+    fun getThinkingBudgetType(): ThinkingBudgetType {
+        val provider = currentProvider?.provider ?: return ThinkingBudgetType.InDevelopment
+        return ThinkingBudgetConfig.getThinkingBudgetType(provider, currentModel)
+    }
 }
 
 data class ChatContextMenuState(

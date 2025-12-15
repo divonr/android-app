@@ -474,7 +474,51 @@ fun ChatScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Spacer(modifier = Modifier.weight(1f))
-                                    
+
+                                    // Thinking Budget Control Button
+                                    Box {
+                                        val budgetType = uiState.getThinkingBudgetType()
+                                        val isThinkingSupported = budgetType is ThinkingBudgetType.Discrete ||
+                                                                  budgetType is ThinkingBudgetType.Continuous
+                                        // Lightbulb is "on" only when thinking is supported AND actually enabled
+                                        val isThinkingActive = isThinkingSupported &&
+                                                               ThinkingBudgetConfig.isThinkingEnabled(uiState.thinkingBudgetValue)
+
+                                        Surface(
+                                            shape = MaterialTheme.shapes.medium,
+                                            color = if (isThinkingActive) Primary.copy(alpha = 0.15f) else SurfaceVariant,
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clickable { viewModel.onThinkingBudgetButtonClick() }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Lightbulb,
+                                                    contentDescription = "Thinking budget",
+                                                    tint = if (isThinkingActive) Primary else OnSurfaceVariant,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+
+                                        // Thinking Budget Popup
+                                        ThinkingBudgetPopup(
+                                            visible = uiState.showThinkingBudgetPopup,
+                                            budgetType = budgetType,
+                                            currentValue = uiState.thinkingBudgetValue,
+                                            onValueChange = { value ->
+                                                when (value) {
+                                                    is ThinkingBudgetValue.Effort -> viewModel.setThinkingEffort(value.level)
+                                                    is ThinkingBudgetValue.Tokens -> viewModel.setThinkingTokenBudget(value.count)
+                                                    ThinkingBudgetValue.None -> {}
+                                                }
+                                            },
+                                            onDismiss = { viewModel.hideThinkingBudgetPopup() }
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
                                     // Text Direction Toggle Button
                                     Surface(
                                         shape = MaterialTheme.shapes.medium,
@@ -1192,6 +1236,230 @@ fun ChatScreen(
                     .padding(bottom = 80.dp) // Position above the input area
             )
         }
+    }
+}
+
+/**
+ * Popup composable for thinking budget control.
+ * Shows either a discrete dropdown or continuous slider based on the budget type.
+ */
+@Composable
+fun ThinkingBudgetPopup(
+    visible: Boolean,
+    budgetType: ThinkingBudgetType,
+    currentValue: ThinkingBudgetValue,
+    onValueChange: (ThinkingBudgetValue) -> Unit,
+    onDismiss: () -> Unit
+) {
+    DropdownMenu(
+        expanded = visible,
+        onDismissRequest = onDismiss,
+        modifier = Modifier
+            .background(Surface, RoundedCornerShape(12.dp))
+    ) {
+        when (budgetType) {
+            is ThinkingBudgetType.Discrete -> {
+                // Discrete options dropdown
+                DiscreteThinkingBudgetContent(
+                    options = budgetType.options,
+                    displayNames = budgetType.displayNames,
+                    currentLevel = (currentValue as? ThinkingBudgetValue.Effort)?.level ?: budgetType.default,
+                    onOptionSelected = { level ->
+                        onValueChange(ThinkingBudgetValue.Effort(level))
+                        onDismiss()
+                    }
+                )
+            }
+            is ThinkingBudgetType.Continuous -> {
+                // Continuous slider
+                ContinuousThinkingBudgetContent(
+                    minTokens = budgetType.minTokens,
+                    maxTokens = budgetType.maxTokens,
+                    step = budgetType.step,
+                    supportsOff = budgetType.supportsOff,
+                    currentTokens = (currentValue as? ThinkingBudgetValue.Tokens)?.count ?: budgetType.default,
+                    onTokensChange = { tokens ->
+                        onValueChange(ThinkingBudgetValue.Tokens(tokens))
+                    }
+                )
+            }
+            ThinkingBudgetType.NotSupported, ThinkingBudgetType.InDevelopment -> {
+                // Should not be shown, but handle gracefully
+            }
+        }
+    }
+}
+
+/**
+ * Content for discrete thinking budget options (dropdown menu items).
+ */
+@Composable
+private fun DiscreteThinkingBudgetContent(
+    options: List<String>,
+    displayNames: Map<String, String>,
+    currentLevel: String,
+    onOptionSelected: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier.padding(vertical = 4.dp)
+    ) {
+        // Header
+        Text(
+            text = "עוצמת חשיבה",
+            style = MaterialTheme.typography.labelMedium,
+            color = OnSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        options.forEach { option ->
+            val displayName = displayNames[option] ?: option
+            val isSelected = option == currentLevel
+
+            DropdownMenuItem(
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = displayName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isSelected) Primary else OnSurface,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        )
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                },
+                onClick = { onOptionSelected(option) },
+                modifier = Modifier.background(
+                    if (isSelected) Primary.copy(alpha = 0.08f) else Color.Transparent
+                )
+            )
+        }
+    }
+}
+
+/**
+ * Content for continuous thinking budget slider.
+ * @param supportsOff If true, allows 0 value with a "jump" from 0 to minTokens
+ */
+@Composable
+private fun ContinuousThinkingBudgetContent(
+    minTokens: Int,
+    maxTokens: Int,
+    step: Int,
+    supportsOff: Boolean,
+    currentTokens: Int,
+    onTokensChange: (Int) -> Unit
+) {
+    var sliderValue by remember(currentTokens) { mutableFloatStateOf(currentTokens.toFloat()) }
+
+    // Calculate effective range
+    val effectiveMin = if (supportsOff) 0f else minTokens.toFloat()
+    // Threshold for jumping between 0 and minTokens (midpoint)
+    val jumpThreshold = if (supportsOff) minTokens / 2f else 0f
+
+    Column(
+        modifier = Modifier
+            .width(280.dp)
+            .padding(16.dp)
+    ) {
+        // Header with current value
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "תקציב חשיבה",
+                style = MaterialTheme.typography.labelMedium,
+                color = OnSurfaceVariant
+            )
+
+            // Display current value
+            val displayValue = sliderValue.toInt()
+            val isOff = displayValue == 0
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isOff) SurfaceVariant else Primary.copy(alpha = 0.12f)
+            ) {
+                Text(
+                    text = if (isOff) "כבוי" else formatTokenCount(displayValue),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isOff) OnSurfaceVariant else Primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Slider
+        Slider(
+            value = sliderValue,
+            onValueChange = { newValue ->
+                if (supportsOff) {
+                    // Handle jump logic: if value is in the "dead zone" between 0 and minTokens
+                    sliderValue = when {
+                        newValue <= jumpThreshold -> 0f // Snap to 0 (off)
+                        newValue < minTokens -> minTokens.toFloat() // Jump to minTokens
+                        else -> {
+                            // Snap to step values within normal range
+                            val snappedValue = (newValue / step).toInt() * step
+                            snappedValue.toFloat().coerceIn(minTokens.toFloat(), maxTokens.toFloat())
+                        }
+                    }
+                } else {
+                    // Normal snapping without off support
+                    val snappedValue = (newValue / step).toInt() * step
+                    sliderValue = snappedValue.toFloat().coerceIn(minTokens.toFloat(), maxTokens.toFloat())
+                }
+            },
+            onValueChangeFinished = {
+                onTokensChange(sliderValue.toInt())
+            },
+            valueRange = effectiveMin..maxTokens.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = if (sliderValue == 0f) OnSurfaceVariant else Primary,
+                activeTrackColor = if (sliderValue == 0f) OnSurfaceVariant.copy(alpha = 0.5f) else Primary,
+                inactiveTrackColor = Primary.copy(alpha = 0.24f)
+            )
+        )
+
+        // Min/Max labels
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = if (supportsOff) "כבוי" else formatTokenCount(minTokens),
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant.copy(alpha = 0.7f)
+            )
+            Text(
+                text = formatTokenCount(maxTokens),
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
+
+/**
+ * Format token count for display (e.g., 1024 -> "1K", 128000 -> "128K").
+ */
+private fun formatTokenCount(tokens: Int): String {
+    return when {
+        tokens >= 1000 -> "${tokens / 1000}K"
+        else -> tokens.toString()
     }
 }
 

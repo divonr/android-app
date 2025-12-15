@@ -35,14 +35,15 @@ class ApiService(private val context: Context) {
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback
     ): Unit = withContext(Dispatchers.IO) {
-        
+
         when (provider.provider) {
-            "openai" -> sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "openai" -> sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, callback)
             "poe" -> sendPoeMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
-            "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
-            "anthropic" -> sendAnthropicMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, callback)
+            "anthropic" -> sendAnthropicMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, callback)
             "cohere" -> sendCohereMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             "openrouter" -> sendOpenRouterMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
             else -> {
@@ -557,18 +558,19 @@ class ApiService(private val context: Context) {
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["openai"] ?: run {
             callback.onError("OpenAI API key is required")
             return
         }
-        
+
         try {
             // Make streaming request and parse response
             val streamingResponse = makeOpenAIStreamingRequest(
                 provider, modelName, messages, systemPrompt, apiKey,
-                webSearchEnabled, enabledTools, callback
+                webSearchEnabled, enabledTools, thinkingBudget, callback
             )
             
             when (streamingResponse) {
@@ -644,7 +646,7 @@ class ApiService(private val context: Context) {
                     var currentMessages = messagesWithToolResult
                     var currentResponse: OpenAIStreamingResult = makeOpenAIStreamingRequest(
                         provider, modelName, currentMessages, systemPrompt, apiKey,
-                        webSearchEnabled, enabledTools, callback,
+                        webSearchEnabled, enabledTools, thinkingBudget, callback,
                         maxToolDepth = 25,
                         currentDepth = 1
                     )
@@ -721,7 +723,7 @@ class ApiService(private val context: Context) {
                         Log.d("TOOL_CALL_DEBUG", "Streaming: Sending follow-up request (depth $toolDepth)")
                         currentResponse = makeOpenAIStreamingRequest(
                             provider, modelName, currentMessages, systemPrompt, apiKey,
-                            webSearchEnabled, enabledTools, callback,
+                            webSearchEnabled, enabledTools, thinkingBudget, callback,
                             maxToolDepth = 25,
                             currentDepth = toolDepth
                         )
@@ -763,6 +765,7 @@ class ApiService(private val context: Context) {
         apiKey: String,
         webSearchEnabled: Boolean,
         enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback,
         maxToolDepth: Int = 25,
         currentDepth: Int = 0
@@ -771,22 +774,29 @@ class ApiService(private val context: Context) {
             // Build request URL
             val url = URL(provider.request.base_url)
             val connection = url.openConnection() as HttpURLConnection
-            
+
             // Set headers
             connection.requestMethod = provider.request.request_type
             connection.setRequestProperty("Authorization", "Bearer $apiKey")
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
-            
+
             // Build conversation input
             val conversationInput = buildOpenAIInput(messages, systemPrompt)
-            
+
             // Build request body with streaming enabled
             val requestBody = buildJsonObject {
                 put("model", modelName)
                 put("input", JsonArray(conversationInput))
                 put("stream", true)
-                
+
+                // Add reasoning parameter for OpenAI models that support it
+                if (thinkingBudget is ThinkingBudgetValue.Effort && thinkingBudget.level.isNotBlank()) {
+                    put("reasoning", buildJsonObject {
+                        put("effort", thinkingBudget.level)
+                    })
+                }
+
                 // Add tools section
                 val toolsArray = buildJsonArray {
                     if (webSearchEnabled) {
@@ -1761,6 +1771,7 @@ class ApiService(private val context: Context) {
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["google"] ?: run {
@@ -1772,7 +1783,7 @@ class ApiService(private val context: Context) {
             // Make streaming request and parse response
             val streamingResponse = makeGoogleStreamingRequest(
                 provider, modelName, messages, systemPrompt, apiKey,
-                webSearchEnabled, enabledTools, callback
+                webSearchEnabled, enabledTools, thinkingBudget, callback
             )
 
             when (streamingResponse) {
@@ -1848,7 +1859,7 @@ class ApiService(private val context: Context) {
                     var currentMessages = messagesWithToolResult
                     var currentResponse: GoogleStreamingResult = makeGoogleStreamingRequest(
                         provider, modelName, currentMessages, systemPrompt, apiKey,
-                        webSearchEnabled, enabledTools, callback,
+                        webSearchEnabled, enabledTools, thinkingBudget, callback,
                         maxToolDepth = 25,
                         currentDepth = 1
                     )
@@ -1925,7 +1936,7 @@ class ApiService(private val context: Context) {
                         Log.d("TOOL_CALL_DEBUG", "Google Streaming: Sending follow-up request (depth $toolDepth)")
                         currentResponse = makeGoogleStreamingRequest(
                             provider, modelName, currentMessages, systemPrompt, apiKey,
-                            webSearchEnabled, enabledTools, callback,
+                            webSearchEnabled, enabledTools, thinkingBudget, callback,
                             maxToolDepth = 25,
                             currentDepth = toolDepth
                         )
@@ -1967,6 +1978,7 @@ class ApiService(private val context: Context) {
         apiKey: String,
         webSearchEnabled: Boolean,
         enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback,
         maxToolDepth: Int = 25,
         currentDepth: Int = 0
@@ -2023,10 +2035,29 @@ class ApiService(private val context: Context) {
                 }
 
                 // Add thinkingConfig for all Google models except gemini-2.0-flash-lite
-                if (modelName != "gemini-2.0-flash-lite") {
+                val modelLower = modelName.lowercase()
+                if (!modelLower.contains("flash-lite") && !modelLower.contains("2.0-flash-lite")) {
                     put("generationConfig", buildJsonObject {
                         put("thinkingConfig", buildJsonObject {
                             put("includeThoughts", true)
+
+                            // Add thinking budget/level based on budget type and model
+                            when (thinkingBudget) {
+                                is ThinkingBudgetValue.Effort -> {
+                                    // Gemini 3 series uses thinkingLevel (discrete)
+                                    put("thinkingLevel", thinkingBudget.level.uppercase())
+                                }
+                                is ThinkingBudgetValue.Tokens -> {
+                                    // Other models use thinkingBudget (continuous)
+                                    // Only add if > 0 (0 means disabled)
+                                    if (thinkingBudget.count > 0) {
+                                        put("thinkingBudget", thinkingBudget.count)
+                                    }
+                                }
+                                ThinkingBudgetValue.None -> {
+                                    // Use default behavior - no explicit budget
+                                }
+                            }
                         })
                     })
                 }
@@ -2215,6 +2246,7 @@ class ApiService(private val context: Context) {
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["anthropic"] ?: run {
@@ -2240,6 +2272,7 @@ class ApiService(private val context: Context) {
                     apiKey,
                     enabledTools,
                     webSearchEnabled,
+                    thinkingBudget,
                     callback
                 )
 
@@ -2337,6 +2370,7 @@ class ApiService(private val context: Context) {
         apiKey: String,
         enabledTools: List<ToolSpecification>,
         webSearchEnabled: Boolean,
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback
     ): AnthropicStreamingResult = withContext(Dispatchers.IO) {
         try {
@@ -2353,10 +2387,24 @@ class ApiService(private val context: Context) {
             // Build messages array
             val anthropicMessages = buildAnthropicMessages(messages)
 
+            // Calculate max_tokens based on thinking budget
+            // When thinking is enabled, max_tokens must be > budget_tokens, so we add 8192 to the budget
+            // Capped at 128000 (Anthropic's maximum)
+            val maxTokens = when (thinkingBudget) {
+                is ThinkingBudgetValue.Tokens -> {
+                    if (thinkingBudget.count > 0) {
+                        minOf(thinkingBudget.count + 8192, 128000)
+                    } else {
+                        8192 // Default when thinking is disabled
+                    }
+                }
+                else -> 8192 // Default for no thinking budget set
+            }
+
             // Build request body
             val requestBody = buildJsonObject {
                 put("model", modelName)
-                put("max_tokens", 8192)
+                put("max_tokens", maxTokens)
                 put("messages", JsonArray(anthropicMessages))
 
                 // Add system prompt if present
@@ -2365,6 +2413,22 @@ class ApiService(private val context: Context) {
                 }
 
                 put("stream", true)
+
+                // Add thinking parameter for Anthropic models
+                if (thinkingBudget is ThinkingBudgetValue.Tokens) {
+                    if (thinkingBudget.count > 0) {
+                        // Thinking enabled with budget
+                        put("thinking", buildJsonObject {
+                            put("type", "enabled")
+                            put("budget_tokens", thinkingBudget.count)
+                        })
+                    } else {
+                        // Thinking explicitly disabled (user set to 0)
+                        put("thinking", buildJsonObject {
+                            put("type", "disabled")
+                        })
+                    }
+                }
 
                 // Add tools if any are enabled or web search is enabled
                 if (enabledTools.isNotEmpty() || webSearchEnabled) {
@@ -3403,7 +3467,7 @@ class ApiService(private val context: Context) {
                 put("model", modelName)
                 put("messages", openRouterMessages)
                 put("stream", true)
-                put("max_tokens", 15000)
+                put("max_tokens", 8192)
             }
 
             Log.d("OpenRouter", "Request body: $requestBody")

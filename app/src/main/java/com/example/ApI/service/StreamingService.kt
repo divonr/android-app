@@ -64,6 +64,7 @@ class StreamingService : Service() {
         const val EXTRA_PROJECT_ATTACHMENTS_JSON = "project_attachments_json"
         const val EXTRA_ENABLED_TOOLS_JSON = "enabled_tools_json"
         const val EXTRA_TOOL_RESULT_JSON = "tool_result_json"
+        const val EXTRA_THINKING_BUDGET_JSON = "thinking_budget_json"
     }
 
     // Binder for local binding
@@ -142,6 +143,7 @@ class StreamingService : Service() {
         val messagesJson = intent.getStringExtra(EXTRA_MESSAGES_JSON) ?: return
         val projectAttachmentsJson = intent.getStringExtra(EXTRA_PROJECT_ATTACHMENTS_JSON) ?: "[]"
         val enabledToolsJson = intent.getStringExtra(EXTRA_ENABLED_TOOLS_JSON) ?: "[]"
+        val thinkingBudgetJson = intent.getStringExtra(EXTRA_THINKING_BUDGET_JSON)
 
         Log.d(TAG, "Starting request: requestId=$requestId, chatId=$chatId")
 
@@ -150,12 +152,18 @@ class StreamingService : Service() {
         val messages: List<Message>
         val projectAttachments: List<Attachment>
         val enabledTools: List<ToolSpecification>
+        val thinkingBudget: ThinkingBudgetValue
 
         try {
             provider = json.decodeFromString<Provider>(providerJson)
             messages = json.decodeFromString<List<Message>>(messagesJson)
             projectAttachments = json.decodeFromString<List<Attachment>>(projectAttachmentsJson)
             enabledTools = json.decodeFromString<List<ToolSpecification>>(enabledToolsJson)
+            thinkingBudget = if (thinkingBudgetJson != null) {
+                json.decodeFromString<ThinkingBudgetValue>(thinkingBudgetJson)
+            } else {
+                ThinkingBudgetValue.None
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse request data", e)
             serviceScope.launch {
@@ -200,7 +208,8 @@ class StreamingService : Service() {
                 systemPrompt = systemPrompt,
                 webSearchEnabled = webSearchEnabled,
                 projectAttachments = projectAttachments,
-                enabledTools = enabledTools
+                enabledTools = enabledTools,
+                thinkingBudget = thinkingBudget
             )
         }
         activeJobs[requestId] = job
@@ -305,7 +314,8 @@ class StreamingService : Service() {
         systemPrompt: String,
         webSearchEnabled: Boolean,
         projectAttachments: List<Attachment>,
-        enabledTools: List<ToolSpecification>
+        enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None
     ) {
         Log.d(TAG, "Executing streaming request: requestId=$requestId")
 
@@ -463,6 +473,7 @@ class StreamingService : Service() {
                 projectAttachments = projectAttachments,
                 webSearchEnabled = webSearchEnabled,
                 enabledTools = enabledTools,
+                thinkingBudget = thinkingBudget,
                 callback = callback
             )
         } catch (e: CancellationException) {
