@@ -553,25 +553,25 @@ fun ChatScreen(
                                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                                             ) {
-                                                // LTR button (left)
+                                                // RTL button (left in code, right on screen due to RTL layout)
                                                 Surface(
                                                     shape = MaterialTheme.shapes.small,
-                                                    color = if (uiState.textDirectionMode == TextDirectionMode.LTR)
+                                                    color = if (uiState.textDirectionMode == TextDirectionMode.RTL)
                                                         MaterialTheme.colorScheme.primaryContainer
                                                     else
                                                         SurfaceVariant,
                                                     modifier = Modifier
                                                         .size(36.dp)
                                                         .clickable {
-                                                            viewModel.setTextDirectionMode(TextDirectionMode.LTR)
+                                                            viewModel.setTextDirectionMode(TextDirectionMode.RTL)
                                                             showTextDirectionMenu = false
                                                         }
                                                 ) {
                                                     Box(contentAlignment = Alignment.Center) {
                                                         Icon(
-                                                            imageVector = Icons.Default.FormatAlignLeft,
-                                                            contentDescription = "LTR",
-                                                            tint = if (uiState.textDirectionMode == TextDirectionMode.LTR)
+                                                            imageVector = Icons.Default.FormatAlignRight,
+                                                            contentDescription = "RTL",
+                                                            tint = if (uiState.textDirectionMode == TextDirectionMode.RTL)
                                                                 MaterialTheme.colorScheme.onPrimaryContainer
                                                             else
                                                                 OnSurfaceVariant,
@@ -607,25 +607,25 @@ fun ChatScreen(
                                                     }
                                                 }
 
-                                                // RTL button (right)
+                                                // LTR button (right in code, left on screen due to RTL layout)
                                                 Surface(
                                                     shape = MaterialTheme.shapes.small,
-                                                    color = if (uiState.textDirectionMode == TextDirectionMode.RTL)
+                                                    color = if (uiState.textDirectionMode == TextDirectionMode.LTR)
                                                         MaterialTheme.colorScheme.primaryContainer
                                                     else
                                                         SurfaceVariant,
                                                     modifier = Modifier
                                                         .size(36.dp)
                                                         .clickable {
-                                                            viewModel.setTextDirectionMode(TextDirectionMode.RTL)
+                                                            viewModel.setTextDirectionMode(TextDirectionMode.LTR)
                                                             showTextDirectionMenu = false
                                                         }
                                                 ) {
                                                     Box(contentAlignment = Alignment.Center) {
                                                         Icon(
-                                                            imageVector = Icons.Default.FormatAlignRight,
-                                                            contentDescription = "RTL",
-                                                            tint = if (uiState.textDirectionMode == TextDirectionMode.RTL)
+                                                            imageVector = Icons.Default.FormatAlignLeft,
+                                                            contentDescription = "LTR",
+                                                            tint = if (uiState.textDirectionMode == TextDirectionMode.LTR)
                                                                 MaterialTheme.colorScheme.onPrimaryContainer
                                                             else
                                                                 OnSurfaceVariant,
