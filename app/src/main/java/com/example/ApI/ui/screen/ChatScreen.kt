@@ -523,44 +523,120 @@ fun ChatScreen(
 
                                     Spacer(modifier = Modifier.width(12.dp))
 
-                                    // Text Direction Toggle Button
-                                    Surface(
-                                        shape = MaterialTheme.shapes.medium,
-                                        color = SurfaceVariant,
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clickable { viewModel.toggleTextDirection() }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            when (uiState.textDirectionMode) {
-                                                TextDirectionMode.AUTO -> {
-                                                    Text(
-                                                        text = "A",
-                                                        color = OnSurfaceVariant,
-                                                        fontSize = 16.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
+                                    // Text Direction Toggle Button with Popup Menu
+                                    var showTextDirectionMenu by remember { mutableStateOf(false) }
+
+                                    Box {
+                                        Surface(
+                                            shape = MaterialTheme.shapes.medium,
+                                            color = SurfaceVariant,
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clickable { showTextDirectionMenu = !showTextDirectionMenu }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.FormatAlignRight,
+                                                    contentDescription = "Text Direction",
+                                                    tint = OnSurfaceVariant,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+
+                                        // Popup menu for text direction options
+                                        DropdownMenu(
+                                            expanded = showTextDirectionMenu,
+                                            onDismissRequest = { showTextDirectionMenu = false }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                // LTR button (left)
+                                                Surface(
+                                                    shape = MaterialTheme.shapes.small,
+                                                    color = if (uiState.textDirectionMode == TextDirectionMode.LTR)
+                                                        MaterialTheme.colorScheme.primaryContainer
+                                                    else
+                                                        SurfaceVariant,
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .clickable {
+                                                            viewModel.setTextDirectionMode(TextDirectionMode.LTR)
+                                                            showTextDirectionMenu = false
+                                                        }
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.FormatAlignLeft,
+                                                            contentDescription = "LTR",
+                                                            tint = if (uiState.textDirectionMode == TextDirectionMode.LTR)
+                                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                                            else
+                                                                OnSurfaceVariant,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
                                                 }
-                                                TextDirectionMode.RTL -> {
-                                                    Icon(
-                                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                                        contentDescription = "RTL",
-                                                        tint = OnSurfaceVariant,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
+
+                                                // AUTO button (middle)
+                                                Surface(
+                                                    shape = MaterialTheme.shapes.small,
+                                                    color = if (uiState.textDirectionMode == TextDirectionMode.AUTO)
+                                                        MaterialTheme.colorScheme.primaryContainer
+                                                    else
+                                                        SurfaceVariant,
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .clickable {
+                                                            viewModel.setTextDirectionMode(TextDirectionMode.AUTO)
+                                                            showTextDirectionMenu = false
+                                                        }
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Text(
+                                                            text = "A",
+                                                            color = if (uiState.textDirectionMode == TextDirectionMode.AUTO)
+                                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                                            else
+                                                                OnSurfaceVariant,
+                                                            fontSize = 16.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
                                                 }
-                                                TextDirectionMode.LTR -> {
-                                                    Icon(
-                                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                                        contentDescription = "LTR",
-                                                        tint = OnSurfaceVariant,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
+
+                                                // RTL button (right)
+                                                Surface(
+                                                    shape = MaterialTheme.shapes.small,
+                                                    color = if (uiState.textDirectionMode == TextDirectionMode.RTL)
+                                                        MaterialTheme.colorScheme.primaryContainer
+                                                    else
+                                                        SurfaceVariant,
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .clickable {
+                                                            viewModel.setTextDirectionMode(TextDirectionMode.RTL)
+                                                            showTextDirectionMenu = false
+                                                        }
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.FormatAlignRight,
+                                                            contentDescription = "RTL",
+                                                            tint = if (uiState.textDirectionMode == TextDirectionMode.RTL)
+                                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                                            else
+                                                                OnSurfaceVariant,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                    
+
                                     Spacer(modifier = Modifier.width(12.dp))
                                     
                                     // Download/Export Button

@@ -1294,6 +1294,10 @@ class ChatViewModel(
         }
         _uiState.value = _uiState.value.copy(textDirectionMode = nextMode)
     }
+
+    fun setTextDirectionMode(mode: TextDirectionMode) {
+        _uiState.value = _uiState.value.copy(textDirectionMode = mode)
+    }
     
     fun importChatHistoryFromUri(uri: Uri) {
         viewModelScope.launch {
