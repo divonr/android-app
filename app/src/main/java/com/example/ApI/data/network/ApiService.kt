@@ -768,7 +768,8 @@ class ApiService(private val context: Context) {
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback,
         maxToolDepth: Int = 25,
-        currentDepth: Int = 0
+        currentDepth: Int = 0,
+        requestReasoningSummary: Boolean = true
     ): OpenAIStreamingResult = withContext(Dispatchers.IO) {
         try {
             // Build request URL
@@ -794,6 +795,9 @@ class ApiService(private val context: Context) {
                 if (thinkingBudget is ThinkingBudgetValue.Effort && thinkingBudget.level.isNotBlank()) {
                     put("reasoning", buildJsonObject {
                         put("effort", thinkingBudget.level)
+                        if (requestReasoningSummary) {
+                            put("summary", "detailed")  // Request detailed reasoning summaries
+                        }
                     })
                 }
 
@@ -839,15 +843,25 @@ class ApiService(private val context: Context) {
             val responseCode = connection.responseCode
 
             if (responseCode >= 400) {
-                if (responseCode == 400) {
-                    // Fallback for 400 Bad Request
-                    connection.disconnect()
+                val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                connection.disconnect()
 
-                    // Run the non-streaming version as a fallback
+                if (responseCode == 400) {
+                    // Check if this is the reasoning.summary error
+                    if (requestReasoningSummary && errorBody.contains("reasoning.summary")) {
+                        Log.d("OPENAI_REASONING", "Reasoning summary not available for this account, retrying without it")
+                        // Retry without requesting reasoning summaries
+                        return@withContext makeOpenAIStreamingRequest(
+                            provider, modelName, messages, systemPrompt, apiKey,
+                            webSearchEnabled, enabledTools, thinkingBudget, callback,
+                            maxToolDepth, currentDepth, requestReasoningSummary = false
+                        )
+                    }
+
+                    // Other 400 errors - fallback to non-streaming
                     sendOpenAIMessageNonStreaming(provider, modelName, messages, systemPrompt, mapOf("openai" to apiKey), webSearchEnabled, enabledTools, callback)
                     return@withContext OpenAIStreamingResult.Error("Fallback to non-streaming handled")
                 } else {
-                    val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
                     callback.onError("HTTP $responseCode: $errorBody")
                     return@withContext OpenAIStreamingResult.Error("HTTP $responseCode: $errorBody")
                 }
@@ -857,7 +871,25 @@ class ApiService(private val context: Context) {
             val fullResponse = StringBuilder()
             var detectedToolCall: com.example.ApI.tools.ToolCall? = null
             var line: String?
-            
+
+            // Reasoning/thinking state tracking
+            var isInReasoningPhase = false
+            var reasoningStartTime: Long = 0
+            val reasoningBuilder = StringBuilder()
+
+            // Track if reasoning summaries are unavailable (for fallback timing)
+            val reasoningSummariesUnavailable = !requestReasoningSummary &&
+                thinkingBudget is ThinkingBudgetValue.Effort &&
+                thinkingBudget.level.isNotBlank()
+
+            // If summaries unavailable but reasoning is enabled, start timing now
+            if (reasoningSummariesUnavailable) {
+                isInReasoningPhase = true
+                reasoningStartTime = System.currentTimeMillis()
+                callback.onThinkingStarted()
+                Log.d("OPENAI_REASONING", "Reasoning phase started (summaries unavailable, timing from request)")
+            }
+
             while (reader.readLine().also { line = it } != null) {
                 val currentLine = line!!
                 
@@ -880,7 +912,41 @@ class ApiService(private val context: Context) {
                         val eventType = chunkJson["type"]?.jsonPrimitive?.content
                         
                         when (eventType) {
+                            "response.output_item.added" -> {
+                                // Check if reasoning block is starting
+                                val item = chunkJson["item"]?.jsonObject
+                                val itemType = item?.get("type")?.jsonPrimitive?.content
+                                if (itemType == "reasoning") {
+                                    if (!isInReasoningPhase) {
+                                        isInReasoningPhase = true
+                                        reasoningStartTime = System.currentTimeMillis()
+                                        callback.onThinkingStarted()
+                                        Log.d("OPENAI_REASONING", "Reasoning phase started")
+                                    }
+                                }
+                            }
+                            "response.reasoning_summary_text.delta" -> {
+                                // Stream reasoning summary text
+                                val deltaText = chunkJson["delta"]?.jsonPrimitive?.content
+                                if (deltaText != null && deltaText.isNotEmpty()) {
+                                    reasoningBuilder.append(deltaText)
+                                    callback.onThinkingPartial(deltaText)
+                                }
+                            }
                             "response.output_text.delta" -> {
+                                // Transition from reasoning to message output if needed
+                                if (isInReasoningPhase) {
+                                    val durationSeconds = (System.currentTimeMillis() - reasoningStartTime) / 1000f
+                                    val reasoningContent = reasoningBuilder.toString().takeIf { it.isNotEmpty() }
+                                    callback.onThinkingComplete(
+                                        thoughts = reasoningContent,
+                                        durationSeconds = durationSeconds,
+                                        status = if (reasoningContent != null) ThoughtsStatus.PRESENT else ThoughtsStatus.UNAVAILABLE
+                                    )
+                                    isInReasoningPhase = false
+                                    Log.d("OPENAI_REASONING", "Reasoning phase complete: ${durationSeconds}s, content length: ${reasoningContent?.length ?: 0}")
+                                }
+
                                 val deltaText = chunkJson["delta"]?.jsonPrimitive?.content
                                 if (deltaText != null) {
                                     fullResponse.append(deltaText)
@@ -890,13 +956,28 @@ class ApiService(private val context: Context) {
                             "response.output_item.done" -> {
                                 // Check if this is a function call completion
                                 val item = chunkJson["item"]?.jsonObject
-                                if (item?.get("type")?.jsonPrimitive?.content == "function_call") {
+                                val itemType = item?.get("type")?.jsonPrimitive?.content
+
+                                if (itemType == "function_call") {
+                                    // Complete reasoning phase if still active (tool call after reasoning)
+                                    if (isInReasoningPhase) {
+                                        val durationSeconds = (System.currentTimeMillis() - reasoningStartTime) / 1000f
+                                        val reasoningContent = reasoningBuilder.toString().takeIf { it.isNotEmpty() }
+                                        callback.onThinkingComplete(
+                                            thoughts = reasoningContent,
+                                            durationSeconds = durationSeconds,
+                                            status = if (reasoningContent != null) ThoughtsStatus.PRESENT else ThoughtsStatus.UNAVAILABLE
+                                        )
+                                        isInReasoningPhase = false
+                                        Log.d("OPENAI_REASONING", "Reasoning phase complete before tool call: ${durationSeconds}s")
+                                    }
+
                                     val status = item["status"]?.jsonPrimitive?.content
                                     if (status == "completed") {
                                         val name = item["name"]?.jsonPrimitive?.content
                                         val callId = item["call_id"]?.jsonPrimitive?.content
                                         val arguments = item["arguments"]?.jsonPrimitive?.content
-                                        
+
                                         if (name != null && callId != null && arguments != null) {
                                             val paramsJson = json.parseToJsonElement(arguments).jsonObject
                                             detectedToolCall = com.example.ApI.tools.ToolCall(
@@ -911,11 +992,24 @@ class ApiService(private val context: Context) {
                                 }
                             }
                             "response.completed" -> {
+                                // Complete any remaining reasoning phase
+                                if (isInReasoningPhase) {
+                                    val durationSeconds = (System.currentTimeMillis() - reasoningStartTime) / 1000f
+                                    val reasoningContent = reasoningBuilder.toString().takeIf { it.isNotEmpty() }
+                                    callback.onThinkingComplete(
+                                        thoughts = reasoningContent,
+                                        durationSeconds = durationSeconds,
+                                        status = if (reasoningContent != null) ThoughtsStatus.PRESENT else ThoughtsStatus.UNAVAILABLE
+                                    )
+                                    isInReasoningPhase = false
+                                    Log.d("OPENAI_REASONING", "Reasoning phase complete at response.completed: ${durationSeconds}s")
+                                }
+
                                 // Response is complete - check for tool call in the full response
                                 if (detectedToolCall == null) {
                                     val response = chunkJson["response"]?.jsonObject
                                     val output = response?.get("output")?.jsonArray
-                                    
+
                                     output?.forEach { outputItem ->
                                         val outputObj = outputItem.jsonObject
                                         if (outputObj["type"]?.jsonPrimitive?.content == "function_call") {
@@ -924,7 +1018,7 @@ class ApiService(private val context: Context) {
                                                 val name = outputObj["name"]?.jsonPrimitive?.content
                                                 val callId = outputObj["call_id"]?.jsonPrimitive?.content
                                                 val arguments = outputObj["arguments"]?.jsonPrimitive?.content
-                                                
+
                                                 if (name != null && callId != null && arguments != null) {
                                                     val paramsJson = json.parseToJsonElement(arguments).jsonObject
                                                     detectedToolCall = com.example.ApI.tools.ToolCall(
