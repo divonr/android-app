@@ -2053,7 +2053,7 @@ class ChatViewModel(
                     // Handle single file sharing
                     intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { uri ->
                         val fileName = getFileName(context, uri) ?: "shared_file"
-                        val mimeType = intent.type ?: context.contentResolver.getType(uri) ?: "application/octet-stream"
+                        val mimeType = resolveMimeType(context, uri, intent.type, fileName)
                         checkAndHandleJsonFile(uri, fileName, mimeType)
                     }
                 }
@@ -2061,7 +2061,7 @@ class ChatViewModel(
                     // Multiple files sharing
                     intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.forEach { uri ->
                         val fileName = getFileName(context, uri) ?: "shared_file"
-                        val mimeType = intent.type ?: context.contentResolver.getType(uri) ?: "application/octet-stream"
+                        val mimeType = resolveMimeType(context, uri, intent.type, fileName)
                         checkAndHandleJsonFile(uri, fileName, mimeType)
                     }
                 }
@@ -2124,6 +2124,60 @@ class ChatViewModel(
             }
         }
         return fileName
+    }
+
+    /**
+     * Resolves a specific MIME type from potentially wildcarded or incomplete intent type.
+     * Falls back to contentResolver and then file extension inference.
+     */
+    private fun resolveMimeType(context: Context, uri: Uri, intentType: String?, fileName: String?): String {
+        // Helper to check if MIME type is valid (has "/" and no wildcard)
+        fun isValidMimeType(type: String?): Boolean {
+            return !type.isNullOrBlank() && type.contains("/") && !type.contains("*")
+        }
+
+        // First try contentResolver which usually gives specific type
+        val resolvedType = context.contentResolver.getType(uri)
+
+        // If contentResolver gives a valid specific type, use it
+        if (isValidMimeType(resolvedType)) {
+            return resolvedType!!
+        }
+
+        // If intentType is specific (not wildcard), use it
+        if (isValidMimeType(intentType)) {
+            return intentType!!
+        }
+
+        // Infer from file extension
+        val extension = fileName?.substringAfterLast('.', "")?.lowercase()
+        val inferredType = when (extension) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            "bmp" -> "image/bmp"
+            "heic", "heif" -> "image/heic"
+            "svg" -> "image/svg+xml"
+            "pdf" -> "application/pdf"
+            "txt" -> "text/plain"
+            "json" -> "application/json"
+            "mp4" -> "video/mp4"
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            "doc" -> "application/msword"
+            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            "xls" -> "application/vnd.ms-excel"
+            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            else -> null
+        }
+
+        if (inferredType != null) {
+            return inferredType
+        }
+
+        // Last resort: use intentType if available (even if wildcard), otherwise default
+        return intentType ?: "application/octet-stream"
     }
 
     // Group Management Methods
