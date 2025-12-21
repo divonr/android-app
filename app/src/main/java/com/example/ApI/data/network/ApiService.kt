@@ -326,7 +326,7 @@ class ApiService(private val context: Context) {
                                             if (fileContent != null) {
                                                 add(buildJsonObject {
                                                     put("type", "input_text")
-                                                    put("text", "--- File: ${attachment.file_name} ---\n$fileContent\n--- End of file ---")
+                                                    put("text", "[ATTACHED FILE: ${attachment.file_name}]\n[MIME TYPE: ${attachment.mime_type}]\n[CONTENT START]\n$fileContent\n[CONTENT END]")
                                                 })
                                             }
                                         }
