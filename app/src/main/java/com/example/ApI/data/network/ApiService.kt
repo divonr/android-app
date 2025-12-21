@@ -250,6 +250,25 @@ class ApiService(private val context: Context) {
     }
     
     /**
+     * Reads text content from a file for inclusion in API requests.
+     * Returns null if the file cannot be read or is too large.
+     */
+    private fun readTextFileContent(filePath: String?, fileName: String): String? {
+        if (filePath == null) return null
+        return try {
+            val file = File(filePath)
+            if (!file.exists()) return null
+            // Limit file size to 100KB to avoid very large payloads
+            if (file.length() > 100 * 1024) {
+                return "[File too large to include inline. Size: ${file.length() / 1024}KB]"
+            }
+            file.readText()
+        } catch (e: Exception) {
+            "[Error reading file: ${e.message}]"
+        }
+    }
+
+    /**
      * Builds the input array for OpenAI API request
      */
     private fun buildOpenAIInput(messages: List<Message>, systemPrompt: String): List<JsonObject> {
@@ -286,10 +305,32 @@ class ApiService(private val context: Context) {
                                     put("text", message.text)
                                 })
                                 message.attachments.forEach { attachment ->
-                                    add(buildJsonObject {
-                                        put("type", if (attachment.mime_type.startsWith("image/")) "input_image" else "input_file")
-                                        put("file_id", attachment.file_OPENAI_id ?: "{file_ID}")
-                                    })
+                                    when {
+                                        // Images: use input_image with file_id
+                                        attachment.mime_type.startsWith("image/") -> {
+                                            add(buildJsonObject {
+                                                put("type", "input_image")
+                                                put("file_id", attachment.file_OPENAI_id ?: "{file_ID}")
+                                            })
+                                        }
+                                        // PDFs: use input_file with file_id (only supported file type for input_file)
+                                        attachment.mime_type == "application/pdf" -> {
+                                            add(buildJsonObject {
+                                                put("type", "input_file")
+                                                put("file_id", attachment.file_OPENAI_id ?: "{file_ID}")
+                                            })
+                                        }
+                                        // Text-based files: read content and include as input_text
+                                        else -> {
+                                            val fileContent = readTextFileContent(attachment.local_file_path, attachment.file_name)
+                                            if (fileContent != null) {
+                                                add(buildJsonObject {
+                                                    put("type", "input_text")
+                                                    put("text", "--- File: ${attachment.file_name} ---\n$fileContent\n--- End of file ---")
+                                                })
+                                            }
+                                        }
+                                    }
                                 }
                             })
                         })
