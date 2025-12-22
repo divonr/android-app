@@ -1,0 +1,801 @@
+package com.example.ApI.data.network.providers
+
+import android.content.Context
+import android.util.Log
+import com.example.ApI.data.model.*
+import com.example.ApI.tools.ToolCall
+import com.example.ApI.tools.ToolCallInfo
+import com.example.ApI.tools.ToolExecutionResult
+import com.example.ApI.tools.ToolRegistry
+import com.example.ApI.tools.ToolSpecification
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.*
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+
+/**
+ * OpenAI API provider implementation.
+ * Handles streaming responses, tool calling, and thinking/reasoning support.
+ */
+class OpenAIProvider(context: Context) : BaseProvider(context) {
+
+    override suspend fun sendMessage(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue,
+        temperature: Float?,
+        callback: StreamingCallback
+    ) {
+        try {
+            // Make streaming request and parse response
+            val streamingResponse = makeStreamingRequest(
+                provider, modelName, messages, systemPrompt, apiKey,
+                webSearchEnabled, enabledTools, thinkingBudget, callback, temperature = temperature
+            )
+
+            when (streamingResponse) {
+                is StreamingResult.TextComplete -> {
+                    Log.d("TOOL_CALL_DEBUG", "Streaming: Text response complete")
+                    callback.onComplete(streamingResponse.fullText)
+                }
+                is StreamingResult.ToolCallDetected -> {
+                    handleToolCall(
+                        provider, modelName, messages, systemPrompt, apiKey,
+                        webSearchEnabled, enabledTools, thinkingBudget, temperature,
+                        streamingResponse, callback
+                    )
+                }
+                is StreamingResult.Error -> {
+                    // Already called callback.onError in makeStreamingRequest
+                }
+            }
+        } catch (e: Exception) {
+            callback.onError("Failed to send OpenAI streaming message: ${e.message}")
+        }
+    }
+
+    /**
+     * Handles tool call execution and chaining for OpenAI
+     */
+    private suspend fun handleToolCall(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue,
+        temperature: Float?,
+        initialResponse: StreamingResult.ToolCallDetected,
+        callback: StreamingCallback
+    ) {
+        Log.d("TOOL_CALL_DEBUG", "Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
+
+        // Execute the tool via callback
+        val toolResult = callback.onToolCall(
+            toolCall = initialResponse.toolCall,
+            precedingText = initialResponse.precedingText
+        )
+        Log.d("TOOL_CALL_DEBUG", "Streaming: Tool executed with result: $toolResult")
+
+        // Create tool messages
+        val toolCallMessage = createToolCallMessage(initialResponse.toolCall, toolResult, "")
+        val toolResponseMessage = createToolResponseMessage(initialResponse.toolCall, toolResult)
+
+        // Save the tool messages to chat history
+        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, initialResponse.precedingText)
+
+        // Build follow-up request with tool result
+        val messagesToAdd = mutableListOf<Message>()
+        if (initialResponse.precedingText.isNotBlank()) {
+            messagesToAdd.add(createAssistantMessage(initialResponse.precedingText, modelName))
+        }
+        messagesToAdd.add(toolCallMessage)
+        messagesToAdd.add(toolResponseMessage)
+        val messagesWithToolResult = messages + messagesToAdd
+
+        // Handle tool chaining with loop (supports up to 25 sequential tool calls)
+        var currentMessages = messagesWithToolResult
+        var currentResponse: StreamingResult = makeStreamingRequest(
+            provider, modelName, currentMessages, systemPrompt, apiKey,
+            webSearchEnabled, enabledTools, thinkingBudget, callback,
+            maxToolDepth = MAX_TOOL_DEPTH,
+            currentDepth = 1,
+            temperature = temperature
+        )
+        var toolDepth = 1
+
+        // Loop to handle sequential tool calls
+        while (currentResponse is StreamingResult.ToolCallDetected && toolDepth < MAX_TOOL_DEPTH) {
+            Log.d("TOOL_CALL_DEBUG", "Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
+
+            // Execute the tool
+            val chainedToolResult = callback.onToolCall(
+                toolCall = currentResponse.toolCall,
+                precedingText = currentResponse.precedingText
+            )
+
+            // Create messages
+            val chainedMessagesToAdd = mutableListOf<Message>()
+            if (currentResponse.precedingText.isNotBlank()) {
+                chainedMessagesToAdd.add(createAssistantMessage(currentResponse.precedingText, modelName))
+            }
+
+            val chainedToolCallMessage = createToolCallMessage(currentResponse.toolCall, chainedToolResult, "")
+            chainedMessagesToAdd.add(chainedToolCallMessage)
+
+            val chainedToolResponseMessage = createToolResponseMessage(currentResponse.toolCall, chainedToolResult)
+            chainedMessagesToAdd.add(chainedToolResponseMessage)
+
+            // Save tool messages
+            callback.onSaveToolMessages(chainedToolCallMessage, chainedToolResponseMessage, currentResponse.precedingText)
+
+            // Add messages to conversation history
+            currentMessages = currentMessages + chainedMessagesToAdd
+            toolDepth++
+
+            // Send follow-up request
+            Log.d("TOOL_CALL_DEBUG", "Streaming: Sending follow-up request (depth $toolDepth)")
+            currentResponse = makeStreamingRequest(
+                provider, modelName, currentMessages, systemPrompt, apiKey,
+                webSearchEnabled, enabledTools, thinkingBudget, callback,
+                maxToolDepth = MAX_TOOL_DEPTH,
+                currentDepth = toolDepth,
+                temperature = temperature
+            )
+        }
+
+        // Handle final response
+        when (currentResponse) {
+            is StreamingResult.TextComplete -> {
+                Log.d("TOOL_CALL_DEBUG", "Streaming: Got final text response after $toolDepth tool calls")
+                callback.onComplete(currentResponse.fullText)
+            }
+            is StreamingResult.ToolCallDetected -> {
+                Log.d("TOOL_CALL_DEBUG", "Streaming: Maximum tool depth ($MAX_TOOL_DEPTH) exceeded")
+                callback.onError("Maximum tool call depth ($MAX_TOOL_DEPTH) exceeded")
+            }
+            is StreamingResult.Error -> {
+                callback.onError(currentResponse.error)
+            }
+        }
+    }
+
+    /**
+     * Makes a streaming OpenAI API request and returns the parsed result
+     */
+    private suspend fun makeStreamingRequest(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        callback: StreamingCallback,
+        maxToolDepth: Int = MAX_TOOL_DEPTH,
+        currentDepth: Int = 0,
+        requestReasoningSummary: Boolean = true,
+        temperature: Float? = null
+    ): StreamingResult = withContext(Dispatchers.IO) {
+        try {
+            val url = URL(provider.request.base_url)
+            val connection = url.openConnection() as HttpURLConnection
+
+            // Set headers
+            connection.requestMethod = provider.request.request_type
+            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.doOutput = true
+
+            // Build conversation input
+            val conversationInput = buildInput(messages, systemPrompt)
+
+            // Build request body with streaming enabled
+            val requestBody = buildRequestBody(
+                modelName, conversationInput, webSearchEnabled, enabledTools,
+                thinkingBudget, requestReasoningSummary, temperature
+            )
+
+            // Send request
+            val writer = OutputStreamWriter(connection.outputStream)
+            writer.write(json.encodeToString(requestBody))
+            writer.flush()
+            writer.close()
+
+            // Read streaming response
+            val responseCode = connection.responseCode
+
+            if (responseCode >= 400) {
+                val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                connection.disconnect()
+
+                if (responseCode == 400) {
+                    // Check if this is the reasoning.summary error
+                    if (requestReasoningSummary && errorBody.contains("reasoning.summary")) {
+                        Log.d("OPENAI_REASONING", "Reasoning summary not available for this account, retrying without it")
+                        return@withContext makeStreamingRequest(
+                            provider, modelName, messages, systemPrompt, apiKey,
+                            webSearchEnabled, enabledTools, thinkingBudget, callback,
+                            maxToolDepth, currentDepth, requestReasoningSummary = false,
+                            temperature = temperature
+                        )
+                    }
+
+                    // Other 400 errors - fallback to non-streaming
+                    sendNonStreaming(provider, modelName, messages, systemPrompt, apiKey, webSearchEnabled, enabledTools, callback)
+                    return@withContext StreamingResult.Error("Fallback to non-streaming handled")
+                } else {
+                    callback.onError("HTTP $responseCode: $errorBody")
+                    return@withContext StreamingResult.Error("HTTP $responseCode: $errorBody")
+                }
+            }
+
+            parseStreamingResponse(connection, callback, thinkingBudget, requestReasoningSummary)
+        } catch (e: Exception) {
+            callback.onError("Failed to make OpenAI streaming request: ${e.message}")
+            StreamingResult.Error("Failed to make OpenAI streaming request: ${e.message}")
+        }
+    }
+
+    /**
+     * Parses the streaming response from OpenAI
+     */
+    private fun parseStreamingResponse(
+        connection: HttpURLConnection,
+        callback: StreamingCallback,
+        thinkingBudget: ThinkingBudgetValue,
+        requestReasoningSummary: Boolean
+    ): StreamingResult {
+        val reader = BufferedReader(InputStreamReader(connection.inputStream))
+        val fullResponse = StringBuilder()
+        var detectedToolCall: ToolCall? = null
+        var line: String?
+
+        // Reasoning/thinking state tracking
+        var isInReasoningPhase = false
+        var reasoningStartTime: Long = 0
+        val reasoningBuilder = StringBuilder()
+
+        // Track if reasoning summaries are unavailable
+        val reasoningSummariesUnavailable = !requestReasoningSummary &&
+            thinkingBudget is ThinkingBudgetValue.Effort &&
+            thinkingBudget.level.isNotBlank()
+
+        if (reasoningSummariesUnavailable) {
+            isInReasoningPhase = true
+            reasoningStartTime = System.currentTimeMillis()
+            callback.onThinkingStarted()
+            Log.d("OPENAI_REASONING", "Reasoning phase started (summaries unavailable, timing from request)")
+        }
+
+        while (reader.readLine().also { line = it } != null) {
+            val currentLine = line!!
+
+            if (currentLine.startsWith("data:")) {
+                val dataContent = currentLine.substring(5).trim()
+
+                if (dataContent == "[DONE]") break
+                if (dataContent.isBlank() || dataContent == "{}") continue
+
+                try {
+                    val chunkJson = json.parseToJsonElement(dataContent).jsonObject
+                    val eventType = chunkJson["type"]?.jsonPrimitive?.content
+
+                    when (eventType) {
+                        "response.output_item.added" -> {
+                            val item = chunkJson["item"]?.jsonObject
+                            val itemType = item?.get("type")?.jsonPrimitive?.content
+                            if (itemType == "reasoning") {
+                                if (!isInReasoningPhase) {
+                                    isInReasoningPhase = true
+                                    reasoningStartTime = System.currentTimeMillis()
+                                    callback.onThinkingStarted()
+                                    Log.d("OPENAI_REASONING", "Reasoning phase started")
+                                }
+                            }
+                        }
+                        "response.reasoning_summary_text.delta" -> {
+                            val deltaText = chunkJson["delta"]?.jsonPrimitive?.content
+                            if (deltaText != null && deltaText.isNotEmpty()) {
+                                reasoningBuilder.append(deltaText)
+                                callback.onThinkingPartial(deltaText)
+                            }
+                        }
+                        "response.output_text.delta" -> {
+                            if (isInReasoningPhase) {
+                                completeReasoningPhase(callback, reasoningStartTime, reasoningBuilder)
+                                isInReasoningPhase = false
+                            }
+
+                            val deltaText = chunkJson["delta"]?.jsonPrimitive?.content
+                            if (deltaText != null) {
+                                fullResponse.append(deltaText)
+                                callback.onPartialResponse(deltaText)
+                            }
+                        }
+                        "response.output_item.done" -> {
+                            val item = chunkJson["item"]?.jsonObject
+                            val itemType = item?.get("type")?.jsonPrimitive?.content
+
+                            if (itemType == "function_call") {
+                                if (isInReasoningPhase) {
+                                    completeReasoningPhase(callback, reasoningStartTime, reasoningBuilder)
+                                    isInReasoningPhase = false
+                                }
+
+                                detectedToolCall = parseToolCall(item)
+                            }
+                        }
+                        "response.completed" -> {
+                            if (isInReasoningPhase) {
+                                completeReasoningPhase(callback, reasoningStartTime, reasoningBuilder)
+                                isInReasoningPhase = false
+                            }
+
+                            if (detectedToolCall == null) {
+                                detectedToolCall = parseToolCallFromResponse(chunkJson)
+                            }
+                            break
+                        }
+                        "response.failed" -> {
+                            val error = chunkJson["response"]?.jsonObject?.get("error")?.jsonObject
+                            val errorMessage = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
+                            callback.onError("OpenAI API error: $errorMessage")
+                            reader.close()
+                            connection.disconnect()
+                            return StreamingResult.Error("OpenAI API error: $errorMessage")
+                        }
+                    }
+                } catch (jsonException: Exception) {
+                    Log.e("TOOL_CALL_DEBUG", "Error parsing streaming chunk: ${jsonException.message}")
+                    continue
+                }
+            }
+        }
+
+        reader.close()
+        connection.disconnect()
+
+        return when {
+            detectedToolCall != null -> StreamingResult.ToolCallDetected(
+                toolCall = detectedToolCall!!,
+                precedingText = fullResponse.toString()
+            )
+            fullResponse.isNotEmpty() -> StreamingResult.TextComplete(fullResponse.toString())
+            else -> StreamingResult.Error("Empty response from OpenAI")
+        }
+    }
+
+    private fun completeReasoningPhase(
+        callback: StreamingCallback,
+        reasoningStartTime: Long,
+        reasoningBuilder: StringBuilder
+    ) {
+        val durationSeconds = (System.currentTimeMillis() - reasoningStartTime) / 1000f
+        val reasoningContent = reasoningBuilder.toString().takeIf { it.isNotEmpty() }
+        callback.onThinkingComplete(
+            thoughts = reasoningContent,
+            durationSeconds = durationSeconds,
+            status = if (reasoningContent != null) ThoughtsStatus.PRESENT else ThoughtsStatus.UNAVAILABLE
+        )
+        Log.d("OPENAI_REASONING", "Reasoning phase complete: ${durationSeconds}s, content length: ${reasoningContent?.length ?: 0}")
+    }
+
+    private fun parseToolCall(item: JsonObject?): ToolCall? {
+        val status = item?.get("status")?.jsonPrimitive?.content
+        if (status == "completed") {
+            val name = item["name"]?.jsonPrimitive?.content
+            val callId = item["call_id"]?.jsonPrimitive?.content
+            val arguments = item["arguments"]?.jsonPrimitive?.content
+
+            if (name != null && callId != null && arguments != null) {
+                val paramsJson = json.parseToJsonElement(arguments).jsonObject
+                Log.d("TOOL_CALL_DEBUG", "Streaming: Detected tool call in output_item.done")
+                return ToolCall(
+                    id = callId,
+                    toolId = name,
+                    parameters = paramsJson,
+                    provider = "openai"
+                )
+            }
+        }
+        return null
+    }
+
+    private fun parseToolCallFromResponse(chunkJson: JsonObject): ToolCall? {
+        val response = chunkJson["response"]?.jsonObject
+        val output = response?.get("output")?.jsonArray
+
+        output?.forEach { outputItem ->
+            val outputObj = outputItem.jsonObject
+            if (outputObj["type"]?.jsonPrimitive?.content == "function_call") {
+                val status = outputObj["status"]?.jsonPrimitive?.content
+                if (status == "completed") {
+                    val name = outputObj["name"]?.jsonPrimitive?.content
+                    val callId = outputObj["call_id"]?.jsonPrimitive?.content
+                    val arguments = outputObj["arguments"]?.jsonPrimitive?.content
+
+                    if (name != null && callId != null && arguments != null) {
+                        val paramsJson = json.parseToJsonElement(arguments).jsonObject
+                        Log.d("TOOL_CALL_DEBUG", "Streaming: Detected tool call in response.completed")
+                        return ToolCall(
+                            id = callId,
+                            toolId = name,
+                            parameters = paramsJson,
+                            provider = "openai"
+                        )
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Builds the input array for OpenAI API request
+     */
+    private fun buildInput(messages: List<Message>, systemPrompt: String): List<JsonObject> {
+        val conversationInput = mutableListOf<JsonObject>()
+
+        // Add system prompt
+        if (systemPrompt.isNotBlank()) {
+            conversationInput.add(buildJsonObject {
+                put("role", "system")
+                put("content", systemPrompt)
+            })
+        }
+
+        // Add messages from conversation history
+        messages.forEach { message ->
+            when (message.role) {
+                "user" -> {
+                    conversationInput.add(buildUserMessage(message))
+                }
+                "assistant" -> {
+                    conversationInput.add(buildJsonObject {
+                        put("role", "assistant")
+                        put("content", message.text)
+                    })
+                }
+                "tool_call" -> {
+                    conversationInput.add(buildJsonObject {
+                        put("type", "function_call")
+                        put("name", message.toolCall?.toolId ?: "unknown")
+                        put("arguments", message.toolCall?.parameters?.toString() ?: "{}")
+                        put("call_id", message.toolCallId ?: "")
+                    })
+                }
+                "tool_response" -> {
+                    conversationInput.add(buildJsonObject {
+                        put("type", "function_call_output")
+                        put("call_id", message.toolResponseCallId ?: "")
+                        put("output", message.toolResponseOutput ?: "")
+                    })
+                }
+            }
+        }
+
+        return conversationInput
+    }
+
+    private fun buildUserMessage(message: Message): JsonObject {
+        return if (message.attachments.isEmpty()) {
+            buildJsonObject {
+                put("role", "user")
+                put("content", buildJsonArray {
+                    add(buildJsonObject {
+                        put("type", "input_text")
+                        put("text", message.text)
+                    })
+                })
+            }
+        } else {
+            buildJsonObject {
+                put("role", "user")
+                put("content", buildJsonArray {
+                    add(buildJsonObject {
+                        put("type", "input_text")
+                        put("text", message.text)
+                    })
+                    message.attachments.forEach { attachment ->
+                        when {
+                            attachment.mime_type.startsWith("image/") -> {
+                                add(buildJsonObject {
+                                    put("type", "input_image")
+                                    put("file_id", attachment.file_OPENAI_id ?: "{file_ID}")
+                                })
+                            }
+                            attachment.mime_type == "application/pdf" -> {
+                                add(buildJsonObject {
+                                    put("type", "input_file")
+                                    put("file_id", attachment.file_OPENAI_id ?: "{file_ID}")
+                                })
+                            }
+                            else -> {
+                                val fileContent = readTextFileContent(attachment.local_file_path, attachment.file_name)
+                                if (fileContent != null) {
+                                    add(buildJsonObject {
+                                        put("type", "input_text")
+                                        put("text", "[ATTACHED FILE: ${attachment.file_name}]\n[MIME TYPE: ${attachment.mime_type}]\n[CONTENT START]\n$fileContent\n[CONTENT END]")
+                                    })
+                                }
+                            }
+                        }
+                    }
+                })
+            }
+        }
+    }
+
+    private fun buildRequestBody(
+        modelName: String,
+        conversationInput: List<JsonObject>,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue,
+        requestReasoningSummary: Boolean,
+        temperature: Float?
+    ): JsonObject {
+        return buildJsonObject {
+            put("model", modelName)
+            put("input", JsonArray(conversationInput))
+            put("stream", true)
+
+            if (temperature != null) {
+                put("temperature", temperature.toDouble())
+            }
+
+            // Add reasoning parameter
+            if (thinkingBudget is ThinkingBudgetValue.Effort && thinkingBudget.level.isNotBlank()) {
+                put("reasoning", buildJsonObject {
+                    put("effort", thinkingBudget.level)
+                    if (requestReasoningSummary) {
+                        put("summary", "detailed")
+                    }
+                })
+            }
+
+            // Add tools section
+            val toolsArray = buildToolsArray(webSearchEnabled, enabledTools)
+            if (toolsArray.isNotEmpty()) {
+                put("tools", toolsArray)
+            }
+        }
+    }
+
+    private fun buildToolsArray(
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>
+    ): JsonArray {
+        return buildJsonArray {
+            if (webSearchEnabled) {
+                add(buildJsonObject {
+                    put("type", "web_search_preview")
+                })
+            }
+            enabledTools.forEach { toolSpec ->
+                add(buildJsonObject {
+                    put("type", "function")
+                    put("name", toolSpec.name)
+                    put("description", toolSpec.description)
+                    if (toolSpec.parameters != null) {
+                        val newParametersObject = buildJsonObject {
+                            toolSpec.parameters.forEach { (key, value) ->
+                                put(key, value)
+                            }
+                            put("additionalProperties", false)
+                        }
+                        put("parameters", newParametersObject)
+                    } else {
+                        put("parameters", buildJsonObject {})
+                    }
+                    put("strict", true)
+                })
+            }
+        }
+    }
+
+    /**
+     * Non-streaming fallback for when streaming fails
+     */
+    private suspend fun sendNonStreaming(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        callback: StreamingCallback
+    ) {
+        try {
+            val response = makeNonStreamingRequest(
+                provider, modelName, messages, systemPrompt, apiKey,
+                webSearchEnabled, enabledTools
+            )
+
+            when (response) {
+                is NonStreamingResponse.TextResponse -> {
+                    callback.onComplete(response.text)
+                }
+                is NonStreamingResponse.ToolCallResponse -> {
+                    Log.d("TOOL_CALL_DEBUG", "Non-streaming: Tool call detected - ${response.toolCall.toolId}")
+
+                    val toolResult = callback.onToolCall(response.toolCall)
+                    Log.d("TOOL_CALL_DEBUG", "Non-streaming: Tool executed with result: $toolResult")
+
+                    val toolCallMessage = createToolCallMessage(response.toolCall, toolResult, "")
+                    val toolResponseMessage = createToolResponseMessage(response.toolCall, toolResult)
+
+                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, "")
+
+                    val messagesWithToolResult = messages + listOf(toolCallMessage, toolResponseMessage)
+
+                    Log.d("TOOL_CALL_DEBUG", "Non-streaming: Sending follow-up request with tool result")
+
+                    val followUpResponse = makeNonStreamingRequest(
+                        provider, modelName, messagesWithToolResult, systemPrompt, apiKey,
+                        webSearchEnabled, enabledTools
+                    )
+
+                    when (followUpResponse) {
+                        is NonStreamingResponse.TextResponse -> {
+                            Log.d("TOOL_CALL_DEBUG", "Non-streaming: Got final text response")
+                            callback.onComplete(followUpResponse.text)
+                        }
+                        is NonStreamingResponse.ToolCallResponse -> {
+                            callback.onError("Multiple tool calls not yet supported")
+                        }
+                        is NonStreamingResponse.ErrorResponse -> {
+                            callback.onError(followUpResponse.error)
+                        }
+                    }
+                }
+                is NonStreamingResponse.ErrorResponse -> {
+                    callback.onError(response.error)
+                }
+            }
+        } catch (e: Exception) {
+            callback.onError("Failed to send OpenAI non-streaming message: ${e.message}")
+        }
+    }
+
+    private suspend fun makeNonStreamingRequest(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>
+    ): NonStreamingResponse = withContext(Dispatchers.IO) {
+        try {
+            val url = URL(provider.request.base_url)
+            val connection = url.openConnection() as HttpURLConnection
+
+            connection.requestMethod = provider.request.request_type
+            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.doOutput = true
+
+            val conversationInput = buildInput(messages, systemPrompt)
+
+            val requestBody = buildJsonObject {
+                put("model", modelName)
+                put("input", JsonArray(conversationInput))
+
+                val toolsArray = buildToolsArray(webSearchEnabled, enabledTools)
+                if (toolsArray.isNotEmpty()) {
+                    put("tools", toolsArray)
+                }
+            }
+
+            val writer = OutputStreamWriter(connection.outputStream)
+            writer.write(json.encodeToString(requestBody))
+            writer.flush()
+            writer.close()
+
+            val responseCode = connection.responseCode
+            val reader = if (responseCode >= 400) {
+                BufferedReader(InputStreamReader(connection.errorStream))
+            } else {
+                BufferedReader(InputStreamReader(connection.inputStream))
+            }
+
+            val response = reader.readText()
+            reader.close()
+            connection.disconnect()
+
+            if (responseCode >= 400) {
+                return@withContext NonStreamingResponse.ErrorResponse("HTTP $responseCode: $response")
+            }
+
+            parseNonStreamingResponse(response)
+        } catch (e: Exception) {
+            NonStreamingResponse.ErrorResponse("Failed to make OpenAI request: ${e.message}")
+        }
+    }
+
+    private fun parseNonStreamingResponse(response: String): NonStreamingResponse {
+        try {
+            val responseJson = json.parseToJsonElement(response).jsonObject
+            val outputArray = responseJson["output"]?.jsonArray
+                ?: return NonStreamingResponse.ErrorResponse("No output in response")
+
+            var responseText = ""
+            var toolCall: ToolCall? = null
+
+            outputArray.forEach { outputElement ->
+                val outputObj = outputElement.jsonObject
+                when (outputObj["type"]?.jsonPrimitive?.content) {
+                    "message" -> {
+                        val content = outputObj["content"]?.jsonArray
+                        content?.forEach { contentElement ->
+                            val contentObj = contentElement.jsonObject
+                            if (contentObj["type"]?.jsonPrimitive?.content == "output_text") {
+                                responseText = contentObj["text"]?.jsonPrimitive?.content ?: ""
+                            }
+                        }
+                    }
+                    "function_call" -> {
+                        val status = outputObj["status"]?.jsonPrimitive?.content
+                        if (status == "completed") {
+                            val name = outputObj["name"]?.jsonPrimitive?.content
+                            val callId = outputObj["call_id"]?.jsonPrimitive?.content
+                            val arguments = outputObj["arguments"]?.jsonPrimitive?.content
+
+                            if (name != null && callId != null && arguments != null) {
+                                val paramsJson = json.parseToJsonElement(arguments).jsonObject
+                                toolCall = ToolCall(
+                                    id = callId,
+                                    toolId = name,
+                                    parameters = paramsJson,
+                                    provider = "openai"
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            return when {
+                toolCall != null -> NonStreamingResponse.ToolCallResponse(toolCall!!)
+                responseText.isNotEmpty() -> NonStreamingResponse.TextResponse(responseText)
+                else -> NonStreamingResponse.ErrorResponse("Empty response from OpenAI")
+            }
+        } catch (e: Exception) {
+            return NonStreamingResponse.ErrorResponse("Failed to parse response: ${e.message}")
+        }
+    }
+
+    /**
+     * Internal sealed classes for streaming and non-streaming results
+     */
+    private sealed class StreamingResult {
+        data class TextComplete(val fullText: String) : StreamingResult()
+        data class ToolCallDetected(
+            val toolCall: ToolCall,
+            val precedingText: String = ""
+        ) : StreamingResult()
+        data class Error(val error: String) : StreamingResult()
+    }
+
+    private sealed class NonStreamingResponse {
+        data class TextResponse(val text: String) : NonStreamingResponse()
+        data class ToolCallResponse(val toolCall: ToolCall) : NonStreamingResponse()
+        data class ErrorResponse(val error: String) : NonStreamingResponse()
+    }
+}

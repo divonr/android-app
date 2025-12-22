@@ -4,7 +4,7 @@ import android.content.Context
 import android.os.Environment
 import com.example.ApI.data.model.*
 import com.example.ApI.data.model.StreamingCallback
-import com.example.ApI.data.network.ApiService
+import com.example.ApI.data.network.LLMApiService
 import com.example.ApI.data.network.ApiResponse
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.serialization.json.*
@@ -35,7 +35,7 @@ class DataRepository(private val context: Context) {
         coerceInputValues = true
     }
     
-    private val apiService = ApiService(context)
+    private val apiService = LLMApiService(context)
     
     private val internalDir = File(context.filesDir, "llm_data")
     

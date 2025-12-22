@@ -41,7 +41,14 @@ This is an Android multi-provider LLM chat client built with Kotlin and Jetpack 
 
 - **DataRepository** (`data/repository/DataRepository.kt`): Single source of truth. Manages local JSON storage (chat_history_{user}.json, api_keys_{user}.json, app_settings.json) and orchestrates network calls. Handles file uploads per provider via `ensureFilesUploadedForProvider()` before API calls.
 
-- **ApiService** (`data/network/ApiService.kt`): Direct network communication with LLM APIs. Implements provider-specific streaming methods (`sendOpenAIMessageStreaming`, `sendGoogleMessageStreaming`, `sendPoeMessageStreaming`) that parse SSE responses and callback to ViewModel.
+- **LLMApiService** (`data/network/LLMApiService.kt`): Thin coordinator that routes messages to provider-specific implementations. Each provider has its own class in `data/network/providers/`:
+  - `OpenAIProvider.kt` - OpenAI API with tool calling and thinking
+  - `GoogleProvider.kt` - Google Gemini with thinking support
+  - `AnthropicProvider.kt` - Anthropic Claude with tool calling
+  - `PoeProvider.kt` - Poe API with tool result handling
+  - `CohereProvider.kt` - Cohere v2 API
+  - `OpenRouterProvider.kt` - OpenRouter (OpenAI-compatible)
+  - `BaseProvider.kt` - Abstract base class with common utilities
 
 ### Provider Configuration
 
@@ -55,18 +62,19 @@ This is an Android multi-provider LLM chat client built with Kotlin and Jetpack 
 
 ### Streaming Implementation
 
-All providers use Server-Sent Events (SSE) for streaming:
+All providers use Server-Sent Events (SSE) for streaming. Each provider class in `data/network/providers/` handles its own SSE parsing:
 
 - **OpenAI**: Listen for `response.output_text.delta` events with `delta` field. See `openai_streaming_guide.md` for complete event lifecycle.
 - **Google Gemini**: Parse `data: ` prefixed JSON chunks, concatenate `text` from `parts` arrays until `finishReason: STOP`. See `google_streaming_guide.md`.
-- Each provider has custom JSON request structure defined in providers.json that ApiService constructs.
+- Each provider extends `BaseProvider` and implements `sendMessage()` with provider-specific request building and SSE parsing.
+- See `ADDING_NEW_PROVIDER_GUIDE.md` for detailed instructions on adding new providers.
 
 ### File Upload Flow
 
 1. ViewModel calls `repository.sendMessageStreaming()`
 2. Repository calls `ensureFilesUploadedForProvider()` to upload files if needed
 3. Provider-specific upload methods store file IDs/URIs in attachment objects
-4. ApiService constructs API requests with file references per provider format
+4. LLMApiService routes to the appropriate provider, which constructs API requests with file references
 
 ## UI Screens
 
@@ -101,7 +109,7 @@ File structure example in `chat_history_example.json`.
 
 ## Important Notes
 
-- The `StreamingCallback` interface (`data/model/StreamingCallback.kt`) is used throughout for streaming message updates from ApiService → Repository → ViewModel → UI.
+- The `StreamingCallback` interface (`data/model/StreamingCallback.kt`) is used throughout for streaming message updates from Provider → LLMApiService → Repository → ViewModel → UI.
 - Message editing creates new versions that can be resent from that point (`resendFromMessage()` in ViewModel).
 - Groups act as folders with optional "project" mode that adds shared context (system prompt + files) to all chats within.
 - Provider selection determines which upload method and API format to use - this is all abstracted through providers.json configuration.

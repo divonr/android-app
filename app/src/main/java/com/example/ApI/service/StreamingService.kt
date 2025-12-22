@@ -14,7 +14,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.ApI.MainActivity
 import com.example.ApI.data.model.*
-import com.example.ApI.data.network.ApiService
+import com.example.ApI.data.network.LLMApiService
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
@@ -77,7 +77,7 @@ class StreamingService : Service() {
 
     // Dependencies
     private lateinit var repository: DataRepository
-    private lateinit var apiService: ApiService
+    private lateinit var apiService: LLMApiService
 
     private val json = Json {
         prettyPrint = false
@@ -113,7 +113,7 @@ class StreamingService : Service() {
         super.onCreate()
         Log.d(TAG, "StreamingService created")
         repository = DataRepository(applicationContext)
-        apiService = ApiService(applicationContext)
+        apiService = LLMApiService(applicationContext)
         createNotificationChannel()
     }
 

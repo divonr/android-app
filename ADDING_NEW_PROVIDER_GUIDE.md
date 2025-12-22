@@ -1,30 +1,65 @@
 # Complete Guide: Adding a New Provider to the Android LLM Chat App
 
-This guide demonstrates how to add a new LLM provider to the app, based on the recent Anthropic integration (commits 21c59bd and 52a8488).
+This guide demonstrates how to add a new LLM provider to the app.
 
 ## Table of Contents
 1. [Overview](#overview)
 2. [Step 1: Add Provider Configuration](#step-1-add-provider-configuration)
-3. [Step 2: Implement Streaming in ApiService](#step-2-implement-streaming-in-apiservice)
-4. [Step 3: Add Provider to DataRepository](#step-3-add-provider-to-datarepository)
-5. [Step 4: Update UI Components](#step-4-update-ui-components)
-6. [Step 5: Optional Features](#step-5-optional-features)
-7. [Testing](#testing)
+3. [Step 2: Create Provider Implementation](#step-2-create-provider-implementation)
+4. [Step 3: Register Provider in LLMApiService](#step-3-register-provider-in-llmapiservice)
+5. [Step 4: Add Provider to DataRepository](#step-4-add-provider-to-datarepository)
+6. [Step 5: Update UI Components](#step-5-update-ui-components)
+7. [Step 6: Optional Features](#step-6-optional-features)
+8. [Testing](#testing)
 
 ---
 
 ## Overview
 
-Adding a new provider requires changes across 9 main files:
-- `app/src/main/assets/providers.json` - Provider API configuration
-- `app/src/main/java/com/example/ApI/data/network/ApiService.kt` - Network/streaming logic
-- `app/src/main/java/com/example/ApI/data/repository/DataRepository.kt` - Provider registration
-- `app/src/main/java/com/example/ApI/ui/screen/ApiKeysScreen.kt` - API key UI styling
-- `app/src/main/java/com/example/ApI/ui/ChatViewModel.kt` - Title generation provider list
-- `app/src/main/java/com/example/ApI/ui/screen/UsernameScreen.kt` - Auto-naming settings UI
-- `app/src/main/java/com/example/ApI/ui/screen/ChatScreen.kt` - Provider display name in chat
-- `app/src/main/java/com/example/ApI/ui/components/Dialogs.kt` - Provider display name in selection menus
-- `app/src/main/res/values/strings.xml` - String resources
+The app uses a modular provider architecture. Each LLM provider (OpenAI, Google, Anthropic, etc.) has its own implementation file that handles:
+- Building API requests
+- Streaming response parsing (SSE)
+- Tool calling and chaining
+- Thinking/reasoning support
+
+### Architecture Overview
+
+```
+User Input (ChatScreen)
+    ↓
+ChatViewModel.sendMessage()
+    ↓
+DataRepository.sendMessageStreaming()
+    ↓
+LLMApiService.sendMessage()   ← Thin coordinator
+    ↓  (routes by provider name)
+    ↓
+YourProvider.sendMessage()    ← Your implementation
+    ↓  (tool calling loop)
+    ↓
+StreamingCallback.onPartialResponse()
+    ↓
+ChatViewModel updates UI state
+    ↓
+UI renders streaming text (ChatScreen)
+```
+
+### Files to Modify/Create
+
+Adding a new provider requires changes across these files:
+
+| File | Purpose |
+|------|---------|
+| `app/src/main/assets/providers.json` | Provider API configuration |
+| `app/src/main/java/.../providers/YourProvider.kt` | **NEW FILE** - Provider implementation |
+| `app/src/main/java/.../network/LLMApiService.kt` | Register provider in routing |
+| `app/src/main/java/.../repository/DataRepository.kt` | Provider registration & file uploads |
+| `app/src/main/java/.../ui/screen/ApiKeysScreen.kt` | API key UI styling |
+| `app/src/main/java/.../ui/ChatViewModel.kt` | Title generation provider list |
+| `app/src/main/java/.../ui/screen/UsernameScreen.kt` | Auto-naming settings UI |
+| `app/src/main/java/.../ui/screen/ChatScreen.kt` | Provider display name in chat |
+| `app/src/main/java/.../ui/components/Dialogs.kt` | Provider display name in selection menus |
+| `app/src/main/res/values/strings.xml` | String resources |
 
 ---
 
@@ -36,407 +71,206 @@ Add your provider's configuration to the JSON array. This defines the API contra
 
 ```json
 {
-    "provider": "anthropic",
+    "provider": "yourprovider",
     "models": [
-        "claude-sonnet-4-5-20250929",
-        "claude-sonnet-4-20250514",
-        "claude-haiku-4-5-20251001",
-        "claude-opus-4-5-20251101",
-        "claude-3-5-sonnet-20241022"
+        "model-v1",
+        "model-v2-fast"
     ],
     "request": {
         "request_type": "POST",
-        "base_url": "https://api.anthropic.com/v1/messages",
+        "base_url": "https://api.yourprovider.com/v1/chat",
         "headers": {
-            "x-api-key": "{ANTHROPIC_API_KEY_HERE}",
-            "anthropic-version": "2023-06-01",
+            "Authorization": "Bearer {API_KEY_HERE}",
             "Content-Type": "application/json"
         },
         "body": {
             "model": "{model_name}",
-            "max_tokens": 8192,
-            "system": "{system_prompt}",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "{user_first_prompt}"
-                        },
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "{mime_type}",
-                                "data": "{base64_encoded_image}"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "{model_first_response}"
-                        }
-                    ]
-                }
-            ]
+            "messages": [...]
         }
     },
     "response_important_fields": {
         "response_format": "server_sent_events",
-        "events": [
-            {
-                "event": "message_start",
-                "data": {
-                    "type": "message_start",
-                    "message": {
-                        "id": "{message_id}",
-                        "model": "{model_name}"
-                    }
-                }
-            },
-            {
-                "event": "content_block_delta",
-                "data": {
-                    "type": "content_block_delta",
-                    "index": 0,
-                    "delta": {
-                        "type": "text_delta",
-                        "text": "{partial_text_chunk}"
-                    }
-                }
-            },
-            {
-                "event": "message_stop",
-                "data": {
-                    "type": "message_stop"
-                }
-            }
-        ]
+        "events": [...]
     }
 }
 ```
 
 ### Key Configuration Elements:
 
-**Provider Name**: Lowercase identifier (e.g., `"anthropic"`)
-
-**Models**: List of model names available from this provider
-
-**Request Structure**:
-- `base_url`: API endpoint
-- `headers`: Authentication and content type
-- `body`: Template showing message format with placeholders
-
-**Response Format**: Document the SSE event structure or JSON response schema
-
-**File Uploads** (Optional): If your provider supports file uploads, add `upload_files_request` and `upload_files_response_important_fields` sections (see OpenAI/Google examples).
+- **Provider Name**: Lowercase identifier (e.g., `"yourprovider"`)
+- **Models**: List of model names available from this provider
+- **Request Structure**: API endpoint, headers, body template
+- **Response Format**: Document the SSE event structure or JSON response schema
+- **File Uploads** (Optional): If your provider supports file uploads, add `upload_files_request` and `upload_files_response_important_fields` sections
 
 ---
 
-## Step 2: Implement Streaming in ApiService
+## Step 2: Create Provider Implementation
 
-### File: `app/src/main/java/com/example/ApI/data/network/ApiService.kt`
+### File: `app/src/main/java/com/example/ApI/data/network/providers/YourProvider.kt`
 
-You need to implement **three key methods**:
+Create a new file extending `BaseProvider`. Use existing providers as reference:
+- `OpenAIProvider.kt` - Full featured with tool calling and thinking
+- `AnthropicProvider.kt` - Tool calling with thinking support
+- `GoogleProvider.kt` - Google Gemini with thinking
+- `PoeProvider.kt` - Complex tool result handling
+- `CohereProvider.kt` - Cohere v2 API format
+- `OpenRouterProvider.kt` - Simple OpenAI-compatible (no tools)
 
-### 2.1: Add Provider Router
-
-In the main `sendMessageStreaming()` method, add your provider case:
-
-```kotlin
-suspend fun sendMessageStreaming(
-    provider: Provider,
-    modelName: String,
-    messages: List<Message>,
-    systemPrompt: String,
-    apiKeys: Map<String, String>,
-    webSearchEnabled: Boolean = false,
-    enabledTools: List<ToolSpecification> = emptyList(),
-    callback: StreamingCallback
-) {
-    when (provider.provider.lowercase()) {
-        "openai" -> sendOpenAIMessage(...)
-        "poe" -> sendPoeMessage(...)
-        "google" -> sendGoogleMessage(...)
-        "anthropic" -> sendAnthropicMessage(...)  // ← ADD THIS
-        else -> {
-            callback.onError("Unknown provider: ${provider.provider}")
-        }
-    }
-}
-```
-
-### 2.2: Implement Main Provider Method
-
-Create a method that handles the overall message flow, including tool calling loops:
+### Template:
 
 ```kotlin
-private suspend fun sendAnthropicMessage(
-    provider: Provider,
-    modelName: String,
-    messages: List<Message>,
-    systemPrompt: String,
-    apiKeys: Map<String, String>,
-    webSearchEnabled: Boolean = false,
-    enabledTools: List<ToolSpecification> = emptyList(),
-    callback: StreamingCallback
-) {
-    val apiKey = apiKeys["anthropic"] ?: run {
-        callback.onError("Anthropic API key is required")
-        return
-    }
+package com.example.ApI.data.network.providers
 
-    try {
-        val conversationMessages = messages.toMutableList()
-        var fullResponseText = ""
-        val maxToolIterations = 25
-        var currentIteration = 0
+import android.content.Context
+import com.example.ApI.data.model.*
+import com.example.ApI.tools.ToolCall
+import com.example.ApI.tools.ToolSpecification
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.*
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 
-        while (currentIteration < maxToolIterations) {
-            currentIteration++
+/**
+ * YourProvider API implementation.
+ * Handles streaming responses, tool calling, and thinking support.
+ */
+class YourProvider(context: Context) : BaseProvider(context) {
 
-            // Make streaming request
-            val result = makeAnthropicStreamingRequest(
-                provider,
-                modelName,
-                conversationMessages,
-                systemPrompt,
-                apiKey,
-                enabledTools,
-                webSearchEnabled,
-                callback
-            )
+    override suspend fun sendMessage(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue,
+        temperature: Float?,
+        callback: StreamingCallback
+    ) {
+        try {
+            val conversationMessages = messages.toMutableList()
+            val maxToolIterations = MAX_TOOL_DEPTH
+            var currentIteration = 0
 
-            when (result) {
-                is AnthropicStreamingResult.TextResponse -> {
-                    // Got text response - we're done
-                    fullResponseText = result.text
-                    callback.onComplete(fullResponseText)
-                    return
-                }
+            while (currentIteration < maxToolIterations) {
+                currentIteration++
 
-                is AnthropicStreamingResult.ToolCall -> {
-                    // Tool call detected - execute it
-                    val toolCall = result.toolCall
-                    val precedingText = result.precedingText
+                val result = makeStreamingRequest(
+                    provider, modelName, conversationMessages, systemPrompt,
+                    apiKey, enabledTools, webSearchEnabled, callback,
+                    temperature = temperature
+                )
 
-                    // Execute the tool
-                    val toolResult = callback.onToolCall(toolCall, precedingText)
-
-                    // Create tool call and response messages
-                    val toolCallMessage = Message(
-                        role = "tool_call",
-                        text = precedingText,
-                        model = modelName,
-                        datetime = java.time.Instant.now().toString(),
-                        toolCall = com.example.ApI.tools.ToolCallInfo(
-                            toolId = toolCall.toolId,
-                            toolName = toolCall.toolId,
-                            parameters = toolCall.parameters,
-                            result = toolResult,
-                            timestamp = java.time.Instant.now().toString()
-                        ),
-                        toolCallId = toolCall.id
-                    )
-
-                    val toolResponseMessage = Message(
-                        role = "tool_response",
-                        text = when (toolResult) {
-                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
-                            is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
-                        },
-                        datetime = java.time.Instant.now().toString(),
-                        toolResponseCallId = toolCall.id,
-                        toolResponseOutput = when (toolResult) {
-                            is com.example.ApI.tools.ToolExecutionResult.Success -> toolResult.result
-                            is com.example.ApI.tools.ToolExecutionResult.Error -> toolResult.error
-                        }
-                    )
-
-                    // Save to history and continue conversation
-                    callback.onSaveToolMessages(toolCallMessage, toolResponseMessage)
-                    conversationMessages.add(toolCallMessage)
-                    conversationMessages.add(toolResponseMessage)
-
-                    fullResponseText = ""
-                }
-
-                is AnthropicStreamingResult.Error -> {
-                    callback.onError(result.message)
-                    return
-                }
-            }
-        }
-
-        callback.onError("Maximum tool calling iterations ($maxToolIterations) reached")
-    } catch (e: Exception) {
-        callback.onError("Failed to send Anthropic message: ${e.message}")
-    }
-}
-```
-
-### 2.3: Implement Streaming Request Parser
-
-Create a method that makes the HTTP request and parses Server-Sent Events:
-
-```kotlin
-private suspend fun makeAnthropicStreamingRequest(
-    provider: Provider,
-    modelName: String,
-    messages: List<Message>,
-    systemPrompt: String,
-    apiKey: String,
-    enabledTools: List<ToolSpecification>,
-    webSearchEnabled: Boolean,
-    callback: StreamingCallback
-): AnthropicStreamingResult = withContext(Dispatchers.IO) {
-    try {
-        val url = URL(provider.request.base_url)
-        val connection = url.openConnection() as HttpURLConnection
-
-        // Set up request headers
-        connection.requestMethod = provider.request.request_type
-        connection.setRequestProperty("x-api-key", apiKey)
-        connection.setRequestProperty("anthropic-version", "2023-06-01")
-        connection.setRequestProperty("Content-Type", "application/json")
-        connection.doOutput = true
-
-        // Build messages array
-        val anthropicMessages = buildAnthropicMessages(messages)
-
-        // Build request body
-        val requestBody = buildJsonObject {
-            put("model", modelName)
-            put("max_tokens", 8192)
-            put("messages", JsonArray(anthropicMessages))
-
-            if (systemPrompt.isNotBlank()) {
-                put("system", systemPrompt)
-            }
-
-            put("stream", true)
-
-            // Add tools if enabled
-            if (enabledTools.isNotEmpty() || webSearchEnabled) {
-                put("tools", buildJsonArray {
-                    // Add web search if enabled
-                    if (webSearchEnabled) {
-                        add(buildJsonObject {
-                            put("type", "web_search_20250305")
-                            put("name", "web_search")
-                        })
+                when (result) {
+                    is StreamingResult.TextResponse -> {
+                        callback.onComplete(result.text)
+                        return
                     }
-                    // Add custom tools
-                    if (enabledTools.isNotEmpty()) {
-                        convertToolsToAnthropicFormat(enabledTools).forEach { add(it) }
+                    is StreamingResult.ToolCallResult -> {
+                        // Execute tool and continue conversation
+                        val toolResult = callback.onToolCall(result.toolCall, result.precedingText)
+
+                        val toolCallMessage = createToolCallMessage(result.toolCall, toolResult, result.precedingText)
+                        val toolResponseMessage = createToolResponseMessage(result.toolCall, toolResult)
+
+                        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, result.precedingText)
+
+                        conversationMessages.add(toolCallMessage)
+                        conversationMessages.add(toolResponseMessage)
                     }
-                })
+                    is StreamingResult.Error -> {
+                        callback.onError(result.message)
+                        return
+                    }
+                }
             }
+
+            callback.onError("Maximum tool calling iterations ($maxToolIterations) reached")
+        } catch (e: Exception) {
+            callback.onError("Failed to send message: ${e.message}")
         }
+    }
 
-        // Send request
-        connection.outputStream.write(requestBody.toString().toByteArray())
-        connection.outputStream.flush()
+    private suspend fun makeStreamingRequest(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        apiKey: String,
+        enabledTools: List<ToolSpecification>,
+        webSearchEnabled: Boolean,
+        callback: StreamingCallback,
+        temperature: Float? = null
+    ): StreamingResult = withContext(Dispatchers.IO) {
+        try {
+            val url = URL(provider.request.base_url)
+            val connection = url.openConnection() as HttpURLConnection
 
-        // Read streaming response
-        val reader = BufferedReader(InputStreamReader(connection.inputStream))
+            // Set up request
+            connection.requestMethod = provider.request.request_type
+            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.doOutput = true
+
+            // Build messages and request body
+            val providerMessages = buildMessages(messages, systemPrompt)
+            val requestBody = buildRequestBody(modelName, providerMessages, enabledTools, webSearchEnabled, temperature)
+
+            connection.outputStream.write(requestBody.toString().toByteArray())
+            connection.outputStream.flush()
+
+            val responseCode = connection.responseCode
+            if (responseCode >= 400) {
+                val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                return@withContext StreamingResult.Error("HTTP $responseCode: $errorBody")
+            }
+
+            val reader = BufferedReader(InputStreamReader(connection.inputStream))
+            parseStreamingResponse(reader, connection, callback)
+        } catch (e: Exception) {
+            StreamingResult.Error("Request failed: ${e.message}")
+        }
+    }
+
+    private fun parseStreamingResponse(
+        reader: BufferedReader,
+        connection: HttpURLConnection,
+        callback: StreamingCallback
+    ): StreamingResult {
         val fullResponse = StringBuilder()
-
-        // Track tool use
-        var currentToolUseId: String? = null
-        var currentToolName: String? = null
-        var currentToolInput = StringBuilder()
-        var isAccumulatingToolInput = false
-        var detectedToolCall: com.example.ApI.tools.ToolCall? = null
+        var detectedToolCall: ToolCall? = null
 
         var line: String?
         while (reader.readLine().also { line = it } != null) {
             val currentLine = line ?: continue
 
-            // Parse SSE format: "event: type" followed by "data: {json}"
-            if (currentLine.startsWith("event: ")) {
-                val eventType = currentLine.substring(7).trim()
-
-                // Read the next line which should be "data: {json}"
-                val dataLine = reader.readLine() ?: continue
-                if (!dataLine.startsWith("data: ")) continue
-
-                val dataContent = dataLine.substring(6).trim()
-                if (dataContent.isEmpty()) continue
+            // Parse SSE format - adapt to your provider's format
+            if (currentLine.startsWith("data: ")) {
+                val dataContent = currentLine.substring(6).trim()
+                if (dataContent == "[DONE]") break
+                if (dataContent.isBlank()) continue
 
                 try {
                     val chunkJson = json.parseToJsonElement(dataContent).jsonObject
 
-                    when (eventType) {
-                        "content_block_delta" -> {
-                            val delta = chunkJson["delta"]?.jsonObject
-                            val deltaType = delta?.get("type")?.jsonPrimitive?.content
-
-                            when (deltaType) {
-                                "text_delta" -> {
-                                    val text = delta?.get("text")?.jsonPrimitive?.content ?: ""
-                                    fullResponse.append(text)
-                                    callback.onPartialResponse(text)
-                                }
-                                "input_json_delta" -> {
-                                    val partialJson = delta?.get("partial_json")?.jsonPrimitive?.content ?: ""
-                                    currentToolInput.append(partialJson)
-                                }
-                            }
-                        }
-
-                        "content_block_start" -> {
-                            val contentBlock = chunkJson["content_block"]?.jsonObject
-                            val blockType = contentBlock?.get("type")?.jsonPrimitive?.content
-
-                            if (blockType == "tool_use") {
-                                currentToolUseId = contentBlock?.get("id")?.jsonPrimitive?.content
-                                currentToolName = contentBlock?.get("name")?.jsonPrimitive?.content
-                                currentToolInput.clear()
-
-                                val initialInput = contentBlock?.get("input")?.jsonObject
-                                if (initialInput != null) {
-                                    currentToolInput.append(initialInput.toString())
-                                }
-
-                                isAccumulatingToolInput = true
-                            }
-                        }
-
-                        "content_block_stop" -> {
-                            if (isAccumulatingToolInput && currentToolUseId != null && currentToolName != null) {
-                                val inputString = currentToolInput.toString().ifEmpty { "{}" }
-                                val toolInputJson = json.parseToJsonElement(inputString).jsonObject
-
-                                detectedToolCall = com.example.ApI.tools.ToolCall(
-                                    id = currentToolUseId!!,
-                                    toolId = currentToolName!!,
-                                    parameters = toolInputJson,
-                                    provider = "anthropic"
-                                )
-
-                                isAccumulatingToolInput = false
-                            }
-                        }
-
-                        "message_stop" -> {
-                            break
-                        }
-
-                        "error" -> {
-                            val error = chunkJson["error"]?.jsonObject
-                            val errorMessage = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
-                            callback.onError("Anthropic API error: $errorMessage")
-                            return@withContext AnthropicStreamingResult.Error(errorMessage)
-                        }
+                    // Extract text content - adapt to your provider's response format
+                    val text = extractTextFromChunk(chunkJson)
+                    if (text != null) {
+                        fullResponse.append(text)
+                        callback.onPartialResponse(text)
                     }
-                } catch (jsonException: Exception) {
-                    println("[DEBUG] Error parsing SSE chunk: ${jsonException.message}")
+
+                    // Check for tool calls - adapt to your provider's format
+                    val toolCall = extractToolCallFromChunk(chunkJson)
+                    if (toolCall != null) {
+                        detectedToolCall = toolCall
+                    }
+                } catch (e: Exception) {
                     continue
                 }
             }
@@ -445,212 +279,189 @@ private suspend fun makeAnthropicStreamingRequest(
         reader.close()
         connection.disconnect()
 
-        // Return result
-        return@withContext when {
-            detectedToolCall != null -> AnthropicStreamingResult.ToolCall(
+        return when {
+            detectedToolCall != null -> StreamingResult.ToolCallResult(
                 toolCall = detectedToolCall!!,
                 precedingText = fullResponse.toString()
             )
-            fullResponse.isNotEmpty() -> AnthropicStreamingResult.TextResponse(fullResponse.toString())
-            else -> AnthropicStreamingResult.Error("Empty response from Anthropic")
-        }
-    } catch (e: Exception) {
-        callback.onError("Failed to make streaming request: ${e.message}")
-        AnthropicStreamingResult.Error("Failed to make streaming request: ${e.message}")
-    }
-}
-```
-
-### 2.4: Add Helper Methods
-
-Create message builder and tool format converters:
-
-```kotlin
-/**
- * Build Anthropic Messages API format from Message objects
- */
-private suspend fun buildAnthropicMessages(messages: List<Message>): List<JsonObject> = withContext(Dispatchers.IO) {
-    val anthropicMessages = mutableListOf<JsonObject>()
-
-    messages.forEach { message ->
-        when (message.role) {
-            "user" -> {
-                val contentArray = buildJsonArray {
-                    if (message.text.isNotBlank()) {
-                        add(buildJsonObject {
-                            put("type", "text")
-                            put("text", message.text)
-                        })
-                    }
-
-                    // Add file attachments as base64
-                    message.attachments.forEach { attachment ->
-                        attachment.local_file_path?.let { filePath ->
-                            try {
-                                val file = File(filePath)
-                                if (file.exists()) {
-                                    val bytes = file.readBytes()
-                                    val base64Data = Base64.getEncoder().encodeToString(bytes)
-
-                                    when {
-                                        attachment.mime_type.startsWith("image/") -> {
-                                            add(buildJsonObject {
-                                                put("type", "image")
-                                                put("source", buildJsonObject {
-                                                    put("type", "base64")
-                                                    put("media_type", attachment.mime_type)
-                                                    put("data", base64Data)
-                                                })
-                                            })
-                                        }
-                                        attachment.mime_type == "application/pdf" -> {
-                                            add(buildJsonObject {
-                                                put("type", "document")
-                                                put("source", buildJsonObject {
-                                                    put("type", "base64")
-                                                    put("media_type", "application/pdf")
-                                                    put("data", base64Data)
-                                                })
-                                            })
-                                        }
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                println("[DEBUG] Error encoding file: ${e.message}")
-                            }
-                        }
-                    }
-                }
-
-                anthropicMessages.add(buildJsonObject {
-                    put("role", "user")
-                    put("content", contentArray)
-                })
-            }
-
-            "assistant" -> {
-                anthropicMessages.add(buildJsonObject {
-                    put("role", "assistant")
-                    put("content", buildJsonArray {
-                        add(buildJsonObject {
-                            put("type", "text")
-                            put("text", message.text)
-                        })
-                    })
-                })
-            }
-
-            "tool_call" -> {
-                val contentArray = buildJsonArray {
-                    if (message.text.isNotBlank()) {
-                        add(buildJsonObject {
-                            put("type", "text")
-                            put("text", message.text)
-                        })
-                    }
-
-                    message.toolCall?.let { toolCall ->
-                        add(buildJsonObject {
-                            put("type", "tool_use")
-                            put("id", message.toolCallId ?: "")
-                            put("name", toolCall.toolId)
-                            put("input", toolCall.parameters)
-                        })
-                    }
-                }
-
-                anthropicMessages.add(buildJsonObject {
-                    put("role", "assistant")
-                    put("content", contentArray)
-                })
-            }
-
-            "tool_response" -> {
-                anthropicMessages.add(buildJsonObject {
-                    put("role", "user")
-                    put("content", buildJsonArray {
-                        add(buildJsonObject {
-                            put("type", "tool_result")
-                            put("tool_use_id", message.toolResponseCallId ?: "")
-                            put("content", message.toolResponseOutput ?: "")
-                        })
-                    })
-                })
-            }
+            fullResponse.isNotEmpty() -> StreamingResult.TextResponse(fullResponse.toString())
+            else -> StreamingResult.Error("Empty response")
         }
     }
 
-    anthropicMessages
-}
+    private fun extractTextFromChunk(chunk: JsonObject): String? {
+        // Adapt to your provider's response format
+        // Example: OpenAI uses choices[0].delta.content
+        // Example: Anthropic uses content_block_delta with delta.text
+        return null // Implement based on your provider
+    }
 
-/**
- * Convert tool specifications to Anthropic's tool format
- */
-private fun convertToolsToAnthropicFormat(tools: List<ToolSpecification>): JsonArray {
-    return buildJsonArray {
-        tools.forEach { tool ->
-            add(buildJsonObject {
-                put("name", tool.name)
-                put("description", tool.description)
-                put("input_schema", buildJsonObject {
-                    put("type", "object")
-                    tool.parameters?.let { params ->
-                        put("properties", params)
-                    } ?: put("properties", buildJsonObject {})
-                    tool.required?.let { req ->
-                        put("required", JsonArray(req.map { JsonPrimitive(it) }))
-                    }
-                })
+    private fun extractToolCallFromChunk(chunk: JsonObject): ToolCall? {
+        // Adapt to your provider's tool call format
+        return null // Implement based on your provider
+    }
+
+    private fun buildMessages(messages: List<Message>, systemPrompt: String): List<JsonObject> {
+        val providerMessages = mutableListOf<JsonObject>()
+
+        // Add system prompt if provided
+        if (systemPrompt.isNotBlank()) {
+            providerMessages.add(buildJsonObject {
+                put("role", "system")
+                put("content", systemPrompt)
             })
         }
+
+        // Convert messages to your provider's format
+        messages.forEach { message ->
+            when (message.role) {
+                "user" -> {
+                    providerMessages.add(buildJsonObject {
+                        put("role", "user")
+                        put("content", message.text)
+                        // Handle attachments if needed
+                    })
+                }
+                "assistant" -> {
+                    providerMessages.add(buildJsonObject {
+                        put("role", "assistant")
+                        put("content", message.text)
+                    })
+                }
+                "tool_call" -> {
+                    // Convert tool call message to your provider's format
+                }
+                "tool_response" -> {
+                    // Convert tool response to your provider's format
+                }
+            }
+        }
+
+        return providerMessages
+    }
+
+    private fun buildRequestBody(
+        modelName: String,
+        messages: List<JsonObject>,
+        enabledTools: List<ToolSpecification>,
+        webSearchEnabled: Boolean,
+        temperature: Float?
+    ): JsonObject {
+        return buildJsonObject {
+            put("model", modelName)
+            put("messages", JsonArray(messages))
+            put("stream", true)
+
+            temperature?.let { put("temperature", it.toDouble()) }
+
+            // Add tools if your provider supports them
+            if (enabledTools.isNotEmpty()) {
+                put("tools", convertToolsToProviderFormat(enabledTools))
+            }
+        }
+    }
+
+    private fun convertToolsToProviderFormat(tools: List<ToolSpecification>): JsonArray {
+        // Convert tools to your provider's format
+        return buildJsonArray {
+            tools.forEach { tool ->
+                add(buildJsonObject {
+                    put("name", tool.name)
+                    put("description", tool.description)
+                    // Add parameters in your provider's format
+                })
+            }
+        }
+    }
+
+    // Internal result types
+    private sealed class StreamingResult {
+        data class TextResponse(val text: String) : StreamingResult()
+        data class ToolCallResult(
+            val toolCall: ToolCall,
+            val precedingText: String = ""
+        ) : StreamingResult()
+        data class Error(val message: String) : StreamingResult()
     }
 }
 ```
 
-### 2.5: Define Result Sealed Class
+### Key Implementation Points:
 
-Add a sealed class to represent different streaming outcomes:
+1. **Extend BaseProvider**: Gives you access to common utilities like `createToolCallMessage()`, `createToolResponseMessage()`, and `json` parser.
+
+2. **Override sendMessage()**: Main entry point - handles the tool calling loop.
+
+3. **Implement makeStreamingRequest()**: Makes HTTP request and parses response.
+
+4. **Adapt to Your Provider's Format**:
+   - Message format (roles, content structure)
+   - SSE event format
+   - Tool call/response format
+   - Error handling
+
+---
+
+## Step 3: Register Provider in LLMApiService
+
+### File: `app/src/main/java/com/example/ApI/data/network/LLMApiService.kt`
+
+Add your provider to the coordinator:
 
 ```kotlin
-/**
- * Sealed class representing the result of an Anthropic streaming request
- */
-private sealed class AnthropicStreamingResult {
-    data class TextResponse(val text: String) : AnthropicStreamingResult()
-    data class ToolCall(val toolCall: com.example.ApI.tools.ToolCall, val precedingText: String) : AnthropicStreamingResult()
-    data class Error(val message: String) : AnthropicStreamingResult()
+class LLMApiService(private val context: Context) {
+
+    // Add lazy-initialized provider instance
+    private val yourProvider by lazy { YourProvider(context) }
+
+    suspend fun sendMessage(
+        provider: Provider,
+        ...
+    ): Unit = withContext(Dispatchers.IO) {
+        val apiKey = apiKeys[provider.provider]
+
+        if (apiKey == null) {
+            callback.onError("${provider.provider.replaceFirstChar { it.uppercase() }} API key is required")
+            return@withContext
+        }
+
+        when (provider.provider) {
+            "openai" -> openAIProvider.sendMessage(...)
+            "google" -> googleProvider.sendMessage(...)
+            "anthropic" -> anthropicProvider.sendMessage(...)
+            "poe" -> poeProvider.sendMessage(...)
+            "cohere" -> cohereProvider.sendMessage(...)
+            "openrouter" -> openRouterProvider.sendMessage(...)
+            "yourprovider" -> yourProvider.sendMessage(...)  // ← ADD THIS
+            else -> {
+                callback.onError("Unknown provider: ${provider.provider}")
+            }
+        }
+    }
 }
 ```
 
 ---
 
-## Step 3: Add Provider to DataRepository
+## Step 4: Add Provider to DataRepository
 
 ### File: `app/src/main/java/com/example/ApI/data/repository/DataRepository.kt`
 
-Add your provider to the `loadProviders()` method:
+### 4.1: Add to loadProviders()
 
 ```kotlin
 fun loadProviders(): List<Provider> {
     return listOf(
-        // ... existing providers (openai, poe, google) ...
+        // ... existing providers ...
 
         Provider(
-            provider = "anthropic",
-            models = listOf(
-                Model.SimpleModel("claude-sonnet-4-5-20250929"),
-                Model.SimpleModel("claude-sonnet-4-20250514"),
-                Model.SimpleModel("claude-haiku-4-5-20251001"),
-                Model.SimpleModel("claude-opus-4-5-20251101"),
-                Model.SimpleModel("claude-3-5-sonnet-20241022"),
-                Model.SimpleModel("claude-3-5-haiku-20241022")
-            ),
+            provider = "yourprovider",
+            models = getModelsForProvider("yourprovider", defaultYourProviderModels),
             request = ApiRequest(
                 request_type = "POST",
-                base_url = "https://api.anthropic.com/v1/messages",
+                base_url = "https://api.yourprovider.com/v1/chat",
                 headers = mapOf(
-                    "x-api-key" to "{ANTHROPIC_API_KEY_HERE}",
-                    "anthropic-version" to "2023-06-01",
+                    "Authorization" to "Bearer {API_KEY_HERE}",
                     "Content-Type" to "application/json"
                 ),
                 body = null
@@ -659,292 +470,175 @@ fun loadProviders(): List<Provider> {
                 id = "{message_id}",
                 model = "{model_name}"
             ),
-            upload_files_request = null,  // Anthropic uses inline base64, no separate upload
+            upload_files_request = null,  // Add if your provider supports file uploads
             upload_files_response_important_fields = null
         )
     )
 }
 ```
 
-**Note**: If your provider requires file upload endpoints (like OpenAI/Google), populate `upload_files_request` and `upload_files_response_important_fields`.
+### 4.2: Add Default Models (Optional)
+
+```kotlin
+private val defaultYourProviderModels = listOf(
+    Model.SimpleModel("model-v1"),
+    Model.SimpleModel("model-v2-fast")
+)
+```
+
+### 4.3: Add File Upload Support (If Needed)
+
+If your provider requires separate file upload endpoints:
+
+```kotlin
+// In ensureFilesUploadedForProvider()
+when (provider.provider.lowercase()) {
+    "openai" -> attachment.file_OPENAI_id == null
+    "google" -> attachment.file_GOOGLE_uri == null
+    "yourprovider" -> attachment.file_YOURPROVIDER_id == null  // ADD
+    else -> false
+}
+
+// In uploadFileForProvider()
+"yourprovider" -> uploadFileToYourProvider(uploadRequest, filePath, fileName, mimeType, apiKey)
+```
+
+### 4.4: Add to Title Generation Models
+
+```kotlin
+// In getTitleGenerationModel()
+val providerModels = mapOf(
+    "openai" to "gpt-5-nano",
+    "google" to "gemini-2.5-flash-lite",
+    "anthropic" to "claude-3-haiku-20240307",
+    "yourprovider" to "model-v2-fast"  // ADD - use your cheapest/fastest model
+)
+```
 
 ---
 
-## Step 4: Update UI Components
+## Step 5: Update UI Components
 
-### 4.1: API Keys Screen - Add Brand Colors
+### 5.1: API Keys Screen - Add Brand Colors
 
 **File**: `app/src/main/java/com/example/ApI/ui/screen/ApiKeysScreen.kt`
 
-Find the `ApiKeyItem` composable and add your provider's brand gradient:
-
 ```kotlin
-@Composable
-private fun ApiKeyItem(
-    apiKey: ApiKey,
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val cardGradient = when (apiKey.provider.lowercase()) {
-        "openai" -> listOf(
-            Color(0xFF10A37F).copy(alpha = 0.25f),
-            Color(0xFF1A7F64).copy(alpha = 0.25f)
-        )
-        "poe" -> listOf(
-            Color(0xFFFF6B6B).copy(alpha = 0.25f),
-            Color(0xFFEE5A6F).copy(alpha = 0.25f)
-        )
-        "google" -> listOf(
-            Color(0xFF4285F4).copy(alpha = 0.25f),
-            Color(0xFFEA4335).copy(alpha = 0.25f),
-            Color(0xFFFBBC05).copy(alpha = 0.25f),
-            Color(0xFF34A853).copy(alpha = 0.25f)
-        )
-        "anthropic" -> listOf(                           // ← ADD THIS
-            Color(0xFFC6613F).copy(alpha = 0.25f),
-            Color(0xFFC6613F).copy(alpha = 0.15f)
-        )
-        else -> listOf(SurfaceVariant, SurfaceVariant)
-    }
-
-    // ... rest of composable
+val cardGradient = when (apiKey.provider.lowercase()) {
+    // ... existing providers ...
+    "yourprovider" -> listOf(
+        Color(0xFF_YOUR_COLOR).copy(alpha = 0.25f),
+        Color(0xFF_YOUR_COLOR).copy(alpha = 0.15f)
+    )
+    else -> listOf(SurfaceVariant, SurfaceVariant)
 }
 ```
 
-### 4.2: ChatViewModel - Add Provider to Title Generation List
+### 5.2: ChatViewModel - Title Generation List
 
 **File**: `app/src/main/java/com/example/ApI/ui/ChatViewModel.kt`
 
-**CRITICAL**: Find the `getAvailableProvidersForTitleGeneration()` function and add your provider to the list:
+⚠️ **CRITICAL**: Add to `getAvailableProvidersForTitleGeneration()`:
 
 ```kotlin
-fun getAvailableProvidersForTitleGeneration(): List<String> {
-    val currentUser = _appSettings.value.current_user
-    val apiKeys = repository.loadApiKeys(currentUser)
-        .filter { it.isActive }
-        .map { it.provider }
-
-    return listOf("openai", "anthropic", "google", "poe", "cohere", "yourprovider").filter { provider ->
-        apiKeys.contains(provider)
-    }
+return listOf("openai", "anthropic", "google", "poe", "cohere", "yourprovider").filter { provider ->
+    apiKeys.contains(provider)
 }
 ```
 
-**⚠️ WARNING**: If you skip this step, your provider will NOT appear in the title generation dropdown in Advanced Settings, even if you add it to `UsernameScreen.kt`!
-
-### 4.3: Username Screen - Add Auto-Naming Option
+### 5.3: Username Screen - Auto-Naming Option
 
 **File**: `app/src/main/java/com/example/ApI/ui/screen/UsernameScreen.kt`
 
-#### Update Provider Selector:
-
 ```kotlin
-@Composable
-private fun TitleGenerationSettingsSection(...) {
-    // ... existing code ...
-
-    // Inside the provider selector dropdown:
-    if ("anthropic" in availableProviders) {
-        ProviderOption(
-            text = stringResource(R.string.anthropic_claude_haiku),
-            isSelected = settings.provider == "anthropic",
-            onClick = {
-                onSettingsChange(settings.copy(provider = "anthropic"))
-                showProviderSelector = false
-            }
-        )
-    }
+// In provider selector dropdown:
+if ("yourprovider" in availableProviders) {
+    ProviderOption(
+        text = stringResource(R.string.yourprovider_model),
+        isSelected = settings.provider == "yourprovider",
+        onClick = {
+            onSettingsChange(settings.copy(provider = "yourprovider"))
+            showProviderSelector = false
+        }
+    )
 }
+
+// In getProviderDisplayName():
+"yourprovider" -> stringResource(R.string.yourprovider_model)
 ```
 
-#### Update Display Name Function:
+### 5.4: ChatScreen - Provider Display Name
+
+**File**: `app/src/main/java/com/example/ApI/ui/screen/ChatScreen.kt`
+
+⚠️ **CRITICAL**: Add to provider name mapping:
 
 ```kotlin
-@Composable
-private fun getProviderDisplayName(provider: String): String {
-    return when (provider) {
-        "auto" -> stringResource(R.string.auto_mode)
-        "openai" -> stringResource(R.string.openai_gpt5_nano)
-        "poe" -> stringResource(R.string.poe_gpt5_nano)
-        "google" -> stringResource(R.string.google_gemini_flash_lite)
-        "anthropic" -> stringResource(R.string.anthropic_claude_haiku)
-        "cohere" -> stringResource(R.string.cohere_command_r7b)
-        "openrouter" -> stringResource(R.string.openrouter_llama)
-        "yourprovider" -> stringResource(R.string.yourprovider_model)  // ← ADD THIS
-        else -> stringResource(R.string.auto_mode)
-    }
-}
+stringResource(id = when(provider) {
+    // ... existing providers ...
+    "yourprovider" -> R.string.provider_yourprovider
+    else -> R.string.provider_openai
+})
 ```
 
-**⚠️ WARNING**: If you skip this step, your provider will display as "Auto" in the title generation settings!
+### 5.5: Dialogs.kt - Selection Menus
 
-### 4.4: Add String Resources
+**File**: `app/src/main/java/com/example/ApI/ui/components/Dialogs.kt`
+
+⚠️ **CRITICAL**: Add to BOTH `when` statements (ProviderSelectorDialog and AddApiKeyDialog):
+
+```kotlin
+"yourprovider" -> R.string.provider_yourprovider
+```
+
+### 5.6: Add String Resources
 
 **File**: `app/src/main/res/values/strings.xml`
 
 ```xml
-<resources>
-    <!-- ... existing strings ... -->
-
-    <!-- Provider names -->
-    <string name="provider_anthropic">Anthropic</string>
-
-    <!-- Auto-naming model options -->
-    <string name="anthropic_claude_haiku">claude-3-5-haiku via Anthropic</string>
-</resources>
+<string name="provider_yourprovider">YourProvider</string>
+<string name="yourprovider_model">model-v2-fast via YourProvider</string>
 ```
-
-### 4.5: Add Provider Display Name to ChatScreen
-
-**File**: `app/src/main/java/com/example/ApI/ui/screen/ChatScreen.kt`
-
-**CRITICAL**: Find the provider display name mapping (around line 384-390) and add your provider:
-
-```kotlin
-Text(
-    text = uiState.currentProvider?.provider?.let { provider ->
-        stringResource(id = when(provider) {
-            "openai" -> R.string.provider_openai
-            "anthropic" -> R.string.provider_anthropic
-            "google" -> R.string.provider_google
-            "poe" -> R.string.provider_poe
-            "cohere" -> R.string.provider_cohere
-            "openrouter" -> R.string.provider_openrouter
-            "yourprovider" -> R.string.provider_yourprovider  // ← ADD THIS
-            else -> R.string.provider_openai
-        })
-    } ?: "",
-    // ... rest of Text properties
-)
-```
-
-**⚠️ WARNING**: If you skip this step, your provider will display as "OpenAI" in the chat interface due to the fallback in the `else` clause! This is a common bug - make sure to add your provider to ALL `when` statements that map provider IDs to display names.
-
-### 4.6: Add Provider Display Name to Dialogs.kt
-
-**File**: `app/src/main/java/com/example/ApI/ui/components/Dialogs.kt`
-
-**CRITICAL**: There are two `when` statements in this file that map provider names to display strings. You must update both:
-
-#### ProviderSelectorDialog (around line 286):
-
-```kotlin
-Text(
-    text = stringResource(id = when(provider.provider) {
-        "openai" -> R.string.provider_openai
-        "anthropic" -> R.string.provider_anthropic
-        "google" -> R.string.provider_google
-        "poe" -> R.string.provider_poe
-        "cohere" -> R.string.provider_cohere
-        "openrouter" -> R.string.provider_openrouter
-        "yourprovider" -> R.string.provider_yourprovider  // ← ADD THIS
-        else -> R.string.provider_openai
-    }),
-    // ... rest of Text properties
-)
-```
-
-#### AddApiKeyDialog (around line 494):
-
-```kotlin
-DropdownMenuItem(
-    text = {
-        Text(
-            text = stringResource(id = when(provider.provider) {
-                "openai" -> R.string.provider_openai
-                "anthropic" -> R.string.provider_anthropic
-                "google" -> R.string.provider_google
-                "poe" -> R.string.provider_poe
-                "cohere" -> R.string.provider_cohere
-                "openrouter" -> R.string.provider_openrouter
-                "yourprovider" -> R.string.provider_yourprovider  // ← ADD THIS
-                else -> R.string.provider_openai
-            }),
-            color = OnSurface
-        )
-    },
-    // ...
-)
-```
-
-**⚠️ WARNING**: If you skip this step, your provider will display as "OpenAI" in:
-- The provider selection dialog (when choosing which provider to use)
-- The API key add dialog dropdown (when adding a new API key)
-
-The correct name will only appear **after** selection, causing confusing UX!
-
-**💡 TIP**: Search for `else -> R.string.provider_openai` across the codebase to find all `when` statements that need updating when adding a new provider.
 
 ---
 
-## Step 5: Optional Features
+## Step 6: Optional Features
 
-### 5.1: Web Search Support
+### 6.1: Thinking/Reasoning Support
 
-If your provider supports web search (like Anthropic's `web_search_20250305` tool), add it to the tools array:
+If your provider supports thinking/reasoning (like OpenAI o1, Anthropic Claude thinking, Google Gemini thinking):
 
 ```kotlin
-// In makeAnthropicStreamingRequest():
-if (enabledTools.isNotEmpty() || webSearchEnabled) {
+// In your streaming parser:
+if (isThinkingBlock) {
+    callback.onThinkingStarted()
+    callback.onThinkingPartial(thinkingText)
+    callback.onThinkingComplete(thoughts, durationSeconds, status)
+}
+```
+
+### 6.2: Web Search Support
+
+If your provider has native web search:
+
+```kotlin
+// In buildRequestBody():
+if (webSearchEnabled) {
     put("tools", buildJsonArray {
-        // Web search tool
-        if (webSearchEnabled) {
-            add(buildJsonObject {
-                put("type", "web_search_20250305")
-                put("name", "web_search")
-            })
-        }
-        // Custom tools
-        if (enabledTools.isNotEmpty()) {
-            convertToolsToAnthropicFormat(enabledTools).forEach { add(it) }
-        }
+        add(buildJsonObject {
+            put("type", "web_search")
+            // Provider-specific format
+        })
     })
 }
 ```
 
-### 5.2: File Upload Endpoints
+### 6.3: File Attachments
 
-If your provider uses separate file upload endpoints (like OpenAI/Google):
-
-1. **Add upload config** to `providers.json`:
-```json
-"upload_files_request": {
-    "request_type": "POST",
-    "base_url": "https://api.example.com/v1/files",
-    "headers": {
-        "Authorization": "Bearer {API_KEY_HERE}"
-    }
-}
-```
-
-2. **Implement upload method** in `ApiService.kt`:
-```kotlin
-suspend fun uploadFileToProvider(
-    filePath: String,
-    mimeType: String,
-    apiKey: String
-): String {
-    // Implementation similar to uploadFileToOpenAI() or uploadFileToGoogle()
-}
-```
-
-3. **Call from DataRepository** in `ensureFilesUploadedForProvider()`:
-```kotlin
-when (provider.provider.lowercase()) {
-    "openai" -> uploadFileToOpenAI(...)
-    "google" -> uploadFileToGoogle(...)
-    "yourprovider" -> uploadFileToYourProvider(...)
-}
-```
-
-### 5.3: Tool Calling
-
-Tool calling is automatically supported if you:
-1. Parse `tool_use` events in your streaming parser
-2. Return `ToolCall` result type from your streaming method
-3. Handle tool messages in `buildProviderMessages()`
-
-The main provider method's while loop will handle the tool execution cycle.
+Different providers handle files differently:
+- **Inline Base64** (Anthropic, Cohere): Encode files in message content
+- **Upload Endpoint** (OpenAI, Google): Upload first, reference by ID
+- **URL Reference** (Poe): Upload to their CDN, reference by URL
 
 ---
 
@@ -957,22 +651,22 @@ The main provider method's while loop will handle the tool execution cycle.
    - [ ] Receive streaming response
    - [ ] Response displays correctly in UI
 
-2. **File Attachments**
+2. **File Attachments** (if supported)
    - [ ] Upload image attachment
    - [ ] Upload PDF/document
    - [ ] Files are properly encoded/uploaded
 
 3. **Tool Calling** (if supported)
-   - [ ] Enable a tool (e.g., calculator)
+   - [ ] Enable a tool
    - [ ] Trigger tool use in conversation
    - [ ] Verify tool result is returned to model
    - [ ] Verify model responds to tool result
+   - [ ] Test tool chaining (multiple sequential tool calls)
 
-4. **Web Search** (if supported)
-   - [ ] Enable web search toggle
-   - [ ] Ask a question requiring current information
-   - [ ] Verify search is performed
-   - [ ] Verify results appear in response
+4. **Thinking/Reasoning** (if supported)
+   - [ ] Enable thinking budget
+   - [ ] Verify thinking indicator shows
+   - [ ] Verify thoughts are displayed
 
 5. **Multi-turn Conversations**
    - [ ] Have a 5+ message conversation
@@ -982,7 +676,6 @@ The main provider method's while loop will handle the tool execution cycle.
 6. **Error Handling**
    - [ ] Test with invalid API key
    - [ ] Test with network timeout
-   - [ ] Test with malformed response
    - [ ] Verify error messages display correctly
 
 7. **UI Components**
@@ -993,16 +686,9 @@ The main provider method's while loop will handle the tool execution cycle.
 ### Build and Run:
 
 ```bash
-# Clean build
 ./gradlew clean
-
-# Build debug APK
 ./gradlew assembleDebug
-
-# Install on device
 ./gradlew installDebug
-
-# Run tests
 ./gradlew testDebugUnitTest
 ```
 
@@ -1010,55 +696,49 @@ The main provider method's while loop will handle the tool execution cycle.
 
 ## Common Pitfalls
 
-1. **SSE Parsing**: Make sure you correctly handle the event format. Some APIs use `event:` and `data:` lines, others use only `data:`.
+1. **SSE Parsing**: Different providers use different formats. Some use `event:` + `data:`, others use only `data:`.
 
-2. **Role Mapping**: Different APIs use different role names (`user/assistant` vs `user/model` vs `user/bot`). Map them correctly.
+2. **Role Mapping**: APIs use different role names (`user/assistant` vs `user/model` vs `user/bot`).
 
-3. **File Encoding**: Some providers (Anthropic) require inline base64, others (OpenAI/Google) use separate upload endpoints.
+3. **File Encoding**: Some providers need inline base64, others need separate upload endpoints.
 
-4. **Tool Format**: Tool specifications vary widely. Check your provider's docs for exact JSON schema.
+4. **Tool Format**: Tool specifications vary widely between providers.
 
-5. **Empty Tool Input**: Some tools have no parameters. Handle empty `{}` input gracefully.
+5. **Empty Tool Input**: Handle tools with no parameters (`{}`).
 
-6. **Streaming Chunks**: Some providers send character-by-character, others send word-by-word or sentence-by-sentence.
+6. **Streaming Chunks**: Providers send data differently (character, word, or sentence level).
 
-7. **Error Events**: Always check for error events in the SSE stream and handle them appropriately.
-
----
-
-## Reference Files
-
-For complete implementation examples, see these commits:
-- **21c59bd**: "adding anthropic as a provider!" - Main integration
-- **52a8488**: "web search for anthropic models" - Web search feature
-- **f7aac57**: "web search anthropic models 2" - Web search refinements
-- **ba0c1c3**: "UI display for enabling web search for Anthropic" - UI updates
+7. **Missing UI Updates**: Search for `else -> R.string.provider_openai` to find all `when` statements that need updating.
 
 ---
 
-## Architecture Overview
+## File Structure Reference
 
 ```
-User Input (ChatScreen)
-    ↓
-ChatViewModel.sendMessage()
-    ↓
-DataRepository.sendMessageStreaming()
-    ↓
-ApiService.sendMessageStreaming()
-    ↓  (routes by provider)
-    ↓
-ApiService.sendAnthropicMessage()  ← Your implementation
-    ↓  (tool calling loop)
-    ↓
-ApiService.makeAnthropicStreamingRequest()
-    ↓  (HTTP + SSE parsing)
-    ↓
-StreamingCallback.onPartialResponse()
-    ↓
-ChatViewModel updates UI state
-    ↓
-UI renders streaming text (ChatScreen)
+app/src/main/java/com/example/ApI/
+├── data/
+│   ├── network/
+│   │   ├── LLMApiService.kt       ← Thin coordinator
+│   │   └── providers/
+│   │       ├── BaseProvider.kt    ← Common utilities
+│   │       ├── ProviderResult.kt  ← Shared types
+│   │       ├── OpenAIProvider.kt
+│   │       ├── GoogleProvider.kt
+│   │       ├── AnthropicProvider.kt
+│   │       ├── PoeProvider.kt
+│   │       ├── CohereProvider.kt
+│   │       ├── OpenRouterProvider.kt
+│   │       └── YourProvider.kt    ← NEW FILE
+│   └── repository/
+│       └── DataRepository.kt      ← Provider registration & file uploads
+├── ui/
+│   ├── ChatViewModel.kt
+│   ├── screen/
+│   │   ├── ChatScreen.kt
+│   │   ├── ApiKeysScreen.kt
+│   │   └── UsernameScreen.kt
+│   └── components/
+│       └── Dialogs.kt
 ```
 
 ---
@@ -1068,14 +748,15 @@ UI renders streaming text (ChatScreen)
 Adding a new provider requires:
 
 1. ✅ Define API contract in `providers.json`
-2. ✅ Implement streaming parser in `ApiService.kt`
-3. ✅ Register provider in `DataRepository.kt`
-4. ✅ Add UI branding in `ApiKeysScreen.kt`
-5. ✅ **Add provider to title generation list in `ChatViewModel.kt`** ⚠️ (Critical - provider won't appear in title generation dropdown if skipped!)
-6. ✅ Add to settings UI in `UsernameScreen.kt`
-7. ✅ Add string resources in `strings.xml`
-8. ✅ **Add provider display name to `ChatScreen.kt`** ⚠️ (Critical - provider will show as "OpenAI" if skipped!)
-9. ✅ **Add provider display name to `Dialogs.kt`** ⚠️ (Critical - provider will show as "OpenAI" in selection menus if skipped!)
-10. ✅ Test thoroughly
+2. ✅ **Create provider implementation in `providers/YourProvider.kt`** (NEW)
+3. ✅ Register provider in `LLMApiService.kt`
+4. ✅ Add provider registration in `DataRepository.kt`
+5. ✅ Add UI branding in `ApiKeysScreen.kt`
+6. ✅ Add to title generation list in `ChatViewModel.kt` ⚠️
+7. ✅ Add to settings UI in `UsernameScreen.kt`
+8. ✅ Add provider display name to `ChatScreen.kt` ⚠️
+9. ✅ Add provider display name to `Dialogs.kt` ⚠️
+10. ✅ Add string resources in `strings.xml`
+11. ✅ Test thoroughly
 
-The app's architecture handles the rest (chat history, tool calling, UI rendering, etc.) automatically once you implement these components correctly.
+The modular architecture handles the rest (chat history, tool calling, UI rendering, etc.) automatically once you implement these components correctly.
