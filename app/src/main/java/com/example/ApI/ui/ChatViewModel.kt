@@ -84,6 +84,42 @@ class ChatViewModel(
         )
     }
 
+    // Integration management delegate (GitHub + Google Workspace)
+    private val integrationManager: IntegrationManager by lazy {
+        IntegrationManager(
+            repository = repository,
+            context = context,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            updateAppSettings = { newSettings -> _appSettings.value = newSettings },
+            showSnackbar = { message -> showSnackbar(message) }
+        )
+    }
+
+    // Search functionality delegate
+    private val searchManager: SearchManager by lazy {
+        SearchManager(
+            repository = repository,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState },
+            getCurrentScreen = { _currentScreen.value }
+        )
+    }
+
+    // Child lock (parental controls) delegate
+    private val childLockManager: ChildLockManager by lazy {
+        ChildLockManager(
+            repository = repository,
+            context = context,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateAppSettings = { newSettings -> _appSettings.value = newSettings },
+            updateUiState = { newState -> _uiState.value = newState }
+        )
+    }
+
     private val json = Json {
         prettyPrint = false
         ignoreUnknownKeys = true
@@ -1301,6 +1337,10 @@ class ChatViewModel(
         }
     }
     
+    fun showSnackbar(message: String) {
+        _uiState.value = _uiState.value.copy(snackbarMessage = message)
+    }
+
     fun clearSnackbar() {
         _uiState.value = _uiState.value.copy(snackbarMessage = null)
     }
@@ -2670,228 +2710,25 @@ class ChatViewModel(
 
     // Search Methods
     
-    fun enterSearchMode() {
-        _uiState.value = _uiState.value.copy(searchMode = true, searchQuery = "")
-    }
-    
-    fun enterConversationSearchMode() {
-        _uiState.value = _uiState.value.copy(searchMode = true, searchQuery = "")
-    }
-    
-    fun enterSearchModeWithQuery(query: String) {
-        _uiState.value = _uiState.value.copy(
-            searchMode = true, 
-            searchQuery = query
-        )
-        // Perform search immediately with the given query
-        performConversationSearch()
-    }
-    
-    fun exitSearchMode() {
-        _uiState.value = _uiState.value.copy(
-            searchMode = false,
-            searchQuery = "",
-            searchResults = emptyList(),
-            searchContext = null // Clear search context when exiting
-        )
-    }
-    
-    fun updateSearchQuery(query: String) {
-        _uiState.value = _uiState.value.copy(searchQuery = query)
-        // Always use conversation search when in search mode in chat screen
-        if (_uiState.value.searchMode && _currentScreen.value == Screen.Chat) {
-            performConversationSearch()
-        } else if (!_uiState.value.searchMode) {
-            // Only perform general search if not in conversation search mode
-            performSearch()
-        }
-    }
-    
-    fun performSearch() {
-        val query = _uiState.value.searchQuery.trim()
-        if (query.isEmpty()) {
-            _uiState.value = _uiState.value.copy(searchResults = emptyList())
-            return
-        }
-        
-        val currentUser = _appSettings.value.current_user
-        val results = repository.searchChats(currentUser, query)
-        _uiState.value = _uiState.value.copy(searchResults = results)
-    }
+    // Search Methods (delegated to SearchManager)
+    fun enterSearchMode() = searchManager.enterSearchMode()
+    fun enterConversationSearchMode() = searchManager.enterConversationSearchMode()
+    fun enterSearchModeWithQuery(query: String) = searchManager.enterSearchModeWithQuery(query)
+    fun exitSearchMode() = searchManager.exitSearchMode()
+    fun updateSearchQuery(query: String) = searchManager.updateSearchQuery(query)
+    fun performSearch() = searchManager.performSearch()
+    fun performConversationSearch() = searchManager.performConversationSearch()
+    fun clearSearchContext() = searchManager.clearSearchContext()
 
-    fun performConversationSearch() {
-        val query = _uiState.value.searchQuery.trim()
-        val currentChat = _uiState.value.currentChat
-        
-        if (query.isEmpty() || currentChat == null) {
-            _uiState.value = _uiState.value.copy(searchContext = null)
-            return
-        }
-        
-        // Search in current conversation messages and attachments
-        val searchResults = mutableListOf<SearchResult>()
-        
-        currentChat.messages.forEachIndexed { messageIndex, message ->
-            val highlightRanges = mutableListOf<IntRange>()
-            
-            // Search in message text
-            if (message.text.contains(query, ignoreCase = true)) {
-                // Find all occurrences of the search term
-                var startIndex = 0
-                while (true) {
-                    val index = message.text.indexOf(query, startIndex, ignoreCase = true)
-                    if (index == -1) break
-                    highlightRanges.add(IntRange(index, index + query.length - 1))
-                    startIndex = index + 1
-                }
-                
-                if (highlightRanges.isNotEmpty()) {
-                    searchResults.add(
-                        SearchResult(
-                            chat = currentChat,
-                            searchQuery = query,
-                            matchType = SearchMatchType.CONTENT,
-                            messageIndex = messageIndex,
-                            highlightRanges = highlightRanges
-                        )
-                    )
-                }
-            }
-            
-            // Search in attachment file names
-            message.attachments.forEach { attachment ->
-                if (attachment.file_name.contains(query, ignoreCase = true)) {
-                    searchResults.add(
-                        SearchResult(
-                            chat = currentChat,
-                            searchQuery = query,
-                            matchType = SearchMatchType.FILE_NAME,
-                            messageIndex = messageIndex,
-                            highlightRanges = emptyList() // File name highlighting would be in a separate UI element
-                        )
-                    )
-                }
-            }
-        }
-        
-        // Update the search context to highlight matches
-        _uiState.value = _uiState.value.copy(
-            searchResults = searchResults,
-            searchContext = if (searchResults.isNotEmpty()) searchResults.first() else null
-        )
-    }
-    
-    fun clearSearchContext() {
-        _uiState.value = _uiState.value.copy(searchContext = null)
-    }
-
-    // Child Lock Methods
-
-    fun setupChildLock(password: String, startTime: String, endTime: String, deviceId: String) {
-        viewModelScope.launch {
-            try {
-                val parentalControlManager = ParentalControlManager(context)
-                parentalControlManager.setParentalPassword(password, deviceId)
-
-                // Update settings with child lock enabled
-                val updatedSettings = _appSettings.value.copy(
-                    childLockSettings = ChildLockSettings(
-                        enabled = true,
-                        encryptedPassword = parentalControlManager.getEncryptedPassword(),
-                        startTime = startTime,
-                        endTime = endTime
-                    )
-                )
-
-                repository.saveAppSettings(updatedSettings)
-                _appSettings.value = updatedSettings
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "שגיאה בהגדרת נעילת ילדים: ${e.message}"
-                )
-            }
-        }
-    }
-
-    fun verifyAndDisableChildLock(password: String, deviceId: String): Boolean {
-        return try {
-            val parentalControlManager = ParentalControlManager(context)
-            val isValidPassword = parentalControlManager.verifyParentalPassword(password, deviceId)
-
-            if (isValidPassword) {
-                // Disable child lock
-                val updatedSettings = _appSettings.value.copy(
-                    childLockSettings = ChildLockSettings(
-                        enabled = false,
-                        encryptedPassword = "",
-                        startTime = "23:00",
-                        endTime = "07:00"
-                    )
-                )
-
-                repository.saveAppSettings(updatedSettings)
-                _appSettings.value = updatedSettings
-                true
-            } else {
-                // Show error message
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "סיסמה שגויה"
-                )
-                false
-            }
-        } catch (e: Exception) {
-            _uiState.value = _uiState.value.copy(
-                snackbarMessage = "שגיאה בביטול נעילת ילדים: ${e.message}"
-            )
-            false
-        }
-    }
-
-    fun updateChildLockSettings(enabled: Boolean, password: String, startTime: String, endTime: String) {
-        val updatedSettings = _appSettings.value.copy(
-            childLockSettings = ChildLockSettings(
-                enabled = enabled,
-                encryptedPassword = password,
-                startTime = startTime,
-                endTime = endTime
-            )
-        )
-
-        repository.saveAppSettings(updatedSettings)
-        _appSettings.value = updatedSettings
-    }
-
-    fun isChildLockActive(): Boolean {
-        val settings = _appSettings.value.childLockSettings
-        if (!settings.enabled) return false
-
-        return isCurrentTimeInLockRange(settings.startTime, settings.endTime)
-    }
-
-    private fun isCurrentTimeInLockRange(startTime: String, endTime: String): Boolean {
-        try {
-            val now = LocalTime.now()
-            val start = LocalTime.parse(startTime)
-            val end = LocalTime.parse(endTime)
-
-            // Handle case where end time is next day (e.g., 23:00 to 07:00)
-            return if (start.isBefore(end)) {
-                // Same day range (e.g., 09:00 to 17:00)
-                now.isAfter(start) && now.isBefore(end)
-            } else {
-                // Overnight range (e.g., 23:00 to 07:00)
-                now.isAfter(start) || now.isBefore(end)
-            }
-        } catch (e: Exception) {
-            // If parsing fails, default to not locked
-            return false
-        }
-    }
-
-    fun getLockEndTime(): String {
-        val settings = _appSettings.value.childLockSettings
-        return settings.endTime
-    }
+    // Child Lock Methods (delegated to ChildLockManager)
+    fun setupChildLock(password: String, startTime: String, endTime: String, deviceId: String) =
+        childLockManager.setupChildLock(password, startTime, endTime, deviceId)
+    fun verifyAndDisableChildLock(password: String, deviceId: String): Boolean =
+        childLockManager.verifyAndDisableChildLock(password, deviceId)
+    fun updateChildLockSettings(enabled: Boolean, password: String, startTime: String, endTime: String) =
+        childLockManager.updateChildLockSettings(enabled, password, startTime, endTime)
+    fun isChildLockActive(): Boolean = childLockManager.isChildLockActive()
+    fun getLockEndTime(): String = childLockManager.getLockEndTime()
 
     // Tool Management Methods
 
@@ -2921,369 +2758,26 @@ class ChatViewModel(
         return ToolRegistry.getInstance().getAllTools()
     }
 
-    // GitHub Integration Methods
-
-    /**
-     * Start GitHub OAuth flow (opens external browser)
-     * @return OAuth state parameter for verification
-     */
-    fun connectGitHub(): String {
-        val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
-        return oauthService.startAuthorizationFlow()
-    }
-
-    /**
-     * Get GitHub OAuth URL and state for in-app WebView authentication.
-     * @return Pair of (authUrl, state)
-     */
-    fun getGitHubAuthUrl(): Pair<String, String> {
-        val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
-        return oauthService.getAuthorizationUrlAndState()
-    }
-
-    /**
-     * Handle OAuth callback and save connection
-     * @param code Authorization code from GitHub
-     * @param state State parameter for verification
-     * @return Success/failure message
-     */
-    fun handleGitHubCallback(code: String, state: String): String {
-        viewModelScope.launch {
-            try {
-                val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
-
-                // Exchange code for token
-                val authResult = oauthService.exchangeCodeForToken(code)
-
-                authResult.fold(
-                    onSuccess = { auth ->
-                        // Get user info
-                        val apiService = com.example.ApI.data.network.GitHubApiService()
-                        val userResult = apiService.getAuthenticatedUser(auth.accessToken)
-
-                        userResult.fold(
-                            onSuccess = { user ->
-                                // Save connection
-                                val connection = GitHubConnection(auth = auth, user = user)
-                                val username = _appSettings.value.current_user
-                                repository.saveGitHubConnection(username, connection)
-
-                                // Register GitHub tools
-                                val toolRegistry = ToolRegistry.getInstance()
-                                toolRegistry.registerGitHubTools(apiService, auth.accessToken, user.login)
-
-                                // Reload appSettings to get the updated githubConnections, then add tool IDs
-                                val freshSettings = repository.loadAppSettings()
-                                val githubToolIds = toolRegistry.getGitHubToolIds()
-                                val updatedEnabledTools = (freshSettings.enabledTools + githubToolIds).distinct()
-                                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                                repository.saveAppSettings(updatedSettings)
-                                _appSettings.value = updatedSettings
-                            },
-                            onFailure = { error ->
-                                _uiState.value = _uiState.value.copy(
-                                    snackbarMessage = "Failed to get GitHub user info: ${error.message}"
-                                )
-                            }
-                        )
-                    },
-                    onFailure = { error ->
-                        _uiState.value = _uiState.value.copy(
-                            snackbarMessage = "GitHub authentication failed: ${error.message}"
-                        )
-                    }
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "Error connecting to GitHub: ${e.message}"
-                )
-            }
-        }
-        return "Processing GitHub connection..."
-    }
-
-    /**
-     * Disconnect GitHub and remove all GitHub tools
-     */
-    fun disconnectGitHub() {
-        viewModelScope.launch {
-            try {
-                val username = _appSettings.value.current_user
-                val connection = repository.loadGitHubConnection(username)
-
-                if (connection != null) {
-                    // Revoke token on GitHub
-                    val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
-                    oauthService.revokeToken(connection.auth.accessToken)
-                }
-
-                // Remove local connection data
-                repository.removeGitHubConnection(username)
-
-                // Unregister GitHub tools
-                val toolRegistry = ToolRegistry.getInstance()
-                toolRegistry.unregisterGitHubTools()
-
-                // Reload appSettings to get the updated githubConnections (with removal), then remove tool IDs
-                val freshSettings = repository.loadAppSettings()
-                val githubToolIds = toolRegistry.getGitHubToolIds()
-                val updatedEnabledTools = freshSettings.enabledTools.filter { it !in githubToolIds }
-                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                repository.saveAppSettings(updatedSettings)
-                _appSettings.value = updatedSettings
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "Error disconnecting GitHub: ${e.message}"
-                )
-            }
-        }
-    }
-
-    /**
-     * Check if GitHub is connected for current user
-     */
-    fun isGitHubConnected(): Boolean {
-        val username = _appSettings.value.current_user
-        return repository.isGitHubConnected(username)
-    }
-
-    /**
-     * Get GitHub connection info for current user
-     */
-    fun getGitHubConnection(): GitHubConnection? {
-        val username = _appSettings.value.current_user
-        return repository.loadGitHubConnection(username)
-    }
-
-    /**
-     * Initialize GitHub tools if already connected
-     * Should be called during app startup
-     */
-    fun initializeGitHubToolsIfConnected() {
-        viewModelScope.launch {
-            try {
-                val username = _appSettings.value.current_user
-                val serviceAndToken = repository.getGitHubApiService(username)
-
-                if (serviceAndToken != null) {
-                    val (apiService, accessToken) = serviceAndToken
-                    val connection = repository.loadGitHubConnection(username)
-
-                    if (connection != null) {
-                        val toolRegistry = ToolRegistry.getInstance()
-                        toolRegistry.registerGitHubTools(apiService, accessToken, connection.user.login)
-
-                        // Ensure GitHub tools are enabled in settings
-                        val currentSettings = _appSettings.value
-                        val githubToolIds = toolRegistry.getGitHubToolIds()
-                        if (!currentSettings.enabledTools.containsAll(githubToolIds)) {
-                            val updatedEnabledTools = (currentSettings.enabledTools + githubToolIds).distinct()
-                            val updatedSettings = currentSettings.copy(enabledTools = updatedEnabledTools)
-                            repository.saveAppSettings(updatedSettings)
-                            _appSettings.value = updatedSettings
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                // Silent fail - GitHub tools won't be available
-            }
-        }
-    }
-
-    /**
-     * Show a snackbar message to the user
-     */
-    fun showSnackbar(message: String) {
-        _uiState.value = _uiState.value.copy(snackbarMessage = message)
-    }
-
-    // ==================== Google Workspace Integration ====================
-
-    private var googleWorkspaceAuthService: com.example.ApI.data.network.GoogleWorkspaceAuthService? = null
-
-    /**
-     * Initialize Google Workspace auth service
-     */
-    private fun initGoogleWorkspaceAuthService() {
-        if (googleWorkspaceAuthService == null) {
-            googleWorkspaceAuthService = com.example.ApI.data.network.GoogleWorkspaceAuthService(context)
-        }
-    }
-
-    /**
-     * Get Google Sign-In intent
-     * @return Intent to launch for Google Sign-In
-     */
-    fun getGoogleSignInIntent(): Intent {
-        initGoogleWorkspaceAuthService()
-        return googleWorkspaceAuthService!!.getSignInIntent()
-    }
-
-    /**
-     * Handle Google Sign-In result
-     * @param data Intent data from ActivityResult
-     */
-    fun handleGoogleSignInResult(data: Intent) {
-        viewModelScope.launch {
-            try {
-                initGoogleWorkspaceAuthService()
-                android.util.Log.d("ChatViewModel", "Handling Google Sign-In result intent")
-                val result = googleWorkspaceAuthService!!.handleSignInResult(data)
-
-                result.fold(
-                    onSuccess = { (auth, user) ->
-                        android.util.Log.d("ChatViewModel", "Google Sign-In success: ${user.email}")
-                        // Save connection
-                        val connection = GoogleWorkspaceConnection(auth = auth, user = user)
-                        val username = _appSettings.value.current_user
-                        
-                        // Save and reload settings to update UI
-                        val updatedSettings = withContext(Dispatchers.IO) {
-                            android.util.Log.d("ChatViewModel", "Saving connection to repository")
-                            repository.saveGoogleWorkspaceConnection(username, connection)
-                            android.util.Log.d("ChatViewModel", "Reloading app settings")
-                            repository.loadAppSettings()
-                        }
-                        
-                        _appSettings.value = updatedSettings
-                        android.util.Log.d("ChatViewModel", "Settings updated with new connection")
-
-                        // Register tools
-                        initializeGoogleWorkspaceToolsIfConnected()
-                    },
-                    onFailure = { error ->
-                        android.util.Log.e("ChatViewModel", "Google Sign-In failed", error)
-                        showSnackbar("שגיאת התחברות: ${error.message}")
-                    }
-                )
-            } catch (e: Exception) {
-                android.util.Log.e("ChatViewModel", "Exception in handleGoogleSignInResult", e)
-                showSnackbar("שגיאה: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * Check if Google Workspace is connected
-     */
-    fun isGoogleWorkspaceConnected(): Boolean {
-        val username = _appSettings.value.current_user
-        return repository.isGoogleWorkspaceConnected(username)
-    }
-
-    /**
-     * Get current Google Workspace connection
-     */
-    fun getGoogleWorkspaceConnection(): GoogleWorkspaceConnection? {
-        val username = _appSettings.value.current_user
-        return repository.loadGoogleWorkspaceConnection(username)
-    }
-
-    /**
-     * Disconnect Google Workspace
-     */
-    fun disconnectGoogleWorkspace() {
-        viewModelScope.launch {
-            try {
-                initGoogleWorkspaceAuthService()
-                googleWorkspaceAuthService!!.signOut()
-
-                val username = _appSettings.value.current_user
-                repository.removeGoogleWorkspaceConnection(username)
-
-                // Unregister tools
-                val toolRegistry = ToolRegistry.getInstance()
-                toolRegistry.unregisterGoogleWorkspaceTools()
-
-                // Reload appSettings to get the updated googleWorkspaceConnections (with removal), then remove tool IDs
-                val freshSettings = repository.loadAppSettings()
-                val googleToolIds = toolRegistry.getGoogleWorkspaceToolIds()
-                val updatedEnabledTools = freshSettings.enabledTools.filter { it !in googleToolIds }
-                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                repository.saveAppSettings(updatedSettings)
-                _appSettings.value = updatedSettings
-            } catch (e: Exception) {
-                showSnackbar("שגיאה בהתנתקות: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * Update enabled Google Workspace services
-     * @param gmail Enable Gmail tools
-     * @param calendar Enable Calendar tools
-     * @param drive Enable Drive tools
-     */
-    fun updateGoogleWorkspaceServices(gmail: Boolean, calendar: Boolean, drive: Boolean) {
-        viewModelScope.launch {
-            try {
-                val username = _appSettings.value.current_user
-                val services = EnabledGoogleServices(gmail, calendar, drive)
-                repository.updateGoogleWorkspaceEnabledServices(username, services)
-
-                // Re-register tools with new configuration
-                initializeGoogleWorkspaceToolsIfConnected()
-            } catch (e: Exception) {
-                showSnackbar("שגיאה בעדכון: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * Initialize Google Workspace tools if connected
-     * Call this on app start and after connection/service changes
-     */
-    fun initializeGoogleWorkspaceToolsIfConnected() {
-        viewModelScope.launch {
-            try {
-                val username = _appSettings.value.current_user
-                val connection = repository.loadGoogleWorkspaceConnection(username) ?: return@launch
-
-                if (connection.auth.isExpired()) {
-                    // Token expired - user needs to reconnect
-                    return@launch
-                }
-
-                // Get API services based on enabled services
-                val apiServices = repository.getGoogleWorkspaceApiServices(username) ?: return@launch
-                val (gmailService, calendarService, driveService) = apiServices
-
-                val toolRegistry = ToolRegistry.getInstance()
-
-                // Register tools
-                toolRegistry.registerGoogleWorkspaceTools(
-                    gmailService = gmailService,
-                    calendarService = calendarService,
-                    driveService = driveService,
-                    googleEmail = connection.user.email,
-                    enabledServices = connection.enabledServices
-                )
-
-                // Add enabled Google Workspace tool IDs to appSettings.enabledTools
-                val enabledGoogleToolIds = mutableListOf<String>()
-                if (connection.enabledServices.gmail) {
-                    enabledGoogleToolIds.addAll(toolRegistry.getGmailToolIds())
-                }
-                if (connection.enabledServices.calendar) {
-                    enabledGoogleToolIds.addAll(toolRegistry.getCalendarToolIds())
-                }
-                if (connection.enabledServices.drive) {
-                    enabledGoogleToolIds.addAll(toolRegistry.getDriveToolIds())
-                }
-
-                // Update enabledTools: remove all Google Workspace IDs first, then add the currently enabled ones
-                val allGoogleToolIds = toolRegistry.getGoogleWorkspaceToolIds()
-                val freshSettings = repository.loadAppSettings()
-                val cleanedTools = freshSettings.enabledTools.filter { it !in allGoogleToolIds }
-                val updatedEnabledTools = (cleanedTools + enabledGoogleToolIds).distinct()
-                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                repository.saveAppSettings(updatedSettings)
-                _appSettings.value = updatedSettings
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
+    // ==================== Integration Management (delegated to IntegrationManager) ====================
+    
+    // GitHub Integration
+    fun connectGitHub(): String = integrationManager.connectGitHub()
+    fun getGitHubAuthUrl(): Pair<String, String> = integrationManager.getGitHubAuthUrl()
+    fun handleGitHubCallback(code: String, state: String): String = integrationManager.handleGitHubCallback(code, state)
+    fun disconnectGitHub() = integrationManager.disconnectGitHub()
+    fun isGitHubConnected(): Boolean = integrationManager.isGitHubConnected()
+    fun getGitHubConnection(): GitHubConnection? = integrationManager.getGitHubConnection()
+    fun initializeGitHubToolsIfConnected() = integrationManager.initializeGitHubToolsIfConnected()
+    
+    // Google Workspace Integration
+    fun getGoogleSignInIntent(): Intent = integrationManager.getGoogleSignInIntent()
+    fun handleGoogleSignInResult(data: Intent) = integrationManager.handleGoogleSignInResult(data)
+    fun isGoogleWorkspaceConnected(): Boolean = integrationManager.isGoogleWorkspaceConnected()
+    fun getGoogleWorkspaceConnection(): GoogleWorkspaceConnection? = integrationManager.getGoogleWorkspaceConnection()
+    fun disconnectGoogleWorkspace() = integrationManager.disconnectGoogleWorkspace()
+    fun updateGoogleWorkspaceServices(gmail: Boolean, calendar: Boolean, drive: Boolean) =
+        integrationManager.updateGoogleWorkspaceServices(gmail, calendar, drive)
+    fun initializeGoogleWorkspaceToolsIfConnected() = integrationManager.initializeGoogleWorkspaceToolsIfConnected()
 
     // ==================== Chat Import from JSON ====================
 
