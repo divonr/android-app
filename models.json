@@ -3,32 +3,131 @@
     "provider": "openai",
     "models": [
       { "name": "gpt-4o" },
-      { "name": "gpt-5.2" },
-      { "name": "gpt-5.1" },
+      {
+        "name": "gpt-5.2",
+        "thinking": {
+          "discrete": {
+            "options": ["none", "low", "medium", "high", "xhigh"],
+            "default": "medium"
+          }
+        }
+      },
+      {
+        "name": "gpt-5.1",
+        "thinking": {
+          "discrete": {
+            "options": ["none", "low", "medium", "high"],
+            "default": "none"
+          }
+        }
+      },
       { "name": "gpt-4.1" },
-      { "name": "o1" },
-      { "name": "o3" },
-      { "name": "o4-mini" },
-      { "name": "o4-mini-deep-research" }
+      {
+        "name": "o1",
+        "thinking": {
+          "discrete": {
+            "options": ["low", "medium", "high"],
+            "default": "medium"
+          }
+        }
+      },
+      {
+        "name": "o3",
+        "thinking": {
+          "discrete": {
+            "options": ["low", "medium", "high"],
+            "default": "medium"
+          }
+        }
+      },
+      {
+        "name": "o4-mini",
+        "thinking": {
+          "discrete": {
+            "options": ["low", "medium", "high"],
+            "default": "medium"
+          }
+        }
+      },
+      {
+        "name": "o4-mini-deep-research",
+        "thinking": {
+          "discrete": {
+            "options": ["low", "medium", "high"],
+            "default": "medium"
+          }
+        }
+      }
     ]
   },
   {
     "provider": "anthropic",
     "models": [
-      { "name": "claude-sonnet-4-5" },
-      { "name": "claude-opus-4-5" },
-      { "name": "claude-haiku-4-5" },
-      { "name": "claude-sonnet-4-0" },
-      { "name": "claude-3-7-sonnet-latest" }
+      {
+        "name": "claude-sonnet-4-5",
+        "thinking": {
+          "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
+        }
+      },
+      {
+        "name": "claude-opus-4-5",
+        "thinking": {
+          "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
+        }
+      },
+      {
+        "name": "claude-haiku-4-5",
+        "thinking": {
+          "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
+        }
+      },
+      {
+        "name": "claude-sonnet-4-0",
+        "thinking": {
+          "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
+        }
+      },
+      {
+        "name": "claude-3-7-sonnet-latest",
+        "thinking": {
+          "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
+        }
+      }
     ]
   },
   {
     "provider": "google",
     "models": [
-      { "name": "gemini-3-flash-preview" },
-      { "name": "gemini-3-pro-preview" },
-      { "name": "gemini-2.5-flash" },
-      { "name": "gemini-2.5-pro" },
+      {
+        "name": "gemini-3-flash-preview",
+        "thinking": {
+          "discrete": {
+            "options": ["minimal", "low", "medium", "high"],
+            "default": "high"
+          }
+        }
+      },
+      {
+        "name": "gemini-3-pro-preview",
+        "thinking": {
+          "discrete": {
+            "options": ["low", "high"],
+            "default": "high"
+          }
+        }
+      },
+      {
+        "name": "gemini-2.5-flash",
+        "thinking": {
+          "continuous": { "min": 0, "max": 24576, "default": 8192, "step": 256, "supports_off": true }
+        }
+      },
+      {
+        "name": "gemini-2.5-pro",
+        "thinking": {
+          "continuous": { "min": 128, "max": 32768, "default": 8192, "step": 128, "supports_off": false }
+        }
+      },
       { "name": "gemini-2.5-flash-lite" },
       { "name": "gemini-2.0-flash-lite" }
     ]
