@@ -24,7 +24,7 @@ import kotlinx.coroutines.withContext
  * - Tool call execution and chaining
  * - Thinking/reasoning support
  */
-class ApiService(private val context: Context) {
+class LLMApiService(private val context: Context) {
 
     // Lazy-initialized provider instances
     private val openAIProvider by lazy { OpenAIProvider(context) }
