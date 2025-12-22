@@ -71,6 +71,19 @@ class ChatViewModel(
     private var streamingService: StreamingService? = null
     private var serviceBound = false
 
+    // Group management delegate
+    private val groupManager: GroupManager by lazy {
+        GroupManager(
+            repository = repository,
+            context = context,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState },
+            navigateToScreen = { screen -> navigateToScreen(screen) }
+        )
+    }
+
     private val json = Json {
         prettyPrint = false
         ignoreUnknownKeys = true
@@ -2190,409 +2203,63 @@ class ChatViewModel(
 
     // Group Management Methods
 
-    fun createNewGroup(groupName: String) {
-        if (groupName.isBlank()) return
+    fun createNewGroup(groupName: String) = groupManager.createNewGroup(groupName)
 
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
-            val newGroup = repository.createNewGroup(currentUser, groupName.trim())
+    fun addChatToGroup(chatId: String, groupId: String) = groupManager.addChatToGroup(chatId, groupId)
 
-            // If there's a pending chat, add it to the new group
-            val pendingChat = _uiState.value.pendingChatForGroup
-            if (pendingChat != null) {
-                repository.addChatToGroup(currentUser, pendingChat.chat_id, newGroup.group_id)
-            }
+    fun removeChatFromGroup(chatId: String) = groupManager.removeChatFromGroup(chatId)
 
-            // Update UI state with new group
-            val chatHistory = repository.loadChatHistory(currentUser)
-            _uiState.value = _uiState.value.copy(
-                groups = chatHistory.groups,
-                chatHistory = chatHistory.chat_history,
-                expandedGroups = _uiState.value.expandedGroups + newGroup.group_id,
-                pendingChatForGroup = null
-            )
+    fun toggleGroupExpansion(groupId: String) = groupManager.toggleGroupExpansion(groupId)
 
-            hideGroupDialog()
-        }
-    }
+    fun showGroupDialog(chat: Chat? = null) = groupManager.showGroupDialog(chat)
 
-    fun addChatToGroup(chatId: String, groupId: String) {
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
-            val success = repository.addChatToGroup(currentUser, chatId, groupId)
+    fun hideGroupDialog() = groupManager.hideGroupDialog()
 
-            if (success) {
-                // Update UI state
-                val chatHistory = repository.loadChatHistory(currentUser)
-                _uiState.value = _uiState.value.copy(
-                    chatHistory = chatHistory.chat_history,
-                    groups = chatHistory.groups
-                )
+    fun refreshChatHistoryAndGroups() = groupManager.refreshChatHistoryAndGroups()
 
-                hideChatContextMenu()
-            } else {
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "שגיאה בהוספת השיחה לקבוצה"
-                )
-            }
-        }
-    }
+    fun toggleGroupProjectStatus(groupId: String) = groupManager.toggleGroupProjectStatus(groupId)
 
-    fun removeChatFromGroup(chatId: String) {
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
-            val success = repository.removeChatFromGroup(currentUser, chatId)
-
-            if (success) {
-                // Update UI state
-                val chatHistory = repository.loadChatHistory(currentUser)
-                _uiState.value = _uiState.value.copy(
-                    chatHistory = chatHistory.chat_history,
-                    groups = chatHistory.groups
-                )
-
-                hideChatContextMenu()
-            }
-        }
-    }
-
-    fun toggleGroupExpansion(groupId: String) {
-        val currentExpanded = _uiState.value.expandedGroups
-        val newExpanded = if (currentExpanded.contains(groupId)) {
-            currentExpanded - groupId
-        } else {
-            currentExpanded + groupId
-        }
-
-        _uiState.value = _uiState.value.copy(expandedGroups = newExpanded)
-    }
-
-    fun showGroupDialog(chat: Chat? = null) {
-        _uiState.value = _uiState.value.copy(
-            showGroupDialog = true,
-            pendingChatForGroup = chat
-        )
-    }
-
-    fun hideGroupDialog() {
-        _uiState.value = _uiState.value.copy(
-            showGroupDialog = false,
-            pendingChatForGroup = null
-        )
-    }
-
-    fun refreshChatHistoryAndGroups() {
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
-            val chatHistory = repository.loadChatHistory(currentUser)
-            _uiState.value = _uiState.value.copy(
-                chatHistory = chatHistory.chat_history,
-                groups = chatHistory.groups
-            )
-        }
-    }
-
-    fun toggleGroupProjectStatus(groupId: String) {
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
-            val currentGroup = _uiState.value.groups.find { it.group_id == groupId }
-            val newProjectStatus = !(currentGroup?.is_project ?: false)
-
-            repository.updateGroupProjectStatus(currentUser, groupId, newProjectStatus)
-
-            // Update UI state
-            val updatedGroups = _uiState.value.groups.map { group ->
-                if (group.group_id == groupId) {
-                    group.copy(is_project = newProjectStatus)
-                } else {
-                    group
-                }
-            }
-
-            _uiState.value = _uiState.value.copy(groups = updatedGroups)
-
-            // Update current group if it's the one being modified
-            if (_uiState.value.currentGroup?.group_id == groupId) {
-                val updatedCurrentGroup = updatedGroups.find { it.group_id == groupId }
-                _uiState.value = _uiState.value.copy(currentGroup = updatedCurrentGroup)
-            }
-        }
-    }
-
-    fun addFileToProject(groupId: String, uri: Uri, fileName: String, mimeType: String) {
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
-
-            try {
-                // Copy file to internal storage
-                val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
-                inputStream?.use { stream ->
-                    val fileData = stream.readBytes()
-                    val localPath = repository.saveFileLocally(fileName, fileData)
-
-                    if (localPath != null) {
-                        val attachment = Attachment(
-                            local_file_path = localPath,
-                            file_name = fileName,
-                            mime_type = mimeType
-                        )
-
-                        repository.addAttachmentToGroup(currentUser, groupId, attachment)
-
-                        // Update UI state
-                        val updatedGroups = _uiState.value.groups.map { group ->
-                            if (group.group_id == groupId) {
-                                group.copy(group_attachments = group.group_attachments + attachment)
-                            } else {
-                                group
-                            }
-                        }
-
-                        _uiState.value = _uiState.value.copy(groups = updatedGroups)
-
-                        // Update current group if it's the one being modified
-                        if (_uiState.value.currentGroup?.group_id == groupId) {
-                            val updatedCurrentGroup = updatedGroups.find { it.group_id == groupId }
-                            _uiState.value = _uiState.value.copy(currentGroup = updatedCurrentGroup)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "שגיאה בהעלאת הקובץ: ${e.message}"
-                )
-            }
-        }
-    }
+    fun addFileToProject(groupId: String, uri: Uri, fileName: String, mimeType: String) =
+        groupManager.addFileToProject(groupId, uri, fileName, mimeType)
 
     fun openProjectInstructionsDialog() {
         _uiState.value = _uiState.value.copy(showSystemPromptDialog = true)
     }
 
-    fun removeFileFromProject(groupId: String, attachmentIndex: Int) {
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
+    fun removeFileFromProject(groupId: String, attachmentIndex: Int) =
+        groupManager.removeFileFromProject(groupId, attachmentIndex)
 
-            // Get the attachment before removing it (to delete the file)
-            val chatHistory = repository.loadChatHistory(currentUser)
-            val group = chatHistory.groups.find { it.group_id == groupId }
-            val attachmentToRemove = group?.group_attachments?.getOrNull(attachmentIndex)
+    fun navigateToGroup(groupId: String) = groupManager.navigateToGroup(groupId)
 
-            // Remove from JSON registry
-            repository.removeAttachmentFromGroup(currentUser, groupId, attachmentIndex)
-
-            // Delete the actual file from internal storage
-            attachmentToRemove?.local_file_path?.let { path ->
-                repository.deleteFile(path)
-            }
-
-            // Update UI state
-            val updatedGroups = _uiState.value.groups.map { groupItem ->
-                if (groupItem.group_id == groupId) {
-                    val updatedAttachments = groupItem.group_attachments.toMutableList()
-                    if (attachmentIndex >= 0 && attachmentIndex < updatedAttachments.size) {
-                        updatedAttachments.removeAt(attachmentIndex)
-                    }
-                    groupItem.copy(group_attachments = updatedAttachments)
-                } else {
-                    groupItem
-                }
-            }
-
-            _uiState.value = _uiState.value.copy(groups = updatedGroups)
-
-            // Update current group if it's the one being modified
-            if (_uiState.value.currentGroup?.group_id == groupId) {
-                val updatedCurrentGroup = updatedGroups.find { it.group_id == groupId }
-                _uiState.value = _uiState.value.copy(currentGroup = updatedCurrentGroup)
-            }
-        }
-    }
-
-    fun navigateToGroup(groupId: String) {
-        val group = _uiState.value.groups.find { it.group_id == groupId }
-        if (group != null) {
-            _uiState.value = _uiState.value.copy(
-                currentGroup = group,
-                systemPrompt = group.system_prompt ?: ""
-            )
-            navigateToScreen(Screen.Group(groupId))
-        }
-    }
-
-    fun updateGroupSystemPrompt(systemPrompt: String) {
-        val currentGroup = _uiState.value.currentGroup ?: return
-        val currentUser = _appSettings.value.current_user
-
-        // Update system prompt in repository
-        val updatedGroups = _uiState.value.groups.map { group ->
-            if (group.group_id == currentGroup.group_id) {
-                group.copy(system_prompt = systemPrompt)
-            } else {
-                group
-            }
-        }
-
-        // Update chat history JSON
-        val chatHistory = repository.loadChatHistory(currentUser)
-        val updatedHistory = chatHistory.copy(groups = updatedGroups)
-        repository.saveChatHistory(updatedHistory)
-
-        // Update UI state
-        _uiState.value = _uiState.value.copy(
-            groups = updatedGroups,
-            currentGroup = updatedGroups.find { it.group_id == currentGroup.group_id },
-            systemPrompt = systemPrompt,
-            showSystemPromptDialog = false
-        )
-    }
+    fun updateGroupSystemPrompt(systemPrompt: String) = groupManager.updateGroupSystemPrompt(systemPrompt)
 
     // Group context menu functions
-    fun showGroupContextMenu(group: ChatGroup, position: androidx.compose.ui.unit.DpOffset) {
-        _uiState.value = _uiState.value.copy(
-            groupContextMenu = GroupContextMenuState(group, position)
-        )
-    }
+    fun showGroupContextMenu(group: ChatGroup, position: androidx.compose.ui.unit.DpOffset) =
+        groupManager.showGroupContextMenu(group, position)
 
-    fun hideGroupContextMenu() {
-        _uiState.value = _uiState.value.copy(
-            groupContextMenu = null
-        )
-    }
+    fun hideGroupContextMenu() = groupManager.hideGroupContextMenu()
 
-    fun showGroupRenameDialog(group: ChatGroup) {
-        _uiState.value = _uiState.value.copy(
-            showGroupRenameDialog = group,
-            groupContextMenu = null
-        )
-    }
+    fun showGroupRenameDialog(group: ChatGroup) = groupManager.showGroupRenameDialog(group)
 
-    fun hideGroupRenameDialog() {
-        _uiState.value = _uiState.value.copy(
-            showGroupRenameDialog = null
-        )
-    }
+    fun hideGroupRenameDialog() = groupManager.hideGroupRenameDialog()
 
-    fun renameGroup(group: ChatGroup, newName: String) {
-        if (newName.isBlank()) return
+    fun renameGroup(group: ChatGroup, newName: String) = groupManager.renameGroup(group, newName)
 
-        val currentUser = _appSettings.value.current_user
-        val success = repository.renameGroup(currentUser, group.group_id, newName.trim())
+    fun makeGroupProject(group: ChatGroup) = groupManager.makeGroupProject(group)
 
-        if (success) {
-            // Update local state
-            val updatedGroups = _uiState.value.groups.map {
-                if (it.group_id == group.group_id) {
-                    it.copy(group_name = newName.trim())
-                } else {
-                    it
-                }
-            }
+    fun createNewConversationInGroup(group: ChatGroup) = groupManager.createNewConversationInGroup(group)
 
-            _uiState.value = _uiState.value.copy(
-                groups = updatedGroups,
-                currentGroup = if (_uiState.value.currentGroup?.group_id == group.group_id) {
-                    _uiState.value.currentGroup?.copy(group_name = newName.trim())
-                } else {
-                    _uiState.value.currentGroup
-                },
-                showGroupRenameDialog = null
-            )
-        } else {
-            _uiState.value = _uiState.value.copy(
-                showGroupRenameDialog = null
-            )
-        }
-    }
+    fun showGroupDeleteConfirmation(group: ChatGroup) = groupManager.showGroupDeleteConfirmation(group)
 
-    fun makeGroupProject(group: ChatGroup) {
-        val currentUser = _appSettings.value.current_user
-        val success = repository.updateGroupProjectStatus(currentUser, group.group_id, true)
-
-        if (success) {
-            // Update local state
-            val updatedGroups = _uiState.value.groups.map {
-                if (it.group_id == group.group_id) {
-                    it.copy(is_project = true)
-                } else {
-                    it
-                }
-            }
-
-            _uiState.value = _uiState.value.copy(
-                groups = updatedGroups,
-                currentGroup = if (_uiState.value.currentGroup?.group_id == group.group_id) {
-                    _uiState.value.currentGroup?.copy(is_project = true)
-                } else {
-                    _uiState.value.currentGroup
-                }
-            )
-
-            // Navigate to group screen with project mode enabled
-            navigateToGroup(group.group_id)
-        } else {
-            // No action needed for error case
-        }
-    }
-
-    fun createNewConversationInGroup(group: ChatGroup) {
-        val currentUser = _appSettings.value.current_user
-        val newChat = repository.createNewChatInGroup(currentUser, "שיחה חדשה", group.group_id)
-
-        // Update local state
-        val updatedChatHistory = _uiState.value.chatHistory + newChat
-        _uiState.value = _uiState.value.copy(
-            chatHistory = updatedChatHistory,
-            currentChat = newChat
-        )
-
-        // Navigate to the new chat
-        navigateToScreen(Screen.Chat)
-    }
-
-    fun showGroupDeleteConfirmation(group: ChatGroup) {
-        _uiState.value = _uiState.value.copy(
-            showDeleteGroupConfirmation = group,
-            groupContextMenu = null
-        )
-    }
-
-    fun hideGroupDeleteConfirmation() {
-        _uiState.value = _uiState.value.copy(
-            showDeleteGroupConfirmation = null
-        )
-    }
+    fun hideGroupDeleteConfirmation() = groupManager.hideGroupDeleteConfirmation()
 
     fun deleteGroup(group: ChatGroup) {
-        val currentUser = _appSettings.value.current_user
-        val success = repository.deleteGroup(currentUser, group.group_id)
+        // Delegate to GroupManager
+        groupManager.deleteGroup(group)
 
-        if (success) {
-            // Update local state - remove group and unassign chats
-            val updatedGroups = _uiState.value.groups.filter { it.group_id != group.group_id }
-            val updatedChatHistory = _uiState.value.chatHistory.map { chat ->
-                if (chat.group == group.group_id) {
-                    chat.copy(group = null)
-                } else {
-                    chat
-                }
-            }
-
-            _uiState.value = _uiState.value.copy(
-                groups = updatedGroups,
-                chatHistory = updatedChatHistory,
-                currentGroup = if (_uiState.value.currentGroup?.group_id == group.group_id) null else _uiState.value.currentGroup,
-                showDeleteGroupConfirmation = null
-            )
-
-            // Navigate back to chat history if we were in the group screen
-            if (_currentScreen.value is Screen.Group && (_currentScreen.value as Screen.Group).groupId == group.group_id) {
-                navigateToScreen(Screen.ChatHistory)
-            }
-        } else {
-            _uiState.value = _uiState.value.copy(
-                showDeleteGroupConfirmation = null
-            )
+        // Handle screen navigation check (GroupManager doesn't have access to _currentScreen)
+        if (_currentScreen.value is Screen.Group && (_currentScreen.value as Screen.Group).groupId == group.group_id) {
+            navigateToScreen(Screen.ChatHistory)
         }
     }
 
