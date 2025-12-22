@@ -79,8 +79,23 @@ object ThinkingBudgetConfig {
 
     /**
      * Get the thinking budget type for a specific provider and model combination.
+     * First checks if the model has a remote config, then falls back to hardcoded defaults.
+     *
+     * @param provider The provider name (e.g., "openai", "anthropic", "google")
+     * @param model The model name
+     * @param modelConfig Optional thinking config from the remote models.json
      */
-    fun getThinkingBudgetType(provider: String, model: String): ThinkingBudgetType {
+    fun getThinkingBudgetType(
+        provider: String,
+        model: String,
+        modelConfig: ThinkingBudgetType? = null
+    ): ThinkingBudgetType {
+        // If we have a remote config for this model, use it
+        if (modelConfig != null) {
+            return modelConfig
+        }
+
+        // Fall back to hardcoded defaults
         return when (provider.lowercase()) {
             "openai" -> getOpenAIThinkingBudget(model)
             "anthropic" -> getAnthropicThinkingBudget(model)
@@ -204,8 +219,12 @@ object ThinkingBudgetConfig {
     /**
      * Check if a model supports thinking at all.
      */
-    fun supportsThinking(provider: String, model: String): Boolean {
-        return when (getThinkingBudgetType(provider, model)) {
+    fun supportsThinking(
+        provider: String,
+        model: String,
+        modelConfig: ThinkingBudgetType? = null
+    ): Boolean {
+        return when (getThinkingBudgetType(provider, model, modelConfig)) {
             is ThinkingBudgetType.Discrete -> true
             is ThinkingBudgetType.Continuous -> true
             ThinkingBudgetType.NotSupported -> false
@@ -216,8 +235,12 @@ object ThinkingBudgetConfig {
     /**
      * Get the default thinking budget value for a provider/model.
      */
-    fun getDefaultValue(provider: String, model: String): ThinkingBudgetValue {
-        return when (val type = getThinkingBudgetType(provider, model)) {
+    fun getDefaultValue(
+        provider: String,
+        model: String,
+        modelConfig: ThinkingBudgetType? = null
+    ): ThinkingBudgetValue {
+        return when (val type = getThinkingBudgetType(provider, model, modelConfig)) {
             is ThinkingBudgetType.Discrete -> ThinkingBudgetValue.Effort(type.default)
             is ThinkingBudgetType.Continuous -> ThinkingBudgetValue.Tokens(type.default)
             ThinkingBudgetType.NotSupported -> ThinkingBudgetValue.None

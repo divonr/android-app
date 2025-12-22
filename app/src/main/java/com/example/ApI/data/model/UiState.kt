@@ -72,7 +72,10 @@ data class ChatUiState(
     // Thinking budget state
     val showThinkingBudgetPopup: Boolean = false,
     val thinkingBudgetPopupAnchor: DpOffset = DpOffset.Zero, // Position anchor for the popup
-    val thinkingBudgetValue: ThinkingBudgetValue = ThinkingBudgetValue.None
+    val thinkingBudgetValue: ThinkingBudgetValue = ThinkingBudgetValue.None,
+    // Temperature state
+    val showTemperaturePopup: Boolean = false,
+    val temperatureValue: Float? = null // null means use API default (don't send parameter)
 ) {
     // Helper functions for per-chat state checks
     fun isLoadingChat(chatId: String): Boolean = chatId in loadingChatIds
@@ -93,7 +96,25 @@ data class ChatUiState(
     // Helper function for thinking budget type based on current provider/model
     fun getThinkingBudgetType(): ThinkingBudgetType {
         val provider = currentProvider?.provider ?: return ThinkingBudgetType.InDevelopment
-        return ThinkingBudgetConfig.getThinkingBudgetType(provider, currentModel)
+
+        // Try to find the model's thinking config from the provider's model list
+        val modelConfig = currentProvider?.models
+            ?.find { it.name == currentModel }
+            ?.thinkingConfig
+
+        return ThinkingBudgetConfig.getThinkingBudgetType(provider, currentModel, modelConfig)
+    }
+
+    // Helper function for temperature config based on current provider/model
+    fun getTemperatureConfig(): TemperatureConfig? {
+        val provider = currentProvider?.provider ?: return null
+
+        // Try to find the model's temperature config from the provider's model list
+        val modelConfig = currentProvider?.models
+            ?.find { it.name == currentModel }
+            ?.temperatureConfig
+
+        return TemperatureConfigUtils.getTemperatureConfig(provider, currentModel, modelConfig)
     }
 }
 

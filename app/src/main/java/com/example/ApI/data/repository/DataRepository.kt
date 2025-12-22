@@ -257,6 +257,65 @@ class DataRepository(private val context: Context) {
     // ============ Providers ============
 
     /**
+     * Converts remote temperature config to TemperatureConfig
+     */
+    private fun convertTemperatureConfig(config: RemoteTemperatureConfig?): TemperatureConfig? {
+        if (config == null) return null
+        return TemperatureConfig(
+            min = config.min,
+            max = config.max,
+            default = config.default,
+            step = config.step
+        )
+    }
+
+    /**
+     * Converts remote thinking config to ThinkingBudgetType
+     */
+    private fun convertThinkingConfig(config: RemoteThinkingConfig?): ThinkingBudgetType? {
+        if (config == null) return null
+
+        // Check for discrete config
+        config.discrete?.let { discrete ->
+            return ThinkingBudgetType.Discrete(
+                options = discrete.options,
+                default = discrete.default,
+                displayNames = mapOf(
+                    "none" to "ללא",
+                    "minimal" to "מינימלי",
+                    "low" to "נמוך",
+                    "medium" to "בינוני",
+                    "high" to "גבוה",
+                    "xhigh" to "גבוה מאוד"
+                )
+            )
+        }
+
+        // Check for continuous config
+        config.continuous?.let { continuous ->
+            // Calculate default step if not provided
+            val step = continuous.step ?: run {
+                val range = continuous.max - continuous.min
+                when {
+                    range >= 100000 -> 1024
+                    range >= 10000 -> 256
+                    range >= 1000 -> 128
+                    else -> 64
+                }
+            }
+            return ThinkingBudgetType.Continuous(
+                minTokens = continuous.min,
+                maxTokens = continuous.max,
+                default = continuous.default,
+                step = step,
+                supportsOff = continuous.supports_off
+            )
+        }
+
+        return null
+    }
+
+    /**
      * Converts remote models to internal Model format
      */
     private fun remoteModelsToModels(remoteModels: List<RemoteModel>): List<Model> {
@@ -264,6 +323,11 @@ class DataRepository(private val context: Context) {
             // Check if any pricing info is available
             val hasPricing = remote.min_points != null || remote.points != null ||
                     remote.input_points_per_1k != null || remote.output_points_per_1k != null
+
+            // Convert thinking config
+            val thinkingConfig = convertThinkingConfig(remote.thinking)
+            // Convert temperature config
+            val temperatureConfig = convertTemperatureConfig(remote.temperature)
 
             if (hasPricing) {
                 val pricing = PoePricing(
@@ -275,10 +339,16 @@ class DataRepository(private val context: Context) {
                 Model.ComplexModel(
                     name = remote.name,
                     min_points = remote.min_points,
-                    pricing = pricing
+                    pricing = pricing,
+                    thinkingConfig = thinkingConfig,
+                    temperatureConfig = temperatureConfig
                 )
             } else {
-                Model.SimpleModel(remote.name)
+                Model.SimpleModel(
+                    name = remote.name,
+                    thinkingConfig = thinkingConfig,
+                    temperatureConfig = temperatureConfig
+                )
             }
         }
     }
@@ -948,6 +1018,7 @@ class DataRepository(private val context: Context) {
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null,
         callback: StreamingCallback
     ) {
         val apiKeys = loadApiKeys(username)
@@ -978,7 +1049,7 @@ class DataRepository(private val context: Context) {
             updatedMessages
         }
 
-        apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, callback)
+        apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, temperature, callback)
     }
 
     // Check and upload project files for current provider

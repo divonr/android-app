@@ -36,16 +36,17 @@ class ApiService(private val context: Context) {
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null,
         callback: StreamingCallback
     ): Unit = withContext(Dispatchers.IO) {
 
         when (provider.provider) {
-            "openai" -> sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, callback)
+            "openai" -> sendOpenAIMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, temperature, callback)
             "poe" -> sendPoeMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
-            "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, callback)
-            "anthropic" -> sendAnthropicMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, callback)
-            "cohere" -> sendCohereMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
-            "openrouter" -> sendOpenRouterMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, callback)
+            "google" -> sendGoogleMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, temperature, callback)
+            "anthropic" -> sendAnthropicMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, temperature, callback)
+            "cohere" -> sendCohereMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, temperature, callback)
+            "openrouter" -> sendOpenRouterMessage(provider, modelName, messages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, temperature, callback)
             else -> {
                 callback.onError("Unknown provider: ${provider.provider}")
             }
@@ -600,6 +601,7 @@ class ApiService(private val context: Context) {
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null,
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["openai"] ?: run {
@@ -611,7 +613,7 @@ class ApiService(private val context: Context) {
             // Make streaming request and parse response
             val streamingResponse = makeOpenAIStreamingRequest(
                 provider, modelName, messages, systemPrompt, apiKey,
-                webSearchEnabled, enabledTools, thinkingBudget, callback
+                webSearchEnabled, enabledTools, thinkingBudget, callback, temperature = temperature
             )
             
             when (streamingResponse) {
@@ -689,7 +691,8 @@ class ApiService(private val context: Context) {
                         provider, modelName, currentMessages, systemPrompt, apiKey,
                         webSearchEnabled, enabledTools, thinkingBudget, callback,
                         maxToolDepth = 25,
-                        currentDepth = 1
+                        currentDepth = 1,
+                        temperature = temperature
                     )
                     var toolDepth = 1
 
@@ -766,7 +769,8 @@ class ApiService(private val context: Context) {
                             provider, modelName, currentMessages, systemPrompt, apiKey,
                             webSearchEnabled, enabledTools, thinkingBudget, callback,
                             maxToolDepth = 25,
-                            currentDepth = toolDepth
+                            currentDepth = toolDepth,
+                            temperature = temperature
                         )
                     }
 
@@ -810,7 +814,8 @@ class ApiService(private val context: Context) {
         callback: StreamingCallback,
         maxToolDepth: Int = 25,
         currentDepth: Int = 0,
-        requestReasoningSummary: Boolean = true
+        requestReasoningSummary: Boolean = true,
+        temperature: Float? = null
     ): OpenAIStreamingResult = withContext(Dispatchers.IO) {
         try {
             // Build request URL
@@ -831,6 +836,11 @@ class ApiService(private val context: Context) {
                 put("model", modelName)
                 put("input", JsonArray(conversationInput))
                 put("stream", true)
+
+                // Add temperature if specified
+                if (temperature != null) {
+                    put("temperature", temperature.toDouble())
+                }
 
                 // Add reasoning parameter for OpenAI models that support it
                 if (thinkingBudget is ThinkingBudgetValue.Effort && thinkingBudget.level.isNotBlank()) {
@@ -895,7 +905,8 @@ class ApiService(private val context: Context) {
                         return@withContext makeOpenAIStreamingRequest(
                             provider, modelName, messages, systemPrompt, apiKey,
                             webSearchEnabled, enabledTools, thinkingBudget, callback,
-                            maxToolDepth, currentDepth, requestReasoningSummary = false
+                            maxToolDepth, currentDepth, requestReasoningSummary = false,
+                            temperature = temperature
                         )
                     }
 
@@ -1907,6 +1918,7 @@ class ApiService(private val context: Context) {
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null,
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["google"] ?: run {
@@ -1918,7 +1930,7 @@ class ApiService(private val context: Context) {
             // Make streaming request and parse response
             val streamingResponse = makeGoogleStreamingRequest(
                 provider, modelName, messages, systemPrompt, apiKey,
-                webSearchEnabled, enabledTools, thinkingBudget, callback
+                webSearchEnabled, enabledTools, thinkingBudget, callback, temperature = temperature
             )
 
             when (streamingResponse) {
@@ -1996,7 +2008,8 @@ class ApiService(private val context: Context) {
                         provider, modelName, currentMessages, systemPrompt, apiKey,
                         webSearchEnabled, enabledTools, thinkingBudget, callback,
                         maxToolDepth = 25,
-                        currentDepth = 1
+                        currentDepth = 1,
+                        temperature = temperature
                     )
                     var toolDepth = 1
 
@@ -2073,7 +2086,8 @@ class ApiService(private val context: Context) {
                             provider, modelName, currentMessages, systemPrompt, apiKey,
                             webSearchEnabled, enabledTools, thinkingBudget, callback,
                             maxToolDepth = 25,
-                            currentDepth = toolDepth
+                            currentDepth = toolDepth,
+                            temperature = temperature
                         )
                     }
 
@@ -2116,7 +2130,8 @@ class ApiService(private val context: Context) {
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback,
         maxToolDepth: Int = 25,
-        currentDepth: Int = 0
+        currentDepth: Int = 0,
+        temperature: Float? = null
     ): GoogleStreamingResult = withContext(Dispatchers.IO) {
         try {
             // Build request URL - replace {model_name} placeholder and change to streaming endpoint
@@ -2169,31 +2184,42 @@ class ApiService(private val context: Context) {
                     put("tools", toolsArray)
                 }
 
-                // Add thinkingConfig for all Google models except gemini-2.0-flash-lite
+                // Add generationConfig with thinkingConfig and temperature
                 val modelLower = modelName.lowercase()
-                if (!modelLower.contains("flash-lite") && !modelLower.contains("2.0-flash-lite")) {
-                    put("generationConfig", buildJsonObject {
-                        put("thinkingConfig", buildJsonObject {
-                            put("includeThoughts", true)
+                val needsThinkingConfig = !modelLower.contains("flash-lite") && !modelLower.contains("2.0-flash-lite")
+                val needsGenerationConfig = needsThinkingConfig || temperature != null
 
-                            // Add thinking budget/level based on budget type and model
-                            when (thinkingBudget) {
-                                is ThinkingBudgetValue.Effort -> {
-                                    // Gemini 3 series uses thinkingLevel (discrete)
-                                    put("thinkingLevel", thinkingBudget.level.uppercase())
-                                }
-                                is ThinkingBudgetValue.Tokens -> {
-                                    // Other models use thinkingBudget (continuous)
-                                    // Only add if > 0 (0 means disabled)
-                                    if (thinkingBudget.count > 0) {
-                                        put("thinkingBudget", thinkingBudget.count)
+                if (needsGenerationConfig) {
+                    put("generationConfig", buildJsonObject {
+                        // Add temperature if specified
+                        if (temperature != null) {
+                            put("temperature", temperature.toDouble())
+                        }
+
+                        // Add thinkingConfig for models that support it
+                        if (needsThinkingConfig) {
+                            put("thinkingConfig", buildJsonObject {
+                                put("includeThoughts", true)
+
+                                // Add thinking budget/level based on budget type and model
+                                when (thinkingBudget) {
+                                    is ThinkingBudgetValue.Effort -> {
+                                        // Gemini 3 series uses thinkingLevel (discrete)
+                                        put("thinkingLevel", thinkingBudget.level.uppercase())
+                                    }
+                                    is ThinkingBudgetValue.Tokens -> {
+                                        // Other models use thinkingBudget (continuous)
+                                        // Only add if > 0 (0 means disabled)
+                                        if (thinkingBudget.count > 0) {
+                                            put("thinkingBudget", thinkingBudget.count)
+                                        }
+                                    }
+                                    ThinkingBudgetValue.None -> {
+                                        // Use default behavior - no explicit budget
                                     }
                                 }
-                                ThinkingBudgetValue.None -> {
-                                    // Use default behavior - no explicit budget
-                                }
-                            }
-                        })
+                            })
+                        }
                     })
                 }
 
@@ -2382,6 +2408,7 @@ class ApiService(private val context: Context) {
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null,
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["anthropic"] ?: run {
@@ -2408,7 +2435,8 @@ class ApiService(private val context: Context) {
                     enabledTools,
                     webSearchEnabled,
                     thinkingBudget,
-                    callback
+                    callback,
+                    temperature = temperature
                 )
 
                 when (result) {
@@ -2506,7 +2534,8 @@ class ApiService(private val context: Context) {
         enabledTools: List<ToolSpecification>,
         webSearchEnabled: Boolean,
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
-        callback: StreamingCallback
+        callback: StreamingCallback,
+        temperature: Float? = null
     ): AnthropicStreamingResult = withContext(Dispatchers.IO) {
         try {
             val url = URL(provider.request.base_url)
@@ -2545,6 +2574,11 @@ class ApiService(private val context: Context) {
                 // Add system prompt if present
                 if (systemPrompt.isNotBlank()) {
                     put("system", systemPrompt)
+                }
+
+                // Add temperature if specified
+                if (temperature != null) {
+                    put("temperature", temperature.toDouble())
                 }
 
                 put("stream", true)
@@ -2972,6 +3006,7 @@ class ApiService(private val context: Context) {
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
+        temperature: Float? = null,
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["cohere"] ?: run {
@@ -2997,7 +3032,8 @@ class ApiService(private val context: Context) {
                     apiKey,
                     enabledTools,
                     webSearchEnabled,
-                    callback
+                    callback,
+                    temperature = temperature
                 )
 
                 when (result) {
@@ -3092,7 +3128,8 @@ class ApiService(private val context: Context) {
         apiKey: String,
         enabledTools: List<ToolSpecification>,
         webSearchEnabled: Boolean,
-        callback: StreamingCallback
+        callback: StreamingCallback,
+        temperature: Float? = null
     ): CohereStreamingResult = withContext(Dispatchers.IO) {
         try {
             val url = URL(provider.request.base_url)
@@ -3112,6 +3149,11 @@ class ApiService(private val context: Context) {
                 put("model", modelName)
                 put("messages", JsonArray(cohereMessages))
                 put("stream", true)
+
+                // Add temperature if specified
+                if (temperature != null) {
+                    put("temperature", temperature.toDouble())
+                }
 
                 // Add tools if any are enabled
                 if (enabledTools.isNotEmpty()) {
@@ -3558,6 +3600,7 @@ class ApiService(private val context: Context) {
         apiKeys: Map<String, String>,
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
+        temperature: Float? = null,
         callback: StreamingCallback
     ) {
         val apiKey = apiKeys["openrouter"] ?: run {
@@ -3573,7 +3616,8 @@ class ApiService(private val context: Context) {
                 messages,
                 systemPrompt,
                 apiKey,
-                callback
+                callback,
+                temperature = temperature
             )
 
             when (result) {
@@ -3598,7 +3642,8 @@ class ApiService(private val context: Context) {
         messages: List<Message>,
         systemPrompt: String,
         apiKey: String,
-        callback: StreamingCallback
+        callback: StreamingCallback,
+        temperature: Float? = null
     ): OpenRouterStreamingResult = withContext(Dispatchers.IO) {
         try {
             val url = URL(provider.request.base_url)
@@ -3688,6 +3733,10 @@ class ApiService(private val context: Context) {
                 put("messages", openRouterMessages)
                 put("stream", true)
                 put("max_tokens", 8192)
+                // Add temperature if specified
+                if (temperature != null) {
+                    put("temperature", temperature.toDouble())
+                }
             }
 
             Log.d("OpenRouter", "Request body: $requestBody")
