@@ -120,6 +120,43 @@ class ChatViewModel(
         )
     }
 
+    // File management delegate
+    private val fileManager: FileManager by lazy {
+        FileManager(
+            repository = repository,
+            context = context,
+            scope = viewModelScope,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState }
+        )
+    }
+
+    // Export/Import functionality delegate
+    private val exportImportManager: ExportImportManager by lazy {
+        ExportImportManager(
+            repository = repository,
+            context = context,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState },
+            selectChat = { chat -> selectChat(chat) },
+            navigateToScreen = { screen -> navigateToScreen(screen) },
+            addFileFromUri = { uri, name, mime -> fileManager.addFileFromUri(uri, name, mime) }
+        )
+    }
+
+    // Branching/variant navigation delegate
+    private val branchingManager: BranchingManager by lazy {
+        BranchingManager(
+            repository = repository,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState }
+        )
+    }
+
     private val json = Json {
         prettyPrint = false
         ignoreUnknownKeys = true
@@ -1246,16 +1283,7 @@ class ChatViewModel(
         )
     }
 
-    fun removeSelectedFile(file: SelectedFile) {
-        _uiState.value = _uiState.value.copy(
-            selectedFiles = _uiState.value.selectedFiles.filter { it != file }
-        )
-        
-        // Delete the local file if it exists
-        file.localPath?.let { path ->
-            repository.deleteFile(path)
-        }
-    }
+    fun removeSelectedFile(file: SelectedFile) = fileManager.removeSelectedFile(file)
 
     fun navigateToScreen(screen: Screen) {
         // Refresh available providers when navigating away from API keys screen
@@ -1385,76 +1413,12 @@ class ChatViewModel(
     }
     
     // File handling methods
-    fun addFileFromUri(uri: Uri, fileName: String, mimeType: String) {
-        viewModelScope.launch {
-            try {
-                // Copy file to internal storage for lazy upload
-                val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
-                inputStream?.use { stream ->
-                    val fileData = stream.readBytes()
-                    val localPath = repository.saveFileLocally(fileName, fileData)
-                    
-                    if (localPath != null) {
-                        val selectedFile = SelectedFile(
-                            uri = uri,
-                            name = fileName,
-                            mimeType = mimeType,
-                            localPath = localPath
-                        )
-                        
-                        _uiState.value = _uiState.value.copy(
-                            selectedFiles = _uiState.value.selectedFiles + selectedFile
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                // Handle file error
-                println("Error adding file: ${e.message}")
-            }
-        }
-    }
+    fun addFileFromUri(uri: Uri, fileName: String, mimeType: String) = fileManager.addFileFromUri(uri, fileName, mimeType)
 
-    fun addMultipleFilesFromUris(filesList: List<Triple<Uri, String, String>>) {
-        viewModelScope.launch {
-            val newSelectedFiles = mutableListOf<SelectedFile>()
-            
-            for ((uri, fileName, mimeType) in filesList) {
-                try {
-                    val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
-                    inputStream?.use { stream ->
-                        val fileData = stream.readBytes()
-                        val localPath = repository.saveFileLocally(fileName, fileData)
-                        
-                        if (localPath != null) {
-                            val selectedFile = SelectedFile(
-                                uri = uri,
-                                name = fileName,
-                                mimeType = mimeType,
-                                localPath = localPath
-                            )
-                            newSelectedFiles.add(selectedFile)
-                        }
-                    }
-                } catch (e: Exception) {
-                    println("Error adding file $fileName: ${e.message}")
-                }
-            }
-            
-            if (newSelectedFiles.isNotEmpty()) {
-                _uiState.value = _uiState.value.copy(
-                    selectedFiles = _uiState.value.selectedFiles + newSelectedFiles
-                )
-            }
-        }
-    }
+    fun addMultipleFilesFromUris(filesList: List<Triple<Uri, String, String>>) = fileManager.addMultipleFilesFromUris(filesList)
     
-    fun showFileSelection() {
-        _uiState.value = _uiState.value.copy(showFileSelection = true)
-    }
-    
-    fun hideFileSelection() {
-        _uiState.value = _uiState.value.copy(showFileSelection = false)
-    }
+    fun showFileSelection() = fileManager.showFileSelection()
+    fun hideFileSelection() = fileManager.hideFileSelection()
 
     fun deleteMessage(message: Message) {
         val currentUser = _appSettings.value.current_user
@@ -2451,498 +2415,24 @@ class ChatViewModel(
         )
     }
 
-    fun openChatExportDialog() {
-        val currentChat = _uiState.value.currentChat ?: return
-        val currentUser = _appSettings.value.current_user
-        viewModelScope.launch {
-            val chatJson = withContext(Dispatchers.IO) {
-                repository.getChatJson(currentUser, currentChat.chat_id)
-            }.orEmpty()
+    // Export/Import Methods (delegated to ExportImportManager)
+    fun openChatExportDialog() = exportImportManager.openChatExportDialog()
+    fun closeChatExportDialog() = exportImportManager.closeChatExportDialog()
+    fun enableChatExportEditing() = exportImportManager.enableChatExportEditing()
+    fun updateChatExportContent(content: String) = exportImportManager.updateChatExportContent(content)
+    fun shareChatExportContent() = exportImportManager.shareChatExportContent()
+    fun saveChatExportToDownloads() = exportImportManager.saveChatExportToDownloads()
+    fun importPendingChatJson() = exportImportManager.importPendingChatJson()
+    fun attachPendingJsonAsFile() = exportImportManager.attachPendingJsonAsFile()
+    fun dismissChatImportDialog() = exportImportManager.dismissChatImportDialog()
+
+    // ==================== Branching System (delegated to BranchingManager) ====================
+    fun getBranchInfoForMessage(message: Message): BranchInfo? = branchingManager.getBranchInfoForMessage(message)
+    fun navigateToNextVariant(nodeId: String) = branchingManager.navigateToNextVariant(nodeId)
+    fun navigateToPreviousVariant(nodeId: String) = branchingManager.navigateToPreviousVariant(nodeId)
+    fun navigateToVariant(nodeId: String, variantIndex: Int) = branchingManager.navigateToVariant(nodeId, variantIndex)
+    fun ensureBranchingStructure() = branchingManager.ensureBranchingStructure()
 
-            _uiState.value = _uiState.value.copy(
-                showChatExportDialog = true,
-                chatExportJson = chatJson,
-                isChatExportEditable = false
-            )
-
-            if (chatJson.isBlank()) {
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = context.getString(R.string.no_content_to_export)
-                )
-            }
-        }
-    }
-
-    fun closeChatExportDialog() {
-        _uiState.value = _uiState.value.copy(
-            showChatExportDialog = false,
-            isChatExportEditable = false
-        )
-    }
-
-    fun enableChatExportEditing() {
-        _uiState.value = _uiState.value.copy(isChatExportEditable = true)
-    }
-
-    fun updateChatExportContent(content: String) {
-        _uiState.value = _uiState.value.copy(chatExportJson = content)
-    }
-
-    fun shareChatExportContent() {
-        val content = _uiState.value.chatExportJson
-        val chatId = _uiState.value.currentChat?.chat_id
-
-        if (content.isBlank()) {
-            _uiState.value = _uiState.value.copy(
-                snackbarMessage = context.getString(R.string.no_content_to_export)
-            )
-            return
-        }
-
-        if (chatId == null) {
-            _uiState.value = _uiState.value.copy(
-                snackbarMessage = context.getString(R.string.error_sending_message)
-            )
-            return
-        }
-
-        viewModelScope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    repository.saveChatJsonToDownloads(chatId, content)
-                }
-
-                if (result != null) {
-                    // File was saved successfully, now share it
-                    withContext(Dispatchers.Main) {
-                        try {
-                            val file = File(result)
-                            val uri = FileProvider.getUriForFile(
-                                context,
-                                context.applicationContext.packageName + ".fileprovider",
-                                file
-                            )
-
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "application/json"
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-
-                            val chooserTitle = context.getString(R.string.share_chat_title)
-                            val chooser = Intent.createChooser(shareIntent, chooserTitle).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(chooser)
-                        } catch (e: Exception) {
-                            _uiState.value = _uiState.value.copy(
-                                snackbarMessage = context.getString(R.string.error_sending_message)
-                            )
-                        }
-                    }
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        snackbarMessage = context.getString(R.string.export_failed)
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = context.getString(R.string.error_sending_message)
-                )
-            }
-        }
-    }
-
-    fun saveChatExportToDownloads() {
-        val content = _uiState.value.chatExportJson
-        val chatId = _uiState.value.currentChat?.chat_id
-
-        if (content.isBlank()) {
-            _uiState.value = _uiState.value.copy(
-                snackbarMessage = context.getString(R.string.no_content_to_export)
-            )
-            return
-        }
-
-        if (chatId == null) {
-            _uiState.value = _uiState.value.copy(
-                snackbarMessage = context.getString(R.string.error_sending_message)
-            )
-            return
-        }
-
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                repository.saveChatJsonToDownloads(chatId, content)
-            }
-
-            if (result != null) {
-                // Show success notification
-                showDownloadNotification(chatId)
-
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = context.getString(R.string.export_success)
-                )
-            } else {
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = context.getString(R.string.export_failed)
-                )
-            }
-        }
-    }
-
-    private fun showDownloadNotification(chatId: String) {
-        android.util.Log.d("ChatExport", "Attempting to show notification for chat: $chatId on Android ${android.os.Build.VERSION.SDK_INT}")
-
-        try {
-            // Check if POST_NOTIFICATIONS permission is required (Android 13+)
-            val needsPermission = android.os.Build.VERSION.SDK_INT >= 33
-            android.util.Log.d("ChatExport", "POST_NOTIFICATIONS permission required: $needsPermission")
-
-            if (needsPermission) {
-                // Check if we have the permission
-                val hasPermission = ContextCompat.checkSelfPermission(
-                    context,
-                    android.Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED
-
-                android.util.Log.d("ChatExport", "Has POST_NOTIFICATIONS permission: $hasPermission")
-
-                if (!hasPermission) {
-                    android.util.Log.w("ChatExport", "POST_NOTIFICATIONS permission not granted, cannot show notification")
-                    return
-                }
-            }
-
-            val notificationManager = NotificationManagerCompat.from(context)
-
-            // Create notification channel for Android 8.0+
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                val channel = android.app.NotificationChannel(
-                    "chat_export_channel",
-                    "התראות ייצוא שיחה",
-                    android.app.NotificationManager.IMPORTANCE_DEFAULT
-                ).apply {
-                    description = "התראות עבור פעולות ייצוא שיחה"
-                }
-                notificationManager.createNotificationChannel(channel)
-            }
-
-            // Create intent to open the downloaded file
-            val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "${chatId}.json")
-            android.util.Log.d("ChatExport", "File path: ${file.absolutePath}")
-            android.util.Log.d("ChatExport", "File exists: ${file.exists()}")
-
-            if (file.exists()) {
-                val fileUri = FileProvider.getUriForFile(
-                    context,
-                    context.applicationContext.packageName + ".fileprovider",
-                    file
-                )
-                android.util.Log.d("ChatExport", "File URI: $fileUri")
-
-                val openFileIntent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(fileUri, "application/json")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                }
-
-                try {
-                    @Suppress("WrongConstant") // FLAG_IMMUTABLE is required for Android 12+
-                    val pendingIntent = PendingIntentCompat.getActivity(
-                        context,
-                        "chat_export_${chatId}".hashCode(),
-                        openFileIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                        false
-                    )
-
-                    val notification = NotificationCompat.Builder(context, "chat_export_channel")
-                        .setSmallIcon(android.R.drawable.stat_sys_download_done)
-                        .setContentTitle("שיחה הורדה בהצלחה")
-                        .setContentText("הקובץ ${chatId}.json נשמר בתיקיית ההורדות")
-                        .setPriority(NotificationCompat.PRIORITY_HIGH) // Higher priority for downloads
-                        .setAutoCancel(true)
-                        .setContentIntent(pendingIntent) // Open file when clicked
-                        .build()
-
-                    // Use a unique ID for each notification to avoid conflicts
-                    val notificationId = "chat_export_${chatId}_${System.currentTimeMillis()}".hashCode()
-                    notificationManager.notify(notificationId, notification)
-
-                    android.util.Log.d("ChatExport", "Notification sent for chat: $chatId with file URI: $fileUri")
-                } catch (e: Exception) {
-                    android.util.Log.e("ChatExport", "Failed to create pending intent: ${e.message}")
-                    // Create notification without click action if pending intent fails
-                    val fallbackNotification = NotificationCompat.Builder(context, "chat_export_channel")
-                        .setSmallIcon(android.R.drawable.stat_sys_download_done)
-                        .setContentTitle("שיחה הורדה בהצלחה")
-                        .setContentText("הקובץ ${chatId}.json נשמר בתיקיית ההורדות")
-                        .setPriority(NotificationCompat.PRIORITY_HIGH)
-                        .setAutoCancel(true)
-                        .build()
-
-                    val notificationId = "chat_export_${chatId}_${System.currentTimeMillis()}".hashCode()
-                    notificationManager.notify(notificationId, fallbackNotification)
-                }
-            } else {
-                android.util.Log.w("ChatExport", "File does not exist at path: ${file.absolutePath}")
-                // Create notification without click action if file doesn't exist
-                val fallbackNotification = NotificationCompat.Builder(context, "chat_export_channel")
-                    .setSmallIcon(android.R.drawable.stat_sys_download_done)
-                    .setContentTitle("שיחה הורדה בהצלחה")
-                    .setContentText("הקובץ ${chatId}.json נשמר בתיקיית ההורדות (אך לא ניתן לפתוח)")
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setAutoCancel(true)
-                    .build()
-
-                val notificationId = "chat_export_${chatId}_${System.currentTimeMillis()}".hashCode()
-                notificationManager.notify(notificationId, fallbackNotification)
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("ChatExport", "Failed to send notification: ${e.message}")
-            // If notification fails, just continue silently
-            // The snackbar message will still show the success
-        }
-    }
-
-    // Search Methods
-    
-    // Search Methods (delegated to SearchManager)
-    fun enterSearchMode() = searchManager.enterSearchMode()
-    fun enterConversationSearchMode() = searchManager.enterConversationSearchMode()
-    fun enterSearchModeWithQuery(query: String) = searchManager.enterSearchModeWithQuery(query)
-    fun exitSearchMode() = searchManager.exitSearchMode()
-    fun updateSearchQuery(query: String) = searchManager.updateSearchQuery(query)
-    fun performSearch() = searchManager.performSearch()
-    fun performConversationSearch() = searchManager.performConversationSearch()
-    fun clearSearchContext() = searchManager.clearSearchContext()
-
-    // Child Lock Methods (delegated to ChildLockManager)
-    fun setupChildLock(password: String, startTime: String, endTime: String, deviceId: String) =
-        childLockManager.setupChildLock(password, startTime, endTime, deviceId)
-    fun verifyAndDisableChildLock(password: String, deviceId: String): Boolean =
-        childLockManager.verifyAndDisableChildLock(password, deviceId)
-    fun updateChildLockSettings(enabled: Boolean, password: String, startTime: String, endTime: String) =
-        childLockManager.updateChildLockSettings(enabled, password, startTime, endTime)
-    fun isChildLockActive(): Boolean = childLockManager.isChildLockActive()
-    fun getLockEndTime(): String = childLockManager.getLockEndTime()
-
-    // Tool Management Methods
-
-    fun enableTool(toolId: String) {
-        val currentSettings = _appSettings.value
-        if (!currentSettings.enabledTools.contains(toolId)) {
-            val updatedSettings = currentSettings.copy(
-                enabledTools = currentSettings.enabledTools + toolId
-            )
-            repository.saveAppSettings(updatedSettings)
-            _appSettings.value = updatedSettings
-        }
-    }
-
-    fun disableTool(toolId: String) {
-        val currentSettings = _appSettings.value
-        if (currentSettings.enabledTools.contains(toolId)) {
-            val updatedSettings = currentSettings.copy(
-                enabledTools = currentSettings.enabledTools.filter { it != toolId }
-            )
-            repository.saveAppSettings(updatedSettings)
-            _appSettings.value = updatedSettings
-        }
-    }
-
-    fun getAvailableTools(): List<com.example.ApI.tools.Tool> {
-        return ToolRegistry.getInstance().getAllTools()
-    }
-
-    // ==================== Integration Management (delegated to IntegrationManager) ====================
-    
-    // GitHub Integration
-    fun connectGitHub(): String = integrationManager.connectGitHub()
-    fun getGitHubAuthUrl(): Pair<String, String> = integrationManager.getGitHubAuthUrl()
-    fun handleGitHubCallback(code: String, state: String): String = integrationManager.handleGitHubCallback(code, state)
-    fun disconnectGitHub() = integrationManager.disconnectGitHub()
-    fun isGitHubConnected(): Boolean = integrationManager.isGitHubConnected()
-    fun getGitHubConnection(): GitHubConnection? = integrationManager.getGitHubConnection()
-    fun initializeGitHubToolsIfConnected() = integrationManager.initializeGitHubToolsIfConnected()
-    
-    // Google Workspace Integration
-    fun getGoogleSignInIntent(): Intent = integrationManager.getGoogleSignInIntent()
-    fun handleGoogleSignInResult(data: Intent) = integrationManager.handleGoogleSignInResult(data)
-    fun isGoogleWorkspaceConnected(): Boolean = integrationManager.isGoogleWorkspaceConnected()
-    fun getGoogleWorkspaceConnection(): GoogleWorkspaceConnection? = integrationManager.getGoogleWorkspaceConnection()
-    fun disconnectGoogleWorkspace() = integrationManager.disconnectGoogleWorkspace()
-    fun updateGoogleWorkspaceServices(gmail: Boolean, calendar: Boolean, drive: Boolean) =
-        integrationManager.updateGoogleWorkspaceServices(gmail, calendar, drive)
-    fun initializeGoogleWorkspaceToolsIfConnected() = integrationManager.initializeGoogleWorkspaceToolsIfConnected()
-
-    // ==================== Chat Import from JSON ====================
-
-    /**
-     * Handle user choice to import JSON as a chat
-     */
-    fun importPendingChatJson() {
-        val pending = _uiState.value.pendingChatImport ?: return
-
-        viewModelScope.launch {
-            try {
-                val currentUser = _appSettings.value.current_user
-                val importedChatId = repository.importSingleChat(pending.jsonContent, currentUser)
-
-                if (importedChatId != null) {
-                    // Reload chat history
-                    val chatHistory = repository.loadChatHistory(currentUser)
-                    _uiState.value = _uiState.value.copy(
-                        chatHistory = chatHistory.chat_history,
-                        groups = chatHistory.groups,
-                        pendingChatImport = null
-                    )
-
-                    // Find and select the imported chat
-                    val importedChat = chatHistory.chat_history.find { it.chat_id == importedChatId }
-                    if (importedChat != null) {
-                        selectChat(importedChat)
-                        navigateToScreen(Screen.Chat)
-                    }
-
-                    Toast.makeText(context, "הצ'אט יובא בהצלחה", Toast.LENGTH_SHORT).show()
-                } else {
-                    _uiState.value = _uiState.value.copy(pendingChatImport = null)
-                    showSnackbar("שגיאה בייבוא הצ'אט")
-                }
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(pendingChatImport = null)
-                showSnackbar("שגיאה בייבוא הצ'אט: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * Handle user choice to attach JSON as a regular file
-     */
-    fun attachPendingJsonAsFile() {
-        val pending = _uiState.value.pendingChatImport ?: return
-
-        // Clear the pending import
-        _uiState.value = _uiState.value.copy(pendingChatImport = null)
-
-        // Add as regular file attachment
-        addFileFromUri(pending.uri, pending.fileName, pending.mimeType)
-    }
-
-    /**
-     * Dismiss the chat import dialog without action
-     */
-    fun dismissChatImportDialog() {
-        _uiState.value = _uiState.value.copy(pendingChatImport = null)
-    }
-
-    // ==================== Branching System ====================
-
-    /**
-     * Get branch info for a specific message.
-     * Returns info about available variants at the node containing this message.
-     */
-    fun getBranchInfoForMessage(message: Message): BranchInfo? {
-        val currentChat = _uiState.value.currentChat ?: return null
-        return repository.getBranchInfoForMessage(currentChat, message.id)
-    }
-
-    /**
-     * Navigate to the next variant at a specific node.
-     */
-    fun navigateToNextVariant(nodeId: String) {
-        val currentUser = _appSettings.value.current_user
-        val currentChat = _uiState.value.currentChat ?: return
-
-        // Get current branch info
-        val branchInfo = repository.getBranchInfo(currentChat, nodeId) ?: return
-        if (!branchInfo.hasNext) return
-
-        // Switch to next variant
-        val updatedChat = repository.switchVariant(
-            currentUser,
-            currentChat.chat_id,
-            nodeId,
-            branchInfo.currentVariantIndex + 1
-        ) ?: return
-
-        // Update UI
-        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
-        _uiState.value = _uiState.value.copy(
-            currentChat = updatedChat,
-            chatHistory = updatedChatHistory
-        )
-    }
-
-    /**
-     * Navigate to the previous variant at a specific node.
-     */
-    fun navigateToPreviousVariant(nodeId: String) {
-        val currentUser = _appSettings.value.current_user
-        val currentChat = _uiState.value.currentChat ?: return
-
-        // Get current branch info
-        val branchInfo = repository.getBranchInfo(currentChat, nodeId) ?: return
-        if (!branchInfo.hasPrevious) return
-
-        // Switch to previous variant
-        val updatedChat = repository.switchVariant(
-            currentUser,
-            currentChat.chat_id,
-            nodeId,
-            branchInfo.currentVariantIndex - 1
-        ) ?: return
-
-        // Update UI
-        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
-        _uiState.value = _uiState.value.copy(
-            currentChat = updatedChat,
-            chatHistory = updatedChatHistory
-        )
-    }
-
-    /**
-     * Navigate to a specific variant by index at a node.
-     */
-    fun navigateToVariant(nodeId: String, variantIndex: Int) {
-        val currentUser = _appSettings.value.current_user
-        val currentChat = _uiState.value.currentChat ?: return
-
-        val updatedChat = repository.switchVariant(
-            currentUser,
-            currentChat.chat_id,
-            nodeId,
-            variantIndex
-        ) ?: return
-
-        // Update UI
-        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
-        _uiState.value = _uiState.value.copy(
-            currentChat = updatedChat,
-            chatHistory = updatedChatHistory
-        )
-    }
-
-    /**
-     * Ensure the current chat has branching structure (migrate if needed).
-     */
-    fun ensureBranchingStructure() {
-        val currentUser = _appSettings.value.current_user
-        val currentChat = _uiState.value.currentChat ?: return
-
-        if (!currentChat.hasBranchingStructure) {
-            val migratedChat = repository.ensureBranchingStructure(currentUser, currentChat.chat_id)
-            if (migratedChat != null) {
-                val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
-                _uiState.value = _uiState.value.copy(
-                    currentChat = migratedChat,
-                    chatHistory = updatedChatHistory
-                )
-            }
         }
     }
 
