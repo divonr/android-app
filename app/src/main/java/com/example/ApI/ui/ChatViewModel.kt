@@ -2621,7 +2621,10 @@ class ChatViewModel(
                 // Initialize with default value if currently None
                 if (_uiState.value.thinkingBudgetValue == ThinkingBudgetValue.None) {
                     val provider = _uiState.value.currentProvider?.provider ?: return
-                    val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, _uiState.value.currentModel)
+                    val modelConfig = _uiState.value.currentProvider?.models
+                        ?.find { it.name == _uiState.value.currentModel }
+                        ?.thinkingConfig
+                    val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, _uiState.value.currentModel, modelConfig)
                     _uiState.value = _uiState.value.copy(thinkingBudgetValue = defaultValue)
                 }
             }
@@ -2675,7 +2678,10 @@ class ChatViewModel(
         val model = _uiState.value.currentModel
 
         if (provider != null) {
-            val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, model)
+            val modelConfig = _uiState.value.currentProvider?.models
+                ?.find { it.name == model }
+                ?.thinkingConfig
+            val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, model, modelConfig)
             _uiState.value = _uiState.value.copy(
                 thinkingBudgetValue = defaultValue,
                 showThinkingBudgetPopup = false

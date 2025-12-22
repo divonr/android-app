@@ -93,7 +93,13 @@ data class ChatUiState(
     // Helper function for thinking budget type based on current provider/model
     fun getThinkingBudgetType(): ThinkingBudgetType {
         val provider = currentProvider?.provider ?: return ThinkingBudgetType.InDevelopment
-        return ThinkingBudgetConfig.getThinkingBudgetType(provider, currentModel)
+
+        // Try to find the model's thinking config from the provider's model list
+        val modelConfig = currentProvider?.models
+            ?.find { it.name == currentModel }
+            ?.thinkingConfig
+
+        return ThinkingBudgetConfig.getThinkingBudgetType(provider, currentModel, modelConfig)
     }
 }
 
