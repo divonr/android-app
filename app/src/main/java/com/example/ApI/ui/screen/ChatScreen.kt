@@ -523,6 +523,41 @@ fun ChatScreen(
 
                                     Spacer(modifier = Modifier.width(12.dp))
 
+                                    // Temperature Control Button
+                                    Box {
+                                        val tempConfig = uiState.getTemperatureConfig()
+                                        val isTemperatureSupported = tempConfig != null
+                                        val isTemperatureActive = isTemperatureSupported && uiState.temperatureValue != null
+
+                                        Surface(
+                                            shape = MaterialTheme.shapes.medium,
+                                            color = if (isTemperatureActive) Primary.copy(alpha = 0.15f) else SurfaceVariant,
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clickable { viewModel.onTemperatureButtonClick() }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Thermostat,
+                                                    contentDescription = "Temperature",
+                                                    tint = if (isTemperatureActive) Primary else OnSurfaceVariant,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+
+                                        // Temperature Popup with Slider
+                                        TemperaturePopup(
+                                            visible = uiState.showTemperaturePopup,
+                                            config = tempConfig,
+                                            currentValue = uiState.temperatureValue,
+                                            onValueChange = { viewModel.setTemperatureValue(it) },
+                                            onDismiss = { viewModel.hideTemperaturePopup() }
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
                                     // Text Direction Toggle Button with Popup Menu
                                     var showTextDirectionMenu by remember { mutableStateOf(false) }
 
@@ -1545,6 +1580,146 @@ private fun formatTokenCount(tokens: Int): String {
     return when {
         tokens >= 1000 -> "${tokens / 1000}K"
         else -> tokens.toString()
+    }
+}
+
+/**
+ * Temperature control popup with slider.
+ * The slider appears attached to the thermometer icon.
+ */
+@Composable
+fun TemperaturePopup(
+    visible: Boolean,
+    config: TemperatureConfig?,
+    currentValue: Float?,
+    onValueChange: (Float?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (config == null) return
+
+    DropdownMenu(
+        expanded = visible,
+        onDismissRequest = onDismiss,
+        modifier = Modifier
+            .background(Surface, RoundedCornerShape(12.dp))
+    ) {
+        TemperatureSliderContent(
+            min = config.min,
+            max = config.max,
+            step = config.step,
+            defaultValue = config.default,
+            currentValue = currentValue,
+            onValueChange = onValueChange
+        )
+    }
+}
+
+/**
+ * Content for temperature slider popup.
+ */
+@Composable
+private fun TemperatureSliderContent(
+    min: Float,
+    max: Float,
+    step: Float,
+    defaultValue: Float?,
+    currentValue: Float?,
+    onValueChange: (Float?) -> Unit
+) {
+    // Use current value or default, or midpoint if no default
+    val effectiveValue = currentValue ?: defaultValue ?: ((min + max) / 2)
+    var sliderValue by remember(effectiveValue) { mutableFloatStateOf(effectiveValue) }
+
+    Column(
+        modifier = Modifier
+            .width(260.dp)
+            .padding(16.dp)
+    ) {
+        // Header with current value
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "טמפרטורה",
+                style = MaterialTheme.typography.labelMedium,
+                color = OnSurfaceVariant
+            )
+
+            // Display current value
+            val displayValue = if (currentValue == null) {
+                "ברירת מחדל"
+            } else {
+                TemperatureConfigUtils.formatValueForDisplay(sliderValue)
+            }
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (currentValue == null) SurfaceVariant else Primary.copy(alpha = 0.12f)
+            ) {
+                Text(
+                    text = displayValue,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (currentValue == null) OnSurfaceVariant else Primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Slider
+        Slider(
+            value = sliderValue,
+            onValueChange = { newValue ->
+                // Snap to step values
+                val steps = ((newValue - min) / step).toInt()
+                sliderValue = (min + steps * step).coerceIn(min, max)
+            },
+            onValueChangeFinished = {
+                onValueChange(sliderValue)
+            },
+            valueRange = min..max,
+            colors = SliderDefaults.colors(
+                thumbColor = Primary,
+                activeTrackColor = Primary,
+                inactiveTrackColor = Primary.copy(alpha = 0.24f)
+            )
+        )
+
+        // Min/Max labels
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = TemperatureConfigUtils.formatValueForDisplay(min),
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant.copy(alpha = 0.7f)
+            )
+            Text(
+                text = TemperatureConfigUtils.formatValueForDisplay(max),
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Reset to default button (if default is available)
+        if (defaultValue != null && currentValue != null) {
+            TextButton(
+                onClick = { onValueChange(null) },
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text(
+                    text = "איפוס לברירת מחדל",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Primary
+                )
+            }
+        }
     }
 }
 

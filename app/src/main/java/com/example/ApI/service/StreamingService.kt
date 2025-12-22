@@ -65,6 +65,7 @@ class StreamingService : Service() {
         const val EXTRA_ENABLED_TOOLS_JSON = "enabled_tools_json"
         const val EXTRA_TOOL_RESULT_JSON = "tool_result_json"
         const val EXTRA_THINKING_BUDGET_JSON = "thinking_budget_json"
+        const val EXTRA_TEMPERATURE = "temperature"
     }
 
     // Binder for local binding
@@ -144,8 +145,13 @@ class StreamingService : Service() {
         val projectAttachmentsJson = intent.getStringExtra(EXTRA_PROJECT_ATTACHMENTS_JSON) ?: "[]"
         val enabledToolsJson = intent.getStringExtra(EXTRA_ENABLED_TOOLS_JSON) ?: "[]"
         val thinkingBudgetJson = intent.getStringExtra(EXTRA_THINKING_BUDGET_JSON)
+        val temperature = if (intent.hasExtra(EXTRA_TEMPERATURE)) {
+            intent.getFloatExtra(EXTRA_TEMPERATURE, 1.0f)
+        } else {
+            null
+        }
 
-        Log.d(TAG, "Starting request: requestId=$requestId, chatId=$chatId")
+        Log.d(TAG, "Starting request: requestId=$requestId, chatId=$chatId, temperature=$temperature")
 
         // Parse data from JSON
         val provider: Provider
@@ -209,7 +215,8 @@ class StreamingService : Service() {
                 webSearchEnabled = webSearchEnabled,
                 projectAttachments = projectAttachments,
                 enabledTools = enabledTools,
-                thinkingBudget = thinkingBudget
+                thinkingBudget = thinkingBudget,
+                temperature = temperature
             )
         }
         activeJobs[requestId] = job
@@ -315,7 +322,8 @@ class StreamingService : Service() {
         webSearchEnabled: Boolean,
         projectAttachments: List<Attachment>,
         enabledTools: List<ToolSpecification>,
-        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null
     ) {
         Log.d(TAG, "Executing streaming request: requestId=$requestId")
 
@@ -474,6 +482,7 @@ class StreamingService : Service() {
                 webSearchEnabled = webSearchEnabled,
                 enabledTools = enabledTools,
                 thinkingBudget = thinkingBudget,
+                temperature = temperature,
                 callback = callback
             )
         } catch (e: CancellationException) {

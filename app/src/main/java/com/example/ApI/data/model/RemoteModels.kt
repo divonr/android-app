@@ -28,7 +28,9 @@ data class RemoteModel(
     @kotlinx.serialization.SerialName("1k_output_points")
     val output_points_per_1k: Double? = null,
     // Thinking budget configuration
-    val thinking: RemoteThinkingConfig? = null
+    val thinking: RemoteThinkingConfig? = null,
+    // Temperature configuration
+    val temperature: RemoteTemperatureConfig? = null
 )
 
 /**
@@ -70,6 +72,22 @@ data class RemoteContinuousThinking(
     val step: Int? = null,
     // Whether 0 is allowed to disable thinking entirely
     val supports_off: Boolean = false
+)
+
+/**
+ * Remote temperature configuration for a model.
+ * If not provided, temperature control is not available for this model.
+ */
+@Serializable
+data class RemoteTemperatureConfig(
+    // Minimum temperature value
+    val min: Float,
+    // Maximum temperature value
+    val max: Float,
+    // Default temperature value (null = use API default, don't send parameter)
+    val default: Float? = null,
+    // Slider step size (optional, defaults to 0.1)
+    val step: Float = 0.1f
 )
 
 /**

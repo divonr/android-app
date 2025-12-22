@@ -323,7 +323,8 @@ class ChatViewModel(
         webSearchEnabled: Boolean,
         projectAttachments: List<Attachment>,
         enabledTools: List<ToolSpecification>,
-        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null
     ) {
         val intent = Intent(context, StreamingService::class.java).apply {
             action = StreamingService.ACTION_START_REQUEST
@@ -340,6 +341,10 @@ class ChatViewModel(
             // Add thinking budget if not None
             if (thinkingBudget != ThinkingBudgetValue.None) {
                 putExtra(StreamingService.EXTRA_THINKING_BUDGET_JSON, json.encodeToString(thinkingBudget))
+            }
+            // Add temperature if set
+            if (temperature != null) {
+                putExtra(StreamingService.EXTRA_TEMPERATURE, temperature)
             }
         }
 
@@ -665,7 +670,8 @@ class ChatViewModel(
                         webSearchEnabled = _uiState.value.webSearchEnabled,
                         projectAttachments = projectAttachments,
                         enabledTools = getEnabledToolSpecifications(),
-                        thinkingBudget = _uiState.value.thinkingBudgetValue
+                        thinkingBudget = _uiState.value.thinkingBudgetValue,
+                        temperature = _uiState.value.temperatureValue
                     )
 
                     // Reload chat to get any updated file IDs from re-uploads
@@ -740,7 +746,8 @@ class ChatViewModel(
                         webSearchEnabled = _uiState.value.webSearchEnabled,
                         projectAttachments = projectAttachments,
                         enabledTools = getEnabledToolSpecifications(),
-                        thinkingBudget = _uiState.value.thinkingBudgetValue
+                        thinkingBudget = _uiState.value.thinkingBudgetValue,
+                        temperature = _uiState.value.temperatureValue
                     )
 
                     // Optionally refresh chat after potential file re-uploads
@@ -1702,7 +1709,8 @@ class ChatViewModel(
                     webSearchEnabled = _uiState.value.webSearchEnabled,
                     projectAttachments = projectAttachments,
                     enabledTools = getEnabledToolSpecifications(),
-                    thinkingBudget = _uiState.value.thinkingBudgetValue
+                    thinkingBudget = _uiState.value.thinkingBudgetValue,
+                    temperature = _uiState.value.temperatureValue
                 )
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Error starting branch request", e)
@@ -2687,6 +2695,53 @@ class ChatViewModel(
                 showThinkingBudgetPopup = false
             )
         }
+    }
+
+    // ==================== Temperature Control ====================
+
+    /**
+     * Handle click on the temperature control button.
+     * Shows the temperature popup if the model supports temperature.
+     */
+    fun onTemperatureButtonClick() {
+        val tempConfig = _uiState.value.getTemperatureConfig()
+
+        if (tempConfig == null) {
+            // Temperature not supported for this provider
+            Toast.makeText(context, "ספק זה אינו תומך בשליטה על טמפרטורה", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Toggle popup visibility
+        _uiState.value = _uiState.value.copy(
+            showTemperaturePopup = !_uiState.value.showTemperaturePopup
+        )
+    }
+
+    /**
+     * Hide the temperature popup.
+     */
+    fun hideTemperaturePopup() {
+        _uiState.value = _uiState.value.copy(showTemperaturePopup = false)
+    }
+
+    /**
+     * Set the temperature value.
+     * @param value The temperature value, or null to use API default
+     */
+    fun setTemperatureValue(value: Float?) {
+        _uiState.value = _uiState.value.copy(temperatureValue = value)
+    }
+
+    /**
+     * Reset temperature to model default when provider/model changes.
+     */
+    fun resetTemperatureToDefault() {
+        val tempConfig = _uiState.value.getTemperatureConfig()
+        _uiState.value = _uiState.value.copy(
+            temperatureValue = tempConfig?.default,
+            showTemperaturePopup = false
+        )
     }
 
     fun openChatExportDialog() {

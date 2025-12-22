@@ -58,6 +58,7 @@ sealed class Model {
     abstract val min_points: Int?
     abstract val pricing: PoePricing?
     abstract val thinkingConfig: ThinkingBudgetType?
+    abstract val temperatureConfig: TemperatureConfig?
 
     @Serializable
     data class SimpleModel(
@@ -65,7 +66,9 @@ sealed class Model {
         override val min_points: Int? = null,
         override val pricing: PoePricing? = null,
         @kotlinx.serialization.Transient
-        override val thinkingConfig: ThinkingBudgetType? = null
+        override val thinkingConfig: ThinkingBudgetType? = null,
+        @kotlinx.serialization.Transient
+        override val temperatureConfig: TemperatureConfig? = null
     ) : Model()
 
     @Serializable
@@ -75,7 +78,9 @@ sealed class Model {
         override val pricing: PoePricing? = null,
         val other_fields: Map<String, kotlinx.serialization.json.JsonElement>? = null,
         @kotlinx.serialization.Transient
-        override val thinkingConfig: ThinkingBudgetType? = null
+        override val thinkingConfig: ThinkingBudgetType? = null,
+        @kotlinx.serialization.Transient
+        override val temperatureConfig: TemperatureConfig? = null
     ) : Model()
 
     override fun toString(): String = name ?: "Unknown Model"

@@ -257,6 +257,19 @@ class DataRepository(private val context: Context) {
     // ============ Providers ============
 
     /**
+     * Converts remote temperature config to TemperatureConfig
+     */
+    private fun convertTemperatureConfig(config: RemoteTemperatureConfig?): TemperatureConfig? {
+        if (config == null) return null
+        return TemperatureConfig(
+            min = config.min,
+            max = config.max,
+            default = config.default,
+            step = config.step
+        )
+    }
+
+    /**
      * Converts remote thinking config to ThinkingBudgetType
      */
     private fun convertThinkingConfig(config: RemoteThinkingConfig?): ThinkingBudgetType? {
@@ -313,6 +326,8 @@ class DataRepository(private val context: Context) {
 
             // Convert thinking config
             val thinkingConfig = convertThinkingConfig(remote.thinking)
+            // Convert temperature config
+            val temperatureConfig = convertTemperatureConfig(remote.temperature)
 
             if (hasPricing) {
                 val pricing = PoePricing(
@@ -325,12 +340,14 @@ class DataRepository(private val context: Context) {
                     name = remote.name,
                     min_points = remote.min_points,
                     pricing = pricing,
-                    thinkingConfig = thinkingConfig
+                    thinkingConfig = thinkingConfig,
+                    temperatureConfig = temperatureConfig
                 )
             } else {
                 Model.SimpleModel(
                     name = remote.name,
-                    thinkingConfig = thinkingConfig
+                    thinkingConfig = thinkingConfig,
+                    temperatureConfig = temperatureConfig
                 )
             }
         }
@@ -1001,6 +1018,7 @@ class DataRepository(private val context: Context) {
         webSearchEnabled: Boolean = false,
         enabledTools: List<ToolSpecification> = emptyList(),
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null,
         callback: StreamingCallback
     ) {
         val apiKeys = loadApiKeys(username)
@@ -1031,7 +1049,7 @@ class DataRepository(private val context: Context) {
             updatedMessages
         }
 
-        apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, callback)
+        apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, temperature, callback)
     }
 
     // Check and upload project files for current provider
