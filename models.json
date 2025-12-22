@@ -2,9 +2,13 @@
   {
     "provider": "openai",
     "models": [
-      { "name": "gpt-4o" },
+      { 
+        "name": "gpt-4o",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
       {
         "name": "gpt-5.2",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "discrete": {
             "options": ["none", "low", "medium", "high", "xhigh"],
@@ -14,6 +18,7 @@
       },
       {
         "name": "gpt-5.1",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "discrete": {
             "options": ["none", "low", "medium", "high"],
@@ -21,9 +26,13 @@
           }
         }
       },
-      { "name": "gpt-4.1" },
+      { 
+        "name": "gpt-4.1",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
       {
         "name": "o1",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "discrete": {
             "options": ["low", "medium", "high"],
@@ -33,6 +42,7 @@
       },
       {
         "name": "o3",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "discrete": {
             "options": ["low", "medium", "high"],
@@ -42,6 +52,7 @@
       },
       {
         "name": "o4-mini",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "discrete": {
             "options": ["low", "medium", "high"],
@@ -51,6 +62,7 @@
       },
       {
         "name": "o4-mini-deep-research",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "discrete": {
             "options": ["low", "medium", "high"],
@@ -65,30 +77,35 @@
     "models": [
       {
         "name": "claude-sonnet-4-5",
+        "temperature": { "min": 0, "max": 1, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
         }
       },
       {
         "name": "claude-opus-4-5",
+        "temperature": { "min": 0, "max": 1, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
         }
       },
       {
         "name": "claude-haiku-4-5",
+        "temperature": { "min": 0, "max": 1, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
         }
       },
       {
         "name": "claude-sonnet-4-0",
+        "temperature": { "min": 0, "max": 1, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
         }
       },
       {
         "name": "claude-3-7-sonnet-latest",
+        "temperature": { "min": 0, "max": 1, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
         }
@@ -100,6 +117,7 @@
     "models": [
       {
         "name": "gemini-3-flash-preview",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "discrete": {
             "options": ["minimal", "low", "medium", "high"],
@@ -109,6 +127,7 @@
       },
       {
         "name": "gemini-3-pro-preview",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "discrete": {
             "options": ["low", "high"],
@@ -118,18 +137,26 @@
       },
       {
         "name": "gemini-2.5-flash",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 0, "max": 24576, "default": 8192, "step": 256, "supports_off": true }
         }
       },
       {
         "name": "gemini-2.5-pro",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 128, "max": 32768, "default": 8192, "step": 128, "supports_off": false }
         }
       },
-      { "name": "gemini-2.5-flash-lite" },
-      { "name": "gemini-2.0-flash-lite" }
+      { 
+        "name": "gemini-2.5-flash-lite",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
+      { 
+        "name": "gemini-2.0-flash-lite",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      }
     ]
   },
   {
@@ -159,25 +186,67 @@
   {
     "provider": "cohere",
     "models": [
-      { "name": "command-r-plus-08-2024" },
-      { "name": "command-a-vision-07-2025" },
-      { "name": "command-r-08-2024" },
-      { "name": "command-a-03-2025" }
+      { 
+        "name": "command-r-plus-08-2024",
+        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
+      },
+      { 
+        "name": "command-a-vision-07-2025",
+        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
+      },
+      { 
+        "name": "command-r-08-2024",
+        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
+      },
+      { 
+        "name": "command-a-03-2025",
+        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
+      }
     ]
   },
   {
     "provider": "openrouter",
     "models": [
-      { "name": "x-ai/grok-code-fast-1" },
-      { "name": "anthropic/claude-sonnet-4.5" },
-      { "name": "google/gemini-2.5-flash" },
-      { "name": "openai/gpt-4o" },
-      { "name": "anthropic/claude-opus-4.5" },
-      { "name": "google/gemini-3-pro-preview" },
-      { "name": "google/gemini-2.5-pro" },
-      { "name": "x-ai/grok-4-fast" },
-      { "name": "minimax/minimax-m2" },
-      { "name": "openai/gpt-oss-120b" }
+      { 
+        "name": "x-ai/grok-code-fast-1",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
+      { 
+        "name": "anthropic/claude-sonnet-4.5",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
+      { 
+        "name": "google/gemini-2.5-flash",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
+      { 
+        "name": "openai/gpt-4o",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
+      { 
+        "name": "anthropic/claude-opus-4.5",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
+      { 
+        "name": "google/gemini-3-pro-preview",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
+      { 
+        "name": "google/gemini-2.5-pro",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
+      { 
+        "name": "x-ai/grok-4-fast",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
+      { 
+        "name": "minimax/minimax-m2",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      },
+      { 
+        "name": "openai/gpt-oss-120b",
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+      }
     ]
   }
 ]
