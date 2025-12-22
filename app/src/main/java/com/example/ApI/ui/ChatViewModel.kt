@@ -2415,7 +2415,68 @@ class ChatViewModel(
         )
     }
 
-    // Export/Import Methods (delegated to ExportImportManager)
+    // ==================== Search Methods (delegated to SearchManager) ====================
+    fun enterSearchMode() = searchManager.enterSearchMode()
+    fun enterConversationSearchMode() = searchManager.enterConversationSearchMode()
+    fun enterSearchModeWithQuery(query: String) = searchManager.enterSearchModeWithQuery(query)
+    fun exitSearchMode() = searchManager.exitSearchMode()
+    fun updateSearchQuery(query: String) = searchManager.updateSearchQuery(query)
+    fun performSearch() = searchManager.performSearch()
+    fun performConversationSearch() = searchManager.performConversationSearch()
+    fun clearSearchContext() = searchManager.clearSearchContext()
+
+    // ==================== Child Lock Methods (delegated to ChildLockManager) ====================
+    fun setupChildLock(password: String, startTime: String, endTime: String, deviceId: String) =
+        childLockManager.setupChildLock(password, startTime, endTime, deviceId)
+    fun verifyAndDisableChildLock(password: String, deviceId: String): Boolean =
+        childLockManager.verifyAndDisableChildLock(password, deviceId)
+    fun updateChildLockSettings(enabled: Boolean, password: String, startTime: String, endTime: String) =
+        childLockManager.updateChildLockSettings(enabled, password, startTime, endTime)
+    fun isChildLockActive(): Boolean = childLockManager.isChildLockActive()
+    fun getLockEndTime(): String = childLockManager.getLockEndTime()
+
+    // ==================== Integration Management (delegated to IntegrationManager) ====================
+    // GitHub Integration
+    fun connectGitHub(): String = integrationManager.connectGitHub()
+    fun getGitHubAuthUrl(): Pair<String, String> = integrationManager.getGitHubAuthUrl()
+    fun handleGitHubCallback(code: String, state: String): String = integrationManager.handleGitHubCallback(code, state)
+    fun disconnectGitHub() = integrationManager.disconnectGitHub()
+    fun isGitHubConnected(): Boolean = integrationManager.isGitHubConnected()
+    fun getGitHubConnection(): GitHubConnection? = integrationManager.getGitHubConnection()
+    fun initializeGitHubToolsIfConnected() = integrationManager.initializeGitHubToolsIfConnected()
+
+    // Google Workspace Integration
+    fun getGoogleSignInIntent(): Intent = integrationManager.getGoogleSignInIntent()
+    fun handleGoogleSignInResult(data: Intent) = integrationManager.handleGoogleSignInResult(data)
+    fun isGoogleWorkspaceConnected(): Boolean = integrationManager.isGoogleWorkspaceConnected()
+    fun getGoogleWorkspaceConnection(): GoogleWorkspaceConnection? = integrationManager.getGoogleWorkspaceConnection()
+    fun disconnectGoogleWorkspace() = integrationManager.disconnectGoogleWorkspace()
+    fun updateGoogleWorkspaceServices(gmail: Boolean, calendar: Boolean, drive: Boolean) =
+        integrationManager.updateGoogleWorkspaceServices(gmail, calendar, drive)
+    fun initializeGoogleWorkspaceToolsIfConnected() = integrationManager.initializeGoogleWorkspaceToolsIfConnected()
+
+    // ==================== Tool Management ====================
+    fun enableTool(toolId: String) {
+        val currentSettings = _appSettings.value
+        if (!currentSettings.enabledTools.contains(toolId)) {
+            val updatedSettings = currentSettings.copy(
+                enabledTools = currentSettings.enabledTools + toolId
+            )
+            repository.saveAppSettings(updatedSettings)
+            _appSettings.value = updatedSettings
+        }
+    }
+
+    fun disableTool(toolId: String) {
+        val currentSettings = _appSettings.value
+        val updatedSettings = currentSettings.copy(
+            enabledTools = currentSettings.enabledTools - toolId
+        )
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+    }
+
+    // ==================== Export/Import Methods (delegated to ExportImportManager) ====================
     fun openChatExportDialog() = exportImportManager.openChatExportDialog()
     fun closeChatExportDialog() = exportImportManager.closeChatExportDialog()
     fun enableChatExportEditing() = exportImportManager.enableChatExportEditing()
@@ -2432,9 +2493,6 @@ class ChatViewModel(
     fun navigateToPreviousVariant(nodeId: String) = branchingManager.navigateToPreviousVariant(nodeId)
     fun navigateToVariant(nodeId: String, variantIndex: Int) = branchingManager.navigateToVariant(nodeId, variantIndex)
     fun ensureBranchingStructure() = branchingManager.ensureBranchingStructure()
-
-        }
-    }
 
 }
 
