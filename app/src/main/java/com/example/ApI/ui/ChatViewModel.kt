@@ -711,7 +711,7 @@ class ChatViewModel(
 
     fun createNewChatInGroup(groupId: String) {
         val currentUser = _appSettings.value.current_user
-        val newChat = repository.createNewChat(currentUser, "שיחה חדשה", "", groupId)
+        val newChat = repository.createNewChatInGroup(currentUser, "שיחה חדשה", groupId, "")
         val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
 
         _uiState.value = _uiState.value.copy(

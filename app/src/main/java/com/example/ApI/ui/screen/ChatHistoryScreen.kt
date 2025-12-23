@@ -228,7 +228,7 @@ fun ChatHistoryScreen(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { viewModel.createNewChat() },
+                onClick = { viewModel.createNewChat("שיחה חדשה") },
                 containerColor = Primary,
                 contentColor = Color.White,
                 modifier = Modifier.padding(16.dp)
@@ -321,7 +321,7 @@ fun ChatHistoryScreen(
                             SearchResultItem(
                                 searchResult = searchResult,
                                 onClick = {
-                                    viewModel.selectChatFromSearch(searchResult)
+                                    viewModel.selectChatFromSearch(searchResult.chat)
                                     // Note: selectChatFromSearch now handles navigation and search mode
                                 },
                                 onLongClick = { offset ->

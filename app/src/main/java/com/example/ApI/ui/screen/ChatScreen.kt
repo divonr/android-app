@@ -1308,7 +1308,7 @@ fun ChatScreen(
                                     viewModel.selectChat(selected)
                                     viewModel.hideChatHistory()
                                 },
-                                onNewChat = { viewModel.createNewChat() },
+                                onNewChat = { viewModel.createNewChat("שיחה חדשה") },
                                 onClose = { viewModel.hideChatHistory() }
                             )
                         }
