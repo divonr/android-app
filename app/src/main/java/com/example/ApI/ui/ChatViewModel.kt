@@ -677,7 +677,258 @@ class ChatViewModel(
     fun cancelEditingMessage() = messageOperationsManager.cancelEditingMessage()
     fun resendFromMessage(message: Message) = messageOperationsManager.resendFromMessage(message)
 
-    
+    // ==================== Chat Selection & Management ====================
+    fun selectChat(chat: Chat) {
+        val currentUser = _appSettings.value.current_user
+        viewModelScope.launch {
+            // Update current chat
+            _uiState.value = _uiState.value.copy(
+                currentChat = chat,
+                systemPrompt = chat.systemPrompt,
+                showChatHistory = false
+            )
+        }
+    }
+
+    fun selectChatFromSearch(chat: Chat) {
+        selectChat(chat)
+        navigateToScreen(Screen.Chat)
+    }
+
+    fun createNewChat(previewName: String): Chat {
+        val currentUser = _appSettings.value.current_user
+        val newChat = repository.createNewChat(currentUser, previewName)
+        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+
+        _uiState.value = _uiState.value.copy(
+            currentChat = newChat,
+            chatHistory = updatedChatHistory,
+            showChatHistory = false
+        )
+        navigateToScreen(Screen.Chat)
+        return newChat
+    }
+
+    fun createNewChatInGroup(groupId: String) {
+        val currentUser = _appSettings.value.current_user
+        val newChat = repository.createNewChat(currentUser, "שיחה חדשה", "", groupId)
+        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+
+        _uiState.value = _uiState.value.copy(
+            currentChat = newChat,
+            chatHistory = updatedChatHistory,
+            groups = repository.loadChatHistory(currentUser).groups
+        )
+        navigateToScreen(Screen.Chat)
+    }
+
+    fun showChatHistory() {
+        _uiState.value = _uiState.value.copy(showChatHistory = true)
+    }
+
+    fun hideChatHistory() {
+        _uiState.value = _uiState.value.copy(showChatHistory = false)
+    }
+
+    // ==================== Provider/Model Selection (delegated to ModelSelectionManager) ====================
+    fun selectProvider(provider: Provider) = modelSelectionManager.selectProvider(provider)
+    fun selectModel(modelName: String) = modelSelectionManager.selectModel(modelName)
+    fun showProviderSelector() = modelSelectionManager.showProviderSelector()
+    fun hideProviderSelector() = modelSelectionManager.hideProviderSelector()
+    fun showModelSelector() = modelSelectionManager.showModelSelector()
+    fun hideModelSelector() = modelSelectionManager.hideModelSelector()
+    fun refreshModels() = modelSelectionManager.refreshModels()
+    fun refreshAvailableProviders() = modelSelectionManager.refreshAvailableProviders()
+
+    // ==================== System Prompt Management ====================
+    fun updateSystemPrompt(prompt: String) {
+        val currentUser = _appSettings.value.current_user
+        val currentChat = _uiState.value.currentChat
+
+        if (currentChat != null) {
+            // Update system prompt for current chat
+            repository.updateChatSystemPrompt(currentUser, currentChat.chat_id, prompt)
+
+            // Update the current chat in UI state
+            val updatedChat = currentChat.copy(systemPrompt = prompt)
+            val updatedChatHistory = _uiState.value.chatHistory.map { chat ->
+                if (chat.chat_id == currentChat.chat_id) updatedChat else chat
+            }
+
+            _uiState.value = _uiState.value.copy(
+                currentChat = updatedChat,
+                systemPrompt = prompt,
+                chatHistory = updatedChatHistory,
+                showSystemPromptDialog = false
+            )
+        } else {
+            // If no current chat, create a new one with the system prompt
+            val newChat = repository.createNewChat(currentUser, "שיחה חדשה", prompt)
+            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+
+            _uiState.value = _uiState.value.copy(
+                currentChat = newChat,
+                systemPrompt = prompt,
+                chatHistory = updatedChatHistory,
+                showSystemPromptDialog = false
+            )
+        }
+    }
+
+    fun showSystemPromptDialog() {
+        _uiState.value = _uiState.value.copy(showSystemPromptDialog = true)
+    }
+
+    fun hideSystemPromptDialog() {
+        _uiState.value = _uiState.value.copy(showSystemPromptDialog = false)
+    }
+
+    fun toggleSystemPromptOverride() {
+        _uiState.value = _uiState.value.copy(
+            systemPromptOverrideEnabled = !_uiState.value.systemPromptOverrideEnabled
+        )
+    }
+
+    fun setSystemPromptOverride(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            systemPromptOverrideEnabled = enabled
+        )
+    }
+
+    fun getCurrentChatProjectGroup(): ChatGroup? {
+        val currentChat = _uiState.value.currentChat
+        val groups = _uiState.value.groups
+
+        return currentChat?.group?.let { groupId ->
+            groups.find { it.group_id == groupId && it.is_project }
+        }
+    }
+
+    fun getEffectiveSystemPrompt(): String {
+        val currentChat = _uiState.value.currentChat ?: return ""
+        val projectGroup = getCurrentChatProjectGroup()
+
+        return when {
+            projectGroup != null -> {
+                val projectPrompt = projectGroup.system_prompt ?: ""
+                val chatPrompt = currentChat.systemPrompt
+
+                when {
+                    _uiState.value.systemPromptOverrideEnabled && chatPrompt.isNotEmpty() ->
+                        "$projectPrompt\n\n$chatPrompt"
+                    else -> projectPrompt
+                }
+            }
+            else -> currentChat.systemPrompt
+        }
+    }
+
+    private fun getEnabledToolSpecifications(): List<ToolSpecification> {
+        val enabledToolIds = _appSettings.value.enabledTools
+        val toolRegistry = ToolRegistry.getInstance()
+        val currentProvider = _uiState.value.currentProvider?.provider ?: "openai"
+
+        val specifications = mutableListOf<ToolSpecification>()
+
+        enabledToolIds.forEach { toolId ->
+            if (toolId == "get_current_group_conversations") {
+                return@forEach
+            }
+
+            toolRegistry.getTool(toolId)?.getSpecification(currentProvider)?.let {
+                specifications.add(it)
+            }
+        }
+
+        if (enabledToolIds.contains("get_current_group_conversations")) {
+            val currentChat = _uiState.value.currentChat
+            val groups = _uiState.value.groups
+            val currentUser = _appSettings.value.current_user
+
+            currentChat?.group?.let { groupId ->
+                groups.find { it.group_id == groupId }?.let { group ->
+                    val groupConversationsTool = com.example.ApI.tools.GroupConversationsTool(
+                        repository = repository,
+                        username = currentUser,
+                        currentChatId = currentChat.chat_id,
+                        groupId = groupId,
+                        groupName = group.group_name
+                    )
+
+                    specifications.add(groupConversationsTool.getSpecification(currentProvider))
+                }
+            }
+        }
+
+        return specifications
+    }
+
+    private suspend fun executeToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
+        if (toolCall.toolId == "get_current_group_conversations") {
+            val currentChat = _uiState.value.currentChat
+            val groups = _uiState.value.groups
+            val currentUser = _appSettings.value.current_user
+
+            return currentChat?.group?.let { groupId ->
+                groups.find { it.group_id == groupId }?.let { group ->
+                    val groupConversationsTool = com.example.ApI.tools.GroupConversationsTool(
+                        repository = repository,
+                        username = currentUser,
+                        currentChatId = currentChat.chat_id,
+                        groupId = groupId,
+                        groupName = group.group_name
+                    )
+                    try {
+                        groupConversationsTool.execute(toolCall.parameters)
+                    } catch (e: Exception) {
+                        com.example.ApI.tools.ToolExecutionResult.Error(
+                            "Failed to execute group conversations tool: ${e.message}"
+                        )
+                    }
+                }
+            } ?: com.example.ApI.tools.ToolExecutionResult.Error(
+                "Group conversations tool can only be used in a group chat"
+            )
+        }
+
+        val enabledToolIds = getEnabledToolSpecifications().map { it.name }
+        return ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
+    }
+
+    // ==================== Snackbar Management ====================
+    fun showSnackbar(message: String) {
+        _uiState.value = _uiState.value.copy(snackbarMessage = message)
+    }
+
+    fun clearSnackbar() {
+        _uiState.value = _uiState.value.copy(snackbarMessage = null)
+    }
+
+    // ==================== File/Attachment Management (delegated to AttachmentManager) ====================
+    fun addFileFromUri(uri: Uri, fileName: String, mimeType: String) = attachmentManager.addFileFromUri(uri, fileName, mimeType)
+    fun addMultipleFilesFromUris(filesList: List<Triple<Uri, String, String>>) = attachmentManager.addMultipleFilesFromUris(filesList)
+    fun removeSelectedFile(file: SelectedFile) = attachmentManager.removeSelectedFile(file)
+    fun showFileSelection() = attachmentManager.showFileSelection()
+    fun hideFileSelection() = attachmentManager.hideFileSelection()
+
+    // ==================== Settings Management ====================
+    fun updateMultiMessageMode(enabled: Boolean) {
+        val updatedSettings = _appSettings.value.copy(multiMessageMode = enabled)
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+    }
+
+    // ==================== Navigation (delegated to NavigationManager) ====================
+    fun navigateToScreen(screen: Screen) = navigationManager.navigateToScreen(screen)
+    fun updateSkipWelcomeScreen(skip: Boolean) = navigationManager.updateSkipWelcomeScreen(skip)
+    fun exportChatHistory() = navigationManager.exportChatHistory()
+    fun importChatHistoryFromUri(uri: Uri) = navigationManager.importChatHistoryFromUri(uri)
+
+    // Text direction settings (delegated to TopBarManager)
+    fun toggleTextDirection() = topBarManager.toggleTextDirection()
+    fun setTextDirectionMode(mode: TextDirectionMode) = topBarManager.setTextDirectionMode(mode)
+
+
     // Title Generation and User Settings methods
     
     fun updateTitleGenerationSettings(newSettings: TitleGenerationSettings) {

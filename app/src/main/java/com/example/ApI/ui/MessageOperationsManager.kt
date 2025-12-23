@@ -184,18 +184,18 @@ class MessageOperationsManager(
                     // Start streaming request via the foreground service
                     // The service handles the API call and broadcasts events back to us
                     startStreamingRequest(
-                        requestId = requestId,
-                        chatId = chatForRequest.chat_id,
-                        username = currentUser,
-                        provider = currentProvider,
-                        modelName = currentModel,
-                        messages = chatForRequest.messages,
-                        systemPrompt = systemPrompt,
-                        webSearchEnabled = uiState.value.webSearchEnabled,
-                        projectAttachments = projectAttachments,
-                        enabledTools = getEnabledToolSpecifications(),
-                        thinkingBudget = uiState.value.thinkingBudgetValue,
-                        temperature = uiState.value.temperatureValue
+                        requestId,
+                        chatForRequest.chat_id,
+                        currentUser,
+                        currentProvider,
+                        currentModel,
+                        chatForRequest.messages,
+                        systemPrompt,
+                        uiState.value.webSearchEnabled,
+                        projectAttachments,
+                        getEnabledToolSpecifications(),
+                        uiState.value.thinkingBudgetValue,
+                        uiState.value.temperatureValue
                     )
 
                     // Reload chat to get any updated file IDs from re-uploads
@@ -264,18 +264,18 @@ class MessageOperationsManager(
 
                     // Start streaming request via the foreground service
                     startStreamingRequest(
-                        requestId = requestId,
-                        chatId = chatId,
-                        username = currentUser,
-                        provider = currentProvider,
-                        modelName = currentModel,
-                        messages = currentChat.messages,
-                        systemPrompt = systemPrompt,
-                        webSearchEnabled = uiState.value.webSearchEnabled,
-                        projectAttachments = projectAttachments,
-                        enabledTools = getEnabledToolSpecifications(),
-                        thinkingBudget = uiState.value.thinkingBudgetValue,
-                        temperature = uiState.value.temperatureValue
+                        requestId,
+                        chatId,
+                        currentUser,
+                        currentProvider,
+                        currentModel,
+                        currentChat.messages,
+                        systemPrompt,
+                        uiState.value.webSearchEnabled,
+                        projectAttachments,
+                        getEnabledToolSpecifications(),
+                        uiState.value.thinkingBudgetValue,
+                        uiState.value.temperatureValue
                     )
 
                     // Optionally refresh chat after potential file re-uploads
@@ -613,18 +613,18 @@ class MessageOperationsManager(
 
                 // Start streaming request via the foreground service
                 startStreamingRequest(
-                    requestId = requestId,
-                    chatId = chatId,
-                    username = currentUser,
-                    provider = currentProvider,
-                    modelName = currentModel,
-                    messages = chat.messages,
-                    systemPrompt = systemPrompt,
-                    webSearchEnabled = uiState.value.webSearchEnabled,
-                    projectAttachments = projectAttachments,
-                    enabledTools = getEnabledToolSpecifications(),
-                    thinkingBudget = uiState.value.thinkingBudgetValue,
-                    temperature = uiState.value.temperatureValue
+                    requestId,
+                    chatId,
+                    currentUser,
+                    currentProvider,
+                    currentModel,
+                    chat.messages,
+                    systemPrompt,
+                    uiState.value.webSearchEnabled,
+                    projectAttachments,
+                    getEnabledToolSpecifications(),
+                    uiState.value.thinkingBudgetValue,
+                    uiState.value.temperatureValue
                 )
             } catch (e: Exception) {
                 Log.e("MessageOperationsManager", "Error starting branch request", e)
