@@ -1,4 +1,4 @@
-package com.example.ApI.ui
+package com.example.ApI.ui.managers.settings
 
 import android.content.Context
 import com.example.ApI.data.ParentalControlManager

@@ -30,6 +30,23 @@ import com.example.ApI.service.StreamingService
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
 import com.example.ApI.tools.ToolExecutionResult
+import com.example.ApI.ui.managers.chat.MessageSendingManager
+import com.example.ApI.ui.managers.chat.MessageEditingManager
+import com.example.ApI.ui.managers.chat.BranchingManager
+import com.example.ApI.ui.managers.chat.ChatContextMenuManager
+import com.example.ApI.ui.managers.chat.SystemPromptManager
+import com.example.ApI.ui.managers.organization.GroupManager
+import com.example.ApI.ui.managers.organization.SearchManager
+import com.example.ApI.ui.managers.provider.ModelSelectionManager
+import com.example.ApI.ui.managers.provider.TopBarManager
+import com.example.ApI.ui.managers.streaming.StreamingEventManager
+import com.example.ApI.ui.managers.streaming.TitleGenerationManager
+import com.example.ApI.ui.managers.io.AttachmentManager
+import com.example.ApI.ui.managers.io.ExportImportManager
+import com.example.ApI.ui.managers.io.SharedIntentManager
+import com.example.ApI.ui.managers.integration.AuthManager
+import com.example.ApI.ui.managers.integration.ToolManager
+import com.example.ApI.ui.managers.settings.ChildLockManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -166,20 +183,6 @@ class ChatViewModel(
         )
     }
 
-    // Navigation and chat history management delegate
-    private val navigationManager: NavigationManager by lazy {
-        NavigationManager(
-            repository = repository,
-            context = context,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            currentScreen = _currentScreen,
-            updateAppSettings = { newSettings -> _appSettings.value = newSettings },
-            updateUiState = { newState -> _uiState.value = newState },
-            refreshAvailableProviders = { refreshAvailableProviders() }
-        )
-    }
 
     // Provider and model selection management delegate
     private val modelSelectionManager: ModelSelectionManager by lazy {
@@ -194,9 +197,9 @@ class ChatViewModel(
         )
     }
 
-    // Message operations delegate (send, edit, delete, resend)
-    private val messageOperationsManager: MessageOperationsManager by lazy {
-        MessageOperationsManager(
+    // Message sending delegate (send, batch send, API calls)
+    private val messageSendingManager: MessageSendingManager by lazy {
+        MessageSendingManager(
             repository = repository,
             context = context,
             scope = viewModelScope,
@@ -204,13 +207,100 @@ class ChatViewModel(
             uiState = _uiState,
             updateUiState = { newState -> _uiState.value = newState },
             getCurrentDateTimeISO = { getCurrentDateTimeISO() },
-            getEffectiveSystemPrompt = { getEffectiveSystemPrompt() },
-            getCurrentChatProjectGroup = { getCurrentChatProjectGroup() },
-            getEnabledToolSpecifications = { getEnabledToolSpecifications() },
+            getEffectiveSystemPrompt = { systemPromptManager.getEffectiveSystemPrompt() },
+            getCurrentChatProjectGroup = { systemPromptManager.getCurrentChatProjectGroup() },
+            getEnabledToolSpecifications = { toolManager.getEnabledToolSpecifications() },
             startStreamingRequest = { requestId, chatId, username, provider, modelName, messages, systemPrompt, webSearchEnabled, projectAttachments, enabledTools, thinkingBudget, temperature ->
                 startStreamingRequest(requestId, chatId, username, provider, modelName, messages, systemPrompt, webSearchEnabled, projectAttachments, enabledTools, thinkingBudget, temperature)
             },
             createNewChat = { previewName -> createNewChat(previewName) }
+        )
+    }
+
+    // Message editing delegate (edit, delete, resend - delegates API calls to messageSendingManager)
+    private val messageEditingManager: MessageEditingManager by lazy {
+        MessageEditingManager(
+            repository = repository,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState },
+            getCurrentDateTimeISO = { getCurrentDateTimeISO() },
+            sendApiRequestForBranch = { chat -> messageSendingManager.sendApiRequestForCurrentBranch(chat) }
+        )
+    }
+
+    // Tool management delegate
+    private val toolManager: ToolManager by lazy {
+        ToolManager(
+            repository = repository,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateAppSettings = { newSettings -> _appSettings.value = newSettings }
+        )
+    }
+
+    // Title generation delegate
+    private val titleGenerationManager: TitleGenerationManager by lazy {
+        TitleGenerationManager(
+            repository = repository,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateAppSettings = { newSettings -> _appSettings.value = newSettings },
+            updateUiState = { newState -> _uiState.value = newState }
+        )
+    }
+
+    // System prompt management delegate
+    private val systemPromptManager: SystemPromptManager by lazy {
+        SystemPromptManager(
+            repository = repository,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState }
+        )
+    }
+
+    // Chat context menu delegate
+    private val chatContextMenuManager: ChatContextMenuManager by lazy {
+        ChatContextMenuManager(
+            repository = repository,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState },
+            navigateToScreen = { screen -> navigateToScreen(screen) },
+            updateChatPreviewName = { chatId, newTitle -> titleGenerationManager.updateChatPreviewName(chatId, newTitle) }
+        )
+    }
+
+    // Shared intent handling delegate
+    private val sharedIntentManager: SharedIntentManager by lazy {
+        SharedIntentManager(
+            repository = repository,
+            context = context,
+            scope = viewModelScope,
+            sharedIntent = sharedIntent,
+            uiState = _uiState,
+            currentScreen = _currentScreen,
+            addFileFromUri = { uri, name, mime -> attachmentManager.addFileFromUri(uri, name, mime) }
+        )
+    }
+
+    // Streaming event handling delegate
+    private val streamingEventManager: StreamingEventManager by lazy {
+        StreamingEventManager(
+            repository = repository,
+            context = context,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState },
+            getCurrentDateTimeISO = { getCurrentDateTimeISO() },
+            handleTitleGeneration = { chat -> titleGenerationManager.handleTitleGeneration(chat) },
+            executeToolCall = { toolCall -> toolManager.executeToolCall(toolCall) },
+            getStreamingService = { streamingService }
         )
     }
 
@@ -231,7 +321,7 @@ class ChatViewModel(
             // Start observing streaming events
             viewModelScope.launch {
                 streamingService?.streamingEvents?.collect { event ->
-                    handleStreamingEvent(event)
+                    streamingEventManager.handleStreamingEvent(event)
                 }
             }
         }
@@ -255,9 +345,9 @@ class ChatViewModel(
             currentProvider = defaultProvider,
             currentModel = "gpt-4o"
         )
-        
+
         loadInitialData()
-        handleSharedFiles()
+        sharedIntentManager.handleSharedFiles()
         bindToStreamingService()
     }
 
@@ -283,172 +373,6 @@ class ChatViewModel(
             context.unbindService(serviceConnection)
             serviceBound = false
             streamingService = null
-        }
-    }
-
-    /**
-     * Handle streaming events from the StreamingService
-     */
-    private fun handleStreamingEvent(event: StreamingEvent) {
-        when (event) {
-            is StreamingEvent.PartialResponse -> {
-                // Update per-chat streaming text
-                val chatId = event.chatId
-                val currentText = _uiState.value.streamingTextByChat[chatId] ?: ""
-                _uiState.value = _uiState.value.copy(
-                    streamingTextByChat = _uiState.value.streamingTextByChat + (chatId to currentText + event.text)
-                )
-            }
-
-            is StreamingEvent.Complete -> {
-                val chatId = event.chatId
-                Log.d("ChatViewModel", "Streaming complete for chat: $chatId")
-
-                viewModelScope.launch {
-                    // Reload chat history to get the saved message
-                    val currentUser = _appSettings.value.current_user
-                    val refreshedHistory = repository.loadChatHistory(currentUser)
-                    val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
-
-                    // Clear streaming state for this chat (including thoughts state)
-                    _uiState.value = _uiState.value.copy(
-                        loadingChatIds = _uiState.value.loadingChatIds - chatId,
-                        streamingChatIds = _uiState.value.streamingChatIds - chatId,
-                        streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
-                        streamingThoughtsTextByChat = _uiState.value.streamingThoughtsTextByChat - chatId,
-                        completedThinkingDurationByChat = _uiState.value.completedThinkingDurationByChat - chatId,
-                        chatHistory = refreshedHistory.chat_history,
-                        currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat
-                    )
-
-                    // Handle title generation if this is the current chat
-                    if (refreshedChat != null && _uiState.value.currentChat?.chat_id == chatId) {
-                        handleTitleGeneration(refreshedChat)
-                    }
-                }
-            }
-
-            is StreamingEvent.Error -> {
-                val chatId = event.chatId
-                Log.e("ChatViewModel", "Streaming error for chat: $chatId - ${event.error}")
-
-                viewModelScope.launch {
-                    // Reload chat history
-                    val currentUser = _appSettings.value.current_user
-                    val refreshedHistory = repository.loadChatHistory(currentUser)
-                    val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
-
-                    // Check for Cohere image not supported error
-                    if (event.error.contains("image content is not supported for this model")) {
-                        Toast.makeText(
-                            context,
-                            "בחרו מודל שתומך בתמונה, כמו command-a-vision-07-2025",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    } else {
-                        _uiState.value = _uiState.value.copy(
-                            snackbarMessage = "שגיאה: ${event.error}"
-                        )
-                    }
-
-                    // Clear streaming state for this chat (including thoughts state)
-                    _uiState.value = _uiState.value.copy(
-                        loadingChatIds = _uiState.value.loadingChatIds - chatId,
-                        streamingChatIds = _uiState.value.streamingChatIds - chatId,
-                        streamingTextByChat = _uiState.value.streamingTextByChat - chatId,
-                        streamingThoughtsTextByChat = _uiState.value.streamingThoughtsTextByChat - chatId,
-                        completedThinkingDurationByChat = _uiState.value.completedThinkingDurationByChat - chatId,
-                        thinkingChatIds = _uiState.value.thinkingChatIds - chatId,
-                        thinkingStartTimeByChat = _uiState.value.thinkingStartTimeByChat - chatId,
-                        chatHistory = refreshedHistory.chat_history,
-                        currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat
-                    )
-                }
-            }
-
-            is StreamingEvent.StatusChange -> {
-                // Status changes are mainly for logging/debugging
-                Log.d("ChatViewModel", "Status change for ${event.chatId}: ${event.status}")
-            }
-
-            is StreamingEvent.ToolCallRequest -> {
-                val chatId = event.chatId
-                val requestId = event.requestId
-                Log.d("ChatViewModel", "Tool call request for chat: $chatId, tool: ${event.toolCall.toolId}")
-
-                viewModelScope.launch {
-                    // Show tool execution indicator
-                    _uiState.value = _uiState.value.copy(
-                        executingToolCall = ExecutingToolInfo(
-                            toolId = event.toolCall.toolId,
-                            toolName = event.toolCall.toolId,
-                            startTime = getCurrentDateTimeISO()
-                        )
-                    )
-
-                    // Execute the tool
-                    val result = executeToolCall(event.toolCall)
-
-                    // Clear tool execution indicator
-                    _uiState.value = _uiState.value.copy(executingToolCall = null)
-
-                    // Provide result back to service
-                    streamingService?.provideToolResult(requestId, result)
-                }
-            }
-
-            is StreamingEvent.MessagesAdded -> {
-                // Messages were saved mid-stream (preceding text + tool messages)
-                // Reload chat history and clear streaming text so UI shows them separately
-                val chatId = event.chatId
-                Log.d("ChatViewModel", "Messages added mid-stream for chat: $chatId")
-
-                viewModelScope.launch {
-                    // Reload chat history to show the newly saved messages
-                    val currentUser = _appSettings.value.current_user
-                    val refreshedHistory = repository.loadChatHistory(currentUser)
-                    val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
-
-                    // Clear streaming text but keep streaming state active
-                    // This ensures saved messages appear as separate bubbles
-                    // and new streaming content starts fresh
-                    _uiState.value = _uiState.value.copy(
-                        streamingTextByChat = _uiState.value.streamingTextByChat + (chatId to ""),
-                        chatHistory = refreshedHistory.chat_history,
-                        currentChat = if (_uiState.value.currentChat?.chat_id == chatId) refreshedChat else _uiState.value.currentChat
-                    )
-                }
-            }
-
-            is StreamingEvent.ThinkingStarted -> {
-                val chatId = event.chatId
-                Log.d("ChatViewModel", "Thinking started for chat: $chatId")
-                _uiState.value = _uiState.value.copy(
-                    thinkingChatIds = _uiState.value.thinkingChatIds + chatId,
-                    thinkingStartTimeByChat = _uiState.value.thinkingStartTimeByChat + (chatId to System.currentTimeMillis())
-                )
-            }
-
-            is StreamingEvent.ThinkingPartial -> {
-                val chatId = event.chatId
-                val currentThoughts = _uiState.value.streamingThoughtsTextByChat[chatId] ?: ""
-                _uiState.value = _uiState.value.copy(
-                    streamingThoughtsTextByChat = _uiState.value.streamingThoughtsTextByChat + (chatId to currentThoughts + event.text)
-                )
-            }
-
-            is StreamingEvent.ThinkingComplete -> {
-                val chatId = event.chatId
-                Log.d("ChatViewModel", "Thinking complete for chat: $chatId, duration: ${event.durationSeconds}s, status: ${event.status}")
-                // Mark thinking as done but KEEP the thoughts text visible during response streaming
-                // Store the completed duration for display (no longer live counting)
-                _uiState.value = _uiState.value.copy(
-                    thinkingChatIds = _uiState.value.thinkingChatIds - chatId,
-                    thinkingStartTimeByChat = _uiState.value.thinkingStartTimeByChat - chatId,
-                    // DON'T clear streamingThoughtsTextByChat - keep it visible during response streaming
-                    completedThinkingDurationByChat = _uiState.value.completedThinkingDurationByChat + (chatId to event.durationSeconds)
-                )
-            }
         }
     }
 
@@ -567,7 +491,7 @@ class ChatViewModel(
 
             // Handle title generation if needed
             if (refreshedChat != null && accumulatedText.isNotEmpty()) {
-                handleTitleGeneration(refreshedChat)
+                titleGenerationManager.handleTitleGeneration(refreshedChat)
             }
         }
     }
@@ -667,15 +591,17 @@ class ChatViewModel(
         _uiState.value = _uiState.value.copy(currentMessage = message)
     }
 
-    // ==================== Message Operations (delegated to MessageOperationsManager) ====================
-    fun sendMessage() = messageOperationsManager.sendMessage()
-    fun sendBufferedBatch() = messageOperationsManager.sendBufferedBatch()
-    fun deleteMessage(message: Message) = messageOperationsManager.deleteMessage(message)
-    fun startEditingMessage(message: Message) = messageOperationsManager.startEditingMessage(message)
-    fun finishEditingMessage() = messageOperationsManager.finishEditingMessage()
-    fun confirmEditAndResend() = messageOperationsManager.confirmEditAndResend()
-    fun cancelEditingMessage() = messageOperationsManager.cancelEditingMessage()
-    fun resendFromMessage(message: Message) = messageOperationsManager.resendFromMessage(message)
+    // ==================== Message Sending (delegated to MessageSendingManager) ====================
+    fun sendMessage() = messageSendingManager.sendMessage()
+    fun sendBufferedBatch() = messageSendingManager.sendBufferedBatch()
+
+    // ==================== Message Editing (delegated to MessageEditingManager) ====================
+    fun deleteMessage(message: Message) = messageEditingManager.deleteMessage(message)
+    fun startEditingMessage(message: Message) = messageEditingManager.startEditingMessage(message)
+    fun finishEditingMessage() = messageEditingManager.finishEditingMessage()
+    fun confirmEditAndResend() = messageEditingManager.confirmEditAndResend()
+    fun cancelEditingMessage() = messageEditingManager.cancelEditingMessage()
+    fun resendFromMessage(message: Message) = messageEditingManager.resendFromMessage(message)
 
     // ==================== Chat Selection & Management ====================
     fun selectChat(chat: Chat) {
@@ -740,160 +666,14 @@ class ChatViewModel(
     fun refreshModels() = modelSelectionManager.refreshModels()
     fun refreshAvailableProviders() = modelSelectionManager.refreshAvailableProviders()
 
-    // ==================== System Prompt Management ====================
-    fun updateSystemPrompt(prompt: String) {
-        val currentUser = _appSettings.value.current_user
-        val currentChat = _uiState.value.currentChat
-
-        if (currentChat != null) {
-            // Update system prompt for current chat
-            repository.updateChatSystemPrompt(currentUser, currentChat.chat_id, prompt)
-
-            // Update the current chat in UI state
-            val updatedChat = currentChat.copy(systemPrompt = prompt)
-            val updatedChatHistory = _uiState.value.chatHistory.map { chat ->
-                if (chat.chat_id == currentChat.chat_id) updatedChat else chat
-            }
-
-            _uiState.value = _uiState.value.copy(
-                currentChat = updatedChat,
-                systemPrompt = prompt,
-                chatHistory = updatedChatHistory,
-                showSystemPromptDialog = false
-            )
-        } else {
-            // If no current chat, create a new one with the system prompt
-            val newChat = repository.createNewChat(currentUser, "שיחה חדשה", prompt)
-            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
-
-            _uiState.value = _uiState.value.copy(
-                currentChat = newChat,
-                systemPrompt = prompt,
-                chatHistory = updatedChatHistory,
-                showSystemPromptDialog = false
-            )
-        }
-    }
-
-    fun showSystemPromptDialog() {
-        _uiState.value = _uiState.value.copy(showSystemPromptDialog = true)
-    }
-
-    fun hideSystemPromptDialog() {
-        _uiState.value = _uiState.value.copy(showSystemPromptDialog = false)
-    }
-
-    fun toggleSystemPromptOverride() {
-        _uiState.value = _uiState.value.copy(
-            systemPromptOverrideEnabled = !_uiState.value.systemPromptOverrideEnabled
-        )
-    }
-
-    fun setSystemPromptOverride(enabled: Boolean) {
-        _uiState.value = _uiState.value.copy(
-            systemPromptOverrideEnabled = enabled
-        )
-    }
-
-    fun getCurrentChatProjectGroup(): ChatGroup? {
-        val currentChat = _uiState.value.currentChat
-        val groups = _uiState.value.groups
-
-        return currentChat?.group?.let { groupId ->
-            groups.find { it.group_id == groupId && it.is_project }
-        }
-    }
-
-    fun getEffectiveSystemPrompt(): String {
-        val currentChat = _uiState.value.currentChat ?: return ""
-        val projectGroup = getCurrentChatProjectGroup()
-
-        return when {
-            projectGroup != null -> {
-                val projectPrompt = projectGroup.system_prompt ?: ""
-                val chatPrompt = currentChat.systemPrompt
-
-                when {
-                    _uiState.value.systemPromptOverrideEnabled && chatPrompt.isNotEmpty() ->
-                        "$projectPrompt\n\n$chatPrompt"
-                    else -> projectPrompt
-                }
-            }
-            else -> currentChat.systemPrompt
-        }
-    }
-
-    private fun getEnabledToolSpecifications(): List<ToolSpecification> {
-        val enabledToolIds = _appSettings.value.enabledTools
-        val toolRegistry = ToolRegistry.getInstance()
-        val currentProvider = _uiState.value.currentProvider?.provider ?: "openai"
-
-        val specifications = mutableListOf<ToolSpecification>()
-
-        enabledToolIds.forEach { toolId ->
-            if (toolId == "get_current_group_conversations") {
-                return@forEach
-            }
-
-            toolRegistry.getTool(toolId)?.getSpecification(currentProvider)?.let {
-                specifications.add(it)
-            }
-        }
-
-        if (enabledToolIds.contains("get_current_group_conversations")) {
-            val currentChat = _uiState.value.currentChat
-            val groups = _uiState.value.groups
-            val currentUser = _appSettings.value.current_user
-
-            currentChat?.group?.let { groupId ->
-                groups.find { it.group_id == groupId }?.let { group ->
-                    val groupConversationsTool = com.example.ApI.tools.GroupConversationsTool(
-                        repository = repository,
-                        username = currentUser,
-                        currentChatId = currentChat.chat_id,
-                        groupId = groupId,
-                        groupName = group.group_name
-                    )
-
-                    specifications.add(groupConversationsTool.getSpecification(currentProvider))
-                }
-            }
-        }
-
-        return specifications
-    }
-
-    private suspend fun executeToolCall(toolCall: com.example.ApI.tools.ToolCall): com.example.ApI.tools.ToolExecutionResult {
-        if (toolCall.toolId == "get_current_group_conversations") {
-            val currentChat = _uiState.value.currentChat
-            val groups = _uiState.value.groups
-            val currentUser = _appSettings.value.current_user
-
-            return currentChat?.group?.let { groupId ->
-                groups.find { it.group_id == groupId }?.let { group ->
-                    val groupConversationsTool = com.example.ApI.tools.GroupConversationsTool(
-                        repository = repository,
-                        username = currentUser,
-                        currentChatId = currentChat.chat_id,
-                        groupId = groupId,
-                        groupName = group.group_name
-                    )
-                    try {
-                        groupConversationsTool.execute(toolCall.parameters)
-                    } catch (e: Exception) {
-                        com.example.ApI.tools.ToolExecutionResult.Error(
-                            "Failed to execute group conversations tool: ${e.message}"
-                        )
-                    }
-                }
-            } ?: com.example.ApI.tools.ToolExecutionResult.Error(
-                "Group conversations tool can only be used in a group chat"
-            )
-        }
-
-        val enabledToolIds = getEnabledToolSpecifications().map { it.name }
-        return ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
-    }
+    // ==================== System Prompt Management (delegated to SystemPromptManager) ====================
+    fun updateSystemPrompt(prompt: String) = systemPromptManager.updateSystemPrompt(prompt)
+    fun showSystemPromptDialog() = systemPromptManager.showSystemPromptDialog()
+    fun hideSystemPromptDialog() = systemPromptManager.hideSystemPromptDialog()
+    fun toggleSystemPromptOverride() = systemPromptManager.toggleSystemPromptOverride()
+    fun setSystemPromptOverride(enabled: Boolean) = systemPromptManager.setSystemPromptOverride(enabled)
+    fun getCurrentChatProjectGroup(): ChatGroup? = systemPromptManager.getCurrentChatProjectGroup()
+    fun getEffectiveSystemPrompt(): String = systemPromptManager.getEffectiveSystemPrompt()
 
     // ==================== Snackbar Management ====================
     fun showSnackbar(message: String) {
@@ -918,437 +698,59 @@ class ChatViewModel(
         _appSettings.value = updatedSettings
     }
 
-    // ==================== Navigation (delegated to NavigationManager) ====================
-    fun navigateToScreen(screen: Screen) = navigationManager.navigateToScreen(screen)
-    fun updateSkipWelcomeScreen(skip: Boolean) = navigationManager.updateSkipWelcomeScreen(skip)
-    fun exportChatHistory() = navigationManager.exportChatHistory()
-    fun importChatHistoryFromUri(uri: Uri) = navigationManager.importChatHistoryFromUri(uri)
+    // ==================== Navigation ====================
+    /**
+     * Navigate to a different screen.
+     * Refreshes available providers when leaving API keys screen.
+     */
+    fun navigateToScreen(screen: Screen) {
+        // Refresh available providers when navigating away from API keys screen
+        // since user may have added/removed/toggled keys
+        if (_currentScreen.value == Screen.ApiKeys && screen != Screen.ApiKeys) {
+            refreshAvailableProviders()
+        }
+        _currentScreen.value = screen
+    }
+
+    /**
+     * Update the skip welcome screen setting.
+     */
+    fun updateSkipWelcomeScreen(skip: Boolean) {
+        val updatedSettings = _appSettings.value.copy(skipWelcomeScreen = skip)
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+    }
+
+    // ==================== Full Chat History Export/Import (delegated to ExportImportManager) ====================
+    fun exportChatHistory() = exportImportManager.exportChatHistory()
+    fun importChatHistoryFromUri(uri: Uri) = exportImportManager.importChatHistoryFromUri(uri)
 
     // Text direction settings (delegated to TopBarManager)
     fun toggleTextDirection() = topBarManager.toggleTextDirection()
     fun setTextDirectionMode(mode: TextDirectionMode) = topBarManager.setTextDirectionMode(mode)
 
 
-    // Title Generation and User Settings methods
-    
-    fun updateTitleGenerationSettings(newSettings: TitleGenerationSettings) {
-        val currentSettings = _appSettings.value
-        val updatedSettings = currentSettings.copy(titleGenerationSettings = newSettings)
-        
-        repository.saveAppSettings(updatedSettings)
-        _appSettings.value = updatedSettings
-    }
-    
-    fun getAvailableProvidersForTitleGeneration(): List<String> {
-        val currentUser = _appSettings.value.current_user
-        val apiKeys = repository.loadApiKeys(currentUser)
-            .filter { it.isActive }
-            .map { it.provider }
-        
-        return listOf("openai", "anthropic", "google", "poe", "cohere", "openrouter").filter { provider ->
-            apiKeys.contains(provider)
-        }
-    }
-    
-    private suspend fun handleTitleGeneration(chat: Chat) {
-        val titleGenerationSettings = _appSettings.value.titleGenerationSettings
-        
-        // Skip if title generation is disabled
-        if (!titleGenerationSettings.enabled) return
-        
-        // Count assistant messages in this conversation
-        val assistantMessages = chat.messages.filter { it.role == "assistant" }
-        val assistantMessageCount = assistantMessages.size
-        
-        val shouldGenerateTitle = when {
-            // First model response - always generate title
-            assistantMessageCount == 1 -> true
-            // Third model response and update on extension is enabled
-            assistantMessageCount == 3 && titleGenerationSettings.updateOnExtension -> true
-            else -> false
-        }
-        
-        if (!shouldGenerateTitle) return
-        
-        try {
-            val currentUser = _appSettings.value.current_user
-            val providerToUse = if (titleGenerationSettings.provider == "auto") null else titleGenerationSettings.provider
-            
-            // Generate title using our helper function
-            val generatedTitle = repository.generateConversationTitle(
-                username = currentUser,
-                conversationId = chat.chat_id,
-                provider = providerToUse
-            )
-            
-            // Update the conversation title if we got a valid response
-            if (generatedTitle.isNotBlank() && generatedTitle != "שיחה חדשה") {
-                updateChatPreviewName(chat.chat_id, generatedTitle)
-            }
-            
-        } catch (e: Exception) {
-            // If title generation fails, just continue without updating the title
-            println("Title generation failed: ${e.message}")
-        }
-    }
-    
-    private suspend fun updateChatPreviewName(chatId: String, newTitle: String) {
-        val currentUser = _appSettings.value.current_user
-        val chatHistory = repository.loadChatHistory(currentUser)
-        
-        // Update the chat with the new preview name
-        val updatedChats = chatHistory.chat_history.map { chat ->
-            if (chat.chat_id == chatId) {
-                chat.copy(preview_name = newTitle)
-            } else {
-                chat
-            }
-        }
-        
-        val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-        repository.saveChatHistory(updatedHistory)
-        
-        // Update UI state
-        val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-        val updatedCurrentChat = finalChatHistory.find { it.chat_id == chatId }
-        
-        _uiState.value = _uiState.value.copy(
-            currentChat = updatedCurrentChat,
-            chatHistory = finalChatHistory
-        )
-    }
-    
-    // Chat Context Menu methods
-    
-    fun showChatContextMenu(chat: Chat, position: androidx.compose.ui.unit.DpOffset) {
-        _uiState.value = _uiState.value.copy(
-            chatContextMenu = ChatContextMenuState(chat, position)
-        )
-    }
-    
-    fun hideChatContextMenu() {
-        _uiState.value = _uiState.value.copy(
-            chatContextMenu = null
-        )
-    }
-    
-    fun showRenameDialog(chat: Chat) {
-        _uiState.value = _uiState.value.copy(
-            showRenameDialog = chat,
-            chatContextMenu = null
-        )
-    }
-    
-    fun hideRenameDialog() {
-        _uiState.value = _uiState.value.copy(
-            showRenameDialog = null
-        )
-    }
-    
-    fun showDeleteConfirmation(chat: Chat) {
-        _uiState.value = _uiState.value.copy(
-            showDeleteConfirmation = chat,
-            chatContextMenu = null
-        )
-    }
-    
-    fun hideDeleteConfirmation() {
-        _uiState.value = _uiState.value.copy(
-            showDeleteConfirmation = null
-        )
-    }
-
-    fun showDeleteChatConfirmation() {
-        _uiState.value = _uiState.value.copy(
-            showDeleteChatConfirmation = _uiState.value.currentChat
-        )
-    }
-
-    fun hideDeleteChatConfirmation() {
-        _uiState.value = _uiState.value.copy(
-            showDeleteChatConfirmation = null
-        )
-    }
-
-    fun deleteCurrentChat() {
-        val currentChat = _uiState.value.currentChat ?: return
-        val currentUser = _appSettings.value.current_user
-
-        viewModelScope.launch {
-            val chatHistory = repository.loadChatHistory(currentUser)
-
-            // Remove the chat from history
-            val updatedChats = chatHistory.chat_history.filter { it.chat_id != currentChat.chat_id }
-            val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-
-            // Save updated history
-            repository.saveChatHistory(updatedHistory)
-
-            // Update UI
-            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-
-            // If we're deleting the current chat, switch to the most recent one or null
-            val newCurrentChat = if (finalChatHistory.isNotEmpty()) {
-                finalChatHistory.last() // Load the most recent chat
-            } else {
-                null
-            }
-
-            _uiState.value = _uiState.value.copy(
-                chatHistory = finalChatHistory,
-                currentChat = null, // Always set to null when deleting current chat
-                systemPrompt = "",
-                showDeleteChatConfirmation = null
-            )
-
-            // Always navigate back to chat history screen when deleting current chat
-            navigateToScreen(Screen.ChatHistory)
-        }
-    }
-    
-    fun renameChat(chat: Chat, newName: String) {
-        if (newName.isBlank()) return
-        
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
-            updateChatPreviewName(chat.chat_id, newName.trim())
-            hideRenameDialog()
-        }
-    }
-    
+    // ==================== Title Generation (delegated to TitleGenerationManager) ====================
+    fun updateTitleGenerationSettings(newSettings: TitleGenerationSettings) = titleGenerationManager.updateTitleGenerationSettings(newSettings)
+    fun getAvailableProvidersForTitleGeneration(): List<String> = titleGenerationManager.getAvailableProvidersForTitleGeneration()
     fun renameChatWithAI(chat: Chat) {
-        // Close the menu immediately
-        hideChatContextMenu()
-
-        // Add chat to renaming set to show loading indicator
-        _uiState.value = _uiState.value.copy(
-            renamingChatIds = _uiState.value.renamingChatIds + chat.chat_id
-        )
-
-        viewModelScope.launch {
-            try {
-                val currentUser = _appSettings.value.current_user
-                val titleGenerationSettings = _appSettings.value.titleGenerationSettings
-                val providerToUse = if (titleGenerationSettings.provider == "auto") null else titleGenerationSettings.provider
-
-                // Generate title using our helper function
-                val generatedTitle = repository.generateConversationTitle(
-                    username = currentUser,
-                    conversationId = chat.chat_id,
-                    provider = providerToUse
-                )
-
-                // Update the conversation title if we got a valid response
-                if (generatedTitle.isNotBlank() && generatedTitle != "שיחה חדשה") {
-                    updateChatPreviewName(chat.chat_id, generatedTitle)
-                }
-
-            } catch (e: Exception) {
-                // If title generation fails, just log the error
-                println("AI rename failed: ${e.message}")
-            } finally {
-                // Remove chat from renaming set
-                _uiState.value = _uiState.value.copy(
-                    renamingChatIds = _uiState.value.renamingChatIds - chat.chat_id
-                )
-            }
-        }
-    }
-    
-    fun deleteChat(chat: Chat) {
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
-            val chatHistory = repository.loadChatHistory(currentUser)
-            
-            // Remove the chat from history
-            val updatedChats = chatHistory.chat_history.filter { it.chat_id != chat.chat_id }
-            val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-            
-            // Save updated history
-            repository.saveChatHistory(updatedHistory)
-            
-            // Update UI
-            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
-            
-            // If we're deleting the current chat, switch to the most recent one or null
-            val newCurrentChat = if (_uiState.value.currentChat?.chat_id == chat.chat_id) {
-                finalChatHistory.lastOrNull()
-            } else {
-                _uiState.value.currentChat
-            }
-            
-            _uiState.value = _uiState.value.copy(
-                chatHistory = finalChatHistory,
-                groups = chatHistory.groups,
-                currentChat = newCurrentChat,
-                showDeleteConfirmation = null
-            )
-        }
-    }
-    
-    // Web Search functionality
-    fun toggleWebSearch() {
-        val currentSupport = _uiState.value.webSearchSupport
-        val currentProvider = _uiState.value.currentProvider?.provider ?: ""
-        val currentModel = _uiState.value.currentModel
-        
-        when (currentSupport) {
-            WebSearchSupport.REQUIRED -> {
-                // Show message that it cannot be disabled
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "לא ניתן לכבות את החיבור לאינטרנט עבור מודל $currentModel דרך הספק $currentProvider"
-                )
-            }
-            WebSearchSupport.OPTIONAL -> {
-                // Toggle the state
-                _uiState.value = _uiState.value.copy(
-                    webSearchEnabled = !_uiState.value.webSearchEnabled
-                )
-            }
-            WebSearchSupport.UNSUPPORTED -> {
-                // This shouldn't happen as the icon should be hidden, but just in case
-                // Do nothing
-            }
-        }
+        chatContextMenuManager.hideChatContextMenu()
+        titleGenerationManager.renameChatWithAI(chat)
     }
 
-    private fun handleSharedFiles() {
-        sharedIntent?.let { intent ->
-            when (intent.action) {
-                Intent.ACTION_SEND -> {
-                    // Handle shared text
-                    intent.getStringExtra(Intent.EXTRA_TEXT)?.let { sharedText ->
-                        _uiState.value = _uiState.value.copy(currentMessage = sharedText)
-                    }
-                    // Handle single file sharing
-                    intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { uri ->
-                        val fileName = getFileName(context, uri) ?: "shared_file"
-                        val mimeType = resolveMimeType(context, uri, intent.type, fileName)
-                        checkAndHandleJsonFile(uri, fileName, mimeType)
-                    }
-                }
-                Intent.ACTION_SEND_MULTIPLE -> {
-                    // Multiple files sharing
-                    intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.forEach { uri ->
-                        val fileName = getFileName(context, uri) ?: "shared_file"
-                        val mimeType = resolveMimeType(context, uri, intent.type, fileName)
-                        checkAndHandleJsonFile(uri, fileName, mimeType)
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Checks IMMEDIATELY if a shared file is a valid chat JSON.
-     * If it is, shows the import dialog right away.
-     * Otherwise, adds it as a regular file attachment (which waits for chat selection).
-     */
-    private fun checkAndHandleJsonFile(uri: Uri, fileName: String, mimeType: String) {
-        // Check if it's a JSON file by extension or MIME type
-        val isJsonFile = fileName.endsWith(".json", ignoreCase = true) ||
-                        mimeType == "application/json" ||
-                        mimeType == "text/json"
-
-        if (isJsonFile) {
-            viewModelScope.launch {
-                try {
-                    // Read the JSON content
-                    val inputStream = context.contentResolver.openInputStream(uri)
-                    val jsonContent = inputStream?.bufferedReader()?.use { it.readText() }
-
-                    if (jsonContent != null && repository.validateChatJson(jsonContent)) {
-                        // Valid chat JSON - show the import choice dialog IMMEDIATELY
-                        // Navigate to ChatHistory screen if not already there
-                        _currentScreen.value = Screen.ChatHistory
-
-                        _uiState.value = _uiState.value.copy(
-                            pendingChatImport = PendingChatImport(
-                                uri = uri,
-                                fileName = fileName,
-                                mimeType = mimeType,
-                                jsonContent = jsonContent
-                            )
-                        )
-                    } else {
-                        // Invalid chat JSON - treat as regular file attachment
-                        addFileFromUri(uri, fileName, mimeType)
-                    }
-                } catch (e: Exception) {
-                    // Error reading file - treat as regular file attachment
-                    addFileFromUri(uri, fileName, mimeType)
-                }
-            }
-        } else {
-            // Not a JSON file - treat as regular file attachment
-            addFileFromUri(uri, fileName, mimeType)
-        }
-    }
-    
-    private fun getFileName(context: Context, uri: Uri): String? {
-        var fileName: String? = null
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-            if (cursor.moveToFirst() && nameIndex >= 0) {
-                fileName = cursor.getString(nameIndex)
-            }
-        }
-        return fileName
-    }
-
-    /**
-     * Resolves a specific MIME type from potentially wildcarded or incomplete intent type.
-     * Falls back to contentResolver and then file extension inference.
-     */
-    private fun resolveMimeType(context: Context, uri: Uri, intentType: String?, fileName: String?): String {
-        // Helper to check if MIME type is valid (has "/" and no wildcard)
-        fun isValidMimeType(type: String?): Boolean {
-            return !type.isNullOrBlank() && type.contains("/") && !type.contains("*")
-        }
-
-        // First try contentResolver which usually gives specific type
-        val resolvedType = context.contentResolver.getType(uri)
-
-        // If contentResolver gives a valid specific type, use it
-        if (isValidMimeType(resolvedType)) {
-            return resolvedType!!
-        }
-
-        // If intentType is specific (not wildcard), use it
-        if (isValidMimeType(intentType)) {
-            return intentType!!
-        }
-
-        // Infer from file extension
-        val extension = fileName?.substringAfterLast('.', "")?.lowercase()
-        val inferredType = when (extension) {
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            "gif" -> "image/gif"
-            "webp" -> "image/webp"
-            "bmp" -> "image/bmp"
-            "heic", "heif" -> "image/heic"
-            "svg" -> "image/svg+xml"
-            "pdf" -> "application/pdf"
-            "txt" -> "text/plain"
-            "json" -> "application/json"
-            "mp4" -> "video/mp4"
-            "mp3" -> "audio/mpeg"
-            "wav" -> "audio/wav"
-            "doc" -> "application/msword"
-            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            "xls" -> "application/vnd.ms-excel"
-            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            else -> null
-        }
-
-        if (inferredType != null) {
-            return inferredType
-        }
-
-        // Last resort: use intentType if available (even if wildcard), otherwise default
-        return intentType ?: "application/octet-stream"
-    }
+    // ==================== Chat Context Menu (delegated to ChatContextMenuManager) ====================
+    fun showChatContextMenu(chat: Chat, position: androidx.compose.ui.unit.DpOffset) = chatContextMenuManager.showChatContextMenu(chat, position)
+    fun hideChatContextMenu() = chatContextMenuManager.hideChatContextMenu()
+    fun showRenameDialog(chat: Chat) = chatContextMenuManager.showRenameDialog(chat)
+    fun hideRenameDialog() = chatContextMenuManager.hideRenameDialog()
+    fun showDeleteConfirmation(chat: Chat) = chatContextMenuManager.showDeleteConfirmation(chat)
+    fun hideDeleteConfirmation() = chatContextMenuManager.hideDeleteConfirmation()
+    fun showDeleteChatConfirmation() = chatContextMenuManager.showDeleteChatConfirmation()
+    fun hideDeleteChatConfirmation() = chatContextMenuManager.hideDeleteChatConfirmation()
+    fun deleteCurrentChat() = chatContextMenuManager.deleteCurrentChat()
+    fun renameChat(chat: Chat, newName: String) = chatContextMenuManager.renameChat(chat, newName)
+    fun deleteChat(chat: Chat) = chatContextMenuManager.deleteChat(chat)
+    fun toggleWebSearch() = chatContextMenuManager.toggleWebSearch()
 
     // Group Management Methods
 
@@ -1474,26 +876,9 @@ class ChatViewModel(
         authManager.updateGoogleWorkspaceServices(gmail, calendar, drive)
     fun initializeGoogleWorkspaceToolsIfConnected() = authManager.initializeGoogleWorkspaceToolsIfConnected()
 
-    // ==================== Tool Management ====================
-    fun enableTool(toolId: String) {
-        val currentSettings = _appSettings.value
-        if (!currentSettings.enabledTools.contains(toolId)) {
-            val updatedSettings = currentSettings.copy(
-                enabledTools = currentSettings.enabledTools + toolId
-            )
-            repository.saveAppSettings(updatedSettings)
-            _appSettings.value = updatedSettings
-        }
-    }
-
-    fun disableTool(toolId: String) {
-        val currentSettings = _appSettings.value
-        val updatedSettings = currentSettings.copy(
-            enabledTools = currentSettings.enabledTools - toolId
-        )
-        repository.saveAppSettings(updatedSettings)
-        _appSettings.value = updatedSettings
-    }
+    // ==================== Tool Management (delegated to ToolManager) ====================
+    fun enableTool(toolId: String) = toolManager.enableTool(toolId)
+    fun disableTool(toolId: String) = toolManager.disableTool(toolId)
 
     // ==================== Export/Import Methods (delegated to ExportImportManager) ====================
     fun openChatExportDialog() = exportImportManager.openChatExportDialog()

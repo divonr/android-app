@@ -1,4 +1,4 @@
-package com.example.ApI.ui
+package com.example.ApI.ui.managers.organization
 
 import android.content.Context
 import android.net.Uri

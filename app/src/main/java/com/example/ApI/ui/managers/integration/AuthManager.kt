@@ -1,4 +1,4 @@
-package com.example.ApI.ui
+package com.example.ApI.ui.managers.integration
 
 import android.content.Context
 import android.content.Intent

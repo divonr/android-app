@@ -1,4 +1,4 @@
-package com.example.ApI.ui
+package com.example.ApI.ui.managers.chat
 
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository

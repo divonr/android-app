@@ -1,4 +1,4 @@
-package com.example.ApI.ui
+package com.example.ApI.ui.managers.io
 
 import android.app.PendingIntent
 import android.content.Context
@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.InputStream
 
 /**
  * Manages chat export and import functionality.
@@ -415,5 +416,56 @@ class ExportImportManager(
      */
     fun dismissChatImportDialog() {
         updateUiState(uiState.value.copy(pendingChatImport = null))
+    }
+
+    // ==================== Full Chat History Export/Import ====================
+
+    /**
+     * Export entire chat history to a file.
+     * Shows a toast with the export path on success.
+     */
+    fun exportChatHistory() {
+        scope.launch {
+            val currentUser = appSettings.value.current_user
+            val exportPath = repository.exportChatHistory(currentUser)
+
+            if (exportPath != null) {
+                Toast.makeText(
+                    context,
+                    "היסטוריית הצ'אט יוצאה בהצלחה ל: $exportPath",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    /**
+     * Import chat history from a URI.
+     * Replaces current chat history with imported data.
+     */
+    fun importChatHistoryFromUri(uri: Uri) {
+        scope.launch {
+            try {
+                val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
+                inputStream?.use { stream ->
+                    val data = stream.readBytes()
+                    val currentUser = appSettings.value.current_user
+                    repository.importChatHistoryJson(data, currentUser)
+                    // Refresh UI state after import
+                    val chatHistory = repository.loadChatHistory(currentUser)
+                    val currentChat = chatHistory.chat_history.lastOrNull()
+                    updateUiState(
+                        uiState.value.copy(
+                            chatHistory = chatHistory.chat_history,
+                            groups = chatHistory.groups,
+                            currentChat = currentChat
+                        )
+                    )
+                    Toast.makeText(context, "היסטוריית הצ'אט יובאה בהצלחה", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "שגיאה בייבוא: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 }
