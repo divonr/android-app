@@ -245,7 +245,7 @@ class ProviderManager(
      * Determine web search support for a given provider and model.
      * Based on providers.json specifications.
      */
-    private fun getWebSearchSupport(providerName: String, modelName: String): WebSearchSupport {
+    fun getWebSearchSupport(providerName: String, modelName: String): WebSearchSupport {
         return when (providerName.lowercase()) {
             "openai" -> {
                 when (modelName) {

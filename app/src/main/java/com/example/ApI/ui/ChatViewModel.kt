@@ -595,7 +595,7 @@ class ChatViewModel(
                 null
             }
             
-            val webSearchSupport = getWebSearchSupport(currentProvider?.provider ?: "", currentModel)
+            val webSearchSupport = providerManager.getWebSearchSupport(currentProvider?.provider ?: "", currentModel)
             val webSearchEnabled = when (webSearchSupport) {
                 WebSearchSupport.REQUIRED -> true
                 WebSearchSupport.OPTIONAL -> false // Default to off for optional models
