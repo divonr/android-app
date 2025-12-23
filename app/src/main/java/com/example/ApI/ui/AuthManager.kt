@@ -16,7 +16,7 @@ import kotlinx.coroutines.withContext
  * Handles OAuth flows, connection management, and tool registration.
  * Extracted from ChatViewModel to reduce complexity.
  */
-class IntegrationManager(
+class AuthManager(
     private val repository: DataRepository,
     private val context: Context,
     private val scope: CoroutineScope,

@@ -15,7 +15,7 @@ import java.io.InputStream
  * Handles copying files to internal storage for lazy upload to providers.
  * Extracted from ChatViewModel to reduce complexity.
  */
-class FileManager(
+class AttachmentManager(
     private val repository: DataRepository,
     private val context: Context,
     private val scope: CoroutineScope,

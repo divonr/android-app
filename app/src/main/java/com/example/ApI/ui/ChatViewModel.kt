@@ -85,8 +85,8 @@ class ChatViewModel(
     }
 
     // Integration management delegate (GitHub + Google Workspace)
-    private val integrationManager: IntegrationManager by lazy {
-        IntegrationManager(
+    private val authManager: AuthManager by lazy {
+        AuthManager(
             repository = repository,
             context = context,
             scope = viewModelScope,
@@ -121,8 +121,8 @@ class ChatViewModel(
     }
 
     // File management delegate
-    private val fileManager: FileManager by lazy {
-        FileManager(
+    private val attachmentManager: AttachmentManager by lazy {
+        AttachmentManager(
             repository = repository,
             context = context,
             scope = viewModelScope,
@@ -142,7 +142,7 @@ class ChatViewModel(
             updateUiState = { newState -> _uiState.value = newState },
             selectChat = { chat -> selectChat(chat) },
             navigateToScreen = { screen -> navigateToScreen(screen) },
-            addFileFromUri = { uri, name, mime -> fileManager.addFileFromUri(uri, name, mime) }
+            addFileFromUri = { uri, name, mime -> attachmentManager.addFileFromUri(uri, name, mime) }
         )
     }
 
@@ -157,9 +157,9 @@ class ChatViewModel(
         )
     }
 
-    // Settings management delegate (temperature, thinking budget, text direction)
-    private val settingsManager: SettingsManager by lazy {
-        SettingsManager(
+    // Top bar controls delegate (temperature, thinking budget, text direction)
+    private val topBarManager: TopBarManager by lazy {
+        TopBarManager(
             context = context,
             uiState = _uiState,
             updateUiState = { newState -> _uiState.value = newState }
@@ -182,8 +182,8 @@ class ChatViewModel(
     }
 
     // Provider and model selection management delegate
-    private val providerManager: ProviderManager by lazy {
-        ProviderManager(
+    private val modelSelectionManager: ModelSelectionManager by lazy {
+        ModelSelectionManager(
             repository = repository,
             context = context,
             scope = viewModelScope,
@@ -595,7 +595,7 @@ class ChatViewModel(
                 null
             }
             
-            val webSearchSupport = providerManager.getWebSearchSupport(currentProvider?.provider ?: "", currentModel)
+            val webSearchSupport = modelSelectionManager.getWebSearchSupport(currentProvider?.provider ?: "", currentModel)
             val webSearchEnabled = when (webSearchSupport) {
                 WebSearchSupport.REQUIRED -> true
                 WebSearchSupport.OPTIONAL -> false // Default to off for optional models
@@ -991,9 +991,9 @@ class ChatViewModel(
         }
     }
 
-    // ==================== Provider/Model Selection (delegated to ProviderManager) ====================
-    fun selectProvider(provider: Provider) = providerManager.selectProvider(provider)
-    fun selectModel(modelName: String) = providerManager.selectModel(modelName)
+    // ==================== Provider/Model Selection (delegated to ModelSelectionManager) ====================
+    fun selectProvider(provider: Provider) = modelSelectionManager.selectProvider(provider)
+    fun selectModel(modelName: String) = modelSelectionManager.selectModel(modelName)
 
     fun updateSystemPrompt(prompt: String) {
         val currentUser = _appSettings.value.current_user
@@ -1029,11 +1029,11 @@ class ChatViewModel(
         }
     }
 
-    fun showProviderSelector() = providerManager.showProviderSelector()
-    fun hideProviderSelector() = providerManager.hideProviderSelector()
-    fun showModelSelector() = providerManager.showModelSelector()
-    fun hideModelSelector() = providerManager.hideModelSelector()
-    fun refreshModels() = providerManager.refreshModels()
+    fun showProviderSelector() = modelSelectionManager.showProviderSelector()
+    fun hideProviderSelector() = modelSelectionManager.hideProviderSelector()
+    fun showModelSelector() = modelSelectionManager.showModelSelector()
+    fun hideModelSelector() = modelSelectionManager.hideModelSelector()
+    fun refreshModels() = modelSelectionManager.refreshModels()
 
     fun showSystemPromptDialog() {
         _uiState.value = _uiState.value.copy(showSystemPromptDialog = true)
@@ -1194,13 +1194,13 @@ class ChatViewModel(
         )
     }
 
-    fun removeSelectedFile(file: SelectedFile) = fileManager.removeSelectedFile(file)
+    fun removeSelectedFile(file: SelectedFile) = attachmentManager.removeSelectedFile(file)
 
     // ==================== Navigation (delegated to NavigationManager) ====================
     fun navigateToScreen(screen: Screen) = navigationManager.navigateToScreen(screen)
     fun updateSkipWelcomeScreen(skip: Boolean) = navigationManager.updateSkipWelcomeScreen(skip)
 
-    fun refreshAvailableProviders() = providerManager.refreshAvailableProviders()
+    fun refreshAvailableProviders() = modelSelectionManager.refreshAvailableProviders()
     fun exportChatHistory() = navigationManager.exportChatHistory()
     
     fun showSnackbar(message: String) {
@@ -1211,19 +1211,19 @@ class ChatViewModel(
         _uiState.value = _uiState.value.copy(snackbarMessage = null)
     }
 
-    // Text direction settings (delegated to SettingsManager)
-    fun toggleTextDirection() = settingsManager.toggleTextDirection()
-    fun setTextDirectionMode(mode: TextDirectionMode) = settingsManager.setTextDirectionMode(mode)
+    // Text direction settings (delegated to TopBarManager)
+    fun toggleTextDirection() = topBarManager.toggleTextDirection()
+    fun setTextDirectionMode(mode: TextDirectionMode) = topBarManager.setTextDirectionMode(mode)
 
     fun importChatHistoryFromUri(uri: Uri) = navigationManager.importChatHistoryFromUri(uri)
     
     // File handling methods
-    fun addFileFromUri(uri: Uri, fileName: String, mimeType: String) = fileManager.addFileFromUri(uri, fileName, mimeType)
+    fun addFileFromUri(uri: Uri, fileName: String, mimeType: String) = attachmentManager.addFileFromUri(uri, fileName, mimeType)
 
-    fun addMultipleFilesFromUris(filesList: List<Triple<Uri, String, String>>) = fileManager.addMultipleFilesFromUris(filesList)
-    
-    fun showFileSelection() = fileManager.showFileSelection()
-    fun hideFileSelection() = fileManager.hideFileSelection()
+    fun addMultipleFilesFromUris(filesList: List<Triple<Uri, String, String>>) = attachmentManager.addMultipleFilesFromUris(filesList)
+
+    fun showFileSelection() = attachmentManager.showFileSelection()
+    fun hideFileSelection() = attachmentManager.hideFileSelection()
 
     fun deleteMessage(message: Message) {
         val currentUser = _appSettings.value.current_user
@@ -2043,20 +2043,20 @@ class ChatViewModel(
         )
     }
 
-    // ==================== Thinking Budget Settings (delegated to SettingsManager) ====================
-    fun onThinkingBudgetButtonClick() = settingsManager.onThinkingBudgetButtonClick()
-    fun showThinkingBudgetPopup() = settingsManager.showThinkingBudgetPopup()
-    fun hideThinkingBudgetPopup() = settingsManager.hideThinkingBudgetPopup()
-    fun setThinkingBudgetValue(value: ThinkingBudgetValue) = settingsManager.setThinkingBudgetValue(value)
-    fun setThinkingEffort(level: String) = settingsManager.setThinkingEffort(level)
-    fun setThinkingTokenBudget(tokens: Int) = settingsManager.setThinkingTokenBudget(tokens)
-    fun resetThinkingBudgetToDefault() = settingsManager.resetThinkingBudgetToDefault()
+    // ==================== Thinking Budget Settings (delegated to TopBarManager) ====================
+    fun onThinkingBudgetButtonClick() = topBarManager.onThinkingBudgetButtonClick()
+    fun showThinkingBudgetPopup() = topBarManager.showThinkingBudgetPopup()
+    fun hideThinkingBudgetPopup() = topBarManager.hideThinkingBudgetPopup()
+    fun setThinkingBudgetValue(value: ThinkingBudgetValue) = topBarManager.setThinkingBudgetValue(value)
+    fun setThinkingEffort(level: String) = topBarManager.setThinkingEffort(level)
+    fun setThinkingTokenBudget(tokens: Int) = topBarManager.setThinkingTokenBudget(tokens)
+    fun resetThinkingBudgetToDefault() = topBarManager.resetThinkingBudgetToDefault()
 
-    // ==================== Temperature Settings (delegated to SettingsManager) ====================
-    fun onTemperatureButtonClick() = settingsManager.onTemperatureButtonClick()
-    fun hideTemperaturePopup() = settingsManager.hideTemperaturePopup()
-    fun setTemperatureValue(value: Float?) = settingsManager.setTemperatureValue(value)
-    fun resetTemperatureToDefault() = settingsManager.resetTemperatureToDefault()
+    // ==================== Temperature Settings (delegated to TopBarManager) ====================
+    fun onTemperatureButtonClick() = topBarManager.onTemperatureButtonClick()
+    fun hideTemperaturePopup() = topBarManager.hideTemperaturePopup()
+    fun setTemperatureValue(value: Float?) = topBarManager.setTemperatureValue(value)
+    fun resetTemperatureToDefault() = topBarManager.resetTemperatureToDefault()
 
     // ==================== Search Methods (delegated to SearchManager) ====================
     fun enterSearchMode() = searchManager.enterSearchMode()
@@ -2078,25 +2078,25 @@ class ChatViewModel(
     fun isChildLockActive(): Boolean = childLockManager.isChildLockActive()
     fun getLockEndTime(): String = childLockManager.getLockEndTime()
 
-    // ==================== Integration Management (delegated to IntegrationManager) ====================
+    // ==================== Integration Management (delegated to AuthManager) ====================
     // GitHub Integration
-    fun connectGitHub(): String = integrationManager.connectGitHub()
-    fun getGitHubAuthUrl(): Pair<String, String> = integrationManager.getGitHubAuthUrl()
-    fun handleGitHubCallback(code: String, state: String): String = integrationManager.handleGitHubCallback(code, state)
-    fun disconnectGitHub() = integrationManager.disconnectGitHub()
-    fun isGitHubConnected(): Boolean = integrationManager.isGitHubConnected()
-    fun getGitHubConnection(): GitHubConnection? = integrationManager.getGitHubConnection()
-    fun initializeGitHubToolsIfConnected() = integrationManager.initializeGitHubToolsIfConnected()
+    fun connectGitHub(): String = authManager.connectGitHub()
+    fun getGitHubAuthUrl(): Pair<String, String> = authManager.getGitHubAuthUrl()
+    fun handleGitHubCallback(code: String, state: String): String = authManager.handleGitHubCallback(code, state)
+    fun disconnectGitHub() = authManager.disconnectGitHub()
+    fun isGitHubConnected(): Boolean = authManager.isGitHubConnected()
+    fun getGitHubConnection(): GitHubConnection? = authManager.getGitHubConnection()
+    fun initializeGitHubToolsIfConnected() = authManager.initializeGitHubToolsIfConnected()
 
     // Google Workspace Integration
-    fun getGoogleSignInIntent(): Intent = integrationManager.getGoogleSignInIntent()
-    fun handleGoogleSignInResult(data: Intent) = integrationManager.handleGoogleSignInResult(data)
-    fun isGoogleWorkspaceConnected(): Boolean = integrationManager.isGoogleWorkspaceConnected()
-    fun getGoogleWorkspaceConnection(): GoogleWorkspaceConnection? = integrationManager.getGoogleWorkspaceConnection()
-    fun disconnectGoogleWorkspace() = integrationManager.disconnectGoogleWorkspace()
+    fun getGoogleSignInIntent(): Intent = authManager.getGoogleSignInIntent()
+    fun handleGoogleSignInResult(data: Intent) = authManager.handleGoogleSignInResult(data)
+    fun isGoogleWorkspaceConnected(): Boolean = authManager.isGoogleWorkspaceConnected()
+    fun getGoogleWorkspaceConnection(): GoogleWorkspaceConnection? = authManager.getGoogleWorkspaceConnection()
+    fun disconnectGoogleWorkspace() = authManager.disconnectGoogleWorkspace()
     fun updateGoogleWorkspaceServices(gmail: Boolean, calendar: Boolean, drive: Boolean) =
-        integrationManager.updateGoogleWorkspaceServices(gmail, calendar, drive)
-    fun initializeGoogleWorkspaceToolsIfConnected() = integrationManager.initializeGoogleWorkspaceToolsIfConnected()
+        authManager.updateGoogleWorkspaceServices(gmail, calendar, drive)
+    fun initializeGoogleWorkspaceToolsIfConnected() = authManager.initializeGoogleWorkspaceToolsIfConnected()
 
     // ==================== Tool Management ====================
     fun enableTool(toolId: String) {

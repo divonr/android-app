@@ -15,7 +15,7 @@ import kotlinx.coroutines.withContext
  * Handles provider switching, model selection, and model list refreshing.
  * Extracted from ChatViewModel to reduce complexity.
  */
-class ProviderManager(
+class ModelSelectionManager(
     private val repository: DataRepository,
     private val context: Context,
     private val scope: CoroutineScope,

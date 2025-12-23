@@ -6,11 +6,11 @@ import com.example.ApI.data.model.*
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Manages application settings: temperature, thinking budget, and text direction.
+ * Manages top bar controls: temperature, thinking budget, and text direction.
  * Handles UI popups and value updates for model parameters.
  * Extracted from ChatViewModel to reduce complexity.
  */
-class SettingsManager(
+class TopBarManager(
     private val context: Context,
     private val uiState: StateFlow<ChatUiState>,
     private val updateUiState: (ChatUiState) -> Unit
