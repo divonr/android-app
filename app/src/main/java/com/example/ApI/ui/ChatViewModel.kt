@@ -157,6 +157,43 @@ class ChatViewModel(
         )
     }
 
+    // Settings management delegate (temperature, thinking budget, text direction)
+    private val settingsManager: SettingsManager by lazy {
+        SettingsManager(
+            context = context,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState }
+        )
+    }
+
+    // Navigation and chat history management delegate
+    private val navigationManager: NavigationManager by lazy {
+        NavigationManager(
+            repository = repository,
+            context = context,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            currentScreen = _currentScreen,
+            updateAppSettings = { newSettings -> _appSettings.value = newSettings },
+            updateUiState = { newState -> _uiState.value = newState },
+            refreshAvailableProviders = { refreshAvailableProviders() }
+        )
+    }
+
+    // Provider and model selection management delegate
+    private val providerManager: ProviderManager by lazy {
+        ProviderManager(
+            repository = repository,
+            context = context,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateAppSettings = { newSettings -> _appSettings.value = newSettings },
+            updateUiState = { newState -> _uiState.value = newState }
+        )
+    }
+
     private val json = Json {
         prettyPrint = false
         ignoreUnknownKeys = true
@@ -954,52 +991,9 @@ class ChatViewModel(
         }
     }
 
-    fun selectProvider(provider: Provider) {
-        val firstModel = provider.models.firstOrNull()?.name ?: "Unknown Model"
-        
-        val updatedSettings = _appSettings.value.copy(
-            selected_provider = provider.provider,
-            selected_model = firstModel
-        )
-        
-        repository.saveAppSettings(updatedSettings)
-        _appSettings.value = updatedSettings
-        
-        val webSearchSupport = getWebSearchSupport(provider.provider, firstModel)
-        val webSearchEnabled = when (webSearchSupport) {
-            WebSearchSupport.REQUIRED -> true
-            WebSearchSupport.OPTIONAL -> _uiState.value.webSearchEnabled
-            WebSearchSupport.UNSUPPORTED -> false
-        }
-        
-        _uiState.value = _uiState.value.copy(
-            currentProvider = provider,
-            currentModel = firstModel,
-            showProviderSelector = false,
-            webSearchSupport = webSearchSupport,
-            webSearchEnabled = webSearchEnabled
-        )
-    }
-
-    fun selectModel(modelName: String) {
-        val newSettings = _appSettings.value.copy(selected_model = modelName)
-        repository.saveAppSettings(newSettings)
-        _appSettings.value = newSettings
-        
-        val webSearchSupport = getWebSearchSupport(_uiState.value.currentProvider?.provider ?: "", modelName)
-        val webSearchEnabled = when (webSearchSupport) {
-            WebSearchSupport.REQUIRED -> true
-            WebSearchSupport.OPTIONAL -> _uiState.value.webSearchEnabled
-            WebSearchSupport.UNSUPPORTED -> false
-        }
-        
-        _uiState.value = _uiState.value.copy(
-            currentModel = modelName,
-            showModelSelector = false,
-            webSearchSupport = webSearchSupport,
-            webSearchEnabled = webSearchEnabled
-        )
-    }
+    // ==================== Provider/Model Selection (delegated to ProviderManager) ====================
+    fun selectProvider(provider: Provider) = providerManager.selectProvider(provider)
+    fun selectModel(modelName: String) = providerManager.selectModel(modelName)
 
     fun updateSystemPrompt(prompt: String) {
         val currentUser = _appSettings.value.current_user
@@ -1035,94 +1029,11 @@ class ChatViewModel(
         }
     }
 
-    fun showProviderSelector() {
-        _uiState.value = _uiState.value.copy(showProviderSelector = true)
-    }
-
-    fun hideProviderSelector() {
-        _uiState.value = _uiState.value.copy(showProviderSelector = false)
-    }
-
-    fun showModelSelector() {
-        _uiState.value = _uiState.value.copy(showModelSelector = true)
-    }
-
-    fun hideModelSelector() {
-        _uiState.value = _uiState.value.copy(showModelSelector = false)
-    }
-
-    fun refreshModels() {
-        viewModelScope.launch {
-            try {
-                // Show loading message
-                withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(
-                        context,
-                        "מעדכן את רשימת המודלים הזמינים...",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                }
-
-                android.util.Log.d("ChatViewModel", "Starting forceRefreshModels()")
-                val (success, errorMessage) = repository.forceRefreshModels()
-                android.util.Log.d("ChatViewModel", "forceRefreshModels() returned: success=$success, error=$errorMessage")
-
-                if (success) {
-                    // Reload providers with updated models
-                    val settings = repository.loadAppSettings()
-                    val allProviders = repository.loadProviders()
-                    val activeApiKeyProviders = repository.loadApiKeys(settings.current_user)
-                        .filter { it.isActive }
-                        .map { it.provider }
-                    val providers = allProviders.filter { provider ->
-                        activeApiKeyProviders.contains(provider.provider)
-                    }
-
-                    // Update UI state with refreshed providers
-                    _uiState.value = _uiState.value.copy(availableProviders = providers)
-
-                    // Update current provider with refreshed models
-                    val currentProvider = providers.find { it.provider == _uiState.value.currentProvider?.provider }
-                    if (currentProvider != null) {
-                        _uiState.value = _uiState.value.copy(currentProvider = currentProvider)
-                    }
-
-                    // Show success message
-                    withContext(Dispatchers.Main) {
-                        android.widget.Toast.makeText(
-                            context,
-                            "הרשימה עודכנה בהצלחה!",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                } else {
-                    // Show failure message with details
-                    withContext(Dispatchers.Main) {
-                        val message = if (errorMessage != null) {
-                            "שגיאה בעדכון הרשימה: $errorMessage"
-                        } else {
-                            "שגיאה בעדכון הרשימה. אנא נסה שוב."
-                        }
-                        android.widget.Toast.makeText(
-                            context,
-                            message,
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("ChatViewModel", "Failed to refresh models", e)
-                // Show error message
-                withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(
-                        context,
-                        "שגיאה בעדכון הרשימה: ${e.message}",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-    }
+    fun showProviderSelector() = providerManager.showProviderSelector()
+    fun hideProviderSelector() = providerManager.hideProviderSelector()
+    fun showModelSelector() = providerManager.showModelSelector()
+    fun hideModelSelector() = providerManager.hideModelSelector()
+    fun refreshModels() = providerManager.refreshModels()
 
     fun showSystemPromptDialog() {
         _uiState.value = _uiState.value.copy(showSystemPromptDialog = true)
@@ -1285,85 +1196,12 @@ class ChatViewModel(
 
     fun removeSelectedFile(file: SelectedFile) = fileManager.removeSelectedFile(file)
 
-    fun navigateToScreen(screen: Screen) {
-        // Refresh available providers when navigating away from API keys screen
-        // since user may have added/removed/toggled keys
-        if (_currentScreen.value == Screen.ApiKeys && screen != Screen.ApiKeys) {
-            refreshAvailableProviders()
-        }
-        _currentScreen.value = screen
-    }
+    // ==================== Navigation (delegated to NavigationManager) ====================
+    fun navigateToScreen(screen: Screen) = navigationManager.navigateToScreen(screen)
+    fun updateSkipWelcomeScreen(skip: Boolean) = navigationManager.updateSkipWelcomeScreen(skip)
 
-    fun updateSkipWelcomeScreen(skip: Boolean) {
-        val updatedSettings = _appSettings.value.copy(skipWelcomeScreen = skip)
-        repository.saveAppSettings(updatedSettings)
-        _appSettings.value = updatedSettings
-    }
-
-    /**
-     * Refresh the available providers list based on active API keys.
-     * Called when returning from API keys screen to update provider selection.
-     */
-    fun refreshAvailableProviders() {
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
-            val allProviders = repository.loadProviders()
-            val activeApiKeyProviders = repository.loadApiKeys(currentUser)
-                .filter { it.isActive }
-                .map { it.provider }
-            val filteredProviders = allProviders.filter { provider ->
-                activeApiKeyProviders.contains(provider.provider)
-            }
-
-            // Check if current provider is still available
-            val currentProvider = _uiState.value.currentProvider
-            val newCurrentProvider = if (currentProvider != null &&
-                activeApiKeyProviders.contains(currentProvider.provider)) {
-                currentProvider
-            } else {
-                filteredProviders.firstOrNull()
-            }
-
-            // Update model if provider changed
-            val newCurrentModel = if (newCurrentProvider?.provider != currentProvider?.provider) {
-                newCurrentProvider?.models?.firstOrNull()?.name ?: ""
-            } else {
-                _uiState.value.currentModel
-            }
-
-            _uiState.value = _uiState.value.copy(
-                availableProviders = filteredProviders,
-                currentProvider = newCurrentProvider,
-                currentModel = newCurrentModel
-            )
-
-            // Update app settings if provider/model changed
-            if (newCurrentProvider?.provider != _appSettings.value.selected_provider ||
-                newCurrentModel != _appSettings.value.selected_model) {
-                val updatedSettings = _appSettings.value.copy(
-                    selected_provider = newCurrentProvider?.provider ?: "",
-                    selected_model = newCurrentModel
-                )
-                repository.saveAppSettings(updatedSettings)
-                _appSettings.value = updatedSettings
-            }
-        }
-    }
-    
-    fun exportChatHistory() {
-        viewModelScope.launch {
-            val currentUser = _appSettings.value.current_user
-            val exportPath = repository.exportChatHistory(currentUser)
-
-            if (exportPath != null) {
-                Toast.makeText(
-                    context,
-                    "היסטוריית הצ'אט יוצאה בהצלחה ל: $exportPath",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
-    }
+    fun refreshAvailableProviders() = providerManager.refreshAvailableProviders()
+    fun exportChatHistory() = navigationManager.exportChatHistory()
     
     fun showSnackbar(message: String) {
         _uiState.value = _uiState.value.copy(snackbarMessage = message)
@@ -1372,45 +1210,12 @@ class ChatViewModel(
     fun clearSnackbar() {
         _uiState.value = _uiState.value.copy(snackbarMessage = null)
     }
-    
-    fun toggleTextDirection() {
-        val currentMode = _uiState.value.textDirectionMode
-        val nextMode = when (currentMode) {
-            TextDirectionMode.AUTO -> TextDirectionMode.RTL
-            TextDirectionMode.RTL -> TextDirectionMode.LTR
-            TextDirectionMode.LTR -> TextDirectionMode.AUTO
-        }
-        _uiState.value = _uiState.value.copy(textDirectionMode = nextMode)
-    }
 
-    fun setTextDirectionMode(mode: TextDirectionMode) {
-        _uiState.value = _uiState.value.copy(textDirectionMode = mode)
-    }
-    
-    fun importChatHistoryFromUri(uri: Uri) {
-        viewModelScope.launch {
-            try {
-                val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
-                inputStream?.use { stream ->
-                    val data = stream.readBytes()
-                    val currentUser = _appSettings.value.current_user
-                    repository.importChatHistoryJson(data, currentUser)
-                    // Refresh UI state after import
-                    val chatHistory = repository.loadChatHistory(currentUser)
-                    val currentChat = chatHistory.chat_history.lastOrNull()
-                    _uiState.value = _uiState.value.copy(
-                        chatHistory = chatHistory.chat_history,
-                        groups = chatHistory.groups,
-                        currentChat = currentChat
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    snackbarMessage = "שגיאה בייבוא היסטוריית צ'אט"
-                )
-            }
-        }
-    }
+    // Text direction settings (delegated to SettingsManager)
+    fun toggleTextDirection() = settingsManager.toggleTextDirection()
+    fun setTextDirectionMode(mode: TextDirectionMode) = settingsManager.setTextDirectionMode(mode)
+
+    fun importChatHistoryFromUri(uri: Uri) = navigationManager.importChatHistoryFromUri(uri)
     
     // File handling methods
     fun addFileFromUri(uri: Uri, fileName: String, mimeType: String) = fileManager.addFileFromUri(uri, fileName, mimeType)
@@ -2030,43 +1835,7 @@ class ChatViewModel(
             }
         }
     }
-    
-    private fun getWebSearchSupport(providerName: String, modelName: String): WebSearchSupport {
-        // Based on the providers.json specifications from the user
-        return when (providerName.lowercase()) {
-            "openai" -> {
-                when (modelName) {
-                    "gpt-5", "gpt-4.1", "gpt-4o", "o3", "o4-mini" -> WebSearchSupport.OPTIONAL
-                    "o4-mini-deep-research" -> WebSearchSupport.REQUIRED
-                    "o1", "o1-pro" -> WebSearchSupport.UNSUPPORTED
-                    else -> WebSearchSupport.OPTIONAL
-                }
-            }
-            "poe" -> {
-                when (modelName) {
-                    "Claude-Sonnet-4-Search" -> WebSearchSupport.REQUIRED
-                    "Gemini-2.5-Pro" -> WebSearchSupport.REQUIRED
-                    else -> WebSearchSupport.UNSUPPORTED
-                }
-            }
-            "google" -> {
-                when (modelName) {
-                    "gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-pro-latest", "gemini-1.5-flash-latest" -> WebSearchSupport.OPTIONAL
-                    else -> WebSearchSupport.OPTIONAL
-                }
-            }
-            "anthropic" -> {
-                // All Claude models support web search as optional
-                WebSearchSupport.OPTIONAL
-            }
-            "openrouter" -> {
-                // OpenRouter web search depends on the underlying model
-                WebSearchSupport.UNSUPPORTED
-            }
-            else -> WebSearchSupport.UNSUPPORTED
-        }
-    }
-    
+
     private fun handleSharedFiles() {
         sharedIntent?.let { intent ->
             when (intent.action) {
@@ -2274,146 +2043,20 @@ class ChatViewModel(
         )
     }
 
-    // Thinking Budget Control
-    /**
-     * Handle click on the thinking budget control button.
-     * Shows appropriate UI based on current provider/model thinking support.
-     */
-    fun onThinkingBudgetButtonClick() {
-        val budgetType = _uiState.value.getThinkingBudgetType()
+    // ==================== Thinking Budget Settings (delegated to SettingsManager) ====================
+    fun onThinkingBudgetButtonClick() = settingsManager.onThinkingBudgetButtonClick()
+    fun showThinkingBudgetPopup() = settingsManager.showThinkingBudgetPopup()
+    fun hideThinkingBudgetPopup() = settingsManager.hideThinkingBudgetPopup()
+    fun setThinkingBudgetValue(value: ThinkingBudgetValue) = settingsManager.setThinkingBudgetValue(value)
+    fun setThinkingEffort(level: String) = settingsManager.setThinkingEffort(level)
+    fun setThinkingTokenBudget(tokens: Int) = settingsManager.setThinkingTokenBudget(tokens)
+    fun resetThinkingBudgetToDefault() = settingsManager.resetThinkingBudgetToDefault()
 
-        when (budgetType) {
-            is ThinkingBudgetType.NotSupported -> {
-                // Show toast that this model doesn't support thinking
-                Toast.makeText(context, "מודל זה אינו תומך במצב חשיבה", Toast.LENGTH_SHORT).show()
-            }
-            is ThinkingBudgetType.InDevelopment -> {
-                // Show toast that support is in development
-                Toast.makeText(context, "נכון לעכשיו התמיכה בפרמטר למודל זה עדיין בפיתוח", Toast.LENGTH_SHORT).show()
-            }
-            is ThinkingBudgetType.Discrete, is ThinkingBudgetType.Continuous -> {
-                // Toggle popup visibility
-                _uiState.value = _uiState.value.copy(
-                    showThinkingBudgetPopup = !_uiState.value.showThinkingBudgetPopup
-                )
-
-                // Initialize with default value if currently None
-                if (_uiState.value.thinkingBudgetValue == ThinkingBudgetValue.None) {
-                    val provider = _uiState.value.currentProvider?.provider ?: return
-                    val modelConfig = _uiState.value.currentProvider?.models
-                        ?.find { it.name == _uiState.value.currentModel }
-                        ?.thinkingConfig
-                    val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, _uiState.value.currentModel, modelConfig)
-                    _uiState.value = _uiState.value.copy(thinkingBudgetValue = defaultValue)
-                }
-            }
-        }
-    }
-
-    /**
-     * Show the thinking budget popup.
-     */
-    fun showThinkingBudgetPopup() {
-        _uiState.value = _uiState.value.copy(showThinkingBudgetPopup = true)
-    }
-
-    /**
-     * Hide the thinking budget popup.
-     */
-    fun hideThinkingBudgetPopup() {
-        _uiState.value = _uiState.value.copy(showThinkingBudgetPopup = false)
-    }
-
-    /**
-     * Set the thinking budget value.
-     */
-    fun setThinkingBudgetValue(value: ThinkingBudgetValue) {
-        _uiState.value = _uiState.value.copy(thinkingBudgetValue = value)
-    }
-
-    /**
-     * Set discrete thinking effort level.
-     */
-    fun setThinkingEffort(level: String) {
-        _uiState.value = _uiState.value.copy(
-            thinkingBudgetValue = ThinkingBudgetValue.Effort(level)
-        )
-    }
-
-    /**
-     * Set continuous thinking token budget.
-     */
-    fun setThinkingTokenBudget(tokens: Int) {
-        _uiState.value = _uiState.value.copy(
-            thinkingBudgetValue = ThinkingBudgetValue.Tokens(tokens)
-        )
-    }
-
-    /**
-     * Reset thinking budget to model default when provider/model changes.
-     */
-    fun resetThinkingBudgetToDefault() {
-        val provider = _uiState.value.currentProvider?.provider
-        val model = _uiState.value.currentModel
-
-        if (provider != null) {
-            val modelConfig = _uiState.value.currentProvider?.models
-                ?.find { it.name == model }
-                ?.thinkingConfig
-            val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, model, modelConfig)
-            _uiState.value = _uiState.value.copy(
-                thinkingBudgetValue = defaultValue,
-                showThinkingBudgetPopup = false
-            )
-        }
-    }
-
-    // ==================== Temperature Control ====================
-
-    /**
-     * Handle click on the temperature control button.
-     * Shows the temperature popup if the model supports temperature.
-     */
-    fun onTemperatureButtonClick() {
-        val tempConfig = _uiState.value.getTemperatureConfig()
-
-        if (tempConfig == null) {
-            // Temperature not supported for this provider
-            Toast.makeText(context, "ספק זה אינו תומך בשליטה על טמפרטורה", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        // Toggle popup visibility
-        _uiState.value = _uiState.value.copy(
-            showTemperaturePopup = !_uiState.value.showTemperaturePopup
-        )
-    }
-
-    /**
-     * Hide the temperature popup.
-     */
-    fun hideTemperaturePopup() {
-        _uiState.value = _uiState.value.copy(showTemperaturePopup = false)
-    }
-
-    /**
-     * Set the temperature value.
-     * @param value The temperature value, or null to use API default
-     */
-    fun setTemperatureValue(value: Float?) {
-        _uiState.value = _uiState.value.copy(temperatureValue = value)
-    }
-
-    /**
-     * Reset temperature to model default when provider/model changes.
-     */
-    fun resetTemperatureToDefault() {
-        val tempConfig = _uiState.value.getTemperatureConfig()
-        _uiState.value = _uiState.value.copy(
-            temperatureValue = tempConfig?.default,
-            showTemperaturePopup = false
-        )
-    }
+    // ==================== Temperature Settings (delegated to SettingsManager) ====================
+    fun onTemperatureButtonClick() = settingsManager.onTemperatureButtonClick()
+    fun hideTemperaturePopup() = settingsManager.hideTemperaturePopup()
+    fun setTemperatureValue(value: Float?) = settingsManager.setTemperatureValue(value)
+    fun resetTemperatureToDefault() = settingsManager.resetTemperatureToDefault()
 
     // ==================== Search Methods (delegated to SearchManager) ====================
     fun enterSearchMode() = searchManager.enterSearchMode()
