@@ -1,22 +1,12 @@
 package com.example.ApI.data.repository
 
 import android.content.Context
-import android.os.Environment
 import com.example.ApI.data.model.*
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.network.LLMApiService
-import com.example.ApI.data.network.ApiResponse
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.serialization.json.*
-import kotlinx.serialization.encodeToString
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
 import java.io.File
-import java.io.IOException
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.UUID
 
 class DataRepository(private val context: Context) {
@@ -35,6 +25,8 @@ class DataRepository(private val context: Context) {
     // Managers
     private val modelsCacheManager = ModelsCacheManager(internalDir, json)
     private val localStorageManager = LocalStorageManager(internalDir, json)
+    private val chatHistoryManager = ChatHistoryManager(internalDir, json)
+    private val groupProjectManager = GroupProjectManager(chatHistoryManager)
     private val externalConnectionsManager = ExternalConnectionsManager(internalDir, json, localStorageManager)
     private val fileUploadManager = FileUploadManager(json) { username -> localStorageManager.loadApiKeys(username) }
     private val chatSearchService = ChatSearchService { username -> loadChatHistory(username) }
@@ -62,272 +54,27 @@ class DataRepository(private val context: Context) {
 
     fun loadProviders(): List<Provider> = modelsCacheManager.buildProviders()
 
-    // Chat History
-    fun loadChatHistory(username: String): UserChatHistory {
-        val file = File(internalDir, "chat_history_$username.json")
-        return if (file.exists()) {
-            try {
-                val content = file.readText()
-                json.decodeFromString<UserChatHistory>(content)
-            } catch (e: Exception) {
-                android.util.Log.e("DataRepository", "Failed to load chat history", e)
-                UserChatHistory(username, emptyList(), emptyList())
-            }
-        } else {
-            android.util.Log.e("DataRepository", "Failed to load chat history, file doesn't exist")
-            UserChatHistory(username, emptyList(), emptyList())
-        }
-    }
-    
-    fun saveChatHistory(chatHistory: UserChatHistory) {
-        val file = File(internalDir, "chat_history_${chatHistory.user_name}.json")
-        try {
-            file.writeText(json.encodeToString(chatHistory))
-        } catch (e: IOException) {
-            // Handle error
-        }
-    }
-    
-    fun getChatJson(username: String, chatId: String): String? {
-        return try {
-            val chat = loadChatHistory(username).chat_history.find { it.chat_id == chatId }
-            chat?.let { json.encodeToString(it) }
-        } catch (e: Exception) {
-            null
-        }
-    }
+    // ============ Chat History (delegated to ChatHistoryManager) ============
 
-    fun saveChatJsonToDownloads(chatId: String, content: String): String? {
-        return try {
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadsDir.exists()) {
-                downloadsDir.mkdirs()
-            }
-            val exportFile = File(downloadsDir, "${chatId}.json")
-            exportFile.writeText(content)
-            exportFile.absolutePath
-        } catch (e: Exception) {
-            null
-        }
-    }
-    fun addMessageToChat(username: String, chatId: String, message: Message): Chat? {
-        val chatHistory = loadChatHistory(username)
-        val targetChat = chatHistory.chat_history.find { it.chat_id == chatId }?.copy(
-            messages = chatHistory.chat_history.find { it.chat_id == chatId }?.messages.orEmpty() + message
-        )
-        
-        val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
-        val updatedHistory = chatHistory.copy(
-            chat_history = if (targetChat != null) {
-                otherChats + targetChat // Add the updated chat at the end
-            } else {
-                chatHistory.chat_history
-            }
-        )
-        
-        saveChatHistory(updatedHistory)
-        return targetChat
-    }
-    
-    fun createNewChat(username: String, previewName: String, systemPrompt: String = ""): Chat {
-        val chatId = UUID.randomUUID().toString()
-        val newChat = Chat(
-            chat_id = chatId,
-            preview_name = previewName,
-            messages = emptyList(),
-            systemPrompt = systemPrompt
-        )
+    fun loadChatHistory(username: String): UserChatHistory = chatHistoryManager.loadChatHistory(username)
+    fun saveChatHistory(chatHistory: UserChatHistory) = chatHistoryManager.saveChatHistory(chatHistory)
+    fun getChatJson(username: String, chatId: String): String? = chatHistoryManager.getChatJson(username, chatId)
+    fun saveChatJsonToDownloads(chatId: String, content: String): String? = chatHistoryManager.saveChatJsonToDownloads(chatId, content)
+    fun addMessageToChat(username: String, chatId: String, message: Message): Chat? = chatHistoryManager.addMessageToChat(username, chatId, message)
+    fun createNewChat(username: String, previewName: String, systemPrompt: String = ""): Chat = chatHistoryManager.createNewChat(username, previewName, systemPrompt)
+    fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat = chatHistoryManager.createNewChatInGroup(username, previewName, groupId, systemPrompt)
+    fun updateChatSystemPrompt(username: String, chatId: String, systemPrompt: String): Chat? = chatHistoryManager.updateChatSystemPrompt(username, chatId, systemPrompt)
 
-        val chatHistory = loadChatHistory(username)
-        val updatedHistory = chatHistory.copy(
-            chat_history = chatHistory.chat_history + newChat
-        )
-        saveChatHistory(updatedHistory)
+    // ============ Group Management (delegated to GroupProjectManager) ============
 
-        return newChat
-    }
-
-    fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat {
-        val chatId = UUID.randomUUID().toString()
-        val newChat = Chat(
-            chat_id = chatId,
-            preview_name = previewName,
-            messages = emptyList(),
-            systemPrompt = systemPrompt,
-            group = groupId
-        )
-
-        val chatHistory = loadChatHistory(username)
-        val updatedHistory = chatHistory.copy(
-            chat_history = chatHistory.chat_history + newChat
-        )
-        saveChatHistory(updatedHistory)
-
-        return newChat
-    }
-    
-    fun updateChatSystemPrompt(username: String, chatId: String, systemPrompt: String): Chat? {
-        val chatHistory = loadChatHistory(username)
-        val updatedChats = chatHistory.chat_history.map { chat ->
-            if (chat.chat_id == chatId) {
-                chat.copy(systemPrompt = systemPrompt)
-            } else {
-                chat
-            }
-        }
-
-        val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-        saveChatHistory(updatedHistory)
-
-        return updatedChats.find { it.chat_id == chatId }
-    }
-
-    // Group Management
-    fun createNewGroup(username: String, groupName: String): ChatGroup {
-        val chatHistory = loadChatHistory(username)
-        val groupId = UUID.randomUUID().toString()
-        val newGroup = ChatGroup(
-            group_id = groupId,
-            group_name = groupName
-        )
-
-        val updatedHistory = chatHistory.copy(groups = chatHistory.groups + newGroup)
-        saveChatHistory(updatedHistory)
-
-        return newGroup
-    }
-
-    fun addChatToGroup(username: String, chatId: String, groupId: String): Boolean {
-        val chatHistory = loadChatHistory(username)
-
-        // Check if group exists
-        val groupExists = chatHistory.groups.any { it.group_id == groupId }
-        if (!groupExists) return false
-
-        val updatedChats = chatHistory.chat_history.map { chat ->
-            if (chat.chat_id == chatId) {
-                chat.copy(group = groupId)
-            } else {
-                chat
-            }
-        }
-
-        val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-        saveChatHistory(updatedHistory)
-
-        return true
-    }
-
-    fun removeChatFromGroup(username: String, chatId: String): Boolean {
-        val chatHistory = loadChatHistory(username)
-
-        val updatedChats = chatHistory.chat_history.map { chat ->
-            if (chat.chat_id == chatId) {
-                chat.copy(group = null)
-            } else {
-                chat
-            }
-        }
-
-        val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-        saveChatHistory(updatedHistory)
-
-        return true
-    }
-
-    fun deleteGroup(username: String, groupId: String): Boolean {
-        val chatHistory = loadChatHistory(username)
-
-        // Remove all chats from this group
-        val updatedChats = chatHistory.chat_history.map { chat ->
-            if (chat.group == groupId) {
-                chat.copy(group = null)
-            } else {
-                chat
-            }
-        }
-
-        // Remove the group
-        val updatedGroups = chatHistory.groups.filter { it.group_id != groupId }
-
-        val updatedHistory = chatHistory.copy(
-            chat_history = updatedChats,
-            groups = updatedGroups
-        )
-        saveChatHistory(updatedHistory)
-
-        return true
-    }
-
-    fun renameGroup(username: String, groupId: String, newName: String): Boolean {
-        val chatHistory = loadChatHistory(username)
-
-        val updatedGroups = chatHistory.groups.map { group ->
-            if (group.group_id == groupId) {
-                group.copy(group_name = newName)
-            } else {
-                group
-            }
-        }
-
-        val updatedHistory = chatHistory.copy(groups = updatedGroups)
-        saveChatHistory(updatedHistory)
-
-        return true
-    }
-
-    fun updateGroupProjectStatus(username: String, groupId: String, isProject: Boolean): Boolean {
-        val chatHistory = loadChatHistory(username)
-
-        val updatedGroups = chatHistory.groups.map { group ->
-            if (group.group_id == groupId) {
-                group.copy(is_project = isProject)
-            } else {
-                group
-            }
-        }
-
-        val updatedHistory = chatHistory.copy(groups = updatedGroups)
-        saveChatHistory(updatedHistory)
-
-        return true
-    }
-
-    fun addAttachmentToGroup(username: String, groupId: String, attachment: Attachment): Boolean {
-        val chatHistory = loadChatHistory(username)
-
-        val updatedGroups = chatHistory.groups.map { group ->
-            if (group.group_id == groupId) {
-                group.copy(group_attachments = group.group_attachments + attachment)
-            } else {
-                group
-            }
-        }
-
-        val updatedHistory = chatHistory.copy(groups = updatedGroups)
-        saveChatHistory(updatedHistory)
-
-        return true
-    }
-
-    fun removeAttachmentFromGroup(username: String, groupId: String, attachmentIndex: Int): Boolean {
-        val chatHistory = loadChatHistory(username)
-
-        val updatedGroups = chatHistory.groups.map { group ->
-            if (group.group_id == groupId && attachmentIndex >= 0 && attachmentIndex < group.group_attachments.size) {
-                val updatedAttachments = group.group_attachments.toMutableList()
-                updatedAttachments.removeAt(attachmentIndex)
-                group.copy(group_attachments = updatedAttachments)
-            } else {
-                group
-            }
-        }
-
-        val updatedHistory = chatHistory.copy(groups = updatedGroups)
-        saveChatHistory(updatedHistory)
-
-        return true
-    }
+    fun createNewGroup(username: String, groupName: String): ChatGroup = groupProjectManager.createNewGroup(username, groupName)
+    fun addChatToGroup(username: String, chatId: String, groupId: String): Boolean = groupProjectManager.addChatToGroup(username, chatId, groupId)
+    fun removeChatFromGroup(username: String, chatId: String): Boolean = groupProjectManager.removeChatFromGroup(username, chatId)
+    fun deleteGroup(username: String, groupId: String): Boolean = groupProjectManager.deleteGroup(username, groupId)
+    fun renameGroup(username: String, groupId: String, newName: String): Boolean = groupProjectManager.renameGroup(username, groupId, newName)
+    fun updateGroupProjectStatus(username: String, groupId: String, isProject: Boolean): Boolean = groupProjectManager.updateGroupProjectStatus(username, groupId, isProject)
+    fun addAttachmentToGroup(username: String, groupId: String, attachment: Attachment): Boolean = groupProjectManager.addAttachmentToGroup(username, groupId, attachment)
+    fun removeAttachmentFromGroup(username: String, groupId: String, attachmentIndex: Int): Boolean = groupProjectManager.removeAttachmentFromGroup(username, groupId, attachmentIndex)
     
     // ============ Local Storage (delegated to LocalStorageManager) ============
 
@@ -342,48 +89,8 @@ class DataRepository(private val context: Context) {
     fun saveFileLocally(fileName: String, data: ByteArray): String? = localStorageManager.saveFileLocally(fileName, data)
     fun deleteFile(filePath: String): Boolean = localStorageManager.deleteFile(filePath)
     
-    // Replace a specific message in a chat
-    fun replaceMessageInChat(username: String, chatId: String, oldMessage: Message, newMessage: Message): Chat? {
-        val chatHistory = loadChatHistory(username)
-        val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
-        
-        val updatedMessages = targetChat.messages.map { message ->
-            if (message == oldMessage) newMessage else message
-        }
-        
-        val updatedChat = targetChat.copy(messages = updatedMessages)
-        val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
-        
-        val updatedHistory = chatHistory.copy(
-            chat_history = otherChats + updatedChat
-        )
-        
-        saveChatHistory(updatedHistory)
-        return updatedChat
-    }
-    
-    // Delete all messages from a specific message onwards (including the message)
-    fun deleteMessagesFromPoint(username: String, chatId: String, fromMessage: Message): Chat? {
-        val chatHistory = loadChatHistory(username)
-        val targetChat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
-        
-        // Find the index of the message to delete from
-        val messageIndex = targetChat.messages.indexOf(fromMessage)
-        if (messageIndex == -1) return targetChat // Message not found
-        
-        // Keep only messages before this index
-        val updatedMessages = targetChat.messages.take(messageIndex)
-        
-        val updatedChat = targetChat.copy(messages = updatedMessages)
-        val otherChats = chatHistory.chat_history.filter { it.chat_id != chatId }
-        
-        val updatedHistory = chatHistory.copy(
-            chat_history = otherChats + updatedChat
-        )
-        
-        saveChatHistory(updatedHistory)
-        return updatedChat
-    }
+    fun replaceMessageInChat(username: String, chatId: String, oldMessage: Message, newMessage: Message): Chat? = chatHistoryManager.replaceMessageInChat(username, chatId, oldMessage, newMessage)
+    fun deleteMessagesFromPoint(username: String, chatId: String, fromMessage: Message): Chat? = chatHistoryManager.deleteMessagesFromPoint(username, chatId, fromMessage)
     
     // API Communication
     suspend fun sendMessage(
@@ -445,117 +152,11 @@ class DataRepository(private val context: Context) {
         username: String
     ): Pair<List<Message>, Boolean> = fileUploadManager.ensureFilesUploadedForProvider(provider, messages, username)
     
-    // Update specific chat with new file attachments after re-upload
-    fun updateChatWithNewAttachments(username: String, chatId: String, updatedMessages: List<Message>) {
-        try {
-            val chatHistory = loadChatHistory(username)
-            val updatedChats = chatHistory.chat_history.map { chat ->
-                if (chat.chat_id == chatId) {
-                    chat.copy(messages = updatedMessages)
-                } else {
-                    chat
-                }
-            }
-            val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-            saveChatHistory(updatedHistory)
-        } catch (e: Exception) {
-            println("Failed to update chat with new file IDs: ${e.message}")
-        }
-    }
-    
-    fun exportChatHistory(username: String): String? {
-        val chatHistory = loadChatHistory(username)
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val exportFile = File(downloadsDir, "chat_history_${username}_${System.currentTimeMillis()}.json")
-        
-        return try {
-            exportFile.writeText(json.encodeToString(chatHistory))
-            exportFile.absolutePath
-        } catch (e: Exception) {
-            null
-        }
-    }
-    
-    /**
-     * Import chat history from raw JSON bytes. The JSON must conform to internal
-     * UserChatHistory schema. All attachment references are stripped.
-     */
-    fun importChatHistoryJson(raw: ByteArray, targetUsername: String) {
-        try {
-            val text = raw.toString(Charsets.UTF_8)
-            val imported = json.decodeFromString<UserChatHistory>(text)
-            // Sanitize: drop attachments info (local and remote) for every message
-            val sanitizedChats = imported.chat_history.map { chat ->
-                val sanitizedMessages = chat.messages.map { msg ->
-                    msg.copy(
-                        attachments = emptyList()
-                    )
-                }
-                chat.copy(messages = sanitizedMessages)
-            }
-            val sanitized = imported.copy(user_name = targetUsername, chat_history = sanitizedChats)
-            saveChatHistory(sanitized)
-        } catch (e: Exception) {
-            // Ignore invalid import
-        }
-    }
-
-    /**
-     * Validates if JSON content represents a valid chat export.
-     * Returns true if the JSON can be parsed as Chat or UserChatHistory.
-     */
-    fun validateChatJson(jsonContent: String): Boolean {
-        return try {
-            // Try parsing as a single Chat first
-            json.decodeFromString<Chat>(jsonContent)
-            true
-        } catch (e: Exception) {
-            try {
-                // Try parsing as UserChatHistory
-                json.decodeFromString<UserChatHistory>(jsonContent)
-                true
-            } catch (e2: Exception) {
-                false
-            }
-        }
-    }
-
-    /**
-     * Import a single chat from JSON content. Sanitizes attachments.
-     * Returns the imported chat ID on success, null on failure.
-     */
-    fun importSingleChat(jsonContent: String, targetUsername: String): String? {
-        return try {
-            // Try parsing as a single Chat first
-            val chat = try {
-                json.decodeFromString<Chat>(jsonContent)
-            } catch (e: Exception) {
-                // If not a single chat, try as UserChatHistory and take first chat
-                val history = json.decodeFromString<UserChatHistory>(jsonContent)
-                history.chat_history.firstOrNull() ?: return null
-            }
-
-            // Sanitize: remove attachments
-            val sanitizedMessages = chat.messages.map { msg ->
-                msg.copy(attachments = emptyList())
-            }
-            val sanitizedChat = chat.copy(messages = sanitizedMessages)
-
-            // Load current chat history
-            val currentHistory = loadChatHistory(targetUsername)
-
-            // Add the imported chat to history
-            val updatedHistory = currentHistory.copy(
-                chat_history = currentHistory.chat_history + sanitizedChat
-            )
-
-            saveChatHistory(updatedHistory)
-            sanitizedChat.chat_id
-        } catch (e: Exception) {
-            println("Failed to import chat: ${e.message}")
-            null
-        }
-    }
+    fun updateChatWithNewAttachments(username: String, chatId: String, updatedMessages: List<Message>) = chatHistoryManager.updateChatWithNewAttachments(username, chatId, updatedMessages)
+    fun exportChatHistory(username: String): String? = chatHistoryManager.exportChatHistory(username)
+    fun importChatHistoryJson(raw: ByteArray, targetUsername: String) = chatHistoryManager.importChatHistoryJson(raw, targetUsername)
+    fun validateChatJson(jsonContent: String): Boolean = chatHistoryManager.validateChatJson(jsonContent)
+    fun importSingleChat(jsonContent: String, targetUsername: String): String? = chatHistoryManager.importSingleChat(jsonContent, targetUsername)
     
     suspend fun uploadFile(
         provider: Provider,
