@@ -417,249 +417,30 @@ fun ChatScreen(
                     }
                 }
 
-                // Selected Files Preview - Grid Layout for Multiple Files
-                if (uiState.selectedFiles.isNotEmpty()) {
-                    if (uiState.selectedFiles.size == 1) {
-                        // Single file - show as list item
-                        LazyColumn(
-                            modifier = Modifier
-                                .heightIn(max = 120.dp)
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp)
-                        ) {
-                            items(uiState.selectedFiles) { file ->
-                                FilePreview(
-                                    file = file,
-                                    onRemove = { viewModel.removeSelectedFile(file) }
-                                )
-                            }
-                        }
-                    } else {
-                        // Multiple files - show as grid of thumbnails
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 80.dp),
-                            modifier = Modifier
-                                .heightIn(max = 160.dp)
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            contentPadding = PaddingValues(4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            items(uiState.selectedFiles) { file ->
-                                FilePreviewThumbnail(
-                                    file = file,
-                                    onRemove = { viewModel.removeSelectedFile(file) }
-                                )
-                            }
-                        }
-                    }
-                }
+                // Selected Files Preview
+                SelectedFilesPreview(
+                    selectedFiles = uiState.selectedFiles,
+                    onRemoveFile = { viewModel.removeSelectedFile(it) }
+                )
 
                 // Modern Message Input Area
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = SurfaceVariant,
-                    shadowElevation = 4.dp
-                ) {
-                    Column(
-                        modifier = Modifier.padding(
-                            horizontal = 20.dp,
-                            vertical = 16.dp
-                        )
-                    ) {
-                        // Input container
-                        Surface(
-                            shape = RoundedCornerShape(24.dp),
-                            color = Surface,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                // Add Files (pin) Button with anchored dropdown
-                                var showFileMenu by remember { mutableStateOf(false) }
-                                Box {
-                                    Surface(
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = if (uiState.selectedFiles.isNotEmpty()) Primary.copy(alpha = 0.1f) else Color.Transparent,
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clickable { showFileMenu = !showFileMenu }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.Default.Add,
-                                                contentDescription = "Add files",
-                                                tint = if (uiState.selectedFiles.isNotEmpty()) Primary else OnSurfaceVariant,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                    FileSelectionDropdown(
-                                        expanded = showFileMenu,
-                                        onDismiss = { showFileMenu = false },
-                                        onFileSelected = { uri, name, mime ->
-                                            viewModel.addFileFromUri(uri, name, mime)
-                                        },
-                                        onMultipleFilesSelected = { filesList ->
-                                            viewModel.addMultipleFilesFromUris(filesList)
-                                        }
-                                    )
-                                }
-
-                                // Message Input Field - Clean design
-                                OutlinedTextField(
-                                    value = uiState.currentMessage,
-                                    onValueChange = { viewModel.updateMessage(it) },
-                                    modifier = Modifier.weight(1f),
-                                    placeholder = {
-                                        Text(
-                                            text = stringResource(R.string.type_message),
-                                            color = OnSurfaceVariant,
-                                            style = MaterialTheme.typography.bodyLarge
-                                        )
-                                    },
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Color.Transparent,
-                                        unfocusedBorderColor = Color.Transparent,
-                                        focusedTextColor = OnSurface,
-                                        unfocusedTextColor = OnSurface,
-                                        unfocusedContainerColor = Color.Transparent,
-                                        focusedContainerColor = Color.Transparent
-                                    ),
-                                    textStyle = MaterialTheme.typography.bodyLarge,
-                                    keyboardOptions = KeyboardOptions.Default.copy(
-                                        keyboardType = KeyboardType.Text
-                                    ),
-                                    maxLines = 6,
-                                    minLines = 1
-                                )
-
-                                // Web Search Toggle Icon
-                                if (uiState.webSearchSupport != WebSearchSupport.UNSUPPORTED) {
-                                    Surface(
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = when {
-                                            uiState.webSearchEnabled -> Primary.copy(alpha = 0.15f)
-                                            uiState.webSearchSupport == WebSearchSupport.REQUIRED -> Primary.copy(alpha = 0.1f)
-                                            else -> Color.Transparent
-                                        },
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clickable { viewModel.toggleWebSearch() }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text(
-                                                text = "🌐",
-                                                fontSize = 20.sp,
-                                                color = when {
-                                                    uiState.webSearchEnabled -> Primary
-                                                    uiState.webSearchSupport == WebSearchSupport.REQUIRED -> Primary.copy(alpha = 0.7f)
-                                                    else -> OnSurfaceVariant.copy(alpha = 0.5f)
-                                                },
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Edit-confirm and Send buttons
-                                if (uiState.isEditMode) {
-                                    // Confirm edit (check)
-                                    Surface(
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = if (uiState.currentMessage.isNotEmpty() && !uiState.isLoading && !uiState.isStreaming) Primary else Primary.copy(alpha = 0.3f),
-                                        modifier = Modifier.size(40.dp).clickable(
-                                            enabled = uiState.currentMessage.isNotEmpty() && !uiState.isLoading && !uiState.isStreaming
-                                        ) { viewModel.finishEditingMessage() }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.Filled.Check,
-                                                contentDescription = "עדכן הודעה",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                    // Small gap
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    // Send after edit (check + resend)
-                                    Surface(
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = if (uiState.currentMessage.isNotEmpty() && !uiState.isLoading && !uiState.isStreaming) Primary else Primary.copy(alpha = 0.3f),
-                                        modifier = Modifier.size(40.dp).clickable(
-                                            enabled = uiState.currentMessage.isNotEmpty() && !uiState.isLoading && !uiState.isStreaming
-                                        ) { viewModel.confirmEditAndResend() }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                                contentDescription = stringResource(R.string.send_message),
-                                                tint = Color.White,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    // Regular send or stop button
-                                    Surface(
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = if (uiState.isLoading || uiState.isStreaming) {
-                                            // Active/clickable when streaming (for stop)
-                                            Primary
-                                        } else if (uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty()) {
-                                            Primary
-                                        } else {
-                                            Primary.copy(alpha = 0.3f)
-                                        },
-                                        modifier = Modifier.size(40.dp).clickable(
-                                            enabled = (uiState.isLoading || uiState.isStreaming) ||
-                                                (uiState.currentMessage.isNotEmpty() || uiState.selectedFiles.isNotEmpty())
-                                        ) {
-                                            if (uiState.isLoading || uiState.isStreaming) {
-                                                // Stop streaming and save accumulated text
-                                                viewModel.stopStreamingAndSave()
-                                            } else {
-                                                viewModel.sendMessage()
-                                            }
-                                        }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            if (uiState.isLoading || uiState.isStreaming) {
-                                                // Loading circle with stop icon inside
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(28.dp),
-                                                    color = Color.White,
-                                                    strokeWidth = 2.dp
-                                                )
-                                                // Stop icon (square) inside the loading circle
-                                                Icon(
-                                                    imageVector = Icons.Filled.Stop,
-                                                    contentDescription = "Stop streaming",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                            } else {
-                                                Icon(
-                                                    imageVector = Icons.AutoMirrored.Filled.Send,
-                                                    contentDescription = stringResource(R.string.send_message),
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                ChatInputArea(
+                    currentMessage = uiState.currentMessage,
+                    onMessageChange = { viewModel.updateMessage(it) },
+                    selectedFiles = uiState.selectedFiles,
+                    isEditMode = uiState.isEditMode,
+                    isLoading = uiState.isLoading,
+                    isStreaming = uiState.isStreaming,
+                    webSearchSupport = uiState.webSearchSupport,
+                    webSearchEnabled = uiState.webSearchEnabled,
+                    onToggleWebSearch = { viewModel.toggleWebSearch() },
+                    onSendMessage = { viewModel.sendMessage() },
+                    onStopStreaming = { viewModel.stopStreamingAndSave() },
+                    onFinishEditing = { viewModel.finishEditingMessage() },
+                    onConfirmEditAndResend = { viewModel.confirmEditAndResend() },
+                    onFileSelected = { uri, name, mime -> viewModel.addFileFromUri(uri, name, mime) },
+                    onMultipleFilesSelected = { filesList -> viewModel.addMultipleFilesFromUris(filesList) }
+                )
             }
 
             // System Prompt Dialog
