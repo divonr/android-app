@@ -53,6 +53,11 @@ import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.components.ChatImportChoiceDialog
 import com.example.ApI.ui.components.ChatContextMenu
 import com.example.ApI.ui.components.GroupContextMenu
+import com.example.ApI.ui.components.DeleteChatConfirmationDialog
+import com.example.ApI.ui.components.RenameChatDialog
+import com.example.ApI.ui.components.CreateGroupDialog
+import com.example.ApI.ui.components.RenameGroupDialog
+import com.example.ApI.ui.components.DeleteGroupConfirmationDialog
 import com.example.ApI.ui.theme.*
 import com.example.ApI.ui.screen.createHighlightedText
 import com.example.ApI.ui.screen.getModelInitial
@@ -494,227 +499,45 @@ fun ChatHistoryScreen(
             
             // Delete confirmation dialog
             uiState.showDeleteConfirmation?.let { chat ->
-                AlertDialog(
-                    onDismissRequest = { viewModel.hideDeleteConfirmation() },
-                    title = {
-                        Text(
-                            stringResource(R.string.delete_confirmation_title),
-                            color = OnSurface
-                        )
-                    },
-                    text = {
-                        Text(
-                            stringResource(R.string.delete_confirmation_message),
-                            color = OnSurfaceVariant
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                viewModel.deleteChat(chat)
-                                viewModel.hideDeleteConfirmation()
-                            }
-                        ) {
-                            Text(stringResource(R.string.delete), color = Color.Red)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { viewModel.hideDeleteConfirmation() }) {
-                            Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
-                        }
-                    },
-                    containerColor = Surface,
-                    tonalElevation = 0.dp
+                DeleteChatConfirmationDialog(
+                    chat = chat,
+                    onDismiss = { viewModel.hideDeleteConfirmation() },
+                    onConfirm = { viewModel.deleteChat(it) }
                 )
             }
 
             // Rename dialog
             uiState.showRenameDialog?.let { chat ->
-                var newTitle by remember { mutableStateOf(chat.title) }
-
-                AlertDialog(
-                    onDismissRequest = { viewModel.hideRenameDialog() },
-                    title = {
-                        Text(
-                            stringResource(R.string.rename),
-                            color = OnSurface
-                        )
-                    },
-                    text = {
-                        OutlinedTextField(
-                            value = newTitle,
-                            onValueChange = { newTitle = it },
-                            label = { Text(stringResource(R.string.chat_title), color = OnSurfaceVariant) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = OnSurface,
-                                unfocusedTextColor = OnSurface,
-                                focusedBorderColor = Primary,
-                                unfocusedBorderColor = Gray500,
-                                focusedLabelColor = Primary,
-                                unfocusedLabelColor = OnSurfaceVariant,
-                                cursorColor = Primary
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                viewModel.renameChat(chat, newTitle)
-                                viewModel.hideRenameDialog()
-                            }
-                        ) {
-                            Text(stringResource(R.string.save), color = Primary)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { viewModel.hideRenameDialog() }) {
-                            Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
-                        }
-                    },
-                    containerColor = Surface,
-                    tonalElevation = 0.dp
+                RenameChatDialog(
+                    chat = chat,
+                    onDismiss = { viewModel.hideRenameDialog() },
+                    onConfirm = { c, newTitle -> viewModel.renameChat(c, newTitle) }
                 )
             }
 
             // Group creation dialog
             if (uiState.showGroupDialog) {
-                var groupName by remember { mutableStateOf("") }
-
-                AlertDialog(
-                    onDismissRequest = { viewModel.hideGroupDialog() },
-                    title = {
-                        Text(
-                            "צור קבוצה חדשה",
-                            color = OnSurface
-                        )
-                    },
-                    text = {
-                        OutlinedTextField(
-                            value = groupName,
-                            onValueChange = { groupName = it },
-                            label = { Text("שם הקבוצה", color = OnSurfaceVariant) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = OnSurface,
-                                unfocusedTextColor = OnSurface,
-                                focusedBorderColor = Primary,
-                                unfocusedBorderColor = Gray500,
-                                focusedLabelColor = Primary,
-                                unfocusedLabelColor = OnSurfaceVariant,
-                                cursorColor = Primary
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                viewModel.createNewGroup(groupName.trim())
-                            },
-                            enabled = groupName.isNotBlank()
-                        ) {
-                            Text("צור", color = if (groupName.isNotBlank()) Primary else OnSurfaceVariant)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { viewModel.hideGroupDialog() }) {
-                            Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
-                        }
-                    },
-                    containerColor = Surface,
-                    tonalElevation = 0.dp
+                CreateGroupDialog(
+                    onDismiss = { viewModel.hideGroupDialog() },
+                    onCreate = { groupName -> viewModel.createNewGroup(groupName) }
                 )
             }
 
             // Group rename dialog
             uiState.showGroupRenameDialog?.let { group ->
-                var newGroupName by remember(group.group_id) { mutableStateOf(group.group_name) }
-
-                // Reset the name when dialog opens with a new group
-                LaunchedEffect(group.group_id, group.group_name) {
-                    newGroupName = group.group_name
-                }
-
-                AlertDialog(
-                    onDismissRequest = { viewModel.hideGroupRenameDialog() },
-                    title = {
-                        Text(
-                            "שנה שם קבוצה",
-                            color = OnSurface
-                        )
-                    },
-                    text = {
-                        OutlinedTextField(
-                            value = newGroupName,
-                            onValueChange = { newGroupName = it },
-                            label = { Text("שם הקבוצה החדש", color = OnSurfaceVariant) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = OnSurface,
-                                unfocusedTextColor = OnSurface,
-                                focusedBorderColor = Primary,
-                                unfocusedBorderColor = Gray500,
-                                focusedLabelColor = Primary,
-                                unfocusedLabelColor = OnSurfaceVariant,
-                                cursorColor = Primary
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                viewModel.renameGroup(group, newGroupName)
-                            },
-                            enabled = newGroupName.isNotBlank() && newGroupName != group.group_name
-                        ) {
-                            Text("שמור", color = if (newGroupName.isNotBlank() && newGroupName != group.group_name) Primary else OnSurfaceVariant)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { viewModel.hideGroupRenameDialog() }) {
-                            Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
-                        }
-                    },
-                    containerColor = Surface,
-                    tonalElevation = 0.dp
+                RenameGroupDialog(
+                    group = group,
+                    onDismiss = { viewModel.hideGroupRenameDialog() },
+                    onConfirm = { g, newGroupName -> viewModel.renameGroup(g, newGroupName) }
                 )
             }
 
             // Group delete confirmation dialog
             uiState.showDeleteGroupConfirmation?.let { group ->
-                AlertDialog(
-                    onDismissRequest = { viewModel.hideGroupDeleteConfirmation() },
-                    title = {
-                        Text(
-                            "מחיקת קבוצה",
-                            color = OnSurface
-                        )
-                    },
-                    text = {
-                        Text(
-                            "האם אתה בטוח שברצונך למחוק את הקבוצה \"${group.group_name}\"? כל השיחות בקבוצה זו יפוזרו ויתבטלו מהקבוצה.",
-                            color = OnSurfaceVariant
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                viewModel.deleteGroup(group)
-                            }
-                        ) {
-                            Text("מחק", color = Color.Red)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { viewModel.hideGroupDeleteConfirmation() }) {
-                            Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
-                        }
-                    },
-                    containerColor = Surface,
-                    tonalElevation = 0.dp
+                DeleteGroupConfirmationDialog(
+                    group = group,
+                    onDismiss = { viewModel.hideGroupDeleteConfirmation() },
+                    onConfirm = { viewModel.deleteGroup(it) }
                 )
             }
 
