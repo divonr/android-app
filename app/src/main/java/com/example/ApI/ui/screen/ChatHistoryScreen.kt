@@ -53,11 +53,9 @@ import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.components.ChatImportChoiceDialog
 import com.example.ApI.ui.theme.*
 import com.example.ApI.ui.screen.createHighlightedText
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
+import com.example.ApI.ui.screen.getModelInitial
+import com.example.ApI.ui.screen.formatTimestamp
+import com.example.ApI.ui.screen.getLastTimestampOrNull
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -1337,41 +1335,6 @@ fun SearchResultItem(
     }
 }
 
-
-fun getModelInitial(model: String): String {
-    return when {
-        model.contains("gpt-4", ignoreCase = true) -> "G4"
-        model.contains("gpt-3", ignoreCase = true) -> "G3"
-        model.contains("claude", ignoreCase = true) -> "C"
-        model.contains("gemini", ignoreCase = true) -> "Gm"
-        model.contains("llama", ignoreCase = true) -> "L"
-        model.contains("mistral", ignoreCase = true) -> "M"
-        else -> model.take(1).uppercase()
-    }
-}
-
-fun formatTimestamp(timestamp: Long): String {
-    val instant = Instant.ofEpochMilli(timestamp)
-    val date = instant.atZone(ZoneId.systemDefault()).toLocalDate()
-    val today = LocalDate.now()
-    
-    return when {
-        date.isEqual(today) -> {
-            val time = instant.atZone(ZoneId.systemDefault()).toLocalTime()
-            time.format(DateTimeFormatter.ofPattern("HH:mm"))
-        }
-        date.isEqual(today.minusDays(1)) -> "אתמול"
-        ChronoUnit.DAYS.between(date, today) < 7 -> {
-            val dayOfWeek = date.dayOfWeek.getDisplayName(
-                java.time.format.TextStyle.FULL,
-                java.util.Locale.forLanguageTag("he")
-            )
-            dayOfWeek
-        }
-        else -> date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
-    }
-}
-
 @Composable
 fun ChatContextMenu(
     chat: Chat,
@@ -1601,16 +1564,6 @@ fun ChatContextMenu(
                 }
             )
         }
-    }
-}
-
-// Helper: returns epoch millis of last message if present, otherwise null
-fun getLastTimestampOrNull(chat: Chat): Long? {
-    val iso = chat.messages.lastOrNull()?.datetime ?: return null
-    return try {
-        Instant.parse(iso).toEpochMilli()
-    } catch (_: Exception) {
-        null
     }
 }
 

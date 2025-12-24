@@ -6,7 +6,13 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
+import com.example.ApI.data.model.Chat
 import com.example.ApI.data.model.Message
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 /**
  * Scrolls to the previous message (one message up) in the chat.
@@ -85,5 +91,57 @@ fun createHighlightedText(
         if (lastIndex < text.length) {
             append(text.substring(lastIndex))
         }
+    }
+}
+
+/**
+ * Get a model initial abbreviation for display
+ */
+fun getModelInitial(model: String): String {
+    return when {
+        model.contains("gpt-4", ignoreCase = true) -> "G4"
+        model.contains("gpt-3", ignoreCase = true) -> "G3"
+        model.contains("claude", ignoreCase = true) -> "C"
+        model.contains("gemini", ignoreCase = true) -> "Gm"
+        model.contains("llama", ignoreCase = true) -> "L"
+        model.contains("mistral", ignoreCase = true) -> "M"
+        else -> model.take(1).uppercase()
+    }
+}
+
+/**
+ * Format a timestamp for display in the chat history
+ */
+fun formatTimestamp(timestamp: Long): String {
+    val instant = Instant.ofEpochMilli(timestamp)
+    val date = instant.atZone(ZoneId.systemDefault()).toLocalDate()
+    val today = LocalDate.now()
+
+    return when {
+        date.isEqual(today) -> {
+            val time = instant.atZone(ZoneId.systemDefault()).toLocalTime()
+            time.format(DateTimeFormatter.ofPattern("HH:mm"))
+        }
+        date.isEqual(today.minusDays(1)) -> "אתמול"
+        ChronoUnit.DAYS.between(date, today) < 7 -> {
+            val dayOfWeek = date.dayOfWeek.getDisplayName(
+                java.time.format.TextStyle.FULL,
+                java.util.Locale.forLanguageTag("he")
+            )
+            dayOfWeek
+        }
+        else -> date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+    }
+}
+
+/**
+ * Get the timestamp of the last message in a chat, or null if no messages
+ */
+fun getLastTimestampOrNull(chat: Chat): Long? {
+    val iso = chat.messages.lastOrNull()?.datetime ?: return null
+    return try {
+        Instant.parse(iso).toEpochMilli()
+    } catch (_: Exception) {
+        null
     }
 }
