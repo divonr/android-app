@@ -143,7 +143,7 @@ fun ChatHistoryPanel(
                             ChatHistoryItem(
                                 chat = chat,
                                 onClick = { onChatSelected(chat) },
-                                onLongClick = { showLocalMenu = true }
+                                onLongClick = { _ -> showLocalMenu = true }
                             )
 
                             if (showLocalMenu) {
