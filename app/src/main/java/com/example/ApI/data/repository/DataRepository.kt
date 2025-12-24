@@ -35,6 +35,7 @@ class DataRepository(private val context: Context) {
     // Managers
     private val modelsCacheManager = ModelsCacheManager(internalDir, json)
     private val localStorageManager = LocalStorageManager(internalDir, json)
+    private val externalConnectionsManager = ExternalConnectionsManager(internalDir, json, localStorageManager)
 
     init {
         if (!internalDir.exists()) {
@@ -1203,260 +1204,22 @@ class DataRepository(private val context: Context) {
         }
     }
 
-    // ==================== GitHub Integration ====================
+    // ============ External Connections (delegated to ExternalConnectionsManager) ============
 
-    /**
-     * Load GitHub connection for a user
-     * @param username The app username
-     * @return GitHubConnection or null if not connected
-     */
-    fun loadGitHubConnection(username: String): GitHubConnection? {
-        return try {
-            val file = File(internalDir, "github_auth_${username}.json")
-            if (!file.exists()) return null
+    fun loadGitHubConnection(username: String): GitHubConnection? = externalConnectionsManager.loadGitHubConnection(username)
+    fun saveGitHubConnection(username: String, connection: GitHubConnection) = externalConnectionsManager.saveGitHubConnection(username, connection)
+    fun removeGitHubConnection(username: String) = externalConnectionsManager.removeGitHubConnection(username)
+    fun isGitHubConnected(username: String): Boolean = externalConnectionsManager.isGitHubConnected(username)
+    fun getGitHubApiService(username: String): Pair<com.example.ApI.data.network.GitHubApiService, String>? = externalConnectionsManager.getGitHubApiService(username)
+    fun updateGitHubLastUsed(username: String) = externalConnectionsManager.updateGitHubLastUsed(username)
 
-            val jsonString = file.readText()
-            json.decodeFromString<GitHubConnection>(jsonString)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
-
-    /**
-     * Save GitHub connection for a user
-     * @param username The app username
-     * @param connection The GitHub connection to save
-     */
-    fun saveGitHubConnection(username: String, connection: GitHubConnection) {
-        try {
-            val file = File(internalDir, "github_auth_${username}.json")
-            val jsonString = json.encodeToString(connection)
-            file.writeText(jsonString)
-
-            // Update app settings to track connection
-            val settings = loadAppSettings()
-            val updatedConnections = settings.githubConnections.toMutableMap()
-            updatedConnections[username] = GitHubConnectionInfo(
-                username = username,
-                githubUsername = connection.user.login,
-                connectedAt = connection.connectedAt,
-                lastUsed = System.currentTimeMillis()
-            )
-            val updatedSettings = settings.copy(githubConnections = updatedConnections)
-            saveAppSettings(updatedSettings)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    /**
-     * Remove GitHub connection for a user
-     * @param username The app username
-     */
-    fun removeGitHubConnection(username: String) {
-        try {
-            // Delete the auth file
-            val file = File(internalDir, "github_auth_${username}.json")
-            if (file.exists()) {
-                file.delete()
-            }
-
-            // Update app settings
-            val settings = loadAppSettings()
-            val updatedConnections = settings.githubConnections.toMutableMap()
-            updatedConnections.remove(username)
-            val updatedSettings = settings.copy(githubConnections = updatedConnections)
-            saveAppSettings(updatedSettings)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    /**
-     * Check if GitHub is connected for a user
-     * @param username The app username
-     * @return true if connected and auth is valid
-     */
-    fun isGitHubConnected(username: String): Boolean {
-        val connection = loadGitHubConnection(username) ?: return false
-        // Check if token is expired (if applicable)
-        return !connection.auth.isExpired()
-    }
-
-    /**
-     * Get GitHub API service with the user's access token
-     * @param username The app username
-     * @return GitHubApiService or null if not connected
-     */
-    fun getGitHubApiService(username: String): Pair<com.example.ApI.data.network.GitHubApiService, String>? {
-        val connection = loadGitHubConnection(username) ?: return null
-        if (connection.auth.isExpired()) return null
-
-        val apiService = com.example.ApI.data.network.GitHubApiService()
-        return Pair(apiService, connection.auth.accessToken)
-    }
-
-    /**
-     * Update the last used timestamp for GitHub connection
-     * @param username The app username
-     */
-    fun updateGitHubLastUsed(username: String) {
-        try {
-            val settings = loadAppSettings()
-            val connectionInfo = settings.githubConnections[username] ?: return
-
-            val updatedConnections = settings.githubConnections.toMutableMap()
-            updatedConnections[username] = connectionInfo.copy(lastUsed = System.currentTimeMillis())
-
-            val updatedSettings = settings.copy(githubConnections = updatedConnections)
-            saveAppSettings(updatedSettings)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    // ==================== Google Workspace Integration ====================
-
-    /**
-     * Load Google Workspace connection for a user
-     * @param username The app username
-     * @return GoogleWorkspaceConnection or null if not connected
-     */
-    fun loadGoogleWorkspaceConnection(username: String): com.example.ApI.data.model.GoogleWorkspaceConnection? {
-        return try {
-            val file = File(internalDir, "google_workspace_auth_${username}.json")
-            if (!file.exists()) return null
-
-            val jsonString = file.readText()
-            json.decodeFromString<com.example.ApI.data.model.GoogleWorkspaceConnection>(jsonString)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
-
-    /**
-     * Save Google Workspace connection for a user
-     * @param username The app username
-     * @param connection The Google Workspace connection to save
-     */
-    fun saveGoogleWorkspaceConnection(username: String, connection: com.example.ApI.data.model.GoogleWorkspaceConnection) {
-        try {
-            val file = File(internalDir, "google_workspace_auth_${username}.json")
-            val jsonString = json.encodeToString(connection)
-            file.writeText(jsonString)
-
-            // Update app settings to track connection
-            val settings = loadAppSettings()
-            val updatedConnections = settings.googleWorkspaceConnections.toMutableMap()
-            updatedConnections[username] = com.example.ApI.data.model.GoogleWorkspaceConnectionInfo(
-                username = username,
-                googleEmail = connection.user.email,
-                connectedAt = connection.connectedAt,
-                lastUsed = System.currentTimeMillis()
-            )
-            val updatedSettings = settings.copy(googleWorkspaceConnections = updatedConnections)
-            saveAppSettings(updatedSettings)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    /**
-     * Remove Google Workspace connection for a user
-     * @param username The app username
-     */
-    fun removeGoogleWorkspaceConnection(username: String) {
-        try {
-            // Delete the auth file
-            val file = File(internalDir, "google_workspace_auth_${username}.json")
-            if (file.exists()) {
-                file.delete()
-            }
-
-            // Update app settings
-            val settings = loadAppSettings()
-            val updatedConnections = settings.googleWorkspaceConnections.toMutableMap()
-            updatedConnections.remove(username)
-            val updatedSettings = settings.copy(googleWorkspaceConnections = updatedConnections)
-            saveAppSettings(updatedSettings)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    /**
-     * Check if Google Workspace is connected for a user
-     * @param username The app username
-     * @return true if connected and auth is valid
-     */
-    fun isGoogleWorkspaceConnected(username: String): Boolean {
-        val connection = loadGoogleWorkspaceConnection(username) ?: return false
-        // Check if token is expired
-        return !connection.auth.isExpired()
-    }
-
-    /**
-     * Update enabled services for Google Workspace connection
-     * @param username The app username
-     * @param services Enabled services configuration
-     */
-    fun updateGoogleWorkspaceEnabledServices(username: String, services: com.example.ApI.data.model.EnabledGoogleServices) {
-        try {
-            val connection = loadGoogleWorkspaceConnection(username) ?: return
-            val updatedConnection = connection.copy(enabledServices = services)
-            saveGoogleWorkspaceConnection(username, updatedConnection)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    /**
-     * Get Google Workspace API services with the user's access token
-     * @param username The app username
-     * @return Triple of (GmailApiService?, GoogleCalendarApiService?, GoogleDriveApiService?) or null if not connected
-     */
-    fun getGoogleWorkspaceApiServices(username: String): Triple<com.example.ApI.data.network.GmailApiService?, com.example.ApI.data.network.GoogleCalendarApiService?, com.example.ApI.data.network.GoogleDriveApiService?>? {
-        val connection = loadGoogleWorkspaceConnection(username) ?: return null
-        if (connection.auth.isExpired()) return null
-
-        val accessToken = connection.auth.accessToken
-        val userEmail = connection.user.email
-
-        val gmailService = if (connection.enabledServices.gmail) {
-            com.example.ApI.data.network.GmailApiService(accessToken, userEmail)
-        } else null
-
-        val calendarService = if (connection.enabledServices.calendar) {
-            com.example.ApI.data.network.GoogleCalendarApiService(accessToken, userEmail)
-        } else null
-
-        val driveService = if (connection.enabledServices.drive) {
-            com.example.ApI.data.network.GoogleDriveApiService(accessToken, userEmail)
-        } else null
-
-        return Triple(gmailService, calendarService, driveService)
-    }
-
-    /**
-     * Update the last used timestamp for Google Workspace connection
-     * @param username The app username
-     */
-    fun updateGoogleWorkspaceLastUsed(username: String) {
-        try {
-            val settings = loadAppSettings()
-            val connectionInfo = settings.googleWorkspaceConnections[username] ?: return
-
-            val updatedConnections = settings.googleWorkspaceConnections.toMutableMap()
-            updatedConnections[username] = connectionInfo.copy(lastUsed = System.currentTimeMillis())
-
-            val updatedSettings = settings.copy(googleWorkspaceConnections = updatedConnections)
-            saveAppSettings(updatedSettings)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
+    fun loadGoogleWorkspaceConnection(username: String): com.example.ApI.data.model.GoogleWorkspaceConnection? = externalConnectionsManager.loadGoogleWorkspaceConnection(username)
+    fun saveGoogleWorkspaceConnection(username: String, connection: com.example.ApI.data.model.GoogleWorkspaceConnection) = externalConnectionsManager.saveGoogleWorkspaceConnection(username, connection)
+    fun removeGoogleWorkspaceConnection(username: String) = externalConnectionsManager.removeGoogleWorkspaceConnection(username)
+    fun isGoogleWorkspaceConnected(username: String): Boolean = externalConnectionsManager.isGoogleWorkspaceConnected(username)
+    fun updateGoogleWorkspaceEnabledServices(username: String, services: com.example.ApI.data.model.EnabledGoogleServices) = externalConnectionsManager.updateGoogleWorkspaceEnabledServices(username, services)
+    fun getGoogleWorkspaceApiServices(username: String): Triple<com.example.ApI.data.network.GmailApiService?, com.example.ApI.data.network.GoogleCalendarApiService?, com.example.ApI.data.network.GoogleDriveApiService?>? = externalConnectionsManager.getGoogleWorkspaceApiServices(username)
+    fun updateGoogleWorkspaceLastUsed(username: String) = externalConnectionsManager.updateGoogleWorkspaceLastUsed(username)
 
     // ==================== Branching System ====================
 
