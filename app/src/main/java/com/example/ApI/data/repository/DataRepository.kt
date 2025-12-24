@@ -34,6 +34,7 @@ class DataRepository(private val context: Context) {
 
     // Managers
     private val modelsCacheManager = ModelsCacheManager(internalDir, json)
+    private val localStorageManager = LocalStorageManager(internalDir, json)
 
     init {
         if (!internalDir.exists()) {
@@ -316,142 +317,18 @@ class DataRepository(private val context: Context) {
         return true
     }
     
-    // API Keys
-    fun loadApiKeys(username: String): List<ApiKey> {
-        val file = File(internalDir, "api_keys_$username.json")
-        return if (file.exists()) {
-            try {
-                val content = file.readText()
-                json.decodeFromString<List<ApiKey>>(content)
-            } catch (e: Exception) {
-                emptyList()
-            }
-        } else {
-            emptyList()
-        }
-    }
-    
-    fun saveApiKeys(username: String, apiKeys: List<ApiKey>) {
-        val file = File(internalDir, "api_keys_$username.json")
-        try {
-            file.writeText(json.encodeToString(apiKeys))
-        } catch (e: IOException) {
-            // Handle error
-        }
-    }
-    
-    fun addApiKey(username: String, apiKey: ApiKey) {
-        val currentKeys = loadApiKeys(username).toMutableList()
-        
-        // If adding a new key for same provider and it should be active, 
-        // deactivate all other keys for this provider
-        if (apiKey.isActive) {
-            for (i in currentKeys.indices) {
-                if (currentKeys[i].provider == apiKey.provider) {
-                    currentKeys[i] = currentKeys[i].copy(isActive = false)
-                }
-            }
-        }
-        
-        currentKeys.add(apiKey)
-        saveApiKeys(username, currentKeys)
-    }
-    
-    fun toggleApiKeyStatus(username: String, keyId: String) {
-        val currentKeys = loadApiKeys(username)
-        val targetKey = currentKeys.find { it.id == keyId } ?: return
-        val updatedKeys = currentKeys.map { key ->
-            when {
-                key.id == keyId -> {
-                    // Toggle this key
-                    val newActiveState = !key.isActive
-                    // If activating this key, deactivate all other keys for same provider
-                    if (newActiveState) {
-                        key.copy(isActive = true)
-                    } else {
-                        key.copy(isActive = false)
-                    }
-                }
-                key.provider == targetKey.provider && key.id != keyId && !targetKey.isActive -> {
-                    // If we're activating the target key, deactivate others of same provider
-                    key.copy(isActive = false)
-                }
-                else -> key
-            }
-        }
-        saveApiKeys(username, updatedKeys)
-    }
-    
-    fun deleteApiKey(username: String, keyId: String) {
-        val currentKeys = loadApiKeys(username)
-        val updatedKeys = currentKeys.filter { it.id != keyId }
-        saveApiKeys(username, updatedKeys)
-    }
-    
-    fun reorderApiKeys(username: String, fromIndex: Int, toIndex: Int) {
-        val currentKeys = loadApiKeys(username).toMutableList()
-        if (fromIndex in currentKeys.indices && toIndex in currentKeys.indices) {
-            val item = currentKeys.removeAt(fromIndex)
-            currentKeys.add(toIndex, item)
-            saveApiKeys(username, currentKeys)
-        }
-    }
-    
-    // App Settings
-    fun loadAppSettings(): AppSettings {
-        val file = File(internalDir, "app_settings.json")
-        return if (file.exists()) {
-            try {
-                val content = file.readText()
-                json.decodeFromString<AppSettings>(content)
-            } catch (e: Exception) {
-                AppSettings(
-                    current_user = "default",
-                    selected_provider = "openai",
-                    selected_model = "gpt-4o"
-                )
-            }
-        } else {
-            AppSettings(
-                current_user = "default",
-                selected_provider = "openai",
-                selected_model = "gpt-4o"
-            )
-        }
-    }
-    
-    fun saveAppSettings(settings: AppSettings) {
-        val file = File(internalDir, "app_settings.json")
-        try {
-            file.writeText(json.encodeToString(settings))
-        } catch (e: IOException) {
-            // Handle error
-        }
-    }
-    
-    // File management
-    fun saveFileLocally(fileName: String, data: ByteArray): String? {
-        val filesDir = File(internalDir, "attachments")
-        if (!filesDir.exists()) {
-            filesDir.mkdirs()
-        }
-        
-        val file = File(filesDir, "${UUID.randomUUID()}_$fileName")
-        return try {
-            file.writeBytes(data)
-            file.absolutePath
-        } catch (e: IOException) {
-            null
-        }
-    }
-    
-    fun deleteFile(filePath: String): Boolean {
-        return try {
-            File(filePath).delete()
-        } catch (e: Exception) {
-            false
-        }
-    }
+    // ============ Local Storage (delegated to LocalStorageManager) ============
+
+    fun loadApiKeys(username: String): List<ApiKey> = localStorageManager.loadApiKeys(username)
+    fun saveApiKeys(username: String, apiKeys: List<ApiKey>) = localStorageManager.saveApiKeys(username, apiKeys)
+    fun addApiKey(username: String, apiKey: ApiKey) = localStorageManager.addApiKey(username, apiKey)
+    fun toggleApiKeyStatus(username: String, keyId: String) = localStorageManager.toggleApiKeyStatus(username, keyId)
+    fun deleteApiKey(username: String, keyId: String) = localStorageManager.deleteApiKey(username, keyId)
+    fun reorderApiKeys(username: String, fromIndex: Int, toIndex: Int) = localStorageManager.reorderApiKeys(username, fromIndex, toIndex)
+    fun loadAppSettings(): AppSettings = localStorageManager.loadAppSettings()
+    fun saveAppSettings(settings: AppSettings) = localStorageManager.saveAppSettings(settings)
+    fun saveFileLocally(fileName: String, data: ByteArray): String? = localStorageManager.saveFileLocally(fileName, data)
+    fun deleteFile(filePath: String): Boolean = localStorageManager.deleteFile(filePath)
     
     // Replace a specific message in a chat
     fun replaceMessageInChat(username: String, chatId: String, oldMessage: Message, newMessage: Message): Chat? {
