@@ -162,9 +162,15 @@ private fun RenderNode(
             is Code -> RenderInlineCode(child, style)
             is FencedCodeBlock -> RenderCodeBlock(child, style, layoutDirection, onLongPress)
             is IndentedCodeBlock -> RenderCodeBlock(child, style, layoutDirection, onLongPress)
-            is BulletList -> RenderBulletList(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
-            is OrderedList -> RenderOrderedList(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
-            is ListItem -> RenderListItem(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
+            is BulletList -> RenderBulletList(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress) { node, s, ld, tdm, eil, olp ->
+                RenderNode(node, s, ld, tdm, eil, olp)
+            }
+            is OrderedList -> RenderOrderedList(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress) { node, s, ld, tdm, eil, olp ->
+                RenderNode(node, s, ld, tdm, eil, olp)
+            }
+            is ListItem -> RenderListItem(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress) { node, s, ld, tdm, eil, olp ->
+                RenderNode(node, s, ld, tdm, eil, olp)
+            }
             is TableBlock -> RenderTable(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
             is HardLineBreak -> Spacer(modifier = Modifier.height(4.dp))
             is ThematicBreak -> {
@@ -470,100 +476,6 @@ private fun RenderBlockQuote(
             RenderNode(node, style.copy(fontStyle = FontStyle.Italic), layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
         }
     }
-}
-
-@Composable
-private fun RenderBulletList(
-    node: BulletList,
-    style: TextStyle,
-    layoutDirection: LayoutDirection,
-    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
-    enableInlineLatex: Boolean = false,
-    onLongPress: () -> Unit = {}
-) {
-    var child = node.firstChild
-    while (child != null) {
-        if (child is ListItem) {
-            CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            start = if (layoutDirection == LayoutDirection.Ltr) 16.dp else 0.dp,
-                            end = if (layoutDirection == LayoutDirection.Rtl) 16.dp else 0.dp,
-                            bottom = 4.dp
-                        )
-                ) {
-                    Text(
-                        text = "• ",
-                        style = style,
-                        modifier = Modifier.padding(
-                            end = if (layoutDirection == LayoutDirection.Ltr) 8.dp else 0.dp,
-                            start = if (layoutDirection == LayoutDirection.Rtl) 8.dp else 0.dp
-                        )
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        RenderNode(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
-                    }
-                }
-            }
-        }
-        child = child.next
-    }
-}
-
-@Composable
-private fun RenderOrderedList(
-    node: OrderedList,
-    style: TextStyle,
-    layoutDirection: LayoutDirection,
-    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
-    enableInlineLatex: Boolean = false,
-    onLongPress: () -> Unit = {}
-) {
-    var child = node.firstChild
-    var index = node.startNumber
-    while (child != null) {
-        if (child is ListItem) {
-            CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            start = if (layoutDirection == LayoutDirection.Ltr) 16.dp else 0.dp,
-                            end = if (layoutDirection == LayoutDirection.Rtl) 16.dp else 0.dp,
-                            bottom = 4.dp
-                        )
-                ) {
-                    Text(
-                        text = "$index. ",
-                        style = style,
-                        modifier = Modifier.padding(
-                            end = if (layoutDirection == LayoutDirection.Ltr) 8.dp else 0.dp,
-                            start = if (layoutDirection == LayoutDirection.Rtl) 8.dp else 0.dp
-                        )
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        RenderNode(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
-                    }
-                }
-            }
-            index++
-        }
-        child = child.next
-    }
-}
-
-@Composable
-private fun RenderListItem(
-    node: ListItem,
-    style: TextStyle,
-    layoutDirection: LayoutDirection,
-    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
-    enableInlineLatex: Boolean = false,
-    onLongPress: () -> Unit = {}
-) {
-    RenderNode(node, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
 }
 
 @Composable
