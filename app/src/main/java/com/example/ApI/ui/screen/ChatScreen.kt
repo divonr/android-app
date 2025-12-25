@@ -1,9 +1,7 @@
 package com.example.ApI.ui.screen
 
-import android.graphics.Bitmap
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,18 +19,14 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.core.view.drawToBitmap
 import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.ChatViewModel
@@ -41,7 +35,6 @@ import com.example.ApI.ui.components.dialogs.*
 import com.example.ApI.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.min
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,14 +139,6 @@ fun ChatScreen(
                         .background(Color.Black.copy(alpha = 0.3f))
                         .clickable { viewModel.cancelEditingMessage() }
                 )
-            }
-            val sheetWidth = 320.dp
-            var screenshot by remember { mutableStateOf<Bitmap?>(null) }
-            val view = LocalView.current
-            LaunchedEffect(uiState.showChatHistory) {
-                if (uiState.showChatHistory) {
-                    screenshot = view.drawToBitmap()
-                }
             }
             Column(
                 modifier = Modifier
@@ -474,69 +459,6 @@ fun ChatScreen(
                     containerColor = Surface,
                     tonalElevation = 0.dp
                 )
-            }
-
-            // Side sheet panel for chat history (fills side space)
-            if (uiState.showChatHistory) {
-                // Overlay that captures clicks outside the panel
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .systemBarsPadding()
-                        .clickable { viewModel.hideChatHistory() }
-                )
-                
-                // Overlay a thin screenshot strip to simulate content edge
-                val cropWidthDp = 24.dp
-                val density = LocalDensity.current
-                val cropPx = with(density) { cropWidthDp.toPx().toInt() }
-                val cropped = remember(screenshot, uiState.showChatHistory) {
-                    screenshot?.let { bmp ->
-                        val w = min(cropPx, bmp.width)
-                        try {
-                            Bitmap.createBitmap(bmp, bmp.width - w, 0, w, bmp.height)
-                        } catch (t: Throwable) { null }
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .systemBarsPadding()
-                ) {
-                    Row(modifier = Modifier.align(Alignment.CenterEnd)) {
-                        // Screenshot strip (left of panel)
-                        cropped?.let { strip ->
-                            Image(
-                                bitmap = strip.asImageBitmap(),
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(cropWidthDp)
-                            )
-                        }
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .width(sheetWidth)
-                                .clickable(enabled = false) { /* Prevent click through */ },
-                            color = Surface,
-                            shadowElevation = 8.dp
-                        ) {
-                            ChatHistoryPanel(
-                                chatHistory = uiState.chatHistory,
-                                uiState = uiState,
-                                viewModel = viewModel,
-                                onChatSelected = { selected ->
-                                    viewModel.selectChat(selected)
-                                    viewModel.hideChatHistory()
-                                },
-                                onNewChat = { viewModel.createNewChat("שיחה חדשה") },
-                                onClose = { viewModel.hideChatHistory() }
-                            )
-                        }
-                    }
-                }
             }
 
             // File Selection Dialog

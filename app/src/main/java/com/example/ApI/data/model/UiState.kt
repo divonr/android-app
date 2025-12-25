@@ -29,7 +29,6 @@ data class ChatUiState(
     val showProviderSelector: Boolean = false,
     val showModelSelector: Boolean = false,
     val showSystemPromptDialog: Boolean = false,
-    val showChatHistory: Boolean = false,
     val showFileSelection: Boolean = false,
     val quickSettingsExpanded: Boolean = false,
     val showChatExportDialog: Boolean = false,

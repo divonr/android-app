@@ -555,8 +555,7 @@ class ChatViewModel(
                 chatHistory = chatHistory.chat_history,
                 groups = chatHistory.groups,
                 webSearchSupport = webSearchSupport,
-                webSearchEnabled = webSearchEnabled,
-                showChatHistory = true
+                webSearchEnabled = webSearchEnabled
             )
             
             // Debug log
@@ -610,8 +609,7 @@ class ChatViewModel(
             // Update current chat
             _uiState.value = _uiState.value.copy(
                 currentChat = chat,
-                systemPrompt = chat.systemPrompt,
-                showChatHistory = false
+                systemPrompt = chat.systemPrompt
             )
         }
     }
@@ -628,8 +626,7 @@ class ChatViewModel(
 
         _uiState.value = _uiState.value.copy(
             currentChat = newChat,
-            chatHistory = updatedChatHistory,
-            showChatHistory = false
+            chatHistory = updatedChatHistory
         )
         navigateToScreen(Screen.Chat)
         return newChat
@@ -646,14 +643,6 @@ class ChatViewModel(
             groups = repository.loadChatHistory(currentUser).groups
         )
         navigateToScreen(Screen.Chat)
-    }
-
-    fun showChatHistory() {
-        _uiState.value = _uiState.value.copy(showChatHistory = true)
-    }
-
-    fun hideChatHistory() {
-        _uiState.value = _uiState.value.copy(showChatHistory = false)
     }
 
     // ==================== Provider/Model Selection (delegated to ModelSelectionManager) ====================
