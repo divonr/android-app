@@ -37,6 +37,7 @@ import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.components.*
+import com.example.ApI.ui.components.dialogs.*
 import com.example.ApI.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
