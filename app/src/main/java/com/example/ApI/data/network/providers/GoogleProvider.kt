@@ -278,15 +278,18 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                                         Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found functionCall part: $functionCall")
                                         val name = functionCall["name"]?.jsonPrimitive?.content
                                         val args = functionCall["args"]?.jsonObject
+                                        // Capture thoughtSignature - required for Gemini 3+ function calling
+                                        val thoughtSignature = part["thoughtSignature"]?.jsonPrimitive?.contentOrNull
 
                                         if (name != null && args != null) {
                                             detectedToolCall = ToolCall(
                                                 id = "google_${System.currentTimeMillis()}",
                                                 toolId = name,
                                                 parameters = args,
-                                                provider = "google"
+                                                provider = "google",
+                                                thoughtSignature = thoughtSignature
                                             )
-                                            Log.d("TOOL_CALL_DEBUG", "Google Streaming: Detected tool call in chunk")
+                                            Log.d("TOOL_CALL_DEBUG", "Google Streaming: Detected tool call in chunk, thoughtSignature=${thoughtSignature != null}")
                                         }
                                     }
 
@@ -407,6 +410,10 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                                     put("name", message.toolCall?.toolId ?: "unknown")
                                     put("args", message.toolCall?.parameters ?: buildJsonObject {})
                                 })
+                                // Include thoughtSignature if available (required for Gemini 3+)
+                                message.toolCall?.thoughtSignature?.let { signature ->
+                                    put("thoughtSignature", signature)
+                                }
                             })
                         })
                     })

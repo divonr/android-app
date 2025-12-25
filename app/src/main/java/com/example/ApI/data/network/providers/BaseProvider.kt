@@ -58,7 +58,8 @@ abstract class BaseProvider(protected val context: Context) {
                 toolName = toolDisplayName,
                 parameters = toolCall.parameters,
                 result = toolResult,
-                timestamp = java.time.Instant.now().toString()
+                timestamp = java.time.Instant.now().toString(),
+                thoughtSignature = toolCall.thoughtSignature // Pass through Google's thought signature
             ),
             datetime = java.time.Instant.now().toString()
         )

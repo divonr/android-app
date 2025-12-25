@@ -68,7 +68,8 @@ data class ToolCall(
     val id: String, // Unique ID for this call (provider-specific)
     val toolId: String, // The tool being called
     val parameters: JsonObject, // Parameters provided by the model
-    val provider: String // Which provider made this call
+    val provider: String, // Which provider made this call
+    val thoughtSignature: String? = null // Google's thought signature for function calls (required for Gemini 3+)
 )
 
 /**
@@ -80,5 +81,6 @@ data class ToolCallInfo(
     val toolName: String,
     val parameters: JsonObject,
     val result: ToolExecutionResult,
-    val timestamp: String // ISO 8601 format
+    val timestamp: String, // ISO 8601 format
+    val thoughtSignature: String? = null // Google's thought signature for function calls (required for Gemini 3+)
 )
