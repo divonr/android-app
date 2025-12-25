@@ -39,6 +39,7 @@ import coil.compose.AsyncImage
 import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.ChatViewModel
+import com.example.ApI.ui.components.markdown.MarkdownText
 import com.example.ApI.ui.screen.createHighlightedText
 import com.example.ApI.ui.theme.*
 import kotlinx.coroutines.delay

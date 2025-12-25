@@ -1,4 +1,4 @@
-package com.example.ApI.ui.components
+package com.example.ApI.ui.components.markdown
 
 import android.widget.Toast
 import androidx.compose.foundation.background

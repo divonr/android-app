@@ -1,4 +1,4 @@
-package com.example.ApI.ui.components
+package com.example.ApI.ui.components.markdown
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
