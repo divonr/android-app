@@ -35,7 +35,7 @@ import coil.request.ImageRequest
 import com.example.ApI.data.model.ApiKey
 import com.example.ApI.data.model.Provider
 import com.example.ApI.data.repository.DataRepository
-import com.example.ApI.ui.components.AddApiKeyDialog
+import com.example.ApI.ui.components.dialogs.AddApiKeyDialog
 import com.example.ApI.ui.components.ProviderApiKeyConfigs
 import com.example.ApI.ui.components.openInCustomTabs
 import com.example.ApI.ui.theme.*

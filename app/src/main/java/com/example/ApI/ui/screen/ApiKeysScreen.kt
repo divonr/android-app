@@ -37,8 +37,8 @@ import androidx.compose.ui.zIndex
 import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
-import com.example.ApI.ui.components.AddApiKeyDialog
-import com.example.ApI.ui.components.DeleteApiKeyConfirmationDialog
+import com.example.ApI.ui.components.dialogs.AddApiKeyDialog
+import com.example.ApI.ui.components.dialogs.DeleteApiKeyConfirmationDialog
 import com.example.ApI.ui.theme.*
 import kotlinx.coroutines.launch
 
