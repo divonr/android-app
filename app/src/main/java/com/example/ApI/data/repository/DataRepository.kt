@@ -65,6 +65,28 @@ class DataRepository(private val context: Context) {
     fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat = chatHistoryManager.createNewChatInGroup(username, previewName, groupId, systemPrompt)
     fun updateChatSystemPrompt(username: String, chatId: String, systemPrompt: String): Chat? = chatHistoryManager.updateChatSystemPrompt(username, chatId, systemPrompt)
 
+    /**
+     * Clean up empty chats (chats with no messages) from the chat history.
+     * This removes chats that were created but never had any content added to them.
+     */
+    fun cleanupEmptyChats(username: String): Int {
+        val chatHistory = loadChatHistory(username)
+
+        // Filter out chats with no messages
+        val nonEmptyChats = chatHistory.chat_history.filter { chat ->
+            chat.messages.isNotEmpty() || chat.messageNodes.isNotEmpty()
+        }
+
+        val removedCount = chatHistory.chat_history.size - nonEmptyChats.size
+
+        if (removedCount > 0) {
+            val updatedHistory = chatHistory.copy(chat_history = nonEmptyChats)
+            saveChatHistory(updatedHistory)
+        }
+
+        return removedCount
+    }
+
     // ============ Group Management (delegated to GroupProjectManager) ============
 
     fun createNewGroup(username: String, groupName: String): ChatGroup = groupProjectManager.createNewGroup(username, groupName)
