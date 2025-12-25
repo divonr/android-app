@@ -81,7 +81,14 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         )
         Log.d("TOOL_CALL_DEBUG", "Google Streaming: Tool executed with result: $toolResult")
 
-        val toolCallMessage = createToolCallMessage(initialResponse.toolCall, toolResult, "")
+        val toolCallMessage = createToolCallMessage(
+            toolCall = initialResponse.toolCall,
+            toolResult = toolResult,
+            precedingText = "",
+            thoughts = initialResponse.thoughts,
+            thinkingDurationSeconds = initialResponse.thinkingDurationSeconds,
+            thoughtsStatus = initialResponse.thoughtsStatus
+        )
         val toolResponseMessage = createToolResponseMessage(initialResponse.toolCall, toolResult)
 
         callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, initialResponse.precedingText)
@@ -325,21 +332,32 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         reader.close()
         connection.disconnect()
 
+        // Calculate thinking duration if there were thoughts
+        val thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+        val thinkingDuration = if (thoughts != null && thinkingStartTime > 0) {
+            (System.currentTimeMillis() - thinkingStartTime) / 1000f
+        } else null
+        val thoughtsStatus = if (thoughts != null) ThoughtsStatus.PRESENT else ThoughtsStatus.NONE
+
         return when {
-            detectedToolCall != null -> StreamingResult.ToolCallDetected(
-                toolCall = detectedToolCall!!,
-                precedingText = fullResponse.toString()
-            )
+            detectedToolCall != null -> {
+                // If there were thoughts before the tool call, notify via callback
+                if (thoughts != null) {
+                    callback.onThinkingComplete(thoughts, thinkingDuration ?: 0f, thoughtsStatus)
+                }
+                StreamingResult.ToolCallDetected(
+                    toolCall = detectedToolCall!!,
+                    precedingText = fullResponse.toString(),
+                    thoughts = thoughts,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus
+                )
+            }
             fullResponse.isNotEmpty() -> StreamingResult.TextComplete(
                 fullText = fullResponse.toString(),
-                thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() },
-                thinkingDurationSeconds = if (thoughtsBuilder.isNotEmpty()) {
-                    (thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f })
-                } else null,
-                thoughtsStatus = when {
-                    thoughtsBuilder.isNotEmpty() -> ThoughtsStatus.PRESENT
-                    else -> ThoughtsStatus.NONE
-                }
+                thoughts = thoughts,
+                thinkingDurationSeconds = thinkingDuration,
+                thoughtsStatus = thoughtsStatus
             )
             else -> StreamingResult.Error("Empty response from Google")
         }
@@ -530,7 +548,10 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         ) : StreamingResult()
         data class ToolCallDetected(
             val toolCall: ToolCall,
-            val precedingText: String = ""
+            val precedingText: String = "",
+            val thoughts: String? = null,
+            val thinkingDurationSeconds: Float? = null,
+            val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
         ) : StreamingResult()
         data class Error(val error: String) : StreamingResult()
     }
