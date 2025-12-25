@@ -158,7 +158,9 @@ private fun RenderNode(
         when (child) {
             is MdParagraph -> RenderParagraph(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
             is Heading -> RenderHeading(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
-            is BlockQuote -> RenderBlockQuote(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
+            is BlockQuote -> RenderBlockQuote(child, style, layoutDirection, textDirectionMode, enableInlineLatex, onLongPress) { node, s, ld, tdm, eil, olp ->
+                RenderNode(node, s, ld, tdm, eil, olp)
+            }
             is Code -> RenderInlineCode(child, style)
             is FencedCodeBlock -> RenderCodeBlock(child, style, layoutDirection, onLongPress)
             is IndentedCodeBlock -> RenderCodeBlock(child, style, layoutDirection, onLongPress)
@@ -405,77 +407,4 @@ internal fun RenderTextWithInlineLatex(
         }
     )
 }
-
-@Composable
-private fun RenderHeading(
-    node: Heading,
-    style: TextStyle,
-    layoutDirection: LayoutDirection,
-    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
-    enableInlineLatex: Boolean = false,
-    onLongPress: () -> Unit = {}
-) {
-    val headingStyle = when (node.level) {
-        1 -> style.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        2 -> style.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        3 -> style.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        4 -> style.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        5 -> style.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        else -> style.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold)
-    }
-    
-    val uriHandler = LocalUriHandler.current
-    val inlineLatexContent = remember { mutableMapOf<String, String>() }
-    val annotatedString = buildAnnotatedString {
-        appendInlineContent(node, headingStyle, enableInlineLatex, inlineLatexContent)
-    }
-    
-    // Determine heading-specific direction based on mode
-    val headingDirection = when (textDirectionMode) {
-        TextDirectionMode.AUTO -> TextDirectionUtils.inferTextDirection(annotatedString.text)
-        TextDirectionMode.RTL -> LayoutDirection.Rtl
-        TextDirectionMode.LTR -> LayoutDirection.Ltr
-    }
-    
-    CompositionLocalProvider(LocalLayoutDirection provides headingDirection) {
-        RenderTextWithInlineLatex(
-            text = annotatedString,
-            style = headingStyle,
-            layoutDirection = headingDirection,
-            inlineLatexContent = inlineLatexContent,
-            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
-            uriHandler = uriHandler,
-            onLongPress = onLongPress
-        )
-    }
-}
-
-@Composable
-private fun RenderBlockQuote(
-    node: BlockQuote,
-    style: TextStyle,
-    layoutDirection: LayoutDirection,
-    textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO,
-    enableInlineLatex: Boolean = false,
-    onLongPress: () -> Unit = {}
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-    ) {
-        // Vertical line on the side
-        Box(
-            modifier = Modifier
-                .width(4.dp)
-                .fillMaxHeight()
-                .background(style.color.copy(alpha = 0.5f))
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            RenderNode(node, style.copy(fontStyle = FontStyle.Italic), layoutDirection, textDirectionMode, enableInlineLatex, onLongPress)
-        }
-    }
-}
-
 
