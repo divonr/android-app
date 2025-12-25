@@ -1,9 +1,7 @@
-package com.example.ApI.ui.components
+package com.example.ApI.ui.components.dialogs
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -11,22 +9,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.res.stringResource
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import com.example.ApI.R
-import com.example.ApI.data.model.*
-import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -246,4 +234,3 @@ fun SystemPromptDialog(
         )
     }
 }
-

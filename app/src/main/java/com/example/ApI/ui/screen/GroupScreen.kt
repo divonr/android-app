@@ -54,6 +54,7 @@ import androidx.core.content.FileProvider
 import androidx.core.view.drawToBitmap
 import coil.compose.AsyncImage
 import com.example.ApI.ui.components.*
+import com.example.ApI.ui.components.dialogs.*
 import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.min
