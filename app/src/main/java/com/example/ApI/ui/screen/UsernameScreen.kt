@@ -300,39 +300,3 @@ fun UserSettingsScreen(
         }
     }
 }
-
-@Composable
-private fun IntegrationsNavigationItem(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = Surface,
-        shadowElevation = 2.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onClick() }
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "אינטגרציות (MCPs)",
-                style = MaterialTheme.typography.bodyMedium,
-                color = OnSurface,
-                fontWeight = FontWeight.Medium
-            )
-            
-            Text(
-                text = ">",
-                style = MaterialTheme.typography.bodyLarge,
-                color = OnSurface.copy(alpha = 0.7f),
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
