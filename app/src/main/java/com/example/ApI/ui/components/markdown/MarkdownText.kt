@@ -413,32 +413,32 @@ private fun convertLatexToTextRepresentation(latex: String): String {
 /**
  * Recursively converts a LaTeX element to text representation with proper Unicode symbols
  */
-private fun convertElementToTextRepresentation(element: LatexRenderer.LatexElement): String {
+private fun convertElementToTextRepresentation(element: LatexElement): String {
     return when (element) {
-        is LatexRenderer.LatexElement.Text -> {
+        is LatexElement.Text -> {
             // Convert symbols like \alpha, \beta, etc. to Unicode
             LatexRenderer.convertLatexToUnicode(element.text)
         }
-        is LatexRenderer.LatexElement.Superscript -> {
+        is LatexElement.Superscript -> {
             val content = LatexRenderer.parseLatexStructure(element.text)
             val contentText = content.joinToString("") { convertElementToTextRepresentation(it) }
             // Convert common superscripts to Unicode
             convertSuperscriptToUnicode(contentText)
         }
-        is LatexRenderer.LatexElement.Subscript -> {
+        is LatexElement.Subscript -> {
             val content = LatexRenderer.parseLatexStructure(element.text)
             val contentText = content.joinToString("") { convertElementToTextRepresentation(it) }
             // Convert common subscripts to Unicode
             convertSubscriptToUnicode(contentText)
         }
-        is LatexRenderer.LatexElement.Fraction -> {
+        is LatexElement.Fraction -> {
             val numContent = LatexRenderer.parseLatexStructure(element.numerator)
             val denContent = LatexRenderer.parseLatexStructure(element.denominator)
             val numerator = numContent.joinToString("") { convertElementToTextRepresentation(it) }
             val denominator = denContent.joinToString("") { convertElementToTextRepresentation(it) }
             "($numerator)/($denominator)"
         }
-        is LatexRenderer.LatexElement.SquareRoot -> {
+        is LatexElement.SquareRoot -> {
             val content = LatexRenderer.parseLatexStructure(element.content)
             val contentText = content.joinToString("") { convertElementToTextRepresentation(it) }
             "√($contentText)"
@@ -457,11 +457,11 @@ private fun AnnotatedString.Builder.appendInlineLatexAnnotated(
 
     elements.forEach { element ->
         when (element) {
-            is LatexRenderer.LatexElement.Text -> {
+            is LatexElement.Text -> {
                 val text = LatexRenderer.convertLatexToUnicode(element.text)
                 append(text)
             }
-            is LatexRenderer.LatexElement.Superscript -> {
+            is LatexElement.Superscript -> {
                 val content = LatexRenderer.parseLatexStructure(element.text)
                 val rendered = content.joinToString("") { sub -> convertElementToTextRepresentation(sub) }
                 val start = length
@@ -475,7 +475,7 @@ private fun AnnotatedString.Builder.appendInlineLatexAnnotated(
                     length
                 )
             }
-            is LatexRenderer.LatexElement.Subscript -> {
+            is LatexElement.Subscript -> {
                 val content = LatexRenderer.parseLatexStructure(element.text)
                 val rendered = content.joinToString("") { sub -> convertElementToTextRepresentation(sub) }
                 val start = length
@@ -489,7 +489,7 @@ private fun AnnotatedString.Builder.appendInlineLatexAnnotated(
                     length
                 )
             }
-            is LatexRenderer.LatexElement.Fraction -> {
+            is LatexElement.Fraction -> {
                 // Fallback textual inline rendering for fractions
                 val num = convertLatexToTextRepresentation(element.numerator)
                 val den = convertLatexToTextRepresentation(element.denominator)
@@ -499,7 +499,7 @@ private fun AnnotatedString.Builder.appendInlineLatexAnnotated(
                 append(den)
                 append(")")
             }
-            is LatexRenderer.LatexElement.SquareRoot -> {
+            is LatexElement.SquareRoot -> {
                 val inner = convertLatexToTextRepresentation(element.content)
                 append("√(")
                 append(inner)

@@ -26,15 +26,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Data class representing a segment of text that can be either regular text or LaTeX
- */
-sealed class TextSegment {
-    data class Regular(val text: String) : TextSegment()
-    data class InlineLatex(val latex: String) : TextSegment()
-    data class DisplayLatex(val latex: String) : TextSegment()
-}
-
-/**
  * Utility object for parsing and rendering LaTeX expressions
  */
 object LatexRenderer {
@@ -185,27 +176,7 @@ object LatexRenderer {
         
         return result
     }
-    
-    /**
-     * Parses superscripts (^) and subscripts (_) with proper handling
-     */
-    data class ParsedLatex(
-        val baseText: String,
-        val superscripts: List<Pair<Int, String>>, // position to superscript
-        val subscripts: List<Pair<Int, String>>    // position to subscript
-    )
-    
-    /**
-     * Represents a parsed LaTeX element for rendering
-     */
-    sealed class LatexElement {
-        data class Text(val text: String) : LatexElement()
-        data class Superscript(val text: String) : LatexElement()
-        data class Subscript(val text: String) : LatexElement()
-        data class Fraction(val numerator: String, val denominator: String) : LatexElement()
-        data class SquareRoot(val content: String) : LatexElement()
-    }
-    
+
     /**
      * Extracts content between braces, handling nested braces
      * Returns the content and the index after the closing brace, or null if invalid
@@ -365,12 +336,12 @@ fun InlineLatexText(
  */
 @Composable
 private fun RenderLatexElement(
-    element: LatexRenderer.LatexElement,
+    element: LatexElement,
     style: TextStyle,
     inline: Boolean
 ) {
     when (element) {
-        is LatexRenderer.LatexElement.Text -> {
+        is LatexElement.Text -> {
             Text(
                 text = element.text,
                 style = style.copy(
@@ -379,7 +350,7 @@ private fun RenderLatexElement(
                 )
             )
         }
-        is LatexRenderer.LatexElement.Superscript -> {
+        is LatexElement.Superscript -> {
             // Parse the superscript content recursively
             val superElements = LatexRenderer.parseLatexStructure(element.text)
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -395,7 +366,7 @@ private fun RenderLatexElement(
                 }
             }
         }
-        is LatexRenderer.LatexElement.Subscript -> {
+        is LatexElement.Subscript -> {
             // Parse the subscript content recursively
             val subElements = LatexRenderer.parseLatexStructure(element.text)
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -411,7 +382,7 @@ private fun RenderLatexElement(
                 }
             }
         }
-        is LatexRenderer.LatexElement.Fraction -> {
+        is LatexElement.Fraction -> {
             FractionDisplayNested(
                 numerator = element.numerator,
                 denominator = element.denominator,
@@ -419,7 +390,7 @@ private fun RenderLatexElement(
                 inline = inline
             )
         }
-        is LatexRenderer.LatexElement.SquareRoot -> {
+        is LatexElement.SquareRoot -> {
             SquareRootDisplayNested(
                 content = element.content,
                 style = style,
@@ -434,7 +405,7 @@ private fun RenderLatexElement(
  */
 @Composable
 private fun RenderLatexElements(
-    elements: List<LatexRenderer.LatexElement>,
+    elements: List<LatexElement>,
     style: TextStyle,
     inline: Boolean
 ) {
@@ -443,17 +414,17 @@ private fun RenderLatexElements(
     while (index < elements.size) {
         val current = elements[index]
         when (current) {
-            is LatexRenderer.LatexElement.Text -> {
+            is LatexElement.Text -> {
                 val text = current.text
                 // If next token(s) are super/sub, attach them to the last char of this text
                 if (text.isNotEmpty() && index + 1 < elements.size) {
                     val next1 = elements.getOrNull(index + 1)
-                    if (next1 is LatexRenderer.LatexElement.Superscript || next1 is LatexRenderer.LatexElement.Subscript) {
+                    if (next1 is LatexElement.Superscript || next1 is LatexElement.Subscript) {
                         val baseChar = text.last().toString()
                         val prefix = text.dropLast(1)
                         if (prefix.isNotEmpty()) {
                             // render prefix first
-                            RenderLatexElement(LatexRenderer.LatexElement.Text(prefix), style, inline)
+                            RenderLatexElement(LatexElement.Text(prefix), style, inline)
                         }
 
                         var superText: String? = null
@@ -461,13 +432,13 @@ private fun RenderLatexElements(
                         var consume = 1
                         // Collect up to two following tokens in any order
                         val n2 = elements.getOrNull(index + 1)
-                        if (n2 is LatexRenderer.LatexElement.Superscript) superText = n2.text
-                        if (n2 is LatexRenderer.LatexElement.Subscript) subText = n2.text
+                        if (n2 is LatexElement.Superscript) superText = n2.text
+                        if (n2 is LatexElement.Subscript) subText = n2.text
                         val n3 = elements.getOrNull(index + 2)
-                        if (n3 is LatexRenderer.LatexElement.Superscript && superText == null) {
+                        if (n3 is LatexElement.Superscript && superText == null) {
                             superText = n3.text; consume = 2
                         }
-                        if (n3 is LatexRenderer.LatexElement.Subscript && subText == null) {
+                        if (n3 is LatexElement.Subscript && subText == null) {
                             subText = n3.text; consume = 2
                         }
 
