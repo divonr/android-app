@@ -84,6 +84,11 @@ fun ChatHistoryScreen(
         viewModel.exitSearchMode()
     }
     
+    LaunchedEffect(Unit) {
+        // Clean up empty chats when entering chat history screen
+        viewModel.cleanupEmptyChatsOnScreen()
+    }
+
     LaunchedEffect(uiState.snackbarMessage) {
         uiState.snackbarMessage?.let {
             snackbarHostState.showSnackbar(

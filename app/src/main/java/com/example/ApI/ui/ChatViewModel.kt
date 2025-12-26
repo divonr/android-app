@@ -476,9 +476,12 @@ class ChatViewModel(
                 repository.addResponseToCurrentVariant(currentUser, chatId, assistantMessage)
             }
 
+            // Clean up empty chats
+            repository.cleanupEmptyChats(currentUser)
+
             // Reload chat history
-            val refreshedHistory = repository.loadChatHistory(currentUser)
-            val refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
+            var refreshedHistory = repository.loadChatHistory(currentUser)
+            var refreshedChat = refreshedHistory.chat_history.find { it.chat_id == chatId }
 
             // Clear streaming state for this chat
             _uiState.value = _uiState.value.copy(
@@ -532,7 +535,14 @@ class ChatViewModel(
             }
             
                          // Load existing chat history
-            val chatHistory = repository.loadChatHistory(settings.current_user)
+            var chatHistory = repository.loadChatHistory(settings.current_user)
+
+            // Clean up empty chats
+            repository.cleanupEmptyChats(settings.current_user)
+
+            // Reload chat history after cleanup
+            chatHistory = repository.loadChatHistory(settings.current_user)
+
             val currentChat = if (chatHistory.chat_history.isNotEmpty()) {
                 chatHistory.chat_history.last() // Load the most recent chat
             } else {
@@ -671,6 +681,21 @@ class ChatViewModel(
 
     fun clearSnackbar() {
         _uiState.value = _uiState.value.copy(snackbarMessage = null)
+    }
+
+    // ==================== Empty Chat Cleanup ====================
+    fun cleanupEmptyChatsOnScreen() {
+        viewModelScope.launch {
+            val currentUser = _appSettings.value.current_user
+            repository.cleanupEmptyChats(currentUser)
+
+            // Reload chat history after cleanup
+            val updatedHistory = repository.loadChatHistory(currentUser)
+            _uiState.value = _uiState.value.copy(
+                chatHistory = updatedHistory.chat_history,
+                groups = updatedHistory.groups
+            )
+        }
     }
 
     // ==================== File/Attachment Management (delegated to AttachmentManager) ====================
