@@ -130,7 +130,7 @@ fun ChatInputArea(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(4.dp),
-                    verticalAlignment = if (isExpanded) Alignment.Bottom else Alignment.CenterVertically,
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Add Files Button
