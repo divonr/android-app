@@ -21,6 +21,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ApI.R
@@ -98,6 +100,17 @@ fun ChatInputArea(
     onMultipleFilesSelected: (List<Triple<Uri, String, String>>) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Estimate line count based on newlines and text length
+    // Count explicit newlines + estimate wrapped lines (approx 35 chars per line)
+    val estimatedLines = remember(currentMessage) {
+        val newlineCount = currentMessage.count { it == '\n' }
+        val longestLineLength = currentMessage.split('\n').maxOfOrNull { it.length } ?: 0
+        val wrappedLines = if (longestLineLength > 35) (longestLineLength / 35) else 0
+        newlineCount + 1 + wrappedLines
+    }
+    val isExpanded = estimatedLines >= 3
+    val showWebSearch = webSearchSupport != WebSearchSupport.UNSUPPORTED
+
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = SurfaceVariant,
@@ -136,30 +149,64 @@ fun ChatInputArea(
                         modifier = Modifier.weight(1f)
                     )
 
-                    // Web Search Toggle
-                    if (webSearchSupport != WebSearchSupport.UNSUPPORTED) {
-                        WebSearchToggle(
-                            enabled = webSearchEnabled,
-                            required = webSearchSupport == WebSearchSupport.REQUIRED,
-                            onClick = onToggleWebSearch
-                        )
-                    }
-
-                    // Action Buttons (Edit mode or Send/Stop)
-                    if (isEditMode) {
-                        EditModeButtons(
-                            enabled = currentMessage.isNotEmpty() && !isLoading && !isStreaming,
-                            onFinishEditing = onFinishEditing,
-                            onConfirmEditAndResend = onConfirmEditAndResend
-                        )
+                    // Action buttons area - stacked vertically when expanded
+                    if (isExpanded && showWebSearch) {
+                        // Vertical layout: web search on top, then edit buttons or send
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            WebSearchToggle(
+                                enabled = webSearchEnabled,
+                                required = webSearchSupport == WebSearchSupport.REQUIRED,
+                                onClick = onToggleWebSearch
+                            )
+                            if (isEditMode) {
+                                // Stack all 3 buttons vertically: web search, confirm, resend
+                                ConfirmEditButton(
+                                    enabled = currentMessage.isNotEmpty() && !isLoading && !isStreaming,
+                                    onClick = onFinishEditing
+                                )
+                                ConfirmEditAndResendButton(
+                                    enabled = currentMessage.isNotEmpty() && !isLoading && !isStreaming,
+                                    onClick = onConfirmEditAndResend
+                                )
+                            } else {
+                                SendButton(
+                                    isLoading = isLoading,
+                                    isStreaming = isStreaming,
+                                    hasContent = currentMessage.isNotEmpty() || selectedFiles.isNotEmpty(),
+                                    onSend = onSendMessage,
+                                    onStop = onStopStreaming
+                                )
+                            }
+                        }
                     } else {
-                        SendButton(
-                            isLoading = isLoading,
-                            isStreaming = isStreaming,
-                            hasContent = currentMessage.isNotEmpty() || selectedFiles.isNotEmpty(),
-                            onSend = onSendMessage,
-                            onStop = onStopStreaming
-                        )
+                        // Horizontal layout: web search and send button side by side
+                        if (showWebSearch) {
+                            WebSearchToggle(
+                                enabled = webSearchEnabled,
+                                required = webSearchSupport == WebSearchSupport.REQUIRED,
+                                onClick = onToggleWebSearch
+                            )
+                        }
+
+                        // Action Buttons (Edit mode or Send/Stop)
+                        if (isEditMode) {
+                            EditModeButtons(
+                                enabled = currentMessage.isNotEmpty() && !isLoading && !isStreaming,
+                                onFinishEditing = onFinishEditing,
+                                onConfirmEditAndResend = onConfirmEditAndResend
+                            )
+                        } else {
+                            SendButton(
+                                isLoading = isLoading,
+                                isStreaming = isStreaming,
+                                hasContent = currentMessage.isNotEmpty() || selectedFiles.isNotEmpty(),
+                                onSend = onSendMessage,
+                                onStop = onStopStreaming
+                            )
+                        }
                     }
                 }
             }
@@ -207,6 +254,7 @@ fun FileAttachmentButton(
 
 /**
  * Clean message text field
+ * Uses TextFieldValue internally to maintain cursor position and prevent scroll jumping on focus
  */
 @Composable
 fun MessageTextField(
@@ -214,9 +262,26 @@ fun MessageTextField(
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Use TextFieldValue to maintain cursor position and prevent scroll reset on focus
+    var textFieldValue by remember { mutableStateOf(TextFieldValue(value)) }
+
+    // Sync external value changes (e.g., when entering edit mode with message content)
+    LaunchedEffect(value) {
+        if (textFieldValue.text != value) {
+            // When external value changes, update text but place cursor at end
+            textFieldValue = TextFieldValue(
+                text = value,
+                selection = TextRange(value.length)
+            )
+        }
+    }
+
     OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = textFieldValue,
+        onValueChange = { newValue ->
+            textFieldValue = newValue
+            onValueChange(newValue.text)
+        },
         modifier = modifier,
         placeholder = {
             Text(
@@ -279,7 +344,61 @@ fun WebSearchToggle(
 }
 
 /**
- * Edit mode action buttons (confirm edit + resend)
+ * Confirm edit button (checkmark)
+ */
+@Composable
+fun ConfirmEditButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (enabled) Primary else Primary.copy(alpha = 0.3f),
+        modifier = modifier
+            .size(40.dp)
+            .clickable(enabled = enabled) { onClick() }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = "עדכן הודעה",
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Confirm edit and resend button (send icon)
+ */
+@Composable
+fun ConfirmEditAndResendButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (enabled) Primary else Primary.copy(alpha = 0.3f),
+        modifier = modifier
+            .size(40.dp)
+            .clickable(enabled = enabled) { onClick() }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Send,
+                contentDescription = stringResource(R.string.send_message),
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Edit mode action buttons (confirm edit + resend) - horizontal layout
  */
 @Composable
 fun EditModeButtons(
@@ -292,41 +411,14 @@ fun EditModeButtons(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Confirm edit (check)
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = if (enabled) Primary else Primary.copy(alpha = 0.3f),
-            modifier = Modifier
-                .size(40.dp)
-                .clickable(enabled = enabled) { onFinishEditing() }
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Filled.Check,
-                    contentDescription = "עדכן הודעה",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-
-        // Send after edit
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = if (enabled) Primary else Primary.copy(alpha = 0.3f),
-            modifier = Modifier
-                .size(40.dp)
-                .clickable(enabled = enabled) { onConfirmEditAndResend() }
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = stringResource(R.string.send_message),
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
+        ConfirmEditButton(
+            enabled = enabled,
+            onClick = onFinishEditing
+        )
+        ConfirmEditAndResendButton(
+            enabled = enabled,
+            onClick = onConfirmEditAndResend
+        )
     }
 }
 
