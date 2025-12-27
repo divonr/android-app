@@ -98,9 +98,15 @@ fun ChatInputArea(
     onMultipleFilesSelected: (List<Triple<Uri, String, String>>) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Track line count to determine layout
-    var lineCount by remember { mutableIntStateOf(1) }
-    val isExpanded = lineCount >= 3
+    // Estimate line count based on newlines and text length
+    // Count explicit newlines + estimate wrapped lines (approx 35 chars per line)
+    val estimatedLines = remember(currentMessage) {
+        val newlineCount = currentMessage.count { it == '\n' }
+        val longestLineLength = currentMessage.split('\n').maxOfOrNull { it.length } ?: 0
+        val wrappedLines = if (longestLineLength > 35) (longestLineLength / 35) else 0
+        newlineCount + 1 + wrappedLines
+    }
+    val isExpanded = estimatedLines >= 3
     val showWebSearch = webSearchSupport != WebSearchSupport.UNSUPPORTED
 
     Surface(
@@ -138,7 +144,6 @@ fun ChatInputArea(
                     MessageTextField(
                         value = currentMessage,
                         onValueChange = onMessageChange,
-                        onLineCountChange = { lineCount = it },
                         modifier = Modifier.weight(1f)
                     )
 
@@ -248,7 +253,6 @@ fun FileAttachmentButton(
 fun MessageTextField(
     value: String,
     onValueChange: (String) -> Unit,
-    onLineCountChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     OutlinedTextField(
@@ -275,10 +279,7 @@ fun MessageTextField(
             keyboardType = KeyboardType.Text
         ),
         maxLines = 6,
-        minLines = 1,
-        onTextLayout = { textLayoutResult ->
-            onLineCountChange(textLayoutResult.lineCount)
-        }
+        minLines = 1
     )
 }
 
