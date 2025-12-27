@@ -21,6 +21,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ApI.R
@@ -252,6 +254,7 @@ fun FileAttachmentButton(
 
 /**
  * Clean message text field
+ * Uses TextFieldValue internally to maintain cursor position and prevent scroll jumping on focus
  */
 @Composable
 fun MessageTextField(
@@ -259,9 +262,26 @@ fun MessageTextField(
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Use TextFieldValue to maintain cursor position and prevent scroll reset on focus
+    var textFieldValue by remember { mutableStateOf(TextFieldValue(value)) }
+
+    // Sync external value changes (e.g., when entering edit mode with message content)
+    LaunchedEffect(value) {
+        if (textFieldValue.text != value) {
+            // When external value changes, update text but place cursor at end
+            textFieldValue = TextFieldValue(
+                text = value,
+                selection = TextRange(value.length)
+            )
+        }
+    }
+
     OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = textFieldValue,
+        onValueChange = { newValue ->
+            textFieldValue = newValue
+            onValueChange(newValue.text)
+        },
         modifier = modifier,
         placeholder = {
             Text(
