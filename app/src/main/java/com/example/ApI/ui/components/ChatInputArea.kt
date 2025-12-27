@@ -98,6 +98,11 @@ fun ChatInputArea(
     onMultipleFilesSelected: (List<Triple<Uri, String, String>>) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Track line count to determine layout
+    var lineCount by remember { mutableIntStateOf(1) }
+    val isExpanded = lineCount >= 3
+    val showWebSearch = webSearchSupport != WebSearchSupport.UNSUPPORTED
+
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = SurfaceVariant,
@@ -119,7 +124,7 @@ fun ChatInputArea(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment = if (isExpanded) Alignment.Bottom else Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Add Files Button
@@ -133,33 +138,64 @@ fun ChatInputArea(
                     MessageTextField(
                         value = currentMessage,
                         onValueChange = onMessageChange,
+                        onLineCountChange = { lineCount = it },
                         modifier = Modifier.weight(1f)
                     )
 
-                    // Web Search Toggle
-                    if (webSearchSupport != WebSearchSupport.UNSUPPORTED) {
-                        WebSearchToggle(
-                            enabled = webSearchEnabled,
-                            required = webSearchSupport == WebSearchSupport.REQUIRED,
-                            onClick = onToggleWebSearch
-                        )
-                    }
-
-                    // Action Buttons (Edit mode or Send/Stop)
-                    if (isEditMode) {
-                        EditModeButtons(
-                            enabled = currentMessage.isNotEmpty() && !isLoading && !isStreaming,
-                            onFinishEditing = onFinishEditing,
-                            onConfirmEditAndResend = onConfirmEditAndResend
-                        )
+                    // Action buttons area - stacked vertically when expanded
+                    if (isExpanded && showWebSearch) {
+                        // Vertical layout: web search on top, send button below
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            WebSearchToggle(
+                                enabled = webSearchEnabled,
+                                required = webSearchSupport == WebSearchSupport.REQUIRED,
+                                onClick = onToggleWebSearch
+                            )
+                            if (isEditMode) {
+                                EditModeButtons(
+                                    enabled = currentMessage.isNotEmpty() && !isLoading && !isStreaming,
+                                    onFinishEditing = onFinishEditing,
+                                    onConfirmEditAndResend = onConfirmEditAndResend
+                                )
+                            } else {
+                                SendButton(
+                                    isLoading = isLoading,
+                                    isStreaming = isStreaming,
+                                    hasContent = currentMessage.isNotEmpty() || selectedFiles.isNotEmpty(),
+                                    onSend = onSendMessage,
+                                    onStop = onStopStreaming
+                                )
+                            }
+                        }
                     } else {
-                        SendButton(
-                            isLoading = isLoading,
-                            isStreaming = isStreaming,
-                            hasContent = currentMessage.isNotEmpty() || selectedFiles.isNotEmpty(),
-                            onSend = onSendMessage,
-                            onStop = onStopStreaming
-                        )
+                        // Horizontal layout: web search and send button side by side
+                        if (showWebSearch) {
+                            WebSearchToggle(
+                                enabled = webSearchEnabled,
+                                required = webSearchSupport == WebSearchSupport.REQUIRED,
+                                onClick = onToggleWebSearch
+                            )
+                        }
+
+                        // Action Buttons (Edit mode or Send/Stop)
+                        if (isEditMode) {
+                            EditModeButtons(
+                                enabled = currentMessage.isNotEmpty() && !isLoading && !isStreaming,
+                                onFinishEditing = onFinishEditing,
+                                onConfirmEditAndResend = onConfirmEditAndResend
+                            )
+                        } else {
+                            SendButton(
+                                isLoading = isLoading,
+                                isStreaming = isStreaming,
+                                hasContent = currentMessage.isNotEmpty() || selectedFiles.isNotEmpty(),
+                                onSend = onSendMessage,
+                                onStop = onStopStreaming
+                            )
+                        }
                     }
                 }
             }
@@ -212,6 +248,7 @@ fun FileAttachmentButton(
 fun MessageTextField(
     value: String,
     onValueChange: (String) -> Unit,
+    onLineCountChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     OutlinedTextField(
@@ -238,7 +275,10 @@ fun MessageTextField(
             keyboardType = KeyboardType.Text
         ),
         maxLines = 6,
-        minLines = 1
+        minLines = 1,
+        onTextLayout = { textLayoutResult ->
+            onLineCountChange(textLayoutResult.lineCount)
+        }
     )
 }
 
