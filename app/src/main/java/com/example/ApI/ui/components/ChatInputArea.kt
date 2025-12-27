@@ -149,7 +149,7 @@ fun ChatInputArea(
 
                     // Action buttons area - stacked vertically when expanded
                     if (isExpanded && showWebSearch) {
-                        // Vertical layout: web search on top, send button below
+                        // Vertical layout: web search on top, then edit buttons or send
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -160,10 +160,14 @@ fun ChatInputArea(
                                 onClick = onToggleWebSearch
                             )
                             if (isEditMode) {
-                                EditModeButtons(
+                                // Stack all 3 buttons vertically: web search, confirm, resend
+                                ConfirmEditButton(
                                     enabled = currentMessage.isNotEmpty() && !isLoading && !isStreaming,
-                                    onFinishEditing = onFinishEditing,
-                                    onConfirmEditAndResend = onConfirmEditAndResend
+                                    onClick = onFinishEditing
+                                )
+                                ConfirmEditAndResendButton(
+                                    enabled = currentMessage.isNotEmpty() && !isLoading && !isStreaming,
+                                    onClick = onConfirmEditAndResend
                                 )
                             } else {
                                 SendButton(
@@ -320,7 +324,61 @@ fun WebSearchToggle(
 }
 
 /**
- * Edit mode action buttons (confirm edit + resend)
+ * Confirm edit button (checkmark)
+ */
+@Composable
+fun ConfirmEditButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (enabled) Primary else Primary.copy(alpha = 0.3f),
+        modifier = modifier
+            .size(40.dp)
+            .clickable(enabled = enabled) { onClick() }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = "עדכן הודעה",
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Confirm edit and resend button (send icon)
+ */
+@Composable
+fun ConfirmEditAndResendButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (enabled) Primary else Primary.copy(alpha = 0.3f),
+        modifier = modifier
+            .size(40.dp)
+            .clickable(enabled = enabled) { onClick() }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Send,
+                contentDescription = stringResource(R.string.send_message),
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Edit mode action buttons (confirm edit + resend) - horizontal layout
  */
 @Composable
 fun EditModeButtons(
@@ -333,41 +391,14 @@ fun EditModeButtons(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Confirm edit (check)
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = if (enabled) Primary else Primary.copy(alpha = 0.3f),
-            modifier = Modifier
-                .size(40.dp)
-                .clickable(enabled = enabled) { onFinishEditing() }
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Filled.Check,
-                    contentDescription = "עדכן הודעה",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-
-        // Send after edit
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = if (enabled) Primary else Primary.copy(alpha = 0.3f),
-            modifier = Modifier
-                .size(40.dp)
-                .clickable(enabled = enabled) { onConfirmEditAndResend() }
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = stringResource(R.string.send_message),
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
+        ConfirmEditButton(
+            enabled = enabled,
+            onClick = onFinishEditing
+        )
+        ConfirmEditAndResendButton(
+            enabled = enabled,
+            onClick = onConfirmEditAndResend
+        )
     }
 }
 
