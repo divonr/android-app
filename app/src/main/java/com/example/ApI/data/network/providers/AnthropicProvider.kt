@@ -351,20 +351,6 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         }
     }
 
-    private fun completeThinkingPhase(
-        callback: StreamingCallback,
-        thinkingStartTime: Long,
-        thoughtsBuilder: StringBuilder
-    ) {
-        val duration = (System.currentTimeMillis() - thinkingStartTime) / 1000f
-        val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
-        callback.onThinkingComplete(
-            thoughts = thoughtsContent,
-            durationSeconds = duration,
-            status = if (thoughtsContent != null) ThoughtsStatus.PRESENT else ThoughtsStatus.UNAVAILABLE
-        )
-    }
-
     private suspend fun buildMessages(messages: List<Message>): List<JsonObject> = withContext(Dispatchers.IO) {
         val anthropicMessages = mutableListOf<JsonObject>()
 

@@ -4,9 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.example.ApI.data.model.*
 import com.example.ApI.tools.ToolCall
-import com.example.ApI.tools.ToolCallInfo
-import com.example.ApI.tools.ToolExecutionResult
-import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -80,95 +77,27 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
         initialResponse: ProviderStreamingResult.ToolCallDetected,
         callback: StreamingCallback
     ) {
-        Log.d("TOOL_CALL_DEBUG", "Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
+        Log.d("TOOL_CALL_DEBUG", "OpenAI Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
 
-        // Execute the tool via callback
-        val toolResult = callback.onToolCall(
-            toolCall = initialResponse.toolCall,
-            precedingText = initialResponse.precedingText
-        )
-        Log.d("TOOL_CALL_DEBUG", "Streaming: Tool executed with result: $toolResult")
-
-        // Create tool messages
-        val toolCallMessage = createToolCallMessage(initialResponse.toolCall, toolResult, "")
-        val toolResponseMessage = createToolResponseMessage(initialResponse.toolCall, toolResult)
-
-        // Save the tool messages to chat history
-        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, initialResponse.precedingText)
-
-        // Build follow-up request with tool result
-        val messagesToAdd = mutableListOf<Message>()
-        if (initialResponse.precedingText.isNotBlank()) {
-            messagesToAdd.add(createAssistantMessage(initialResponse.precedingText, modelName))
-        }
-        messagesToAdd.add(toolCallMessage)
-        messagesToAdd.add(toolResponseMessage)
-        val messagesWithToolResult = messages + messagesToAdd
-
-        // Handle tool chaining with loop (supports up to 25 sequential tool calls)
-        var currentMessages = messagesWithToolResult
-        var currentResponse: ProviderStreamingResult = makeStreamingRequest(
-            provider, modelName, currentMessages, systemPrompt, apiKey,
-            webSearchEnabled, enabledTools, thinkingBudget, callback,
-            maxToolDepth = MAX_TOOL_DEPTH,
-            currentDepth = 1,
-            temperature = temperature
-        )
-        var toolDepth = 1
-
-        // Loop to handle sequential tool calls
-        while (currentResponse is ProviderStreamingResult.ToolCallDetected && toolDepth < MAX_TOOL_DEPTH) {
-            Log.d("TOOL_CALL_DEBUG", "Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
-
-            // Execute the tool
-            val chainedToolResult = callback.onToolCall(
-                toolCall = currentResponse.toolCall,
-                precedingText = currentResponse.precedingText
-            )
-
-            // Create messages
-            val chainedMessagesToAdd = mutableListOf<Message>()
-            if (currentResponse.precedingText.isNotBlank()) {
-                chainedMessagesToAdd.add(createAssistantMessage(currentResponse.precedingText, modelName))
-            }
-
-            val chainedToolCallMessage = createToolCallMessage(currentResponse.toolCall, chainedToolResult, "")
-            chainedMessagesToAdd.add(chainedToolCallMessage)
-
-            val chainedToolResponseMessage = createToolResponseMessage(currentResponse.toolCall, chainedToolResult)
-            chainedMessagesToAdd.add(chainedToolResponseMessage)
-
-            // Save tool messages
-            callback.onSaveToolMessages(chainedToolCallMessage, chainedToolResponseMessage, currentResponse.precedingText)
-
-            // Add messages to conversation history
-            currentMessages = currentMessages + chainedMessagesToAdd
-            toolDepth++
-
-            // Send follow-up request
-            Log.d("TOOL_CALL_DEBUG", "Streaming: Sending follow-up request (depth $toolDepth)")
-            currentResponse = makeStreamingRequest(
-                provider, modelName, currentMessages, systemPrompt, apiKey,
+        val finalText = handleToolCallChain(
+            initialToolCall = initialResponse.toolCall,
+            initialPrecedingText = initialResponse.precedingText,
+            messages = messages,
+            modelName = modelName,
+            callback = callback
+        ) { updatedMessages ->
+            makeStreamingRequest(
+                provider, modelName, updatedMessages, systemPrompt, apiKey,
                 webSearchEnabled, enabledTools, thinkingBudget, callback,
-                maxToolDepth = MAX_TOOL_DEPTH,
-                currentDepth = toolDepth,
                 temperature = temperature
             )
         }
 
-        // Handle final response
-        when (currentResponse) {
-            is ProviderStreamingResult.TextComplete -> {
-                Log.d("TOOL_CALL_DEBUG", "Streaming: Got final text response after $toolDepth tool calls")
-                callback.onComplete(currentResponse.fullText)
-            }
-            is ProviderStreamingResult.ToolCallDetected -> {
-                Log.d("TOOL_CALL_DEBUG", "Streaming: Maximum tool depth ($MAX_TOOL_DEPTH) exceeded")
-                callback.onError("Maximum tool call depth ($MAX_TOOL_DEPTH) exceeded")
-            }
-            is ProviderStreamingResult.Error -> {
-                callback.onError(currentResponse.error)
-            }
+        if (finalText != null) {
+            callback.onComplete(finalText)
+        } else {
+            // Max depth exceeded (error already reported by handleToolCallChain if it was an error)
+            callback.onError("Maximum tool call depth ($MAX_TOOL_DEPTH) exceeded")
         }
     }
 
@@ -316,7 +245,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                         }
                         "response.output_text.delta" -> {
                             if (isInReasoningPhase) {
-                                completeReasoningPhase(callback, reasoningStartTime, reasoningBuilder)
+                                completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
                                 isInReasoningPhase = false
                             }
 
@@ -332,7 +261,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
 
                             if (itemType == "function_call") {
                                 if (isInReasoningPhase) {
-                                    completeReasoningPhase(callback, reasoningStartTime, reasoningBuilder)
+                                    completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
                                     isInReasoningPhase = false
                                 }
 
@@ -341,7 +270,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                         }
                         "response.completed" -> {
                             if (isInReasoningPhase) {
-                                completeReasoningPhase(callback, reasoningStartTime, reasoningBuilder)
+                                completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
                                 isInReasoningPhase = false
                             }
 
@@ -377,21 +306,6 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
             fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(fullResponse.toString())
             else -> ProviderStreamingResult.Error("Empty response from OpenAI")
         }
-    }
-
-    private fun completeReasoningPhase(
-        callback: StreamingCallback,
-        reasoningStartTime: Long,
-        reasoningBuilder: StringBuilder
-    ) {
-        val durationSeconds = (System.currentTimeMillis() - reasoningStartTime) / 1000f
-        val reasoningContent = reasoningBuilder.toString().takeIf { it.isNotEmpty() }
-        callback.onThinkingComplete(
-            thoughts = reasoningContent,
-            durationSeconds = durationSeconds,
-            status = if (reasoningContent != null) ThoughtsStatus.PRESENT else ThoughtsStatus.UNAVAILABLE
-        )
-        Log.d("OPENAI_REASONING", "Reasoning phase complete: ${durationSeconds}s, content length: ${reasoningContent?.length ?: 0}")
     }
 
     private fun parseToolCall(item: JsonObject?): ToolCall? {
