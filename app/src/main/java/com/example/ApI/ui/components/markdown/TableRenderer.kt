@@ -16,7 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.example.ApI.data.model.TextDirectionMode
-import com.example.ApI.ui.screen.TextDirectionUtils
+import com.example.ApI.ui.utils.TextDirectionUtils
 import org.commonmark.ext.gfm.tables.*
 
 @Composable
