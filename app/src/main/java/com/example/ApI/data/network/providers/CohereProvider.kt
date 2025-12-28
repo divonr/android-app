@@ -64,11 +64,6 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                         val toolCall = result.toolCall
                         val precedingText = result.precedingText
 
-                        println("[DEBUG] Cohere executing tool: ${toolCall.toolId}")
-                        if (precedingText.isNotBlank()) {
-                            println("[DEBUG] Preceding text: $precedingText")
-                        }
-
                         val toolResult = callback.onToolCall(toolCall, precedingText)
 
                         val toolCallMessage = createToolCallMessage(toolCall, toolResult, precedingText)
@@ -118,8 +113,6 @@ class CohereProvider(context: Context) : BaseProvider(context) {
             val cohereMessages = buildMessages(messages, systemPrompt)
             val requestBody = buildRequestBody(modelName, cohereMessages, enabledTools, webSearchEnabled, temperature)
 
-            println("[DEBUG] Cohere request body: $requestBody")
-
             connection.outputStream.write(requestBody.toString().toByteArray())
             connection.outputStream.flush()
 
@@ -159,7 +152,6 @@ class CohereProvider(context: Context) : BaseProvider(context) {
 
             if (currentLine.isBlank()) continue
             if (currentLine == "data: [DONE]") {
-                println("[DEBUG] Cohere stream complete")
                 break
             }
 
@@ -177,11 +169,11 @@ class CohereProvider(context: Context) : BaseProvider(context) {
 
                     when (eventType) {
                         "message-start" -> {
-                            println("[DEBUG] Cohere message started")
+                            // Message started
                         }
 
                         "content-start" -> {
-                            println("[DEBUG] Cohere content block started")
+                            // Content block started
                         }
 
                         "content-delta" -> {
@@ -201,12 +193,12 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                                     callback.onPartialResponse(text)
                                 }
                             } catch (e: Exception) {
-                                println("[DEBUG] Error parsing content-delta: ${e.message}")
+                                // Error parsing content-delta
                             }
                         }
 
                         "content-end" -> {
-                            println("[DEBUG] Cohere content block ended")
+                            // Content block ended
                         }
 
                         "tool-plan-delta" -> {
@@ -239,10 +231,8 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                                 if (!initialArgs.isNullOrEmpty()) {
                                     currentToolArguments.append(initialArgs)
                                 }
-
-                                println("[DEBUG] Cohere tool call started: $currentToolName (id: $currentToolCallId)")
                             } catch (e: Exception) {
-                                println("[DEBUG] Error parsing tool-call-start: ${e.message}")
+                                // Error parsing tool-call-start
                             }
                         }
 
@@ -262,7 +252,7 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                                     currentToolArguments.append(argsChunk)
                                 }
                             } catch (e: Exception) {
-                                println("[DEBUG] Error parsing tool-call-delta: ${e.message}")
+                                // Error parsing tool-call-delta
                             }
                         }
 
@@ -278,23 +268,17 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                                         parameters = toolInputJson,
                                         provider = "cohere"
                                     )
-
-                                    println("[DEBUG] Cohere tool call detected: $detectedToolCall")
                                 } catch (e: Exception) {
-                                    println("[DEBUG] Error parsing Cohere tool input JSON: ${e.message}")
+                                    // Error parsing Cohere tool input JSON
                                 }
                             }
                         }
 
                         "message-end" -> {
-                            val delta = chunkJson["delta"]?.jsonObject
-                            val finishReason = delta?.get("finish_reason")?.jsonPrimitive?.content
-                            println("[DEBUG] Cohere message ended with finish_reason: $finishReason")
                             break
                         }
                     }
                 } catch (jsonException: Exception) {
-                    println("[DEBUG] Error parsing Cohere SSE chunk: ${jsonException.message}")
                     continue
                 }
             }
@@ -358,7 +342,7 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                                                     })
                                                 }
                                             } catch (e: Exception) {
-                                                println("[DEBUG] Error encoding image for Cohere: ${e.message}")
+                                                // Error encoding image for Cohere
                                             }
                                         }
                                     }
@@ -471,7 +455,7 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                                                     }
                                                 })
                                             } catch (e: Exception) {
-                                                println("[DEBUG] Error converting tool parameter $paramName: ${e.message}")
+                                                // Error converting tool parameter
                                             }
                                         }
                                     })

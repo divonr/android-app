@@ -561,12 +561,6 @@ class ChatViewModel(
                 webSearchSupport = webSearchSupport,
                 webSearchEnabled = webSearchEnabled
             )
-            
-            // Debug log
-            println("DEBUG: Loaded ${providers.size} providers")
-            println("DEBUG: Current provider: ${currentProvider?.provider}")
-            println("DEBUG: Current model: $currentModel")
-            println("DEBUG: Loaded ${chatHistory.chat_history.size} existing chats")
 
             // Update settings if we changed anything
             if (currentModel != settings.selected_model ||

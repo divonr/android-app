@@ -1,6 +1,7 @@
 package com.example.ApI.data.repository
 
 import android.os.Environment
+import android.util.Log
 import com.example.ApI.data.model.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
@@ -16,6 +17,10 @@ class ChatHistoryManager(
     private val internalDir: File,
     private val json: Json
 ) {
+    companion object {
+        private const val TAG = "ChatHistoryManager"
+    }
+
     fun loadChatHistory(username: String): UserChatHistory {
         val file = File(internalDir, "chat_history_$username.json")
         return if (file.exists()) {
@@ -23,11 +28,11 @@ class ChatHistoryManager(
                 val content = file.readText()
                 json.decodeFromString<UserChatHistory>(content)
             } catch (e: Exception) {
-                android.util.Log.e("ChatHistoryManager", "Failed to load chat history", e)
+                Log.e(TAG, "Failed to load chat history", e)
                 UserChatHistory(username, emptyList(), emptyList())
             }
         } else {
-            android.util.Log.e("ChatHistoryManager", "Failed to load chat history, file doesn't exist")
+            Log.e(TAG, "Failed to load chat history, file doesn't exist")
             UserChatHistory(username, emptyList(), emptyList())
         }
     }
@@ -190,7 +195,7 @@ class ChatHistoryManager(
             val updatedHistory = chatHistory.copy(chat_history = updatedChats)
             saveChatHistory(updatedHistory)
         } catch (e: Exception) {
-            println("Failed to update chat with new file IDs: ${e.message}")
+            Log.e(TAG, "Failed to update chat with new file IDs", e)
         }
     }
 
@@ -283,7 +288,7 @@ class ChatHistoryManager(
             saveChatHistory(updatedHistory)
             sanitizedChat.chat_id
         } catch (e: Exception) {
-            println("Failed to import chat: ${e.message}")
+            Log.e(TAG, "Failed to import chat", e)
             null
         }
     }

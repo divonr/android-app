@@ -189,8 +189,6 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
             val requestBody = buildRequestBody(modelName, contents, webSearchEnabled, enabledTools, thinkingBudget, temperature)
             val requestBodyJson = json.encodeToString(requestBody)
 
-            println("[DEBUG] Google Streaming API Request: $requestBodyJson")
-
             val writer = OutputStreamWriter(connection.outputStream)
             writer.write(requestBodyJson)
             writer.flush()
@@ -322,8 +320,6 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                         }
                     }
                 } catch (jsonException: Exception) {
-                    println("[DEBUG] Error parsing Google streaming chunk: ${jsonException.message}")
-                    println("[DEBUG] Problematic chunk: $dataContent")
                     continue
                 }
             }
