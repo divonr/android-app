@@ -8,11 +8,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.io.BufferedReader
-import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.Base64
 
 /**
  * OpenRouter API provider implementation.
@@ -44,11 +42,15 @@ class OpenRouterProvider(context: Context) : BaseProvider(context) {
             )
 
             when (result) {
-                is StreamingResult.TextResponse -> {
-                    callback.onComplete(result.text)
+                is ProviderStreamingResult.TextComplete -> {
+                    callback.onComplete(result.fullText)
                 }
-                is StreamingResult.Error -> {
-                    callback.onError(result.message)
+                is ProviderStreamingResult.ToolCallDetected -> {
+                    // OpenRouter doesn't support tool calling yet
+                    callback.onError("Tool calling not supported for OpenRouter")
+                }
+                is ProviderStreamingResult.Error -> {
+                    callback.onError(result.error)
                 }
             }
         } catch (e: Exception) {
@@ -64,7 +66,7 @@ class OpenRouterProvider(context: Context) : BaseProvider(context) {
         apiKey: String,
         callback: StreamingCallback,
         temperature: Float? = null
-    ): StreamingResult = withContext(Dispatchers.IO) {
+    ): ProviderStreamingResult = withContext(Dispatchers.IO) {
         try {
             val url = URL(provider.request.base_url)
             val connection = url.openConnection() as HttpURLConnection
@@ -90,13 +92,13 @@ class OpenRouterProvider(context: Context) : BaseProvider(context) {
                 val errorResponse = errorReader.readText()
                 errorReader.close()
                 connection.disconnect()
-                return@withContext StreamingResult.Error("HTTP $responseCode: $errorResponse")
+                return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorResponse")
             }
 
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             parseStreamingResponse(reader, connection, callback)
         } catch (e: Exception) {
-            StreamingResult.Error("OpenRouter request failed: ${e.message}")
+            ProviderStreamingResult.Error("OpenRouter request failed: ${e.message}")
         }
     }
 
@@ -104,7 +106,7 @@ class OpenRouterProvider(context: Context) : BaseProvider(context) {
         reader: BufferedReader,
         connection: HttpURLConnection,
         callback: StreamingCallback
-    ): StreamingResult {
+    ): ProviderStreamingResult {
         val fullResponse = StringBuilder()
 
         var line: String?
@@ -134,7 +136,7 @@ class OpenRouterProvider(context: Context) : BaseProvider(context) {
                         val errorMessage = error["message"]?.jsonPrimitive?.contentOrNull ?: "Unknown error"
                         reader.close()
                         connection.disconnect()
-                        return StreamingResult.Error(errorMessage)
+                        return ProviderStreamingResult.Error(errorMessage)
                     }
 
                     // Extract text from choices[0].delta.content
@@ -165,9 +167,9 @@ class OpenRouterProvider(context: Context) : BaseProvider(context) {
         connection.disconnect()
 
         return if (fullResponse.isNotEmpty()) {
-            StreamingResult.TextResponse(fullResponse.toString())
+            ProviderStreamingResult.TextComplete(fullResponse.toString())
         } else {
-            StreamingResult.Error("Empty response from OpenRouter")
+            ProviderStreamingResult.Error("Empty response from OpenRouter")
         }
     }
 
@@ -200,14 +202,7 @@ class OpenRouterProvider(context: Context) : BaseProvider(context) {
                                     message.attachments.filter {
                                         it.mime_type.startsWith("image/")
                                     }.forEach { attachment ->
-                                        val base64Data = attachment.local_file_path?.let { path ->
-                                            try {
-                                                val file = File(path)
-                                                if (file.exists()) {
-                                                    Base64.getEncoder().encodeToString(file.readBytes())
-                                                } else null
-                                            } catch (e: Exception) { null }
-                                        }
+                                        val base64Data = readFileAsBase64(attachment.local_file_path)
                                         if (base64Data != null) {
                                             add(buildJsonObject {
                                                 put("type", "image_url")
@@ -254,8 +249,4 @@ class OpenRouterProvider(context: Context) : BaseProvider(context) {
         }
     }
 
-    private sealed class StreamingResult {
-        data class TextResponse(val text: String) : StreamingResult()
-        data class Error(val message: String) : StreamingResult()
-    }
 }

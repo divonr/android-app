@@ -44,18 +44,18 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
             )
 
             when (streamingResponse) {
-                is StreamingResult.TextComplete -> {
+                is ProviderStreamingResult.TextComplete -> {
                     Log.d("TOOL_CALL_DEBUG", "Streaming: Text response complete")
                     callback.onComplete(streamingResponse.fullText)
                 }
-                is StreamingResult.ToolCallDetected -> {
+                is ProviderStreamingResult.ToolCallDetected -> {
                     handleToolCall(
                         provider, modelName, messages, systemPrompt, apiKey,
                         webSearchEnabled, enabledTools, thinkingBudget, temperature,
                         streamingResponse, callback
                     )
                 }
-                is StreamingResult.Error -> {
+                is ProviderStreamingResult.Error -> {
                     // Already called callback.onError in makeStreamingRequest
                 }
             }
@@ -77,7 +77,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
         enabledTools: List<ToolSpecification>,
         thinkingBudget: ThinkingBudgetValue,
         temperature: Float?,
-        initialResponse: StreamingResult.ToolCallDetected,
+        initialResponse: ProviderStreamingResult.ToolCallDetected,
         callback: StreamingCallback
     ) {
         Log.d("TOOL_CALL_DEBUG", "Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
@@ -107,7 +107,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
 
         // Handle tool chaining with loop (supports up to 25 sequential tool calls)
         var currentMessages = messagesWithToolResult
-        var currentResponse: StreamingResult = makeStreamingRequest(
+        var currentResponse: ProviderStreamingResult = makeStreamingRequest(
             provider, modelName, currentMessages, systemPrompt, apiKey,
             webSearchEnabled, enabledTools, thinkingBudget, callback,
             maxToolDepth = MAX_TOOL_DEPTH,
@@ -117,7 +117,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
         var toolDepth = 1
 
         // Loop to handle sequential tool calls
-        while (currentResponse is StreamingResult.ToolCallDetected && toolDepth < MAX_TOOL_DEPTH) {
+        while (currentResponse is ProviderStreamingResult.ToolCallDetected && toolDepth < MAX_TOOL_DEPTH) {
             Log.d("TOOL_CALL_DEBUG", "Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
 
             // Execute the tool
@@ -158,15 +158,15 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
 
         // Handle final response
         when (currentResponse) {
-            is StreamingResult.TextComplete -> {
+            is ProviderStreamingResult.TextComplete -> {
                 Log.d("TOOL_CALL_DEBUG", "Streaming: Got final text response after $toolDepth tool calls")
                 callback.onComplete(currentResponse.fullText)
             }
-            is StreamingResult.ToolCallDetected -> {
+            is ProviderStreamingResult.ToolCallDetected -> {
                 Log.d("TOOL_CALL_DEBUG", "Streaming: Maximum tool depth ($MAX_TOOL_DEPTH) exceeded")
                 callback.onError("Maximum tool call depth ($MAX_TOOL_DEPTH) exceeded")
             }
-            is StreamingResult.Error -> {
+            is ProviderStreamingResult.Error -> {
                 callback.onError(currentResponse.error)
             }
         }
@@ -189,7 +189,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
         currentDepth: Int = 0,
         requestReasoningSummary: Boolean = true,
         temperature: Float? = null
-    ): StreamingResult = withContext(Dispatchers.IO) {
+    ): ProviderStreamingResult = withContext(Dispatchers.IO) {
         try {
             val url = URL(provider.request.base_url)
             val connection = url.openConnection() as HttpURLConnection
@@ -236,17 +236,17 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
 
                     // Other 400 errors - fallback to non-streaming
                     sendNonStreaming(provider, modelName, messages, systemPrompt, apiKey, webSearchEnabled, enabledTools, callback)
-                    return@withContext StreamingResult.Error("Fallback to non-streaming handled")
+                    return@withContext ProviderStreamingResult.Error("Fallback to non-streaming handled")
                 } else {
                     callback.onError("HTTP $responseCode: $errorBody")
-                    return@withContext StreamingResult.Error("HTTP $responseCode: $errorBody")
+                    return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorBody")
                 }
             }
 
             parseStreamingResponse(connection, callback, thinkingBudget, requestReasoningSummary)
         } catch (e: Exception) {
             callback.onError("Failed to make OpenAI streaming request: ${e.message}")
-            StreamingResult.Error("Failed to make OpenAI streaming request: ${e.message}")
+            ProviderStreamingResult.Error("Failed to make OpenAI streaming request: ${e.message}")
         }
     }
 
@@ -258,7 +258,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
         callback: StreamingCallback,
         thinkingBudget: ThinkingBudgetValue,
         requestReasoningSummary: Boolean
-    ): StreamingResult {
+    ): ProviderStreamingResult {
         val reader = BufferedReader(InputStreamReader(connection.inputStream))
         val fullResponse = StringBuilder()
         var detectedToolCall: ToolCall? = null
@@ -356,7 +356,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                             callback.onError("OpenAI API error: $errorMessage")
                             reader.close()
                             connection.disconnect()
-                            return StreamingResult.Error("OpenAI API error: $errorMessage")
+                            return ProviderStreamingResult.Error("OpenAI API error: $errorMessage")
                         }
                     }
                 } catch (jsonException: Exception) {
@@ -370,12 +370,12 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
         connection.disconnect()
 
         return when {
-            detectedToolCall != null -> StreamingResult.ToolCallDetected(
+            detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
                 toolCall = detectedToolCall!!,
                 precedingText = fullResponse.toString()
             )
-            fullResponse.isNotEmpty() -> StreamingResult.TextComplete(fullResponse.toString())
-            else -> StreamingResult.Error("Empty response from OpenAI")
+            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(fullResponse.toString())
+            else -> ProviderStreamingResult.Error("Empty response from OpenAI")
         }
     }
 
@@ -779,18 +779,6 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
         } catch (e: Exception) {
             return NonStreamingResponse.ErrorResponse("Failed to parse response: ${e.message}")
         }
-    }
-
-    /**
-     * Internal sealed classes for streaming and non-streaming results
-     */
-    private sealed class StreamingResult {
-        data class TextComplete(val fullText: String) : StreamingResult()
-        data class ToolCallDetected(
-            val toolCall: ToolCall,
-            val precedingText: String = ""
-        ) : StreamingResult()
-        data class Error(val error: String) : StreamingResult()
     }
 
     private sealed class NonStreamingResponse {

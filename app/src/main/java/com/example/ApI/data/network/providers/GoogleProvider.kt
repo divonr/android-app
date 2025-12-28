@@ -40,18 +40,18 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
             )
 
             when (streamingResponse) {
-                is StreamingResult.TextComplete -> {
+                is ProviderStreamingResult.TextComplete -> {
                     Log.d("TOOL_CALL_DEBUG", "Google Streaming: Text response complete")
                     callback.onComplete(streamingResponse.fullText)
                 }
-                is StreamingResult.ToolCallDetected -> {
+                is ProviderStreamingResult.ToolCallDetected -> {
                     handleToolCall(
                         provider, modelName, messages, systemPrompt, apiKey,
                         webSearchEnabled, enabledTools, thinkingBudget, temperature,
                         streamingResponse, callback
                     )
                 }
-                is StreamingResult.Error -> {
+                is ProviderStreamingResult.Error -> {
                     // Already called callback.onError
                 }
             }
@@ -70,7 +70,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         enabledTools: List<ToolSpecification>,
         thinkingBudget: ThinkingBudgetValue,
         temperature: Float?,
-        initialResponse: StreamingResult.ToolCallDetected,
+        initialResponse: ProviderStreamingResult.ToolCallDetected,
         callback: StreamingCallback
     ) {
         Log.d("TOOL_CALL_DEBUG", "Google Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
@@ -102,7 +102,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         val messagesWithToolResult = messages + messagesToAdd
 
         var currentMessages = messagesWithToolResult
-        var currentResponse: StreamingResult = makeStreamingRequest(
+        var currentResponse: ProviderStreamingResult = makeStreamingRequest(
             provider, modelName, currentMessages, systemPrompt, apiKey,
             webSearchEnabled, enabledTools, thinkingBudget, callback,
             maxToolDepth = MAX_TOOL_DEPTH,
@@ -111,7 +111,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         )
         var toolDepth = 1
 
-        while (currentResponse is StreamingResult.ToolCallDetected && toolDepth < MAX_TOOL_DEPTH) {
+        while (currentResponse is ProviderStreamingResult.ToolCallDetected && toolDepth < MAX_TOOL_DEPTH) {
             Log.d("TOOL_CALL_DEBUG", "Google Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
 
             val chainedToolResult = callback.onToolCall(
@@ -146,15 +146,15 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         }
 
         when (currentResponse) {
-            is StreamingResult.TextComplete -> {
+            is ProviderStreamingResult.TextComplete -> {
                 Log.d("TOOL_CALL_DEBUG", "Google Streaming: Got final text response after $toolDepth tool calls")
                 callback.onComplete(currentResponse.fullText)
             }
-            is StreamingResult.ToolCallDetected -> {
+            is ProviderStreamingResult.ToolCallDetected -> {
                 Log.d("TOOL_CALL_DEBUG", "Google Streaming: Maximum tool depth ($MAX_TOOL_DEPTH) exceeded")
                 callback.onError("Maximum tool call depth ($MAX_TOOL_DEPTH) exceeded")
             }
-            is StreamingResult.Error -> {
+            is ProviderStreamingResult.Error -> {
                 callback.onError(currentResponse.error)
             }
         }
@@ -173,7 +173,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         maxToolDepth: Int = MAX_TOOL_DEPTH,
         currentDepth: Int = 0,
         temperature: Float? = null
-    ): StreamingResult = withContext(Dispatchers.IO) {
+    ): ProviderStreamingResult = withContext(Dispatchers.IO) {
         try {
             // Build request URL - replace placeholder and change to streaming endpoint
             val baseUrl = provider.request.base_url.replace("{model_name}", modelName)
@@ -199,20 +199,20 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
             if (responseCode >= 400) {
                 val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
                 callback.onError("HTTP $responseCode: $errorBody")
-                return@withContext StreamingResult.Error("HTTP $responseCode: $errorBody")
+                return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorBody")
             }
 
             parseStreamingResponse(connection, callback)
         } catch (e: Exception) {
             callback.onError("Failed to make Google streaming request: ${e.message}")
-            StreamingResult.Error("Failed to make Google streaming request: ${e.message}")
+            ProviderStreamingResult.Error("Failed to make Google streaming request: ${e.message}")
         }
     }
 
     private fun parseStreamingResponse(
         connection: HttpURLConnection,
         callback: StreamingCallback
-    ): StreamingResult {
+    ): ProviderStreamingResult {
         Log.d("TOOL_CALL_DEBUG", "Starting to read Google stream...")
         val reader = BufferedReader(InputStreamReader(connection.inputStream))
         val fullResponse = StringBuilder()
@@ -242,7 +242,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                         callback.onError("Google API streaming error: $errorMessage")
                         reader.close()
                         connection.disconnect()
-                        return StreamingResult.Error("Google API streaming error: $errorMessage")
+                        return ProviderStreamingResult.Error("Google API streaming error: $errorMessage")
                     }
 
                     val candidates = chunkJson["candidates"]?.jsonArray
@@ -254,7 +254,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                         val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.content
                         if (finishReason != null && finishReason != "STOP") {
                             callback.onError("Google API streaming blocked due to: $finishReason")
-                            return StreamingResult.Error("Google API streaming blocked due to: $finishReason")
+                            return ProviderStreamingResult.Error("Google API streaming blocked due to: $finishReason")
                         }
 
                         val content = firstCandidate["content"]?.jsonObject
@@ -341,7 +341,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                 if (thoughts != null) {
                     callback.onThinkingComplete(thoughts, thinkingDuration ?: 0f, thoughtsStatus)
                 }
-                StreamingResult.ToolCallDetected(
+                ProviderStreamingResult.ToolCallDetected(
                     toolCall = detectedToolCall!!,
                     precedingText = fullResponse.toString(),
                     thoughts = thoughts,
@@ -349,13 +349,13 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                     thoughtsStatus = thoughtsStatus
                 )
             }
-            fullResponse.isNotEmpty() -> StreamingResult.TextComplete(
+            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
                 fullText = fullResponse.toString(),
                 thoughts = thoughts,
                 thinkingDurationSeconds = thinkingDuration,
                 thoughtsStatus = thoughtsStatus
             )
-            else -> StreamingResult.Error("Empty response from Google")
+            else -> ProviderStreamingResult.Error("Empty response from Google")
         }
     }
 
@@ -535,20 +535,4 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         }
     }
 
-    private sealed class StreamingResult {
-        data class TextComplete(
-            val fullText: String,
-            val thoughts: String? = null,
-            val thinkingDurationSeconds: Float? = null,
-            val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
-        ) : StreamingResult()
-        data class ToolCallDetected(
-            val toolCall: ToolCall,
-            val precedingText: String = "",
-            val thoughts: String? = null,
-            val thinkingDurationSeconds: Float? = null,
-            val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
-        ) : StreamingResult()
-        data class Error(val error: String) : StreamingResult()
-    }
 }

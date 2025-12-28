@@ -8,11 +8,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.io.BufferedReader
-import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.Base64
 
 /**
  * Anthropic Claude API provider implementation.
@@ -55,13 +53,13 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                 )
 
                 when (result) {
-                    is StreamingResult.TextResponse -> {
-                        fullResponseText = result.text
+                    is ProviderStreamingResult.TextComplete -> {
+                        fullResponseText = result.fullText
                         callback.onComplete(fullResponseText)
                         return
                     }
 
-                    is StreamingResult.ToolCallResult -> {
+                    is ProviderStreamingResult.ToolCallDetected -> {
                         val toolCall = result.toolCall
                         val precedingText = result.precedingText
 
@@ -78,8 +76,8 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                         fullResponseText = ""
                     }
 
-                    is StreamingResult.Error -> {
-                        callback.onError(result.message)
+                    is ProviderStreamingResult.Error -> {
+                        callback.onError(result.error)
                         return
                     }
                 }
@@ -131,7 +129,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         callback: StreamingCallback,
         temperature: Float? = null
-    ): StreamingResult = withContext(Dispatchers.IO) {
+    ): ProviderStreamingResult = withContext(Dispatchers.IO) {
         try {
             val url = URL(provider.request.base_url)
             val connection = url.openConnection() as HttpURLConnection
@@ -168,7 +166,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
             parseStreamingResponse(reader, connection, callback)
         } catch (e: Exception) {
             callback.onError("Failed to make Anthropic streaming request: ${e.message}")
-            StreamingResult.Error("Failed to make Anthropic streaming request: ${e.message}")
+            ProviderStreamingResult.Error("Failed to make Anthropic streaming request: ${e.message}")
         }
     }
 
@@ -176,7 +174,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         reader: BufferedReader,
         connection: HttpURLConnection,
         callback: StreamingCallback
-    ): StreamingResult {
+    ): ProviderStreamingResult {
         val fullResponse = StringBuilder()
 
         // Track tool use
@@ -313,7 +311,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                             val error = chunkJson["error"]?.jsonObject
                             val errorMessage = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
                             callback.onError("Anthropic API error: $errorMessage")
-                            return StreamingResult.Error(errorMessage)
+                            return ProviderStreamingResult.Error(errorMessage)
                         }
                     }
                 } catch (jsonException: Exception) {
@@ -336,20 +334,20 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         }
 
         return when {
-            detectedToolCall != null -> StreamingResult.ToolCallResult(
+            detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
                 toolCall = detectedToolCall!!,
                 precedingText = fullResponse.toString(),
                 thoughts = thoughtsContent,
                 thinkingDurationSeconds = thinkingDuration,
                 thoughtsStatus = thoughtsStatus
             )
-            fullResponse.isNotEmpty() -> StreamingResult.TextResponse(
-                text = fullResponse.toString(),
+            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
+                fullText = fullResponse.toString(),
                 thoughts = thoughtsContent,
                 thinkingDurationSeconds = thinkingDuration,
                 thoughtsStatus = thoughtsStatus
             )
-            else -> StreamingResult.Error("Empty response from Anthropic")
+            else -> ProviderStreamingResult.Error("Empty response from Anthropic")
         }
     }
 
@@ -382,38 +380,29 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                         }
 
                         message.attachments.forEach { attachment ->
-                            attachment.local_file_path?.let { filePath ->
-                                try {
-                                    val file = File(filePath)
-                                    if (file.exists()) {
-                                        val bytes = file.readBytes()
-                                        val base64Data = Base64.getEncoder().encodeToString(bytes)
-
-                                        when {
-                                            attachment.mime_type.startsWith("image/") -> {
-                                                add(buildJsonObject {
-                                                    put("type", "image")
-                                                    put("source", buildJsonObject {
-                                                        put("type", "base64")
-                                                        put("media_type", attachment.mime_type)
-                                                        put("data", base64Data)
-                                                    })
-                                                })
-                                            }
-                                            attachment.mime_type == "application/pdf" -> {
-                                                add(buildJsonObject {
-                                                    put("type", "document")
-                                                    put("source", buildJsonObject {
-                                                        put("type", "base64")
-                                                        put("media_type", "application/pdf")
-                                                        put("data", base64Data)
-                                                    })
-                                                })
-                                            }
-                                        }
+                            val base64Data = readFileAsBase64(attachment.local_file_path)
+                            if (base64Data != null) {
+                                when {
+                                    attachment.mime_type.startsWith("image/") -> {
+                                        add(buildJsonObject {
+                                            put("type", "image")
+                                            put("source", buildJsonObject {
+                                                put("type", "base64")
+                                                put("media_type", attachment.mime_type)
+                                                put("data", base64Data)
+                                            })
+                                        })
                                     }
-                                } catch (e: Exception) {
-                                    // Error encoding file
+                                    attachment.mime_type == "application/pdf" -> {
+                                        add(buildJsonObject {
+                                            put("type", "document")
+                                            put("source", buildJsonObject {
+                                                put("type", "base64")
+                                                put("media_type", "application/pdf")
+                                                put("data", base64Data)
+                                            })
+                                        })
+                                    }
                                 }
                             }
                         }
@@ -551,20 +540,4 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         }
     }
 
-    private sealed class StreamingResult {
-        data class TextResponse(
-            val text: String,
-            val thoughts: String? = null,
-            val thinkingDurationSeconds: Float? = null,
-            val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
-        ) : StreamingResult()
-        data class ToolCallResult(
-            val toolCall: ToolCall,
-            val precedingText: String = "",
-            val thoughts: String? = null,
-            val thinkingDurationSeconds: Float? = null,
-            val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
-        ) : StreamingResult()
-        data class Error(val message: String) : StreamingResult()
-    }
 }

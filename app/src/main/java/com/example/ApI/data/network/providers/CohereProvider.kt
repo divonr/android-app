@@ -8,11 +8,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.io.BufferedReader
-import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.Base64
 
 /**
  * Cohere API provider implementation.
@@ -54,13 +52,13 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                 )
 
                 when (result) {
-                    is StreamingResult.TextResponse -> {
-                        fullResponseText = result.text
+                    is ProviderStreamingResult.TextComplete -> {
+                        fullResponseText = result.fullText
                         callback.onComplete(fullResponseText)
                         return
                     }
 
-                    is StreamingResult.ToolCallResult -> {
+                    is ProviderStreamingResult.ToolCallDetected -> {
                         val toolCall = result.toolCall
                         val precedingText = result.precedingText
 
@@ -77,8 +75,8 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                         fullResponseText = ""
                     }
 
-                    is StreamingResult.Error -> {
-                        callback.onError(result.message)
+                    is ProviderStreamingResult.Error -> {
+                        callback.onError(result.error)
                         return
                     }
                 }
@@ -100,7 +98,7 @@ class CohereProvider(context: Context) : BaseProvider(context) {
         webSearchEnabled: Boolean,
         callback: StreamingCallback,
         temperature: Float? = null
-    ): StreamingResult = withContext(Dispatchers.IO) {
+    ): ProviderStreamingResult = withContext(Dispatchers.IO) {
         try {
             val url = URL(provider.request.base_url)
             val connection = url.openConnection() as HttpURLConnection
@@ -122,14 +120,14 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                 val errorResponse = errorReader.readText()
                 errorReader.close()
                 connection.disconnect()
-                return@withContext StreamingResult.Error("HTTP $responseCode: $errorResponse")
+                return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorResponse")
             }
 
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             parseStreamingResponse(reader, connection, callback)
         } catch (e: Exception) {
             callback.onError("Failed to make Cohere streaming request: ${e.message}")
-            StreamingResult.Error("Failed to make streaming request: ${e.message}")
+            ProviderStreamingResult.Error("Failed to make streaming request: ${e.message}")
         }
     }
 
@@ -137,7 +135,7 @@ class CohereProvider(context: Context) : BaseProvider(context) {
         reader: BufferedReader,
         connection: HttpURLConnection,
         callback: StreamingCallback
-    ): StreamingResult {
+    ): ProviderStreamingResult {
         val fullResponse = StringBuilder()
 
         var currentToolCallId: String? = null
@@ -288,12 +286,12 @@ class CohereProvider(context: Context) : BaseProvider(context) {
         connection.disconnect()
 
         return when {
-            detectedToolCall != null -> StreamingResult.ToolCallResult(
+            detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
                 toolCall = detectedToolCall!!,
                 precedingText = fullResponse.toString()
             )
-            fullResponse.isNotEmpty() -> StreamingResult.TextResponse(fullResponse.toString())
-            else -> StreamingResult.Error("Empty response from Cohere")
+            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(fullResponse.toString())
+            else -> ProviderStreamingResult.Error("Empty response from Cohere")
         }
     }
 
@@ -327,23 +325,14 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                                 }
                                 message.attachments.forEach { attachment ->
                                     if (attachment.mime_type.startsWith("image/")) {
-                                        attachment.local_file_path?.let { filePath ->
-                                            try {
-                                                val file = File(filePath)
-                                                if (file.exists()) {
-                                                    val bytes = file.readBytes()
-                                                    val base64Data = Base64.getEncoder().encodeToString(bytes)
-                                                    val dataUrl = "data:${attachment.mime_type};base64,$base64Data"
-                                                    add(buildJsonObject {
-                                                        put("type", "image_url")
-                                                        put("image_url", buildJsonObject {
-                                                            put("url", dataUrl)
-                                                        })
-                                                    })
-                                                }
-                                            } catch (e: Exception) {
-                                                // Error encoding image for Cohere
-                                            }
+                                        val dataUrl = createDataUrl(attachment.local_file_path, attachment.mime_type)
+                                        if (dataUrl != null) {
+                                            add(buildJsonObject {
+                                                put("type", "image_url")
+                                                put("image_url", buildJsonObject {
+                                                    put("url", dataUrl)
+                                                })
+                                            })
                                         }
                                     }
                                 }
@@ -480,12 +469,4 @@ class CohereProvider(context: Context) : BaseProvider(context) {
         }
     }
 
-    private sealed class StreamingResult {
-        data class TextResponse(val text: String) : StreamingResult()
-        data class ToolCallResult(
-            val toolCall: ToolCall,
-            val precedingText: String = ""
-        ) : StreamingResult()
-        data class Error(val message: String) : StreamingResult()
-    }
 }

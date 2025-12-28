@@ -105,6 +105,31 @@ abstract class BaseProvider(protected val context: Context) {
     }
 
     /**
+     * Reads a file from disk and encodes it as Base64.
+     * Returns null if the file doesn't exist or cannot be read.
+     */
+    protected fun readFileAsBase64(filePath: String?): String? {
+        if (filePath == null) return null
+        return try {
+            val file = java.io.File(filePath)
+            if (file.exists()) {
+                java.util.Base64.getEncoder().encodeToString(file.readBytes())
+            } else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Creates a data URL from a file path and MIME type.
+     * Returns null if the file cannot be read.
+     */
+    protected fun createDataUrl(filePath: String?, mimeType: String): String? {
+        val base64Data = readFileAsBase64(filePath) ?: return null
+        return "data:$mimeType;base64,$base64Data"
+    }
+
+    /**
      * Reads text content from a file for inclusion in API requests.
      * Returns null if the file cannot be read or is too large.
      */

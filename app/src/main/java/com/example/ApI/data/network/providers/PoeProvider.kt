@@ -41,17 +41,17 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             )
 
             when (streamingResponse) {
-                is StreamingResult.TextComplete -> {
+                is ProviderStreamingResult.TextComplete -> {
                     Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Text response complete")
                     callback.onComplete(streamingResponse.fullText)
                 }
-                is StreamingResult.ToolCallDetected -> {
+                is ProviderStreamingResult.ToolCallDetected -> {
                     handleToolCall(
                         provider, modelName, messages, systemPrompt, apiKey,
                         webSearchEnabled, enabledTools, streamingResponse, callback
                     )
                 }
-                is StreamingResult.Error -> {
+                is ProviderStreamingResult.Error -> {
                     // Already called callback.onError
                 }
             }
@@ -68,7 +68,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         apiKey: String,
         webSearchEnabled: Boolean,
         enabledTools: List<ToolSpecification>,
-        initialResponse: StreamingResult.ToolCallDetected,
+        initialResponse: ProviderStreamingResult.ToolCallDetected,
         callback: StreamingCallback
     ) {
         Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
@@ -94,7 +94,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
 
         var currentToolCall = initialResponse.toolCall
         var currentToolResult = toolResult
-        var currentResponse: StreamingResult
+        var currentResponse: ProviderStreamingResult
         var toolDepth = 1
 
         while (toolDepth < MAX_TOOL_DEPTH) {
@@ -114,12 +114,12 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             }
 
             when (currentResponse) {
-                is StreamingResult.TextComplete -> {
+                is ProviderStreamingResult.TextComplete -> {
                     Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Got final text response")
                     callback.onComplete(currentResponse.fullText)
                     return
                 }
-                is StreamingResult.ToolCallDetected -> {
+                is ProviderStreamingResult.ToolCallDetected -> {
                     Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
 
                     if (currentResponse.precedingText.isNotBlank()) {
@@ -155,7 +155,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                     currentToolResult = nextToolResult
                     toolDepth++
                 }
-                is StreamingResult.Error -> {
+                is ProviderStreamingResult.Error -> {
                     callback.onError(currentResponse.error)
                     return
                 }
@@ -178,7 +178,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         callback: StreamingCallback,
         maxToolDepth: Int = MAX_TOOL_DEPTH,
         currentDepth: Int = 0
-    ): StreamingResult = withContext(Dispatchers.IO) {
+    ): ProviderStreamingResult = withContext(Dispatchers.IO) {
         try {
             val baseUrl = provider.request.base_url.replace("{model_name}", modelName)
             val url = URL(baseUrl)
@@ -202,14 +202,14 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             if (responseCode >= 400) {
                 val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
                 callback.onError("HTTP $responseCode: $errorBody")
-                return@withContext StreamingResult.Error("HTTP $responseCode: $errorBody")
+                return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorBody")
             }
 
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             parseStreamingResponse(reader, connection, callback)
         } catch (e: Exception) {
             callback.onError("Failed to make Poe streaming request: ${e.message}")
-            StreamingResult.Error("Failed to make Poe streaming request: ${e.message}")
+            ProviderStreamingResult.Error("Failed to make Poe streaming request: ${e.message}")
         }
     }
 
@@ -224,7 +224,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         toolCall: ToolCall,
         toolResult: ToolExecutionResult,
         callback: StreamingCallback
-    ): StreamingResult = withContext(Dispatchers.IO) {
+    ): ProviderStreamingResult = withContext(Dispatchers.IO) {
         try {
             val baseUrl = provider.request.base_url.replace("{model_name}", modelName)
             val url = URL(baseUrl)
@@ -250,7 +250,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             if (responseCode >= 400) {
                 val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
                 callback.onError("HTTP $responseCode: $errorBody")
-                return@withContext StreamingResult.Error("HTTP $responseCode: $errorBody")
+                return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorBody")
             }
 
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
@@ -258,7 +258,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             parseStreamingResponseForToolResults(reader, connection, callback)
         } catch (e: Exception) {
             callback.onError("Failed to make Poe streaming request with tool results: ${e.message}")
-            StreamingResult.Error("Failed to make Poe streaming request with tool results: ${e.message}")
+            ProviderStreamingResult.Error("Failed to make Poe streaming request with tool results: ${e.message}")
         }
     }
 
@@ -266,7 +266,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         reader: BufferedReader,
         connection: HttpURLConnection,
         callback: StreamingCallback
-    ): StreamingResult {
+    ): ProviderStreamingResult {
         val fullResponse = StringBuilder()
         var detectedToolCall: ToolCall? = null
         val toolCallBuffer = mutableMapOf<Int, MutableMap<String, Any>>()
@@ -378,7 +378,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                             reader.close()
                             connection.disconnect()
                             callback.onError("Poe API error ($errorType): $errorText")
-                            return StreamingResult.Error("Poe API error ($errorType): $errorText")
+                            return ProviderStreamingResult.Error("Poe API error ($errorType): $errorText")
                         }
                         "done" -> {
                             Log.d("TOOL_CALL_DEBUG", "Poe: Stream done")
@@ -396,12 +396,12 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         connection.disconnect()
 
         return when {
-            detectedToolCall != null -> StreamingResult.ToolCallDetected(
+            detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
                 toolCall = detectedToolCall!!,
                 precedingText = fullResponse.toString()
             )
-            fullResponse.isNotEmpty() -> StreamingResult.TextComplete(fullResponse.toString())
-            else -> StreamingResult.Error("Empty response from Poe")
+            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(fullResponse.toString())
+            else -> ProviderStreamingResult.Error("Empty response from Poe")
         }
     }
 
@@ -409,7 +409,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         reader: BufferedReader,
         connection: HttpURLConnection,
         callback: StreamingCallback
-    ): StreamingResult {
+    ): ProviderStreamingResult {
         val fullResponse = StringBuilder()
         var line: String?
 
@@ -451,7 +451,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                             reader.close()
                             connection.disconnect()
                             callback.onError("Poe API error ($errorType): $errorText")
-                            return StreamingResult.Error("Poe API error ($errorType): $errorText")
+                            return ProviderStreamingResult.Error("Poe API error ($errorType): $errorText")
                         }
                         "done" -> {
                             Log.d("TOOL_CALL_DEBUG", "Poe: Follow-up stream done")
@@ -469,9 +469,9 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         connection.disconnect()
 
         return if (fullResponse.isNotEmpty()) {
-            StreamingResult.TextComplete(fullResponse.toString())
+            ProviderStreamingResult.TextComplete(fullResponse.toString())
         } else {
-            StreamingResult.Error("Empty response from Poe follow-up request")
+            ProviderStreamingResult.Error("Empty response from Poe follow-up request")
         }
     }
 
@@ -625,12 +625,4 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         }
     }
 
-    private sealed class StreamingResult {
-        data class TextComplete(val fullText: String) : StreamingResult()
-        data class ToolCallDetected(
-            val toolCall: ToolCall,
-            val precedingText: String = ""
-        ) : StreamingResult()
-        data class Error(val error: String) : StreamingResult()
-    }
 }
