@@ -57,6 +57,7 @@ import androidx.core.content.FileProvider
 import androidx.core.app.PendingIntentCompat
 import android.app.PendingIntent
 import android.os.Environment
+import com.example.ApI.util.JsonConfig
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -304,13 +305,6 @@ class ChatViewModel(
         )
     }
 
-    private val json = Json {
-        prettyPrint = false
-        ignoreUnknownKeys = true
-        isLenient = true
-        coerceInputValues = true
-    }
-
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val localBinder = binder as StreamingService.LocalBinder
@@ -398,16 +392,16 @@ class ChatViewModel(
             putExtra(StreamingService.EXTRA_REQUEST_ID, requestId)
             putExtra(StreamingService.EXTRA_CHAT_ID, chatId)
             putExtra(StreamingService.EXTRA_USERNAME, username)
-            putExtra(StreamingService.EXTRA_PROVIDER_JSON, json.encodeToString(provider))
+            putExtra(StreamingService.EXTRA_PROVIDER_JSON, JsonConfig.standard.encodeToString(provider))
             putExtra(StreamingService.EXTRA_MODEL_NAME, modelName)
             putExtra(StreamingService.EXTRA_SYSTEM_PROMPT, systemPrompt)
             putExtra(StreamingService.EXTRA_WEB_SEARCH_ENABLED, webSearchEnabled)
-            putExtra(StreamingService.EXTRA_MESSAGES_JSON, json.encodeToString(messages))
-            putExtra(StreamingService.EXTRA_PROJECT_ATTACHMENTS_JSON, json.encodeToString(projectAttachments))
-            putExtra(StreamingService.EXTRA_ENABLED_TOOLS_JSON, json.encodeToString(enabledTools))
+            putExtra(StreamingService.EXTRA_MESSAGES_JSON, JsonConfig.standard.encodeToString(messages))
+            putExtra(StreamingService.EXTRA_PROJECT_ATTACHMENTS_JSON, JsonConfig.standard.encodeToString(projectAttachments))
+            putExtra(StreamingService.EXTRA_ENABLED_TOOLS_JSON, JsonConfig.standard.encodeToString(enabledTools))
             // Add thinking budget if not None
             if (thinkingBudget != ThinkingBudgetValue.None) {
-                putExtra(StreamingService.EXTRA_THINKING_BUDGET_JSON, json.encodeToString(thinkingBudget))
+                putExtra(StreamingService.EXTRA_THINKING_BUDGET_JSON, JsonConfig.standard.encodeToString(thinkingBudget))
             }
             // Add temperature if set
             if (temperature != null) {

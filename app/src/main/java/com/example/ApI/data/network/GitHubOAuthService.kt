@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import com.example.ApI.data.model.GitHubAuth
 import com.example.ApI.data.model.GitHubOAuthConfig
+import com.example.ApI.util.JsonConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -29,13 +30,6 @@ class GitHubOAuthService(private val context: Context) {
         // Registered at: https://github.com/settings/developers
         private const val CLIENT_ID = "Ov23liIqbBxkhRQcaTn1"
         private const val CLIENT_SECRET = "6b2e01569404a3ea854e5bb4187d63ff9316f59d"
-    }
-
-    private val json = Json {
-        prettyPrint = false
-        ignoreUnknownKeys = true
-        isLenient = true
-        coerceInputValues = true
     }
 
     private val config = GitHubOAuthConfig(
@@ -132,7 +126,7 @@ class GitHubOAuthService(private val context: Context) {
             Log.d(TAG, "Token exchange response: $responseCode")
 
             if (responseCode in 200..299) {
-                val tokenResponse = json.decodeFromString<TokenResponse>(responseBody)
+                val tokenResponse = JsonConfig.standard.decodeFromString<TokenResponse>(responseBody)
 
                 // Check for error in response
                 tokenResponse.error?.let { error ->
@@ -206,7 +200,7 @@ class GitHubOAuthService(private val context: Context) {
             Log.d(TAG, "Token refresh response: $responseCode")
 
             if (responseCode in 200..299) {
-                val tokenResponse = json.decodeFromString<TokenResponse>(responseBody)
+                val tokenResponse = JsonConfig.standard.decodeFromString<TokenResponse>(responseBody)
 
                 tokenResponse.error?.let { error ->
                     return@withContext Result.failure(Exception("OAuth error: $error - ${tokenResponse.errorDescription}"))

@@ -7,6 +7,7 @@ import com.example.ApI.tools.ToolCallInfo
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.JsonConfig
 import kotlinx.serialization.json.*
 
 /**
@@ -15,12 +16,7 @@ import kotlinx.serialization.json.*
  */
 abstract class BaseProvider(protected val context: Context) {
 
-    protected val json = Json {
-        prettyPrint = true
-        ignoreUnknownKeys = true
-        isLenient = true
-        coerceInputValues = true
-    }
+    protected val json = JsonConfig.prettyPrint
 
     /**
      * Send a message to the provider and stream the response.

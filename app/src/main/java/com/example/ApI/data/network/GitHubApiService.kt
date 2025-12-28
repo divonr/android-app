@@ -2,6 +2,7 @@ package com.example.ApI.data.network
 
 import android.util.Log
 import com.example.ApI.data.model.*
+import com.example.ApI.util.JsonConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -23,13 +24,6 @@ class GitHubApiService {
         private const val TAG = "GitHubApiService"
         private const val BASE_URL = "https://api.github.com"
         private const val GITHUB_API_VERSION = "2022-11-28"
-    }
-
-    private val json = Json {
-        prettyPrint = false
-        ignoreUnknownKeys = true
-        isLenient = true
-        coerceInputValues = true
     }
 
     /**
@@ -110,12 +104,12 @@ class GitHubApiService {
                 // Response can be a single file or array of files
                 return@withContext try {
                     // Try parsing as single file first
-                    val content = json.decodeFromString<GitHubContent>(responseBody)
+                    val content = JsonConfig.standard.decodeFromString<GitHubContent>(responseBody)
                     Result.success(content)
                 } catch (e: Exception) {
                     // Try parsing as array of files (directory)
                     try {
-                        val contents = json.decodeFromString<List<GitHubContent>>(responseBody)
+                        val contents = JsonConfig.standard.decodeFromString<List<GitHubContent>>(responseBody)
                         Result.success(contents)
                     } catch (e2: Exception) {
                         Result.failure(Exception("Failed to parse response: ${e2.message}"))
@@ -123,7 +117,7 @@ class GitHubApiService {
                 }
             } else {
                 val error = try {
-                    json.decodeFromString<GitHubError>(responseBody)
+                    JsonConfig.standard.decodeFromString<GitHubError>(responseBody)
                 } catch (e: Exception) {
                     GitHubError(message = "HTTP $responseCode: $responseBody")
                 }
@@ -441,11 +435,11 @@ class GitHubApiService {
             Log.d(TAG, "GET $endpoint: $responseCode")
 
             if (responseCode in 200..299) {
-                val result = json.decodeFromString<T>(responseBody)
+                val result = JsonConfig.standard.decodeFromString<T>(responseBody)
                 Result.success(result)
             } else {
                 val error = try {
-                    json.decodeFromString<GitHubError>(responseBody)
+                    JsonConfig.standard.decodeFromString<GitHubError>(responseBody)
                 } catch (e: Exception) {
                     GitHubError(message = "HTTP $responseCode: $responseBody")
                 }
@@ -476,11 +470,11 @@ class GitHubApiService {
             Log.d(TAG, "GET $endpoint: $responseCode")
 
             if (responseCode in 200..299) {
-                val result = json.decodeFromString<List<T>>(responseBody)
+                val result = JsonConfig.standard.decodeFromString<List<T>>(responseBody)
                 Result.success(result)
             } else {
                 val error = try {
-                    json.decodeFromString<GitHubError>(responseBody)
+                    JsonConfig.standard.decodeFromString<GitHubError>(responseBody)
                 } catch (e: Exception) {
                     GitHubError(message = "HTTP $responseCode: $responseBody")
                 }
@@ -504,7 +498,7 @@ class GitHubApiService {
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json")
 
-            val requestBody = json.encodeToString(body)
+            val requestBody = JsonConfig.standard.encodeToString(body)
             Log.d(TAG, "POST $endpoint: $requestBody")
 
             OutputStreamWriter(connection.outputStream).use { writer ->
@@ -522,11 +516,11 @@ class GitHubApiService {
             Log.d(TAG, "POST $endpoint response: $responseCode")
 
             if (responseCode in 200..299) {
-                val result = json.decodeFromString<R>(responseBody)
+                val result = JsonConfig.standard.decodeFromString<R>(responseBody)
                 Result.success(result)
             } else {
                 val error = try {
-                    json.decodeFromString<GitHubError>(responseBody)
+                    JsonConfig.standard.decodeFromString<GitHubError>(responseBody)
                 } catch (e: Exception) {
                     GitHubError(message = "HTTP $responseCode: $responseBody")
                 }
@@ -550,7 +544,7 @@ class GitHubApiService {
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json")
 
-            val requestBody = json.encodeToString(body)
+            val requestBody = JsonConfig.standard.encodeToString(body)
             Log.d(TAG, "PUT $endpoint: $requestBody")
 
             OutputStreamWriter(connection.outputStream).use { writer ->
@@ -568,11 +562,11 @@ class GitHubApiService {
             Log.d(TAG, "PUT $endpoint response: $responseCode")
 
             if (responseCode in 200..299) {
-                val result = json.decodeFromString<R>(responseBody)
+                val result = JsonConfig.standard.decodeFromString<R>(responseBody)
                 Result.success(result)
             } else {
                 val error = try {
-                    json.decodeFromString<GitHubError>(responseBody)
+                    JsonConfig.standard.decodeFromString<GitHubError>(responseBody)
                 } catch (e: Exception) {
                     GitHubError(message = "HTTP $responseCode: $responseBody")
                 }
@@ -611,11 +605,11 @@ class GitHubApiService {
             Log.d(TAG, "DELETE $endpoint response: $responseCode")
 
             if (responseCode in 200..299) {
-                val result = json.decodeFromString<R>(responseBody)
+                val result = JsonConfig.standard.decodeFromString<R>(responseBody)
                 Result.success(result)
             } else {
                 val error = try {
-                    json.decodeFromString<GitHubError>(responseBody)
+                    JsonConfig.standard.decodeFromString<GitHubError>(responseBody)
                 } catch (e: Exception) {
                     GitHubError(message = "HTTP $responseCode: $responseBody")
                 }
