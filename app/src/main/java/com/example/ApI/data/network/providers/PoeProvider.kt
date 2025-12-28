@@ -255,7 +255,8 @@ class PoeProvider(context: Context) : BaseProvider(context) {
 
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             Log.d("TOOL_CALL_DEBUG", "Poe: Starting to read follow-up stream...")
-            parseStreamingResponseForToolResults(reader, connection, callback)
+            // Use the same parser as initial requests - tool calls can happen at any point in the chain
+            parseStreamingResponse(reader, connection, callback)
         } catch (e: Exception) {
             callback.onError("Failed to make Poe streaming request with tool results: ${e.message}")
             ProviderStreamingResult.Error("Failed to make Poe streaming request with tool results: ${e.message}")
@@ -402,76 +403,6 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             )
             fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(fullResponse.toString())
             else -> ProviderStreamingResult.Error("Empty response from Poe")
-        }
-    }
-
-    private fun parseStreamingResponseForToolResults(
-        reader: BufferedReader,
-        connection: HttpURLConnection,
-        callback: StreamingCallback
-    ): ProviderStreamingResult {
-        val fullResponse = StringBuilder()
-        var line: String?
-
-        while (reader.readLine().also { line = it } != null) {
-            val currentLine = line!!
-
-            if (currentLine.startsWith("event:")) {
-                val eventType = currentLine.substring(6).trim()
-
-                val dataLine = reader.readLine()
-                if (dataLine == null || !dataLine.startsWith("data:")) continue
-
-                val dataContent = dataLine.substring(5).trim()
-                if (dataContent.isBlank() || dataContent == "{}") continue
-
-                try {
-                    when (eventType) {
-                        "text" -> {
-                            val eventJson = json.parseToJsonElement(dataContent).jsonObject
-                            val text = eventJson["text"]?.jsonPrimitive?.content
-                            if (text != null) {
-                                fullResponse.append(text)
-                                callback.onPartialResponse(text)
-                            }
-                        }
-                        "replace_response" -> {
-                            val eventJson = json.parseToJsonElement(dataContent).jsonObject
-                            val replacementText = eventJson["text"]?.jsonPrimitive?.content
-                            if (replacementText != null && replacementText.isNotBlank()) {
-                                fullResponse.clear()
-                                fullResponse.append(replacementText)
-                                callback.onPartialResponse(replacementText)
-                            }
-                        }
-                        "error" -> {
-                            val eventJson = json.parseToJsonElement(dataContent).jsonObject
-                            val errorText = eventJson["text"]?.jsonPrimitive?.content ?: "Unknown error"
-                            val errorType = eventJson["error_type"]?.jsonPrimitive?.content
-                            reader.close()
-                            connection.disconnect()
-                            callback.onError("Poe API error ($errorType): $errorText")
-                            return ProviderStreamingResult.Error("Poe API error ($errorType): $errorText")
-                        }
-                        "done" -> {
-                            Log.d("TOOL_CALL_DEBUG", "Poe: Follow-up stream done")
-                            break
-                        }
-                    }
-                } catch (jsonException: Exception) {
-                    Log.e("TOOL_CALL_DEBUG", "Poe: Error parsing follow-up event: ${jsonException.message}")
-                    continue
-                }
-            }
-        }
-
-        reader.close()
-        connection.disconnect()
-
-        return if (fullResponse.isNotEmpty()) {
-            ProviderStreamingResult.TextComplete(fullResponse.toString())
-        } else {
-            ProviderStreamingResult.Error("Empty response from Poe follow-up request")
         }
     }
 
