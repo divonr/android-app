@@ -61,47 +61,9 @@ class FileUploadManager(
         username: String
     ): List<Attachment> {
         if (projectAttachments.isEmpty()) return emptyList()
-
-        val updatedAttachments = mutableListOf<Attachment>()
-
-        for (attachment in projectAttachments) {
-            val needsUpload = when (provider.provider) {
-                "openai" -> attachment.file_OPENAI_id == null
-                "poe" -> attachment.file_POE_url == null
-                "google" -> attachment.file_GOOGLE_uri == null
-                else -> false
-            }
-
-            if (needsUpload && attachment.local_file_path != null) {
-                // Need to upload file for current provider
-                val uploadedAttachment = uploadFile(
-                    provider = provider,
-                    filePath = attachment.local_file_path,
-                    fileName = attachment.file_name,
-                    mimeType = attachment.mime_type,
-                    username = username
-                )
-
-                if (uploadedAttachment != null) {
-                    // Merge the new ID with existing attachment data
-                    val mergedAttachment = when (provider.provider) {
-                        "openai" -> attachment.copy(file_OPENAI_id = uploadedAttachment.file_OPENAI_id)
-                        "poe" -> attachment.copy(file_POE_url = uploadedAttachment.file_POE_url)
-                        "google" -> attachment.copy(file_GOOGLE_uri = uploadedAttachment.file_GOOGLE_uri)
-                        else -> attachment
-                    }
-                    updatedAttachments.add(mergedAttachment)
-                } else {
-                    // Upload failed, keep original attachment
-                    updatedAttachments.add(attachment)
-                }
-            } else {
-                // File already uploaded for this provider or no local path
-                updatedAttachments.add(attachment)
-            }
+        return projectAttachments.map { attachment ->
+            ensureAttachmentUploadedForProvider(provider, attachment, username).first
         }
-
-        return updatedAttachments
     }
 
     /**
@@ -113,63 +75,66 @@ class FileUploadManager(
         messages: List<Message>,
         username: String
     ): Pair<List<Message>, Boolean> {
-        val updatedMessages = mutableListOf<Message>()
         var hasUpdates = false
-
-        for (message in messages) {
+        val updatedMessages = messages.map { message ->
             if (message.attachments.isEmpty()) {
-                // No attachments, keep message as is
-                updatedMessages.add(message)
-                continue
-            }
-
-            val updatedAttachments = mutableListOf<Attachment>()
-
-            for (attachment in message.attachments) {
-                val needsReupload = when (provider.provider) {
-                    "openai" -> attachment.file_OPENAI_id == null
-                    "poe" -> attachment.file_POE_url == null
-                    "google" -> attachment.file_GOOGLE_uri == null
-                    else -> false
+                message
+            } else {
+                val updatedAttachments = message.attachments.map { attachment ->
+                    val (updatedAttachment, wasUpdated) = ensureAttachmentUploadedForProvider(provider, attachment, username)
+                    if (wasUpdated) hasUpdates = true
+                    updatedAttachment
                 }
-
-                if (needsReupload && attachment.local_file_path != null) {
-                    // Need to re-upload file for current provider
-                    val uploadedAttachment = uploadFile(
-                        provider = provider,
-                        filePath = attachment.local_file_path,
-                        fileName = attachment.file_name,
-                        mimeType = attachment.mime_type,
-                        username = username
-                    )
-
-                    if (uploadedAttachment != null) {
-                        // Merge the new ID with existing attachment data
-                        val mergedAttachment = when (provider.provider) {
-                            "openai" -> attachment.copy(file_OPENAI_id = uploadedAttachment.file_OPENAI_id)
-                            "poe" -> attachment.copy(file_POE_url = uploadedAttachment.file_POE_url)
-                            "google" -> attachment.copy(file_GOOGLE_uri = uploadedAttachment.file_GOOGLE_uri)
-                            else -> attachment
-                        }
-                        updatedAttachments.add(mergedAttachment)
-                        hasUpdates = true
-                    } else {
-                        // Upload failed, keep original attachment
-                        updatedAttachments.add(attachment)
-                    }
-                } else {
-                    // Already has correct ID for current provider, or no local file
-                    updatedAttachments.add(attachment)
-                }
+                message.copy(attachments = updatedAttachments)
             }
+        }
+        return Pair(updatedMessages, hasUpdates)
+    }
 
-            updatedMessages.add(message.copy(attachments = updatedAttachments))
+    /**
+     * Check if an attachment needs upload for the given provider and upload if necessary.
+     * Returns the updated attachment (with provider-specific IDs) or the original if no upload needed/failed,
+     * along with a boolean indicating if the attachment was updated.
+     */
+    private suspend fun ensureAttachmentUploadedForProvider(
+        provider: Provider,
+        attachment: Attachment,
+        username: String
+    ): Pair<Attachment, Boolean> {
+        val needsUpload = when (provider.provider) {
+            "openai" -> attachment.file_OPENAI_id == null
+            "poe" -> attachment.file_POE_url == null
+            "google" -> attachment.file_GOOGLE_uri == null
+            else -> false
         }
 
-        return Pair(
-            if (hasUpdates) updatedMessages else messages,
-            hasUpdates
-        )
+        if (needsUpload && attachment.local_file_path != null) {
+            // Need to upload file for current provider
+            val uploadedAttachment = uploadFile(
+                provider = provider,
+                filePath = attachment.local_file_path,
+                fileName = attachment.file_name,
+                mimeType = attachment.mime_type,
+                username = username
+            )
+
+            if (uploadedAttachment != null) {
+                // Merge the new ID with existing attachment data
+                val mergedAttachment = when (provider.provider) {
+                    "openai" -> attachment.copy(file_OPENAI_id = uploadedAttachment.file_OPENAI_id)
+                    "poe" -> attachment.copy(file_POE_url = uploadedAttachment.file_POE_url)
+                    "google" -> attachment.copy(file_GOOGLE_uri = uploadedAttachment.file_GOOGLE_uri)
+                    else -> attachment
+                }
+                return Pair(mergedAttachment, true)
+            } else {
+                // Upload failed, keep original attachment
+                return Pair(attachment, false)
+            }
+        } else {
+            // File already uploaded for this provider or no local path
+            return Pair(attachment, false)
+        }
     }
 
     // ============ Provider-Specific Upload Implementations ============

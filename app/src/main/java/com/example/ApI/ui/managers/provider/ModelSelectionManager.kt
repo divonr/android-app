@@ -1,12 +1,9 @@
 package com.example.ApI.ui.managers.provider
 
-import android.content.Context
 import android.widget.Toast
 import com.example.ApI.data.model.*
-import com.example.ApI.data.repository.DataRepository
-import kotlinx.coroutines.CoroutineScope
+import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -16,13 +13,8 @@ import kotlinx.coroutines.withContext
  * Extracted from ChatViewModel to reduce complexity.
  */
 class ModelSelectionManager(
-    private val repository: DataRepository,
-    private val context: Context,
-    private val scope: CoroutineScope,
-    private val appSettings: StateFlow<AppSettings>,
-    private val uiState: StateFlow<ChatUiState>,
-    private val updateAppSettings: (AppSettings) -> Unit,
-    private val updateUiState: (ChatUiState) -> Unit
+    private val deps: ManagerDependencies,
+    private val updateAppSettings: (AppSettings) -> Unit
 ) {
 
     /**
@@ -32,23 +24,23 @@ class ModelSelectionManager(
     fun selectProvider(provider: Provider) {
         val firstModel = provider.models.firstOrNull()?.name ?: "Unknown Model"
 
-        val updatedSettings = appSettings.value.copy(
+        val updatedSettings = deps.appSettings.value.copy(
             selected_provider = provider.provider,
             selected_model = firstModel
         )
 
-        repository.saveAppSettings(updatedSettings)
+        deps.repository.saveAppSettings(updatedSettings)
         updateAppSettings(updatedSettings)
 
         val webSearchSupport = getWebSearchSupport(provider.provider, firstModel)
         val webSearchEnabled = when (webSearchSupport) {
             WebSearchSupport.REQUIRED -> true
-            WebSearchSupport.OPTIONAL -> uiState.value.webSearchEnabled
+            WebSearchSupport.OPTIONAL -> deps.uiState.value.webSearchEnabled
             WebSearchSupport.UNSUPPORTED -> false
         }
 
-        updateUiState(
-            uiState.value.copy(
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 currentProvider = provider,
                 currentModel = firstModel,
                 showProviderSelector = false,
@@ -63,19 +55,19 @@ class ModelSelectionManager(
      * Updates settings and handles web search support.
      */
     fun selectModel(modelName: String) {
-        val newSettings = appSettings.value.copy(selected_model = modelName)
-        repository.saveAppSettings(newSettings)
+        val newSettings = deps.appSettings.value.copy(selected_model = modelName)
+        deps.repository.saveAppSettings(newSettings)
         updateAppSettings(newSettings)
 
-        val webSearchSupport = getWebSearchSupport(uiState.value.currentProvider?.provider ?: "", modelName)
+        val webSearchSupport = getWebSearchSupport(deps.uiState.value.currentProvider?.provider ?: "", modelName)
         val webSearchEnabled = when (webSearchSupport) {
             WebSearchSupport.REQUIRED -> true
-            WebSearchSupport.OPTIONAL -> uiState.value.webSearchEnabled
+            WebSearchSupport.OPTIONAL -> deps.uiState.value.webSearchEnabled
             WebSearchSupport.UNSUPPORTED -> false
         }
 
-        updateUiState(
-            uiState.value.copy(
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 currentModel = modelName,
                 showModelSelector = false,
                 webSearchSupport = webSearchSupport,
@@ -88,28 +80,28 @@ class ModelSelectionManager(
      * Show the provider selection dialog.
      */
     fun showProviderSelector() {
-        updateUiState(uiState.value.copy(showProviderSelector = true))
+        deps.updateUiState(deps.uiState.value.copy(showProviderSelector = true))
     }
 
     /**
      * Hide the provider selection dialog.
      */
     fun hideProviderSelector() {
-        updateUiState(uiState.value.copy(showProviderSelector = false))
+        deps.updateUiState(deps.uiState.value.copy(showProviderSelector = false))
     }
 
     /**
      * Show the model selection dialog.
      */
     fun showModelSelector() {
-        updateUiState(uiState.value.copy(showModelSelector = true))
+        deps.updateUiState(deps.uiState.value.copy(showModelSelector = true))
     }
 
     /**
      * Hide the model selection dialog.
      */
     fun hideModelSelector() {
-        updateUiState(uiState.value.copy(showModelSelector = false))
+        deps.updateUiState(deps.uiState.value.copy(showModelSelector = false))
     }
 
     /**
@@ -117,26 +109,26 @@ class ModelSelectionManager(
      * Fetches latest models from configured providers and updates UI.
      */
     fun refreshModels() {
-        scope.launch {
+        deps.scope.launch {
             try {
                 // Show loading message
                 withContext(Dispatchers.Main) {
                     Toast.makeText(
-                        context,
+                        deps.context,
                         "מעדכן את רשימת המודלים הזמינים...",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
 
                 android.util.Log.d("ProviderManager", "Starting forceRefreshModels()")
-                val (success, errorMessage) = repository.forceRefreshModels()
+                val (success, errorMessage) = deps.repository.forceRefreshModels()
                 android.util.Log.d("ProviderManager", "forceRefreshModels() returned: success=$success, error=$errorMessage")
 
                 if (success) {
                     // Reload providers with updated models
-                    val settings = repository.loadAppSettings()
-                    val allProviders = repository.loadProviders()
-                    val activeApiKeyProviders = repository.loadApiKeys(settings.current_user)
+                    val settings = deps.repository.loadAppSettings()
+                    val allProviders = deps.repository.loadProviders()
+                    val activeApiKeyProviders = deps.repository.loadApiKeys(settings.current_user)
                         .filter { it.isActive }
                         .map { it.provider }
                     val providers = allProviders.filter { provider ->
@@ -144,18 +136,18 @@ class ModelSelectionManager(
                     }
 
                     // Update UI state with refreshed providers
-                    updateUiState(uiState.value.copy(availableProviders = providers))
+                    deps.updateUiState(deps.uiState.value.copy(availableProviders = providers))
 
                     // Update current provider with refreshed models
-                    val currentProvider = providers.find { it.provider == uiState.value.currentProvider?.provider }
+                    val currentProvider = providers.find { it.provider == deps.uiState.value.currentProvider?.provider }
                     if (currentProvider != null) {
-                        updateUiState(uiState.value.copy(currentProvider = currentProvider))
+                        deps.updateUiState(deps.uiState.value.copy(currentProvider = currentProvider))
                     }
 
                     // Show success message
                     withContext(Dispatchers.Main) {
                         Toast.makeText(
-                            context,
+                            deps.context,
                             "הרשימה עודכנה בהצלחה!",
                             Toast.LENGTH_SHORT
                         ).show()
@@ -169,7 +161,7 @@ class ModelSelectionManager(
                             "שגיאה בעדכון הרשימה. אנא נסה שוב."
                         }
                         Toast.makeText(
-                            context,
+                            deps.context,
                             message,
                             Toast.LENGTH_LONG
                         ).show()
@@ -180,7 +172,7 @@ class ModelSelectionManager(
                 // Show error message
                 withContext(Dispatchers.Main) {
                     Toast.makeText(
-                        context,
+                        deps.context,
                         "שגיאה בעדכון הרשימה: ${e.message}",
                         Toast.LENGTH_LONG
                     ).show()
@@ -194,10 +186,10 @@ class ModelSelectionManager(
      * Called when returning from API keys screen.
      */
     fun refreshAvailableProviders() {
-        scope.launch {
-            val currentUser = appSettings.value.current_user
-            val allProviders = repository.loadProviders()
-            val activeApiKeyProviders = repository.loadApiKeys(currentUser)
+        deps.scope.launch {
+            val currentUser = deps.appSettings.value.current_user
+            val allProviders = deps.repository.loadProviders()
+            val activeApiKeyProviders = deps.repository.loadApiKeys(currentUser)
                 .filter { it.isActive }
                 .map { it.provider }
             val filteredProviders = allProviders.filter { provider ->
@@ -205,7 +197,7 @@ class ModelSelectionManager(
             }
 
             // Check if current provider is still available
-            val currentProvider = uiState.value.currentProvider
+            val currentProvider = deps.uiState.value.currentProvider
             val newCurrentProvider = if (currentProvider != null &&
                 activeApiKeyProviders.contains(currentProvider.provider)) {
                 currentProvider
@@ -217,11 +209,11 @@ class ModelSelectionManager(
             val newCurrentModel = if (newCurrentProvider?.provider != currentProvider?.provider) {
                 newCurrentProvider?.models?.firstOrNull()?.name ?: ""
             } else {
-                uiState.value.currentModel
+                deps.uiState.value.currentModel
             }
 
-            updateUiState(
-                uiState.value.copy(
+            deps.updateUiState(
+                deps.uiState.value.copy(
                     availableProviders = filteredProviders,
                     currentProvider = newCurrentProvider,
                     currentModel = newCurrentModel
@@ -229,13 +221,13 @@ class ModelSelectionManager(
             )
 
             // Update app settings if provider/model changed
-            if (newCurrentProvider?.provider != appSettings.value.selected_provider ||
-                newCurrentModel != appSettings.value.selected_model) {
-                val updatedSettings = appSettings.value.copy(
+            if (newCurrentProvider?.provider != deps.appSettings.value.selected_provider ||
+                newCurrentModel != deps.appSettings.value.selected_model) {
+                val updatedSettings = deps.appSettings.value.copy(
                     selected_provider = newCurrentProvider?.provider ?: "",
                     selected_model = newCurrentModel
                 )
-                repository.saveAppSettings(updatedSettings)
+                deps.repository.saveAppSettings(updatedSettings)
                 updateAppSettings(updatedSettings)
             }
         }

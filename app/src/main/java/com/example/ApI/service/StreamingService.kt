@@ -19,6 +19,7 @@ import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.JsonConfig
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -78,13 +79,6 @@ class StreamingService : Service() {
     // Dependencies
     private lateinit var repository: DataRepository
     private lateinit var apiService: LLMApiService
-
-    private val json = Json {
-        prettyPrint = false
-        ignoreUnknownKeys = true
-        isLenient = true
-        coerceInputValues = true
-    }
 
     // Service-level coroutine scope (survives activity death)
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -161,12 +155,12 @@ class StreamingService : Service() {
         val thinkingBudget: ThinkingBudgetValue
 
         try {
-            provider = json.decodeFromString<Provider>(providerJson)
-            messages = json.decodeFromString<List<Message>>(messagesJson)
-            projectAttachments = json.decodeFromString<List<Attachment>>(projectAttachmentsJson)
-            enabledTools = json.decodeFromString<List<ToolSpecification>>(enabledToolsJson)
+            provider = JsonConfig.standard.decodeFromString<Provider>(providerJson)
+            messages = JsonConfig.standard.decodeFromString<List<Message>>(messagesJson)
+            projectAttachments = JsonConfig.standard.decodeFromString<List<Attachment>>(projectAttachmentsJson)
+            enabledTools = JsonConfig.standard.decodeFromString<List<ToolSpecification>>(enabledToolsJson)
             thinkingBudget = if (thinkingBudgetJson != null) {
-                json.decodeFromString<ThinkingBudgetValue>(thinkingBudgetJson)
+                JsonConfig.standard.decodeFromString<ThinkingBudgetValue>(thinkingBudgetJson)
             } else {
                 ThinkingBudgetValue.None
             }
@@ -245,7 +239,7 @@ class StreamingService : Service() {
         val toolResultJson = intent.getStringExtra(EXTRA_TOOL_RESULT_JSON) ?: return
 
         try {
-            val result = json.decodeFromString<ToolExecutionResult>(toolResultJson)
+            val result = JsonConfig.standard.decodeFromString<ToolExecutionResult>(toolResultJson)
             pendingToolResults[requestId]?.complete(result)
             pendingToolResults.remove(requestId)
         } catch (e: Exception) {

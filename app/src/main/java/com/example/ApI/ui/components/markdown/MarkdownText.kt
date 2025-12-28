@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import com.example.ApI.data.model.TextDirectionMode
-import com.example.ApI.ui.screen.TextDirectionUtils
+import com.example.ApI.ui.utils.TextDirectionUtils
 import org.commonmark.ext.gfm.strikethrough.Strikethrough
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.*

@@ -1,8 +1,7 @@
 package com.example.ApI.ui.managers.organization
 
 import com.example.ApI.data.model.*
-import com.example.ApI.data.repository.DataRepository
-import kotlinx.coroutines.flow.StateFlow
+import com.example.ApI.ui.managers.ManagerDependencies
 
 /**
  * Manages search functionality for chat history and conversation search.
@@ -10,10 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
  * Extracted from ChatViewModel to reduce complexity.
  */
 class SearchManager(
-    private val repository: DataRepository,
-    private val appSettings: StateFlow<AppSettings>,
-    private val uiState: StateFlow<ChatUiState>,
-    private val updateUiState: (ChatUiState) -> Unit,
+    private val deps: ManagerDependencies,
     private val getCurrentScreen: () -> Screen
 ) {
 
@@ -21,22 +17,22 @@ class SearchManager(
      * Enter search mode (global chat search)
      */
     fun enterSearchMode() {
-        updateUiState(uiState.value.copy(searchMode = true, searchQuery = ""))
+        deps.updateUiState(deps.uiState.value.copy(searchMode = true, searchQuery = ""))
     }
 
     /**
      * Enter conversation search mode (search within current chat)
      */
     fun enterConversationSearchMode() {
-        updateUiState(uiState.value.copy(searchMode = true, searchQuery = ""))
+        deps.updateUiState(deps.uiState.value.copy(searchMode = true, searchQuery = ""))
     }
 
     /**
      * Enter search mode with a pre-populated query and perform search immediately
      */
     fun enterSearchModeWithQuery(query: String) {
-        updateUiState(
-            uiState.value.copy(
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 searchMode = true,
                 searchQuery = query
             )
@@ -49,8 +45,8 @@ class SearchManager(
      * Exit search mode and clear all search results
      */
     fun exitSearchMode() {
-        updateUiState(
-            uiState.value.copy(
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 searchMode = false,
                 searchQuery = "",
                 searchResults = emptyList(),
@@ -63,11 +59,11 @@ class SearchManager(
      * Update the search query and trigger appropriate search
      */
     fun updateSearchQuery(query: String) {
-        updateUiState(uiState.value.copy(searchQuery = query))
+        deps.updateUiState(deps.uiState.value.copy(searchQuery = query))
         // Always use conversation search when in search mode in chat screen
-        if (uiState.value.searchMode && getCurrentScreen() == Screen.Chat) {
+        if (deps.uiState.value.searchMode && getCurrentScreen() == Screen.Chat) {
             performConversationSearch()
-        } else if (!uiState.value.searchMode) {
+        } else if (!deps.uiState.value.searchMode) {
             // Only perform general search if not in conversation search mode
             performSearch()
         }
@@ -77,15 +73,15 @@ class SearchManager(
      * Perform global search across all chats
      */
     fun performSearch() {
-        val query = uiState.value.searchQuery.trim()
+        val query = deps.uiState.value.searchQuery.trim()
         if (query.isEmpty()) {
-            updateUiState(uiState.value.copy(searchResults = emptyList()))
+            deps.updateUiState(deps.uiState.value.copy(searchResults = emptyList()))
             return
         }
 
-        val currentUser = appSettings.value.current_user
-        val results = repository.searchChats(currentUser, query)
-        updateUiState(uiState.value.copy(searchResults = results))
+        val currentUser = deps.appSettings.value.current_user
+        val results = deps.repository.searchChats(currentUser, query)
+        deps.updateUiState(deps.uiState.value.copy(searchResults = results))
     }
 
     /**
@@ -93,11 +89,11 @@ class SearchManager(
      * Searches message text and attachment file names
      */
     fun performConversationSearch() {
-        val query = uiState.value.searchQuery.trim()
-        val currentChat = uiState.value.currentChat
+        val query = deps.uiState.value.searchQuery.trim()
+        val currentChat = deps.uiState.value.currentChat
 
         if (query.isEmpty() || currentChat == null) {
-            updateUiState(uiState.value.copy(searchContext = null))
+            deps.updateUiState(deps.uiState.value.copy(searchContext = null))
             return
         }
 
@@ -148,8 +144,8 @@ class SearchManager(
         }
 
         // Update the search context to highlight matches
-        updateUiState(
-            uiState.value.copy(
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 searchResults = searchResults,
                 searchContext = if (searchResults.isNotEmpty()) searchResults.first() else null
             )
@@ -160,6 +156,6 @@ class SearchManager(
      * Clear the current search context (highlighted search result)
      */
     fun clearSearchContext() {
-        updateUiState(uiState.value.copy(searchContext = null))
+        deps.updateUiState(deps.uiState.value.copy(searchContext = null))
     }
 }

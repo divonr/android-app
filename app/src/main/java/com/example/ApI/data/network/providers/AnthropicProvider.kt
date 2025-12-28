@@ -65,11 +65,6 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                         val toolCall = result.toolCall
                         val precedingText = result.precedingText
 
-                        println("[DEBUG] Executing tool: ${toolCall.toolId}")
-                        if (precedingText.isNotBlank()) {
-                            println("[DEBUG] Preceding text: $precedingText")
-                        }
-
                         val toolResult = callback.onToolCall(toolCall, precedingText)
 
                         val toolCallMessage = createToolCallMessageForAnthropic(toolCall, toolResult, precedingText, modelName)
@@ -216,7 +211,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
 
                     when (eventType) {
                         "message_start" -> {
-                            println("[DEBUG] Anthropic message started")
+                            // Message started
                         }
 
                         "content_block_start" -> {
@@ -231,7 +226,6 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                                         isInThinkingPhase = true
                                         thinkingStartTime = System.currentTimeMillis()
                                         callback.onThinkingStarted()
-                                        println("[DEBUG] Anthropic thinking started")
                                     }
                                 }
                                 "text" -> {
@@ -256,7 +250,6 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                                     }
 
                                     isAccumulatingToolInput = true
-                                    println("[DEBUG] Tool use started: $currentToolName (id: $currentToolUseId)")
                                 }
                             }
                         }
@@ -300,10 +293,8 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                                         parameters = toolInputJson,
                                         provider = "anthropic"
                                     )
-
-                                    println("[DEBUG] Tool call detected: $detectedToolCall")
                                 } catch (e: Exception) {
-                                    println("[DEBUG] Error parsing tool input JSON: ${e.message}")
+                                    // Error parsing tool input
                                 }
 
                                 isAccumulatingToolInput = false
@@ -311,12 +302,10 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                         }
 
                         "message_delta" -> {
-                            val stopReason = chunkJson["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.content
-                            println("[DEBUG] Message delta - stop_reason: $stopReason")
+                            // Message delta received
                         }
 
                         "message_stop" -> {
-                            println("[DEBUG] Anthropic message stopped")
                             break
                         }
 
@@ -328,7 +317,6 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                         }
                     }
                 } catch (jsonException: Exception) {
-                    println("[DEBUG] Error parsing Anthropic SSE chunk: ${jsonException.message}")
                     continue
                 }
             }
@@ -377,7 +365,6 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
             durationSeconds = duration,
             status = if (thoughtsContent != null) ThoughtsStatus.PRESENT else ThoughtsStatus.UNAVAILABLE
         )
-        println("[DEBUG] Anthropic thinking completed, duration: ${duration}s")
     }
 
     private suspend fun buildMessages(messages: List<Message>): List<JsonObject> = withContext(Dispatchers.IO) {
@@ -426,7 +413,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                                         }
                                     }
                                 } catch (e: Exception) {
-                                    println("[DEBUG] Error encoding file ${attachment.file_name}: ${e.message}")
+                                    // Error encoding file
                                 }
                             }
                         }

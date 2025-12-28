@@ -93,9 +93,7 @@ fun ChatScreen(
                 val adjustedIndex = reversedIndex +
                     (if (uiState.isStreaming && (uiState.streamingText.isNotEmpty() || hasThinkingForSearch)) 1 else 0) +
                     (if (uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading) 1 else 0)
-                
-                println("DEBUG SEARCH: Scrolling to message index ${searchContext.messageIndex}, reversedIndex: $reversedIndex, adjustedIndex: $adjustedIndex, total messages: ${currentChat.messages.size}")
-                
+
                 // Try to scroll to the item
                 if (adjustedIndex >= 0 && adjustedIndex < (currentChat.messages.size + 2)) {
                     listState.animateScrollToItem(adjustedIndex)
@@ -108,7 +106,6 @@ fun ChatScreen(
                 kotlinx.coroutines.delay(8000) // Keep highlighting for 8 seconds
                 viewModel.clearSearchContext()
             } catch (e: Exception) {
-                println("DEBUG SEARCH: Error scrolling to message: ${e.message}")
                 // If scrolling fails, still clear context after delay
                 kotlinx.coroutines.delay(3000)
                 viewModel.clearSearchContext()

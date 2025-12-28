@@ -5,34 +5,28 @@ import com.example.ApI.data.model.*
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.network.LLMApiService
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.JsonConfig
 import kotlinx.serialization.json.*
 import java.io.File
 
 class DataRepository(private val context: Context) {
-
-    private val json = Json {
-        prettyPrint = true
-        ignoreUnknownKeys = true
-        isLenient = true
-        coerceInputValues = true
-    }
 
     private val apiService = LLMApiService(context)
 
     private val internalDir = File(context.filesDir, "llm_data")
 
     // Managers
-    private val modelsCacheManager = ModelsCacheManager(internalDir, json)
-    private val localStorageManager = LocalStorageManager(internalDir, json)
-    private val chatHistoryManager = ChatHistoryManager(internalDir, json)
+    private val modelsCacheManager = ModelsCacheManager(internalDir, JsonConfig.prettyPrint)
+    private val localStorageManager = LocalStorageManager(internalDir, JsonConfig.prettyPrint)
+    private val chatHistoryManager = ChatHistoryManager(internalDir, JsonConfig.prettyPrint)
     private val groupProjectManager = GroupProjectManager(chatHistoryManager)
     private val messageBranchingManager = MessageBranchingManager(chatHistoryManager)
-    private val externalConnectionsManager = ExternalConnectionsManager(internalDir, json, localStorageManager)
-    private val fileUploadManager = FileUploadManager(json) { username -> localStorageManager.loadApiKeys(username) }
+    private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager)
+    private val fileUploadManager = FileUploadManager(JsonConfig.prettyPrint) { username -> localStorageManager.loadApiKeys(username) }
     private val chatSearchService = ChatSearchService { username -> loadChatHistory(username) }
     private val titleGenerationService by lazy {
         TitleGenerationService(
-            json = json,
+            json = JsonConfig.prettyPrint,
             apiService = apiService,
             loadChatHistory = { username -> loadChatHistory(username) },
             loadProviders = { loadProviders() },

@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ApI.data.model.TextDirectionMode
-import com.example.ApI.ui.screen.TextDirectionUtils
+import com.example.ApI.ui.utils.TextDirectionUtils
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.Heading
 import org.commonmark.node.Node

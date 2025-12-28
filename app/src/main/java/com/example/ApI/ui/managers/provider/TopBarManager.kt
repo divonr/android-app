@@ -1,9 +1,8 @@
 package com.example.ApI.ui.managers.provider
 
-import android.content.Context
 import android.widget.Toast
 import com.example.ApI.data.model.*
-import kotlinx.coroutines.flow.StateFlow
+import com.example.ApI.ui.managers.ManagerDependencies
 
 /**
  * Manages top bar controls: temperature, thinking budget, and text direction.
@@ -11,9 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
  * Extracted from ChatViewModel to reduce complexity.
  */
 class TopBarManager(
-    private val context: Context,
-    private val uiState: StateFlow<ChatUiState>,
-    private val updateUiState: (ChatUiState) -> Unit
+    private val deps: ManagerDependencies
 ) {
 
     // ==================== Temperature Settings ====================
@@ -22,18 +19,18 @@ class TopBarManager(
      * Handle temperature button click - toggles popup or shows unsupported message.
      */
     fun onTemperatureButtonClick() {
-        val tempConfig = uiState.value.getTemperatureConfig()
+        val tempConfig = deps.uiState.value.getTemperatureConfig()
 
         if (tempConfig == null) {
             // Temperature not supported for this provider
-            Toast.makeText(context, "ספק זה אינו תומך בשליטה על טמפרטורה", Toast.LENGTH_SHORT).show()
+            Toast.makeText(deps.context, "ספק זה אינו תומך בשליטה על טמפרטורה", Toast.LENGTH_SHORT).show()
             return
         }
 
         // Toggle popup visibility
-        updateUiState(
-            uiState.value.copy(
-                showTemperaturePopup = !uiState.value.showTemperaturePopup
+        deps.updateUiState(
+            deps.uiState.value.copy(
+                showTemperaturePopup = !deps.uiState.value.showTemperaturePopup
             )
         )
     }
@@ -42,7 +39,7 @@ class TopBarManager(
      * Hide the temperature popup.
      */
     fun hideTemperaturePopup() {
-        updateUiState(uiState.value.copy(showTemperaturePopup = false))
+        deps.updateUiState(deps.uiState.value.copy(showTemperaturePopup = false))
     }
 
     /**
@@ -50,16 +47,16 @@ class TopBarManager(
      * @param value The temperature value, or null to use API default
      */
     fun setTemperatureValue(value: Float?) {
-        updateUiState(uiState.value.copy(temperatureValue = value))
+        deps.updateUiState(deps.uiState.value.copy(temperatureValue = value))
     }
 
     /**
      * Reset temperature to model default when provider/model changes.
      */
     fun resetTemperatureToDefault() {
-        val tempConfig = uiState.value.getTemperatureConfig()
-        updateUiState(
-            uiState.value.copy(
+        val tempConfig = deps.uiState.value.getTemperatureConfig()
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 temperatureValue = tempConfig?.default,
                 showTemperaturePopup = false
             )
@@ -72,33 +69,33 @@ class TopBarManager(
      * Handle thinking budget button click - toggles popup or shows unsupported message.
      */
     fun onThinkingBudgetButtonClick() {
-        val budgetType = uiState.value.getThinkingBudgetType()
+        val budgetType = deps.uiState.value.getThinkingBudgetType()
 
         when (budgetType) {
             is ThinkingBudgetType.NotSupported -> {
                 // Show toast that this model doesn't support thinking
-                Toast.makeText(context, "מודל זה אינו תומך במצב חשיבה", Toast.LENGTH_SHORT).show()
+                Toast.makeText(deps.context, "מודל זה אינו תומך במצב חשיבה", Toast.LENGTH_SHORT).show()
             }
             is ThinkingBudgetType.InDevelopment -> {
                 // Show toast that support is in development
-                Toast.makeText(context, "נכון לעכשיו התמיכה בפרמטר למודל זה עדיין בפיתוח", Toast.LENGTH_SHORT).show()
+                Toast.makeText(deps.context, "נכון לעכשיו התמיכה בפרמטר למודל זה עדיין בפיתוח", Toast.LENGTH_SHORT).show()
             }
             is ThinkingBudgetType.Discrete, is ThinkingBudgetType.Continuous -> {
                 // Toggle popup visibility
-                updateUiState(
-                    uiState.value.copy(
-                        showThinkingBudgetPopup = !uiState.value.showThinkingBudgetPopup
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        showThinkingBudgetPopup = !deps.uiState.value.showThinkingBudgetPopup
                     )
                 )
 
                 // Initialize with default value if currently None
-                if (uiState.value.thinkingBudgetValue == ThinkingBudgetValue.None) {
-                    val provider = uiState.value.currentProvider?.provider ?: return
-                    val modelConfig = uiState.value.currentProvider?.models
-                        ?.find { it.name == uiState.value.currentModel }
+                if (deps.uiState.value.thinkingBudgetValue == ThinkingBudgetValue.None) {
+                    val provider = deps.uiState.value.currentProvider?.provider ?: return
+                    val modelConfig = deps.uiState.value.currentProvider?.models
+                        ?.find { it.name == deps.uiState.value.currentModel }
                         ?.thinkingConfig
-                    val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, uiState.value.currentModel, modelConfig)
-                    updateUiState(uiState.value.copy(thinkingBudgetValue = defaultValue))
+                    val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, deps.uiState.value.currentModel, modelConfig)
+                    deps.updateUiState(deps.uiState.value.copy(thinkingBudgetValue = defaultValue))
                 }
             }
         }
@@ -108,29 +105,29 @@ class TopBarManager(
      * Show the thinking budget popup.
      */
     fun showThinkingBudgetPopup() {
-        updateUiState(uiState.value.copy(showThinkingBudgetPopup = true))
+        deps.updateUiState(deps.uiState.value.copy(showThinkingBudgetPopup = true))
     }
 
     /**
      * Hide the thinking budget popup.
      */
     fun hideThinkingBudgetPopup() {
-        updateUiState(uiState.value.copy(showThinkingBudgetPopup = false))
+        deps.updateUiState(deps.uiState.value.copy(showThinkingBudgetPopup = false))
     }
 
     /**
      * Set the thinking budget value.
      */
     fun setThinkingBudgetValue(value: ThinkingBudgetValue) {
-        updateUiState(uiState.value.copy(thinkingBudgetValue = value))
+        deps.updateUiState(deps.uiState.value.copy(thinkingBudgetValue = value))
     }
 
     /**
      * Set discrete thinking effort level.
      */
     fun setThinkingEffort(level: String) {
-        updateUiState(
-            uiState.value.copy(
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 thinkingBudgetValue = ThinkingBudgetValue.Effort(level)
             )
         )
@@ -140,8 +137,8 @@ class TopBarManager(
      * Set continuous thinking token budget.
      */
     fun setThinkingTokenBudget(tokens: Int) {
-        updateUiState(
-            uiState.value.copy(
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 thinkingBudgetValue = ThinkingBudgetValue.Tokens(tokens)
             )
         )
@@ -151,16 +148,16 @@ class TopBarManager(
      * Reset thinking budget to model default when provider/model changes.
      */
     fun resetThinkingBudgetToDefault() {
-        val provider = uiState.value.currentProvider?.provider
-        val model = uiState.value.currentModel
+        val provider = deps.uiState.value.currentProvider?.provider
+        val model = deps.uiState.value.currentModel
 
         if (provider != null) {
-            val modelConfig = uiState.value.currentProvider?.models
+            val modelConfig = deps.uiState.value.currentProvider?.models
                 ?.find { it.name == model }
                 ?.thinkingConfig
             val defaultValue = ThinkingBudgetConfig.getDefaultValue(provider, model, modelConfig)
-            updateUiState(
-                uiState.value.copy(
+            deps.updateUiState(
+                deps.uiState.value.copy(
                     thinkingBudgetValue = defaultValue,
                     showThinkingBudgetPopup = false
                 )
@@ -174,19 +171,19 @@ class TopBarManager(
      * Toggle between AUTO, RTL, and LTR text direction modes.
      */
     fun toggleTextDirection() {
-        val currentMode = uiState.value.textDirectionMode
+        val currentMode = deps.uiState.value.textDirectionMode
         val nextMode = when (currentMode) {
             TextDirectionMode.AUTO -> TextDirectionMode.RTL
             TextDirectionMode.RTL -> TextDirectionMode.LTR
             TextDirectionMode.LTR -> TextDirectionMode.AUTO
         }
-        updateUiState(uiState.value.copy(textDirectionMode = nextMode))
+        deps.updateUiState(deps.uiState.value.copy(textDirectionMode = nextMode))
     }
 
     /**
      * Set a specific text direction mode.
      */
     fun setTextDirectionMode(mode: TextDirectionMode) {
-        updateUiState(uiState.value.copy(textDirectionMode = mode))
+        deps.updateUiState(deps.uiState.value.copy(textDirectionMode = mode))
     }
 }

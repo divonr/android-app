@@ -1,12 +1,8 @@
 package com.example.ApI.ui.managers.io
 
-import android.content.Context
 import android.net.Uri
-import com.example.ApI.data.model.ChatUiState
 import com.example.ApI.data.model.SelectedFile
-import com.example.ApI.data.repository.DataRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.StateFlow
+import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.launch
 import java.io.InputStream
 
@@ -16,11 +12,7 @@ import java.io.InputStream
  * Extracted from ChatViewModel to reduce complexity.
  */
 class AttachmentManager(
-    private val repository: DataRepository,
-    private val context: Context,
-    private val scope: CoroutineScope,
-    private val uiState: StateFlow<ChatUiState>,
-    private val updateUiState: (ChatUiState) -> Unit
+    private val deps: ManagerDependencies
 ) {
 
     /**
@@ -28,13 +20,13 @@ class AttachmentManager(
      * Copies the file to internal storage for lazy upload.
      */
     fun addFileFromUri(uri: Uri, fileName: String, mimeType: String) {
-        scope.launch {
+        deps.scope.launch {
             try {
                 // Copy file to internal storage for lazy upload
-                val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
+                val inputStream: InputStream? = deps.context.contentResolver.openInputStream(uri)
                 inputStream?.use { stream ->
                     val fileData = stream.readBytes()
-                    val localPath = repository.saveFileLocally(fileName, fileData)
+                    val localPath = deps.repository.saveFileLocally(fileName, fileData)
 
                     if (localPath != null) {
                         val selectedFile = SelectedFile(
@@ -44,9 +36,9 @@ class AttachmentManager(
                             localPath = localPath
                         )
 
-                        updateUiState(
-                            uiState.value.copy(
-                                selectedFiles = uiState.value.selectedFiles + selectedFile
+                        deps.updateUiState(
+                            deps.uiState.value.copy(
+                                selectedFiles = deps.uiState.value.selectedFiles + selectedFile
                             )
                         )
                     }
@@ -63,15 +55,15 @@ class AttachmentManager(
      * Useful for batch file selection.
      */
     fun addMultipleFilesFromUris(filesList: List<Triple<Uri, String, String>>) {
-        scope.launch {
+        deps.scope.launch {
             val newSelectedFiles = mutableListOf<SelectedFile>()
 
             for ((uri, fileName, mimeType) in filesList) {
                 try {
-                    val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
+                    val inputStream: InputStream? = deps.context.contentResolver.openInputStream(uri)
                     inputStream?.use { stream ->
                         val fileData = stream.readBytes()
-                        val localPath = repository.saveFileLocally(fileName, fileData)
+                        val localPath = deps.repository.saveFileLocally(fileName, fileData)
 
                         if (localPath != null) {
                             val selectedFile = SelectedFile(
@@ -89,9 +81,9 @@ class AttachmentManager(
             }
 
             if (newSelectedFiles.isNotEmpty()) {
-                updateUiState(
-                    uiState.value.copy(
-                        selectedFiles = uiState.value.selectedFiles + newSelectedFiles
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        selectedFiles = deps.uiState.value.selectedFiles + newSelectedFiles
                     )
                 )
             }
@@ -103,15 +95,15 @@ class AttachmentManager(
      * Also deletes the file from local storage.
      */
     fun removeSelectedFile(file: SelectedFile) {
-        updateUiState(
-            uiState.value.copy(
-                selectedFiles = uiState.value.selectedFiles.filter { it != file }
+        deps.updateUiState(
+            deps.uiState.value.copy(
+                selectedFiles = deps.uiState.value.selectedFiles.filter { it != file }
             )
         )
 
         // Delete the local file if it exists
         file.localPath?.let { path ->
-            repository.deleteFile(path)
+            deps.repository.deleteFile(path)
         }
     }
 
@@ -119,13 +111,13 @@ class AttachmentManager(
      * Show the file selection dialog.
      */
     fun showFileSelection() {
-        updateUiState(uiState.value.copy(showFileSelection = true))
+        deps.updateUiState(deps.uiState.value.copy(showFileSelection = true))
     }
 
     /**
      * Hide the file selection dialog.
      */
     fun hideFileSelection() {
-        updateUiState(uiState.value.copy(showFileSelection = false))
+        deps.updateUiState(deps.uiState.value.copy(showFileSelection = false))
     }
 }
