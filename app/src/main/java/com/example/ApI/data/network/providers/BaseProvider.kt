@@ -41,10 +41,7 @@ abstract class BaseProvider(protected val context: Context) {
     protected fun createToolCallMessage(
         toolCall: ToolCall,
         toolResult: ToolExecutionResult,
-        precedingText: String = "",
-        thoughts: String? = null,
-        thinkingDurationSeconds: Float? = null,
-        thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
+        precedingText: String = ""
     ): Message {
         val toolDisplayName = ToolRegistry.getInstance().getToolDisplayName(toolCall.toolId)
 
@@ -60,10 +57,7 @@ abstract class BaseProvider(protected val context: Context) {
                 timestamp = java.time.Instant.now().toString(),
                 thoughtSignature = toolCall.thoughtSignature // Pass through Google's thought signature
             ),
-            datetime = java.time.Instant.now().toString(),
-            thoughts = thoughts,
-            thinkingDurationSeconds = thinkingDurationSeconds,
-            thoughtsStatus = thoughtsStatus
+            datetime = java.time.Instant.now().toString()
         )
     }
 

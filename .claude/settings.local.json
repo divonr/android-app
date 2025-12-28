@@ -11,7 +11,10 @@
       "Bash(if not exist \"C:\\Users\\DELL\\Documents\\Cursor\\chatGPT api\\android app\\app\\src\\main\\res\\drawable\" mkdir \"C:\\Users\\DELL\\Documents\\Cursor\\chatGPT api\\android app\\app\\src\\main\\res\\drawable\")",
       "Bash(cmd /c:*)",
       "Bash(xcopy:*)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "WebFetch(domain:platform.openai.com)",
+      "Bash(curl:*)",
+      "WebFetch(domain:ai.google.dev)"
     ],
     "deny": [],
     "ask": []

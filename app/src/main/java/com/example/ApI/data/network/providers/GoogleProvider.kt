@@ -40,18 +40,18 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
             )
 
             when (streamingResponse) {
-                is ProviderStreamingResult.TextComplete -> {
+                is StreamingResult.TextComplete -> {
                     Log.d("TOOL_CALL_DEBUG", "Google Streaming: Text response complete")
                     callback.onComplete(streamingResponse.fullText)
                 }
-                is ProviderStreamingResult.ToolCallDetected -> {
+                is StreamingResult.ToolCallDetected -> {
                     handleToolCall(
                         provider, modelName, messages, systemPrompt, apiKey,
                         webSearchEnabled, enabledTools, thinkingBudget, temperature,
                         streamingResponse, callback
                     )
                 }
-                is ProviderStreamingResult.Error -> {
+                is StreamingResult.Error -> {
                     // Already called callback.onError
                 }
             }
@@ -70,7 +70,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         enabledTools: List<ToolSpecification>,
         thinkingBudget: ThinkingBudgetValue,
         temperature: Float?,
-        initialResponse: ProviderStreamingResult.ToolCallDetected,
+        initialResponse: StreamingResult.ToolCallDetected,
         callback: StreamingCallback
     ) {
         Log.d("TOOL_CALL_DEBUG", "Google Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
@@ -81,14 +81,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         )
         Log.d("TOOL_CALL_DEBUG", "Google Streaming: Tool executed with result: $toolResult")
 
-        val toolCallMessage = createToolCallMessage(
-            toolCall = initialResponse.toolCall,
-            toolResult = toolResult,
-            precedingText = "",
-            thoughts = initialResponse.thoughts,
-            thinkingDurationSeconds = initialResponse.thinkingDurationSeconds,
-            thoughtsStatus = initialResponse.thoughtsStatus
-        )
+        val toolCallMessage = createToolCallMessage(initialResponse.toolCall, toolResult, "")
         val toolResponseMessage = createToolResponseMessage(initialResponse.toolCall, toolResult)
 
         callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, initialResponse.precedingText)
@@ -102,7 +95,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         val messagesWithToolResult = messages + messagesToAdd
 
         var currentMessages = messagesWithToolResult
-        var currentResponse: ProviderStreamingResult = makeStreamingRequest(
+        var currentResponse: StreamingResult = makeStreamingRequest(
             provider, modelName, currentMessages, systemPrompt, apiKey,
             webSearchEnabled, enabledTools, thinkingBudget, callback,
             maxToolDepth = MAX_TOOL_DEPTH,
@@ -111,7 +104,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         )
         var toolDepth = 1
 
-        while (currentResponse is ProviderStreamingResult.ToolCallDetected && toolDepth < MAX_TOOL_DEPTH) {
+        while (currentResponse is StreamingResult.ToolCallDetected && toolDepth < MAX_TOOL_DEPTH) {
             Log.d("TOOL_CALL_DEBUG", "Google Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
 
             val chainedToolResult = callback.onToolCall(
@@ -146,15 +139,15 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         }
 
         when (currentResponse) {
-            is ProviderStreamingResult.TextComplete -> {
+            is StreamingResult.TextComplete -> {
                 Log.d("TOOL_CALL_DEBUG", "Google Streaming: Got final text response after $toolDepth tool calls")
                 callback.onComplete(currentResponse.fullText)
             }
-            is ProviderStreamingResult.ToolCallDetected -> {
+            is StreamingResult.ToolCallDetected -> {
                 Log.d("TOOL_CALL_DEBUG", "Google Streaming: Maximum tool depth ($MAX_TOOL_DEPTH) exceeded")
                 callback.onError("Maximum tool call depth ($MAX_TOOL_DEPTH) exceeded")
             }
-            is ProviderStreamingResult.Error -> {
+            is StreamingResult.Error -> {
                 callback.onError(currentResponse.error)
             }
         }
@@ -173,7 +166,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         maxToolDepth: Int = MAX_TOOL_DEPTH,
         currentDepth: Int = 0,
         temperature: Float? = null
-    ): ProviderStreamingResult = withContext(Dispatchers.IO) {
+    ): StreamingResult = withContext(Dispatchers.IO) {
         try {
             // Build request URL - replace placeholder and change to streaming endpoint
             val baseUrl = provider.request.base_url.replace("{model_name}", modelName)
@@ -189,6 +182,8 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
             val requestBody = buildRequestBody(modelName, contents, webSearchEnabled, enabledTools, thinkingBudget, temperature)
             val requestBodyJson = json.encodeToString(requestBody)
 
+            println("[DEBUG] Google Streaming API Request: $requestBodyJson")
+
             val writer = OutputStreamWriter(connection.outputStream)
             writer.write(requestBodyJson)
             writer.flush()
@@ -199,20 +194,20 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
             if (responseCode >= 400) {
                 val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
                 callback.onError("HTTP $responseCode: $errorBody")
-                return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorBody")
+                return@withContext StreamingResult.Error("HTTP $responseCode: $errorBody")
             }
 
             parseStreamingResponse(connection, callback)
         } catch (e: Exception) {
             callback.onError("Failed to make Google streaming request: ${e.message}")
-            ProviderStreamingResult.Error("Failed to make Google streaming request: ${e.message}")
+            StreamingResult.Error("Failed to make Google streaming request: ${e.message}")
         }
     }
 
     private fun parseStreamingResponse(
         connection: HttpURLConnection,
         callback: StreamingCallback
-    ): ProviderStreamingResult {
+    ): StreamingResult {
         Log.d("TOOL_CALL_DEBUG", "Starting to read Google stream...")
         val reader = BufferedReader(InputStreamReader(connection.inputStream))
         val fullResponse = StringBuilder()
@@ -242,7 +237,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                         callback.onError("Google API streaming error: $errorMessage")
                         reader.close()
                         connection.disconnect()
-                        return ProviderStreamingResult.Error("Google API streaming error: $errorMessage")
+                        return StreamingResult.Error("Google API streaming error: $errorMessage")
                     }
 
                     val candidates = chunkJson["candidates"]?.jsonArray
@@ -254,7 +249,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                         val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.content
                         if (finishReason != null && finishReason != "STOP") {
                             callback.onError("Google API streaming blocked due to: $finishReason")
-                            return ProviderStreamingResult.Error("Google API streaming blocked due to: $finishReason")
+                            return StreamingResult.Error("Google API streaming blocked due to: $finishReason")
                         }
 
                         val content = firstCandidate["content"]?.jsonObject
@@ -320,6 +315,8 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                         }
                     }
                 } catch (jsonException: Exception) {
+                    println("[DEBUG] Error parsing Google streaming chunk: ${jsonException.message}")
+                    println("[DEBUG] Problematic chunk: $dataContent")
                     continue
                 }
             }
@@ -328,34 +325,23 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         reader.close()
         connection.disconnect()
 
-        // Calculate thinking duration if there were thoughts
-        val thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
-        val thinkingDuration = if (thoughts != null && thinkingStartTime > 0) {
-            (System.currentTimeMillis() - thinkingStartTime) / 1000f
-        } else null
-        val thoughtsStatus = if (thoughts != null) ThoughtsStatus.PRESENT else ThoughtsStatus.NONE
-
         return when {
-            detectedToolCall != null -> {
-                // If there were thoughts before the tool call, notify via callback
-                if (thoughts != null) {
-                    callback.onThinkingComplete(thoughts, thinkingDuration ?: 0f, thoughtsStatus)
-                }
-                ProviderStreamingResult.ToolCallDetected(
-                    toolCall = detectedToolCall!!,
-                    precedingText = fullResponse.toString(),
-                    thoughts = thoughts,
-                    thinkingDurationSeconds = thinkingDuration,
-                    thoughtsStatus = thoughtsStatus
-                )
-            }
-            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
-                fullText = fullResponse.toString(),
-                thoughts = thoughts,
-                thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus
+            detectedToolCall != null -> StreamingResult.ToolCallDetected(
+                toolCall = detectedToolCall!!,
+                precedingText = fullResponse.toString()
             )
-            else -> ProviderStreamingResult.Error("Empty response from Google")
+            fullResponse.isNotEmpty() -> StreamingResult.TextComplete(
+                fullText = fullResponse.toString(),
+                thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() },
+                thinkingDurationSeconds = if (thoughtsBuilder.isNotEmpty()) {
+                    (thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f })
+                } else null,
+                thoughtsStatus = when {
+                    thoughtsBuilder.isNotEmpty() -> ThoughtsStatus.PRESENT
+                    else -> ThoughtsStatus.NONE
+                }
+            )
+            else -> StreamingResult.Error("Empty response from Google")
         }
     }
 
@@ -535,4 +521,17 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         }
     }
 
+    private sealed class StreamingResult {
+        data class TextComplete(
+            val fullText: String,
+            val thoughts: String? = null,
+            val thinkingDurationSeconds: Float? = null,
+            val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
+        ) : StreamingResult()
+        data class ToolCallDetected(
+            val toolCall: ToolCall,
+            val precedingText: String = ""
+        ) : StreamingResult()
+        data class Error(val error: String) : StreamingResult()
+    }
 }

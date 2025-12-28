@@ -333,17 +333,6 @@ fun ToolCallBubble(
             .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.Start
     ) {
-        // Show thoughts area for tool_call messages if available
-        if (message.thoughtsStatus != ThoughtsStatus.NONE) {
-            ThoughtsBubble(
-                thoughts = message.thoughts,
-                durationSeconds = message.thinkingDurationSeconds,
-                status = message.thoughtsStatus,
-                textDirectionMode = uiState.textDirectionMode,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
-
         // Tool call container with modern design
         Surface(
             shape = RoundedCornerShape(
