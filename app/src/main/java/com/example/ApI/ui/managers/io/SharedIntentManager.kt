@@ -1,13 +1,10 @@
 package com.example.ApI.ui.managers.io
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import com.example.ApI.data.model.ChatUiState
 import com.example.ApI.data.model.PendingChatImport
 import com.example.ApI.data.model.Screen
-import com.example.ApI.data.repository.DataRepository
-import kotlinx.coroutines.CoroutineScope
+import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -17,11 +14,8 @@ import kotlinx.coroutines.launch
  * Extracted from ChatViewModel to reduce complexity.
  */
 class SharedIntentManager(
-    private val repository: DataRepository,
-    private val context: Context,
-    private val scope: CoroutineScope,
+    private val deps: ManagerDependencies,
     private val sharedIntent: Intent?,
-    private val uiState: MutableStateFlow<ChatUiState>,
     private val currentScreen: MutableStateFlow<Screen>,
     private val addFileFromUri: (Uri, String, String) -> Unit
 ) {
@@ -36,13 +30,13 @@ class SharedIntentManager(
                 Intent.ACTION_SEND -> {
                     // Handle shared text
                     intent.getStringExtra(Intent.EXTRA_TEXT)?.let { sharedText ->
-                        uiState.value = uiState.value.copy(currentMessage = sharedText)
+                        deps.updateUiState(deps.uiState.value.copy(currentMessage = sharedText))
                     }
                     // Handle single file sharing
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { uri ->
-                        val fileName = getFileName(context, uri) ?: "shared_file"
-                        val mimeType = resolveMimeType(context, uri, intent.type, fileName)
+                        val fileName = getFileName(uri) ?: "shared_file"
+                        val mimeType = resolveMimeType(uri, intent.type, fileName)
                         checkAndHandleJsonFile(uri, fileName, mimeType)
                     }
                 }
@@ -50,8 +44,8 @@ class SharedIntentManager(
                     // Multiple files sharing
                     @Suppress("DEPRECATION")
                     intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.forEach { uri ->
-                        val fileName = getFileName(context, uri) ?: "shared_file"
-                        val mimeType = resolveMimeType(context, uri, intent.type, fileName)
+                        val fileName = getFileName(uri) ?: "shared_file"
+                        val mimeType = resolveMimeType(uri, intent.type, fileName)
                         checkAndHandleJsonFile(uri, fileName, mimeType)
                     }
                 }
@@ -71,25 +65,25 @@ class SharedIntentManager(
                         mimeType == "text/json"
 
         if (isJsonFile) {
-            scope.launch {
+            deps.scope.launch {
                 try {
                     // Read the JSON content
-                    val inputStream = context.contentResolver.openInputStream(uri)
+                    val inputStream = deps.context.contentResolver.openInputStream(uri)
                     val jsonContent = inputStream?.bufferedReader()?.use { it.readText() }
 
-                    if (jsonContent != null && repository.validateChatJson(jsonContent)) {
+                    if (jsonContent != null && deps.repository.validateChatJson(jsonContent)) {
                         // Valid chat JSON - show the import choice dialog IMMEDIATELY
                         // Navigate to ChatHistory screen if not already there
                         currentScreen.value = Screen.ChatHistory
 
-                        uiState.value = uiState.value.copy(
+                        deps.updateUiState(deps.uiState.value.copy(
                             pendingChatImport = PendingChatImport(
                                 uri = uri,
                                 fileName = fileName,
                                 mimeType = mimeType,
                                 jsonContent = jsonContent
                             )
-                        )
+                        ))
                     } else {
                         // Invalid chat JSON - treat as regular file attachment
                         addFileFromUri(uri, fileName, mimeType)
@@ -108,9 +102,9 @@ class SharedIntentManager(
     /**
      * Get the file name from a URI using content resolver.
      */
-    private fun getFileName(context: Context, uri: Uri): String? {
+    private fun getFileName(uri: Uri): String? {
         var fileName: String? = null
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        deps.context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
             val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
             if (cursor.moveToFirst() && nameIndex >= 0) {
                 fileName = cursor.getString(nameIndex)
@@ -123,14 +117,14 @@ class SharedIntentManager(
      * Resolves a specific MIME type from potentially wildcarded or incomplete intent type.
      * Falls back to contentResolver and then file extension inference.
      */
-    private fun resolveMimeType(context: Context, uri: Uri, intentType: String?, fileName: String?): String {
+    private fun resolveMimeType(uri: Uri, intentType: String?, fileName: String?): String {
         // Helper to check if MIME type is valid (has "/" and no wildcard)
         fun isValidMimeType(type: String?): Boolean {
             return !type.isNullOrBlank() && type.contains("/") && !type.contains("*")
         }
 
         // First try contentResolver which usually gives specific type
-        val resolvedType = context.contentResolver.getType(uri)
+        val resolvedType = deps.context.contentResolver.getType(uri)
 
         // If contentResolver gives a valid specific type, use it
         if (isValidMimeType(resolvedType)) {

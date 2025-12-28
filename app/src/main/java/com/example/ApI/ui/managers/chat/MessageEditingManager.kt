@@ -1,10 +1,8 @@
 package com.example.ApI.ui.managers.chat
 
 import com.example.ApI.data.model.*
-import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.DeleteMessageResult
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.StateFlow
+import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.launch
 
 /**
@@ -13,11 +11,7 @@ import kotlinx.coroutines.launch
  * Split from MessageOperationsManager - this manager owns edit/delete/resend logic.
  */
 class MessageEditingManager(
-    private val repository: DataRepository,
-    private val scope: CoroutineScope,
-    private val appSettings: StateFlow<AppSettings>,
-    private val uiState: StateFlow<ChatUiState>,
-    private val updateUiState: (ChatUiState) -> Unit,
+    private val deps: ManagerDependencies,
     private val getCurrentDateTimeISO: () -> String,
     private val sendApiRequestForBranch: (Chat) -> Unit
 ) {
@@ -26,12 +20,12 @@ class MessageEditingManager(
      * Delete a message using branching-aware deletion.
      */
     fun deleteMessage(message: Message) {
-        val currentUser = appSettings.value.current_user
-        val currentChat = uiState.value.currentChat ?: return
+        val currentUser = deps.appSettings.value.current_user
+        val currentChat = deps.uiState.value.currentChat ?: return
 
-        scope.launch {
+        deps.scope.launch {
             // Use branching-aware deletion
-            val result = repository.deleteMessageFromBranch(
+            val result = deps.repository.deleteMessageFromBranch(
                 currentUser,
                 currentChat.chat_id,
                 message.id
@@ -39,19 +33,19 @@ class MessageEditingManager(
 
             when (result) {
                 is DeleteMessageResult.Success -> {
-                    val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
-                    updateUiState(uiState.value.copy(
+                    val updatedChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
+                    deps.updateUiState(deps.uiState.value.copy(
                         currentChat = result.updatedChat,
                         chatHistory = updatedChatHistory
                     ))
                 }
                 is DeleteMessageResult.CannotDeleteBranchPoint -> {
-                    updateUiState(uiState.value.copy(
+                    deps.updateUiState(deps.uiState.value.copy(
                         snackbarMessage = result.message
                     ))
                 }
                 is DeleteMessageResult.Error -> {
-                    updateUiState(uiState.value.copy(
+                    deps.updateUiState(deps.uiState.value.copy(
                         snackbarMessage = "שגיאה במחיקת ההודעה: ${result.message}"
                     ))
                 }
@@ -63,7 +57,7 @@ class MessageEditingManager(
      * Start editing a message.
      */
     fun startEditingMessage(message: Message) {
-        updateUiState(uiState.value.copy(
+        deps.updateUiState(deps.uiState.value.copy(
             editingMessage = message,
             isEditMode = true,
             currentMessage = message.text
@@ -74,16 +68,16 @@ class MessageEditingManager(
      * Finish editing a message - creates a new branch with the edited message (no API call).
      */
     fun finishEditingMessage() {
-        val editingMessage = uiState.value.editingMessage ?: return
-        val currentChat = uiState.value.currentChat ?: return
-        val currentUser = appSettings.value.current_user
-        val newText = uiState.value.currentMessage.trim()
+        val editingMessage = deps.uiState.value.editingMessage ?: return
+        val currentChat = deps.uiState.value.currentChat ?: return
+        val currentUser = deps.appSettings.value.current_user
+        val newText = deps.uiState.value.currentMessage.trim()
 
         if (newText.isEmpty()) return
 
         // If text hasn't changed, just exit edit mode
         if (newText == editingMessage.text) {
-            updateUiState(uiState.value.copy(
+            deps.updateUiState(deps.uiState.value.copy(
                 editingMessage = null,
                 isEditMode = false,
                 currentMessage = ""
@@ -92,11 +86,11 @@ class MessageEditingManager(
         }
 
         // Ensure branching structure exists
-        val chatWithBranching = repository.ensureBranchingStructure(currentUser, currentChat.chat_id)
+        val chatWithBranching = deps.repository.ensureBranchingStructure(currentUser, currentChat.chat_id)
             ?: return
 
         // Find the node for this message
-        val nodeId = repository.findNodeForMessage(chatWithBranching, editingMessage)
+        val nodeId = deps.repository.findNodeForMessage(chatWithBranching, editingMessage)
 
         if (nodeId != null) {
             // Create a new branch with the edited message (no responses yet)
@@ -105,7 +99,7 @@ class MessageEditingManager(
                 datetime = getCurrentDateTimeISO()
             )
 
-            val result = repository.createBranch(
+            val result = deps.repository.createBranch(
                 currentUser,
                 currentChat.chat_id,
                 nodeId,
@@ -114,9 +108,9 @@ class MessageEditingManager(
 
             if (result != null) {
                 val (updatedChat, _) = result
-                val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+                val updatedChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
 
-                updateUiState(uiState.value.copy(
+                deps.updateUiState(deps.uiState.value.copy(
                     editingMessage = null,
                     isEditMode = false,
                     currentMessage = "",
@@ -129,16 +123,16 @@ class MessageEditingManager(
 
         // Fallback: if branching fails, use the old behavior
         val updatedMessage = editingMessage.copy(text = newText)
-        val updatedChat = repository.replaceMessageInChat(
+        val updatedChat = deps.repository.replaceMessageInChat(
             currentUser,
             currentChat.chat_id,
             editingMessage,
             updatedMessage
         )
 
-        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+        val updatedChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
 
-        updateUiState(uiState.value.copy(
+        deps.updateUiState(deps.uiState.value.copy(
             editingMessage = null,
             isEditMode = false,
             currentMessage = "",
@@ -151,18 +145,18 @@ class MessageEditingManager(
      * Confirm the edit and immediately resend from the edited message (creates new branch with API call).
      */
     fun confirmEditAndResend() {
-        val editingMessage = uiState.value.editingMessage ?: return
-        val currentChat = uiState.value.currentChat ?: return
-        val currentUser = appSettings.value.current_user
-        val newText = uiState.value.currentMessage.trim()
+        val editingMessage = deps.uiState.value.editingMessage ?: return
+        val currentChat = deps.uiState.value.currentChat ?: return
+        val currentUser = deps.appSettings.value.current_user
+        val newText = deps.uiState.value.currentMessage.trim()
         if (newText.isEmpty()) return
 
         // Ensure branching structure exists
-        val chatWithBranching = repository.ensureBranchingStructure(currentUser, currentChat.chat_id)
+        val chatWithBranching = deps.repository.ensureBranchingStructure(currentUser, currentChat.chat_id)
             ?: return
 
         // Find the node for this message
-        val nodeId = repository.findNodeForMessage(chatWithBranching, editingMessage)
+        val nodeId = deps.repository.findNodeForMessage(chatWithBranching, editingMessage)
 
         if (nodeId != null) {
             // Create the edited message
@@ -172,7 +166,7 @@ class MessageEditingManager(
             )
 
             // Create a new branch
-            val result = repository.createBranch(
+            val result = deps.repository.createBranch(
                 currentUser,
                 currentChat.chat_id,
                 nodeId,
@@ -181,9 +175,9 @@ class MessageEditingManager(
 
             if (result != null) {
                 val (updatedChat, _) = result
-                val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+                val updatedChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
 
-                updateUiState(uiState.value.copy(
+                deps.updateUiState(deps.uiState.value.copy(
                     editingMessage = null,
                     isEditMode = false,
                     currentMessage = "",
@@ -199,15 +193,15 @@ class MessageEditingManager(
 
         // Fallback: use old behavior if branching fails
         val updatedMessage = editingMessage.copy(text = newText)
-        val updatedChat = repository.replaceMessageInChat(
+        val updatedChat = deps.repository.replaceMessageInChat(
             currentUser,
             currentChat.chat_id,
             editingMessage,
             updatedMessage
         ) ?: return
 
-        val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
-        updateUiState(uiState.value.copy(
+        val updatedChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
+        deps.updateUiState(deps.uiState.value.copy(
             editingMessage = null,
             isEditMode = false,
             currentMessage = "",
@@ -222,7 +216,7 @@ class MessageEditingManager(
      * Cancel editing without saving changes.
      */
     fun cancelEditingMessage() {
-        updateUiState(uiState.value.copy(
+        deps.updateUiState(deps.uiState.value.copy(
             editingMessage = null,
             isEditMode = false,
             currentMessage = ""
@@ -233,16 +227,16 @@ class MessageEditingManager(
      * Resend from a specific message point - creates a new branch with the same message.
      */
     fun resendFromMessage(message: Message) {
-        val currentChat = uiState.value.currentChat ?: return
-        val currentUser = appSettings.value.current_user
+        val currentChat = deps.uiState.value.currentChat ?: return
+        val currentUser = deps.appSettings.value.current_user
 
-        scope.launch {
+        deps.scope.launch {
             // Ensure branching structure exists
-            val chatWithBranching = repository.ensureBranchingStructure(currentUser, currentChat.chat_id)
+            val chatWithBranching = deps.repository.ensureBranchingStructure(currentUser, currentChat.chat_id)
                 ?: return@launch
 
             // Find the node for this message
-            val nodeId = repository.findNodeForMessage(chatWithBranching, message)
+            val nodeId = deps.repository.findNodeForMessage(chatWithBranching, message)
 
             if (nodeId != null) {
                 // Create a new branch with the same message but new timestamp
@@ -250,7 +244,7 @@ class MessageEditingManager(
                     datetime = getCurrentDateTimeISO()
                 )
 
-                val result = repository.createBranch(
+                val result = deps.repository.createBranch(
                     currentUser,
                     currentChat.chat_id,
                     nodeId,
@@ -259,9 +253,9 @@ class MessageEditingManager(
 
                 if (result != null) {
                     val (updatedChat, _) = result
-                    val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+                    val updatedChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
 
-                    updateUiState(uiState.value.copy(
+                    deps.updateUiState(deps.uiState.value.copy(
                         currentChat = updatedChat,
                         chatHistory = updatedChatHistory
                     ))
@@ -273,27 +267,27 @@ class MessageEditingManager(
             }
 
             // Fallback: old behavior if branching fails
-            val deletedChat = repository.deleteMessagesFromPoint(
+            val deletedChat = deps.repository.deleteMessagesFromPoint(
                 currentUser,
                 currentChat.chat_id,
                 message
             ) ?: return@launch
 
-            val resendUpdatedChat = repository.addMessageToChat(
+            val resendUpdatedChat = deps.repository.addMessageToChat(
                 currentUser,
                 deletedChat.chat_id,
                 message
             )
 
-            val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+            val finalChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
 
             val chatId = resendUpdatedChat!!.chat_id
-            updateUiState(uiState.value.copy(
+            deps.updateUiState(deps.uiState.value.copy(
                 currentChat = resendUpdatedChat,
                 chatHistory = finalChatHistory,
-                loadingChatIds = uiState.value.loadingChatIds + chatId,
-                streamingChatIds = uiState.value.streamingChatIds + chatId,
-                streamingTextByChat = uiState.value.streamingTextByChat + (chatId to "")
+                loadingChatIds = deps.uiState.value.loadingChatIds + chatId,
+                streamingChatIds = deps.uiState.value.streamingChatIds + chatId,
+                streamingTextByChat = deps.uiState.value.streamingTextByChat + (chatId to "")
             ))
 
             // Delegate API call to MessageSendingManager

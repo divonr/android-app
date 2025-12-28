@@ -1,13 +1,10 @@
 package com.example.ApI.ui.managers.integration
 
-import android.content.Context
 import android.content.Intent
 import com.example.ApI.data.model.*
-import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.tools.ToolRegistry
-import kotlinx.coroutines.CoroutineScope
+import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -17,10 +14,7 @@ import kotlinx.coroutines.withContext
  * Extracted from ChatViewModel to reduce complexity.
  */
 class AuthManager(
-    private val repository: DataRepository,
-    private val context: Context,
-    private val scope: CoroutineScope,
-    private val appSettings: StateFlow<AppSettings>,
+    private val deps: ManagerDependencies,
     private val updateAppSettings: (AppSettings) -> Unit,
     private val showSnackbar: (String) -> Unit
 ) {
@@ -34,7 +28,7 @@ class AuthManager(
      * @return Authorization URL to open in browser
      */
     fun connectGitHub(): String {
-        val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
+        val oauthService = com.example.ApI.data.network.GitHubOAuthService(deps.context)
         return oauthService.startAuthorizationFlow()
     }
 
@@ -43,7 +37,7 @@ class AuthManager(
      * @return Pair of (authUrl, state)
      */
     fun getGitHubAuthUrl(): Pair<String, String> {
-        val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
+        val oauthService = com.example.ApI.data.network.GitHubOAuthService(deps.context)
         return oauthService.getAuthorizationUrlAndState()
     }
 
@@ -54,9 +48,9 @@ class AuthManager(
      * @return Success/failure message
      */
     fun handleGitHubCallback(code: String, state: String): String {
-        scope.launch {
+        deps.scope.launch {
             try {
-                val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
+                val oauthService = com.example.ApI.data.network.GitHubOAuthService(deps.context)
 
                 // Exchange code for token
                 val authResult = oauthService.exchangeCodeForToken(code)
@@ -71,19 +65,19 @@ class AuthManager(
                             onSuccess = { user ->
                                 // Save connection
                                 val connection = GitHubConnection(auth = auth, user = user)
-                                val username = appSettings.value.current_user
-                                repository.saveGitHubConnection(username, connection)
+                                val username = deps.appSettings.value.current_user
+                                deps.repository.saveGitHubConnection(username, connection)
 
                                 // Register GitHub tools
                                 val toolRegistry = ToolRegistry.getInstance()
                                 toolRegistry.registerGitHubTools(apiService, auth.accessToken, user.login)
 
-                                // Reload appSettings to get the updated githubConnections, then add tool IDs
-                                val freshSettings = repository.loadAppSettings()
+                                // Reload deps.appSettings to get the updated githubConnections, then add tool IDs
+                                val freshSettings = deps.repository.loadAppSettings()
                                 val githubToolIds = toolRegistry.getGitHubToolIds()
                                 val updatedEnabledTools = (freshSettings.enabledTools + githubToolIds).distinct()
                                 val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                                repository.saveAppSettings(updatedSettings)
+                                deps.repository.saveAppSettings(updatedSettings)
                                 updateAppSettings(updatedSettings)
                             },
                             onFailure = { error ->
@@ -106,30 +100,30 @@ class AuthManager(
      * Disconnect GitHub and remove all GitHub tools
      */
     fun disconnectGitHub() {
-        scope.launch {
+        deps.scope.launch {
             try {
-                val username = appSettings.value.current_user
-                val connection = repository.loadGitHubConnection(username)
+                val username = deps.appSettings.value.current_user
+                val connection = deps.repository.loadGitHubConnection(username)
 
                 if (connection != null) {
                     // Revoke token on GitHub
-                    val oauthService = com.example.ApI.data.network.GitHubOAuthService(context)
+                    val oauthService = com.example.ApI.data.network.GitHubOAuthService(deps.context)
                     oauthService.revokeToken(connection.auth.accessToken)
                 }
 
                 // Remove local connection data
-                repository.removeGitHubConnection(username)
+                deps.repository.removeGitHubConnection(username)
 
                 // Unregister GitHub tools
                 val toolRegistry = ToolRegistry.getInstance()
                 toolRegistry.unregisterGitHubTools()
 
-                // Reload appSettings to get the updated githubConnections (with removal), then remove tool IDs
-                val freshSettings = repository.loadAppSettings()
+                // Reload deps.appSettings to get the updated githubConnections (with removal), then remove tool IDs
+                val freshSettings = deps.repository.loadAppSettings()
                 val githubToolIds = toolRegistry.getGitHubToolIds()
                 val updatedEnabledTools = freshSettings.enabledTools.filter { it !in githubToolIds }
                 val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                repository.saveAppSettings(updatedSettings)
+                deps.repository.saveAppSettings(updatedSettings)
                 updateAppSettings(updatedSettings)
             } catch (e: Exception) {
                 showSnackbar("Error disconnecting GitHub: ${e.message}")
@@ -141,16 +135,16 @@ class AuthManager(
      * Check if GitHub is connected for current user
      */
     fun isGitHubConnected(): Boolean {
-        val username = appSettings.value.current_user
-        return repository.isGitHubConnected(username)
+        val username = deps.appSettings.value.current_user
+        return deps.repository.isGitHubConnected(username)
     }
 
     /**
      * Get GitHub connection info for current user
      */
     fun getGitHubConnection(): GitHubConnection? {
-        val username = appSettings.value.current_user
-        return repository.loadGitHubConnection(username)
+        val username = deps.appSettings.value.current_user
+        return deps.repository.loadGitHubConnection(username)
     }
 
     /**
@@ -158,26 +152,26 @@ class AuthManager(
      * Should be called during app startup
      */
     fun initializeGitHubToolsIfConnected() {
-        scope.launch {
+        deps.scope.launch {
             try {
-                val username = appSettings.value.current_user
-                val serviceAndToken = repository.getGitHubApiService(username)
+                val username = deps.appSettings.value.current_user
+                val serviceAndToken = deps.repository.getGitHubApiService(username)
 
                 if (serviceAndToken != null) {
                     val (apiService, accessToken) = serviceAndToken
-                    val connection = repository.loadGitHubConnection(username)
+                    val connection = deps.repository.loadGitHubConnection(username)
 
                     if (connection != null) {
                         val toolRegistry = ToolRegistry.getInstance()
                         toolRegistry.registerGitHubTools(apiService, accessToken, connection.user.login)
 
                         // Ensure GitHub tools are enabled in settings
-                        val currentSettings = appSettings.value
+                        val currentSettings = deps.appSettings.value
                         val githubToolIds = toolRegistry.getGitHubToolIds()
                         if (!currentSettings.enabledTools.containsAll(githubToolIds)) {
                             val updatedEnabledTools = (currentSettings.enabledTools + githubToolIds).distinct()
                             val updatedSettings = currentSettings.copy(enabledTools = updatedEnabledTools)
-                            repository.saveAppSettings(updatedSettings)
+                            deps.repository.saveAppSettings(updatedSettings)
                             updateAppSettings(updatedSettings)
                         }
                     }
@@ -195,7 +189,7 @@ class AuthManager(
      */
     private fun initGoogleWorkspaceAuthService() {
         if (googleWorkspaceAuthService == null) {
-            googleWorkspaceAuthService = com.example.ApI.data.network.GoogleWorkspaceAuthService(context)
+            googleWorkspaceAuthService = com.example.ApI.data.network.GoogleWorkspaceAuthService(deps.context)
         }
     }
 
@@ -213,7 +207,7 @@ class AuthManager(
      * @param data Intent data from ActivityResult
      */
     fun handleGoogleSignInResult(data: Intent) {
-        scope.launch {
+        deps.scope.launch {
             try {
                 initGoogleWorkspaceAuthService()
                 android.util.Log.d("IntegrationManager", "Handling Google Sign-In result intent")
@@ -224,14 +218,14 @@ class AuthManager(
                         android.util.Log.d("IntegrationManager", "Google Sign-In success: ${user.email}")
                         // Save connection
                         val connection = GoogleWorkspaceConnection(auth = auth, user = user)
-                        val username = appSettings.value.current_user
+                        val username = deps.appSettings.value.current_user
 
                         // Save and reload settings to update UI
                         val updatedSettings = withContext(Dispatchers.IO) {
-                            android.util.Log.d("IntegrationManager", "Saving connection to repository")
-                            repository.saveGoogleWorkspaceConnection(username, connection)
+                            android.util.Log.d("IntegrationManager", "Saving connection to deps.repository")
+                            deps.repository.saveGoogleWorkspaceConnection(username, connection)
                             android.util.Log.d("IntegrationManager", "Reloading app settings")
-                            repository.loadAppSettings()
+                            deps.repository.loadAppSettings()
                         }
 
                         updateAppSettings(updatedSettings)
@@ -256,40 +250,40 @@ class AuthManager(
      * Check if Google Workspace is connected
      */
     fun isGoogleWorkspaceConnected(): Boolean {
-        val username = appSettings.value.current_user
-        return repository.isGoogleWorkspaceConnected(username)
+        val username = deps.appSettings.value.current_user
+        return deps.repository.isGoogleWorkspaceConnected(username)
     }
 
     /**
      * Get current Google Workspace connection
      */
     fun getGoogleWorkspaceConnection(): GoogleWorkspaceConnection? {
-        val username = appSettings.value.current_user
-        return repository.loadGoogleWorkspaceConnection(username)
+        val username = deps.appSettings.value.current_user
+        return deps.repository.loadGoogleWorkspaceConnection(username)
     }
 
     /**
      * Disconnect Google Workspace
      */
     fun disconnectGoogleWorkspace() {
-        scope.launch {
+        deps.scope.launch {
             try {
                 initGoogleWorkspaceAuthService()
                 googleWorkspaceAuthService!!.signOut()
 
-                val username = appSettings.value.current_user
-                repository.removeGoogleWorkspaceConnection(username)
+                val username = deps.appSettings.value.current_user
+                deps.repository.removeGoogleWorkspaceConnection(username)
 
                 // Unregister tools
                 val toolRegistry = ToolRegistry.getInstance()
                 toolRegistry.unregisterGoogleWorkspaceTools()
 
-                // Reload appSettings to get the updated googleWorkspaceConnections (with removal), then remove tool IDs
-                val freshSettings = repository.loadAppSettings()
+                // Reload deps.appSettings to get the updated googleWorkspaceConnections (with removal), then remove tool IDs
+                val freshSettings = deps.repository.loadAppSettings()
                 val googleToolIds = toolRegistry.getGoogleWorkspaceToolIds()
                 val updatedEnabledTools = freshSettings.enabledTools.filter { it !in googleToolIds }
                 val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                repository.saveAppSettings(updatedSettings)
+                deps.repository.saveAppSettings(updatedSettings)
                 updateAppSettings(updatedSettings)
             } catch (e: Exception) {
                 showSnackbar("שגיאה בהתנתקות: ${e.message}")
@@ -304,11 +298,11 @@ class AuthManager(
      * @param drive Enable Drive tools
      */
     fun updateGoogleWorkspaceServices(gmail: Boolean, calendar: Boolean, drive: Boolean) {
-        scope.launch {
+        deps.scope.launch {
             try {
-                val username = appSettings.value.current_user
+                val username = deps.appSettings.value.current_user
                 val services = EnabledGoogleServices(gmail, calendar, drive)
-                repository.updateGoogleWorkspaceEnabledServices(username, services)
+                deps.repository.updateGoogleWorkspaceEnabledServices(username, services)
 
                 // Re-register tools with new configuration
                 initializeGoogleWorkspaceToolsIfConnected()
@@ -323,10 +317,10 @@ class AuthManager(
      * Call this on app start and after connection/service changes
      */
     fun initializeGoogleWorkspaceToolsIfConnected() {
-        scope.launch {
+        deps.scope.launch {
             try {
-                val username = appSettings.value.current_user
-                val connection = repository.loadGoogleWorkspaceConnection(username) ?: return@launch
+                val username = deps.appSettings.value.current_user
+                val connection = deps.repository.loadGoogleWorkspaceConnection(username) ?: return@launch
 
                 if (connection.auth.isExpired()) {
                     // Token expired - user needs to reconnect
@@ -334,7 +328,7 @@ class AuthManager(
                 }
 
                 // Get API services based on enabled services
-                val apiServices = repository.getGoogleWorkspaceApiServices(username) ?: return@launch
+                val apiServices = deps.repository.getGoogleWorkspaceApiServices(username) ?: return@launch
                 val (gmailService, calendarService, driveService) = apiServices
 
                 val toolRegistry = ToolRegistry.getInstance()
@@ -348,7 +342,7 @@ class AuthManager(
                     enabledServices = connection.enabledServices
                 )
 
-                // Add enabled Google Workspace tool IDs to appSettings.enabledTools
+                // Add enabled Google Workspace tool IDs to deps.appSettings.enabledTools
                 val enabledGoogleToolIds = mutableListOf<String>()
                 if (connection.enabledServices.gmail) {
                     enabledGoogleToolIds.addAll(toolRegistry.getGmailToolIds())
@@ -362,11 +356,11 @@ class AuthManager(
 
                 // Update enabledTools: remove all Google Workspace IDs first, then add the currently enabled ones
                 val allGoogleToolIds = toolRegistry.getGoogleWorkspaceToolIds()
-                val freshSettings = repository.loadAppSettings()
+                val freshSettings = deps.repository.loadAppSettings()
                 val cleanedTools = freshSettings.enabledTools.filter { it !in allGoogleToolIds }
                 val updatedEnabledTools = (cleanedTools + enabledGoogleToolIds).distinct()
                 val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                repository.saveAppSettings(updatedSettings)
+                deps.repository.saveAppSettings(updatedSettings)
                 updateAppSettings(updatedSettings)
             } catch (e: Exception) {
                 e.printStackTrace()

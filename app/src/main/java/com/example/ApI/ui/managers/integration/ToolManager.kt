@@ -1,14 +1,12 @@
 package com.example.ApI.ui.managers.integration
 
 import com.example.ApI.data.model.AppSettings
-import com.example.ApI.data.model.ChatUiState
-import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
 import com.example.ApI.tools.GroupConversationsTool
-import kotlinx.coroutines.flow.StateFlow
+import com.example.ApI.ui.managers.ManagerDependencies
 
 /**
  * Manages tool registration, specification retrieval, and execution.
@@ -16,9 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
  * Extracted from ChatViewModel to reduce complexity.
  */
 class ToolManager(
-    private val repository: DataRepository,
-    private val appSettings: StateFlow<AppSettings>,
-    private val uiState: StateFlow<ChatUiState>,
+    private val deps: ManagerDependencies,
     private val updateAppSettings: (AppSettings) -> Unit
 ) {
 
@@ -27,9 +23,9 @@ class ToolManager(
      * Handles special tools like group_conversations that need context.
      */
     fun getEnabledToolSpecifications(): List<ToolSpecification> {
-        val enabledToolIds = appSettings.value.enabledTools
+        val enabledToolIds = deps.appSettings.value.enabledTools
         val toolRegistry = ToolRegistry.getInstance()
-        val currentProvider = uiState.value.currentProvider?.provider ?: "openai"
+        val currentProvider = deps.uiState.value.currentProvider?.provider ?: "openai"
 
         val specifications = mutableListOf<ToolSpecification>()
 
@@ -44,14 +40,14 @@ class ToolManager(
         }
 
         if (enabledToolIds.contains("get_current_group_conversations")) {
-            val currentChat = uiState.value.currentChat
-            val groups = uiState.value.groups
-            val currentUser = appSettings.value.current_user
+            val currentChat = deps.uiState.value.currentChat
+            val groups = deps.uiState.value.groups
+            val currentUser = deps.appSettings.value.current_user
 
             currentChat?.group?.let { groupId ->
                 groups.find { it.group_id == groupId }?.let { group ->
                     val groupConversationsTool = GroupConversationsTool(
-                        repository = repository,
+                        repository = deps.repository,
                         username = currentUser,
                         currentChatId = currentChat.chat_id,
                         groupId = groupId,
@@ -72,14 +68,14 @@ class ToolManager(
      */
     suspend fun executeToolCall(toolCall: ToolCall): ToolExecutionResult {
         if (toolCall.toolId == "get_current_group_conversations") {
-            val currentChat = uiState.value.currentChat
-            val groups = uiState.value.groups
-            val currentUser = appSettings.value.current_user
+            val currentChat = deps.uiState.value.currentChat
+            val groups = deps.uiState.value.groups
+            val currentUser = deps.appSettings.value.current_user
 
             return currentChat?.group?.let { groupId ->
                 groups.find { it.group_id == groupId }?.let { group ->
                     val groupConversationsTool = GroupConversationsTool(
-                        repository = repository,
+                        repository = deps.repository,
                         username = currentUser,
                         currentChatId = currentChat.chat_id,
                         groupId = groupId,
@@ -106,12 +102,12 @@ class ToolManager(
      * Enable a tool by its ID.
      */
     fun enableTool(toolId: String) {
-        val currentSettings = appSettings.value
+        val currentSettings = deps.appSettings.value
         if (!currentSettings.enabledTools.contains(toolId)) {
             val updatedSettings = currentSettings.copy(
                 enabledTools = currentSettings.enabledTools + toolId
             )
-            repository.saveAppSettings(updatedSettings)
+            deps.repository.saveAppSettings(updatedSettings)
             updateAppSettings(updatedSettings)
         }
     }
@@ -120,11 +116,11 @@ class ToolManager(
      * Disable a tool by its ID.
      */
     fun disableTool(toolId: String) {
-        val currentSettings = appSettings.value
+        val currentSettings = deps.appSettings.value
         val updatedSettings = currentSettings.copy(
             enabledTools = currentSettings.enabledTools - toolId
         )
-        repository.saveAppSettings(updatedSettings)
+        deps.repository.saveAppSettings(updatedSettings)
         updateAppSettings(updatedSettings)
     }
 }

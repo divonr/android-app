@@ -1,7 +1,6 @@
 package com.example.ApI.ui.managers.io
 
 import android.app.PendingIntent
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -14,10 +13,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.example.ApI.R
 import com.example.ApI.data.model.*
-import com.example.ApI.data.repository.DataRepository
-import kotlinx.coroutines.CoroutineScope
+import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -29,12 +26,7 @@ import java.io.InputStream
  * Extracted from ChatViewModel to reduce complexity.
  */
 class ExportImportManager(
-    private val repository: DataRepository,
-    private val context: Context,
-    private val scope: CoroutineScope,
-    private val appSettings: StateFlow<AppSettings>,
-    private val uiState: StateFlow<ChatUiState>,
-    private val updateUiState: (ChatUiState) -> Unit,
+    private val deps: ManagerDependencies,
     private val selectChat: (Chat) -> Unit,
     private val navigateToScreen: (Screen) -> Unit,
     private val addFileFromUri: (Uri, String, String) -> Unit
@@ -47,15 +39,15 @@ class ExportImportManager(
      * Loads the chat JSON and displays it for editing/sharing.
      */
     fun openChatExportDialog() {
-        val currentChat = uiState.value.currentChat ?: return
-        val currentUser = appSettings.value.current_user
-        scope.launch {
+        val currentChat = deps.uiState.value.currentChat ?: return
+        val currentUser = deps.appSettings.value.current_user
+        deps.scope.launch {
             val chatJson = withContext(Dispatchers.IO) {
-                repository.getChatJson(currentUser, currentChat.chat_id)
+                deps.repository.getChatJson(currentUser, currentChat.chat_id)
             }.orEmpty()
 
-            updateUiState(
-                uiState.value.copy(
+            deps.updateUiState(
+                deps.uiState.value.copy(
                     showChatExportDialog = true,
                     chatExportJson = chatJson,
                     isChatExportEditable = false
@@ -63,9 +55,9 @@ class ExportImportManager(
             )
 
             if (chatJson.isBlank()) {
-                updateUiState(
-                    uiState.value.copy(
-                        snackbarMessage = context.getString(R.string.no_content_to_export)
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        snackbarMessage = deps.context.getString(R.string.no_content_to_export)
                     )
                 )
             }
@@ -76,8 +68,8 @@ class ExportImportManager(
      * Close the chat export dialog.
      */
     fun closeChatExportDialog() {
-        updateUiState(
-            uiState.value.copy(
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 showChatExportDialog = false,
                 isChatExportEditable = false
             )
@@ -88,14 +80,14 @@ class ExportImportManager(
      * Enable editing of the chat export content.
      */
     fun enableChatExportEditing() {
-        updateUiState(uiState.value.copy(isChatExportEditable = true))
+        deps.updateUiState(deps.uiState.value.copy(isChatExportEditable = true))
     }
 
     /**
      * Update the chat export content (when user edits it).
      */
     fun updateChatExportContent(content: String) {
-        updateUiState(uiState.value.copy(chatExportJson = content))
+        deps.updateUiState(deps.uiState.value.copy(chatExportJson = content))
     }
 
     /**
@@ -103,31 +95,31 @@ class ExportImportManager(
      * Saves to a temporary file and launches share intent.
      */
     fun shareChatExportContent() {
-        val content = uiState.value.chatExportJson
-        val chatId = uiState.value.currentChat?.chat_id
+        val content = deps.uiState.value.chatExportJson
+        val chatId = deps.uiState.value.currentChat?.chat_id
 
         if (content.isBlank()) {
-            updateUiState(
-                uiState.value.copy(
-                    snackbarMessage = context.getString(R.string.no_content_to_export)
+            deps.updateUiState(
+                deps.uiState.value.copy(
+                    snackbarMessage = deps.context.getString(R.string.no_content_to_export)
                 )
             )
             return
         }
 
         if (chatId == null) {
-            updateUiState(
-                uiState.value.copy(
-                    snackbarMessage = context.getString(R.string.error_sending_message)
+            deps.updateUiState(
+                deps.uiState.value.copy(
+                    snackbarMessage = deps.context.getString(R.string.error_sending_message)
                 )
             )
             return
         }
 
-        scope.launch {
+        deps.scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    repository.saveChatJsonToDownloads(chatId, content)
+                    deps.repository.saveChatJsonToDownloads(chatId, content)
                 }
 
                 if (result != null) {
@@ -136,8 +128,8 @@ class ExportImportManager(
                         try {
                             val file = File(result)
                             val uri = FileProvider.getUriForFile(
-                                context,
-                                context.applicationContext.packageName + ".fileprovider",
+                                deps.context,
+                                deps.context.applicationContext.packageName + ".fileprovider",
                                 file
                             )
 
@@ -148,30 +140,30 @@ class ExportImportManager(
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
 
-                            val chooserTitle = context.getString(R.string.share_chat_title)
+                            val chooserTitle = deps.context.getString(R.string.share_chat_title)
                             val chooser = Intent.createChooser(shareIntent, chooserTitle).apply {
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
-                            context.startActivity(chooser)
+                            deps.context.startActivity(chooser)
                         } catch (e: Exception) {
-                            updateUiState(
-                                uiState.value.copy(
-                                    snackbarMessage = context.getString(R.string.error_sending_message)
+                            deps.updateUiState(
+                                deps.uiState.value.copy(
+                                    snackbarMessage = deps.context.getString(R.string.error_sending_message)
                                 )
                             )
                         }
                     }
                 } else {
-                    updateUiState(
-                        uiState.value.copy(
-                            snackbarMessage = context.getString(R.string.export_failed)
+                    deps.updateUiState(
+                        deps.uiState.value.copy(
+                            snackbarMessage = deps.context.getString(R.string.export_failed)
                         )
                     )
                 }
             } catch (e: Exception) {
-                updateUiState(
-                    uiState.value.copy(
-                        snackbarMessage = context.getString(R.string.error_sending_message)
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        snackbarMessage = deps.context.getString(R.string.error_sending_message)
                     )
                 )
             }
@@ -183,45 +175,45 @@ class ExportImportManager(
      * Shows a notification upon successful save.
      */
     fun saveChatExportToDownloads() {
-        val content = uiState.value.chatExportJson
-        val chatId = uiState.value.currentChat?.chat_id
+        val content = deps.uiState.value.chatExportJson
+        val chatId = deps.uiState.value.currentChat?.chat_id
 
         if (content.isBlank()) {
-            updateUiState(
-                uiState.value.copy(
-                    snackbarMessage = context.getString(R.string.no_content_to_export)
+            deps.updateUiState(
+                deps.uiState.value.copy(
+                    snackbarMessage = deps.context.getString(R.string.no_content_to_export)
                 )
             )
             return
         }
 
         if (chatId == null) {
-            updateUiState(
-                uiState.value.copy(
-                    snackbarMessage = context.getString(R.string.error_sending_message)
+            deps.updateUiState(
+                deps.uiState.value.copy(
+                    snackbarMessage = deps.context.getString(R.string.error_sending_message)
                 )
             )
             return
         }
 
-        scope.launch {
+        deps.scope.launch {
             val result = withContext(Dispatchers.IO) {
-                repository.saveChatJsonToDownloads(chatId, content)
+                deps.repository.saveChatJsonToDownloads(chatId, content)
             }
 
             if (result != null) {
                 // Show success notification
                 showDownloadNotification(chatId)
 
-                updateUiState(
-                    uiState.value.copy(
-                        snackbarMessage = context.getString(R.string.export_success)
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        snackbarMessage = deps.context.getString(R.string.export_success)
                     )
                 )
             } else {
-                updateUiState(
-                    uiState.value.copy(
-                        snackbarMessage = context.getString(R.string.export_failed)
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        snackbarMessage = deps.context.getString(R.string.export_failed)
                     )
                 )
             }
@@ -243,7 +235,7 @@ class ExportImportManager(
             if (needsPermission) {
                 // Check if we have the permission
                 val hasPermission = ContextCompat.checkSelfPermission(
-                    context,
+                    deps.context,
                     android.Manifest.permission.POST_NOTIFICATIONS
                 ) == PackageManager.PERMISSION_GRANTED
 
@@ -255,7 +247,7 @@ class ExportImportManager(
                 }
             }
 
-            val notificationManager = NotificationManagerCompat.from(context)
+            val notificationManager = NotificationManagerCompat.from(deps.context)
 
             // Create notification channel for Android 8.0+
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -276,8 +268,8 @@ class ExportImportManager(
 
             if (file.exists()) {
                 val fileUri = FileProvider.getUriForFile(
-                    context,
-                    context.applicationContext.packageName + ".fileprovider",
+                    deps.context,
+                    deps.context.applicationContext.packageName + ".fileprovider",
                     file
                 )
                 android.util.Log.d("ChatExport", "File URI: $fileUri")
@@ -292,14 +284,14 @@ class ExportImportManager(
                 try {
                     @Suppress("WrongConstant") // FLAG_IMMUTABLE is required for Android 12+
                     val pendingIntent = PendingIntentCompat.getActivity(
-                        context,
+                        deps.context,
                         "chat_export_${chatId}".hashCode(),
                         openFileIntent,
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                         false
                     )
 
-                    val notification = NotificationCompat.Builder(context, "chat_export_channel")
+                    val notification = NotificationCompat.Builder(deps.context, "chat_export_channel")
                         .setSmallIcon(android.R.drawable.stat_sys_download_done)
                         .setContentTitle("שיחה הורדה בהצלחה")
                         .setContentText("הקובץ ${chatId}.json נשמר בתיקיית ההורדות")
@@ -316,7 +308,7 @@ class ExportImportManager(
                 } catch (e: Exception) {
                     android.util.Log.e("ChatExport", "Failed to create pending intent: ${e.message}")
                     // Create notification without click action if pending intent fails
-                    val fallbackNotification = NotificationCompat.Builder(context, "chat_export_channel")
+                    val fallbackNotification = NotificationCompat.Builder(deps.context, "chat_export_channel")
                         .setSmallIcon(android.R.drawable.stat_sys_download_done)
                         .setContentTitle("שיחה הורדה בהצלחה")
                         .setContentText("הקובץ ${chatId}.json נשמר בתיקיית ההורדות")
@@ -330,7 +322,7 @@ class ExportImportManager(
             } else {
                 android.util.Log.w("ChatExport", "File does not exist at path: ${file.absolutePath}")
                 // Create notification without click action if file doesn't exist
-                val fallbackNotification = NotificationCompat.Builder(context, "chat_export_channel")
+                val fallbackNotification = NotificationCompat.Builder(deps.context, "chat_export_channel")
                     .setSmallIcon(android.R.drawable.stat_sys_download_done)
                     .setContentTitle("שיחה הורדה בהצלחה")
                     .setContentText("הקובץ ${chatId}.json נשמר בתיקיית ההורדות")
@@ -353,18 +345,18 @@ class ExportImportManager(
      * Creates a new chat from the JSON content and navigates to it.
      */
     fun importPendingChatJson() {
-        val pending = uiState.value.pendingChatImport ?: return
+        val pending = deps.uiState.value.pendingChatImport ?: return
 
-        scope.launch {
+        deps.scope.launch {
             try {
-                val currentUser = appSettings.value.current_user
-                val importedChatId = repository.importSingleChat(pending.jsonContent, currentUser)
+                val currentUser = deps.appSettings.value.current_user
+                val importedChatId = deps.repository.importSingleChat(pending.jsonContent, currentUser)
 
                 if (importedChatId != null) {
                     // Reload chat history
-                    val chatHistory = repository.loadChatHistory(currentUser)
-                    updateUiState(
-                        uiState.value.copy(
+                    val chatHistory = deps.repository.loadChatHistory(currentUser)
+                    deps.updateUiState(
+                        deps.uiState.value.copy(
                             chatHistory = chatHistory.chat_history,
                             groups = chatHistory.groups,
                             pendingChatImport = null
@@ -378,19 +370,19 @@ class ExportImportManager(
                         navigateToScreen(Screen.Chat)
                     }
 
-                    Toast.makeText(context, "הצ'אט יובא בהצלחה", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(deps.context, "הצ'אט יובא בהצלחה", Toast.LENGTH_SHORT).show()
                 } else {
-                    updateUiState(uiState.value.copy(pendingChatImport = null))
-                    updateUiState(
-                        uiState.value.copy(
+                    deps.updateUiState(deps.uiState.value.copy(pendingChatImport = null))
+                    deps.updateUiState(
+                        deps.uiState.value.copy(
                             snackbarMessage = "שגיאה בייבוא הצ'אט"
                         )
                     )
                 }
             } catch (e: Exception) {
-                updateUiState(uiState.value.copy(pendingChatImport = null))
-                updateUiState(
-                    uiState.value.copy(
+                deps.updateUiState(deps.uiState.value.copy(pendingChatImport = null))
+                deps.updateUiState(
+                    deps.uiState.value.copy(
                         snackbarMessage = "שגיאה בייבוא הצ'אט: ${e.message}"
                     )
                 )
@@ -402,10 +394,10 @@ class ExportImportManager(
      * Attach a pending JSON file as a regular file attachment instead of importing it.
      */
     fun attachPendingJsonAsFile() {
-        val pending = uiState.value.pendingChatImport ?: return
+        val pending = deps.uiState.value.pendingChatImport ?: return
 
         // Clear the pending import
-        updateUiState(uiState.value.copy(pendingChatImport = null))
+        deps.updateUiState(deps.uiState.value.copy(pendingChatImport = null))
 
         // Add as regular file attachment
         addFileFromUri(pending.uri, pending.fileName, pending.mimeType)
@@ -415,7 +407,7 @@ class ExportImportManager(
      * Dismiss the chat import dialog without taking action.
      */
     fun dismissChatImportDialog() {
-        updateUiState(uiState.value.copy(pendingChatImport = null))
+        deps.updateUiState(deps.uiState.value.copy(pendingChatImport = null))
     }
 
     // ==================== Full Chat History Export/Import ====================
@@ -425,13 +417,13 @@ class ExportImportManager(
      * Shows a toast with the export path on success.
      */
     fun exportChatHistory() {
-        scope.launch {
-            val currentUser = appSettings.value.current_user
-            val exportPath = repository.exportChatHistory(currentUser)
+        deps.scope.launch {
+            val currentUser = deps.appSettings.value.current_user
+            val exportPath = deps.repository.exportChatHistory(currentUser)
 
             if (exportPath != null) {
                 Toast.makeText(
-                    context,
+                    deps.context,
                     "היסטוריית הצ'אט יוצאה בהצלחה ל: $exportPath",
                     Toast.LENGTH_LONG
                 ).show()
@@ -444,27 +436,27 @@ class ExportImportManager(
      * Replaces current chat history with imported data.
      */
     fun importChatHistoryFromUri(uri: Uri) {
-        scope.launch {
+        deps.scope.launch {
             try {
-                val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
+                val inputStream: InputStream? = deps.context.contentResolver.openInputStream(uri)
                 inputStream?.use { stream ->
                     val data = stream.readBytes()
-                    val currentUser = appSettings.value.current_user
-                    repository.importChatHistoryJson(data, currentUser)
+                    val currentUser = deps.appSettings.value.current_user
+                    deps.repository.importChatHistoryJson(data, currentUser)
                     // Refresh UI state after import
-                    val chatHistory = repository.loadChatHistory(currentUser)
+                    val chatHistory = deps.repository.loadChatHistory(currentUser)
                     val currentChat = chatHistory.chat_history.lastOrNull()
-                    updateUiState(
-                        uiState.value.copy(
+                    deps.updateUiState(
+                        deps.uiState.value.copy(
                             chatHistory = chatHistory.chat_history,
                             groups = chatHistory.groups,
                             currentChat = currentChat
                         )
                     )
-                    Toast.makeText(context, "היסטוריית הצ'אט יובאה בהצלחה", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(deps.context, "היסטוריית הצ'אט יובאה בהצלחה", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(context, "שגיאה בייבוא: ${e.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(deps.context, "שגיאה בייבוא: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }

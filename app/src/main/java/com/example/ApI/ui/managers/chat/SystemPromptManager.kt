@@ -1,10 +1,7 @@
 package com.example.ApI.ui.managers.chat
 
-import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.ChatGroup
-import com.example.ApI.data.model.ChatUiState
-import com.example.ApI.data.repository.DataRepository
-import kotlinx.coroutines.flow.StateFlow
+import com.example.ApI.ui.managers.ManagerDependencies
 
 /**
  * Manages system prompt functionality for chats and projects.
@@ -12,10 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
  * Extracted from ChatViewModel to reduce complexity.
  */
 class SystemPromptManager(
-    private val repository: DataRepository,
-    private val appSettings: StateFlow<AppSettings>,
-    private val uiState: StateFlow<ChatUiState>,
-    private val updateUiState: (ChatUiState) -> Unit
+    private val deps: ManagerDependencies
 ) {
 
     /**
@@ -23,21 +17,21 @@ class SystemPromptManager(
      * Creates a new chat if no current chat exists.
      */
     fun updateSystemPrompt(prompt: String) {
-        val currentUser = appSettings.value.current_user
-        val currentChat = uiState.value.currentChat
+        val currentUser = deps.appSettings.value.current_user
+        val currentChat = deps.uiState.value.currentChat
 
         if (currentChat != null) {
             // Update system prompt for current chat
-            repository.updateChatSystemPrompt(currentUser, currentChat.chat_id, prompt)
+            deps.repository.updateChatSystemPrompt(currentUser, currentChat.chat_id, prompt)
 
             // Update the current chat in UI state
             val updatedChat = currentChat.copy(systemPrompt = prompt)
-            val updatedChatHistory = uiState.value.chatHistory.map { chat ->
+            val updatedChatHistory = deps.uiState.value.chatHistory.map { chat ->
                 if (chat.chat_id == currentChat.chat_id) updatedChat else chat
             }
 
-            updateUiState(
-                uiState.value.copy(
+            deps.updateUiState(
+                deps.uiState.value.copy(
                     currentChat = updatedChat,
                     systemPrompt = prompt,
                     chatHistory = updatedChatHistory,
@@ -46,11 +40,11 @@ class SystemPromptManager(
             )
         } else {
             // If no current chat, create a new one with the system prompt
-            val newChat = repository.createNewChat(currentUser, "שיחה חדשה", prompt)
-            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+            val newChat = deps.repository.createNewChat(currentUser, "שיחה חדשה", prompt)
+            val updatedChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
 
-            updateUiState(
-                uiState.value.copy(
+            deps.updateUiState(
+                deps.uiState.value.copy(
                     currentChat = newChat,
                     systemPrompt = prompt,
                     chatHistory = updatedChatHistory,
@@ -64,14 +58,14 @@ class SystemPromptManager(
      * Show the system prompt dialog.
      */
     fun showSystemPromptDialog() {
-        updateUiState(uiState.value.copy(showSystemPromptDialog = true))
+        deps.updateUiState(deps.uiState.value.copy(showSystemPromptDialog = true))
     }
 
     /**
      * Hide the system prompt dialog.
      */
     fun hideSystemPromptDialog() {
-        updateUiState(uiState.value.copy(showSystemPromptDialog = false))
+        deps.updateUiState(deps.uiState.value.copy(showSystemPromptDialog = false))
     }
 
     /**
@@ -79,9 +73,9 @@ class SystemPromptManager(
      * When enabled, chat system prompt is appended to project system prompt.
      */
     fun toggleSystemPromptOverride() {
-        updateUiState(
-            uiState.value.copy(
-                systemPromptOverrideEnabled = !uiState.value.systemPromptOverrideEnabled
+        deps.updateUiState(
+            deps.uiState.value.copy(
+                systemPromptOverrideEnabled = !deps.uiState.value.systemPromptOverrideEnabled
             )
         )
     }
@@ -90,8 +84,8 @@ class SystemPromptManager(
      * Set the system prompt override setting explicitly.
      */
     fun setSystemPromptOverride(enabled: Boolean) {
-        updateUiState(
-            uiState.value.copy(
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 systemPromptOverrideEnabled = enabled
             )
         )
@@ -102,8 +96,8 @@ class SystemPromptManager(
      * Returns null if the chat is not in a project group.
      */
     fun getCurrentChatProjectGroup(): ChatGroup? {
-        val currentChat = uiState.value.currentChat
-        val groups = uiState.value.groups
+        val currentChat = deps.uiState.value.currentChat
+        val groups = deps.uiState.value.groups
 
         return currentChat?.group?.let { groupId ->
             groups.find { it.group_id == groupId && it.is_project }
@@ -115,7 +109,7 @@ class SystemPromptManager(
      * Merges project system prompt with chat system prompt if applicable.
      */
     fun getEffectiveSystemPrompt(): String {
-        val currentChat = uiState.value.currentChat ?: return ""
+        val currentChat = deps.uiState.value.currentChat ?: return ""
         val projectGroup = getCurrentChatProjectGroup()
 
         return when {
@@ -124,7 +118,7 @@ class SystemPromptManager(
                 val chatPrompt = currentChat.systemPrompt
 
                 when {
-                    uiState.value.systemPromptOverrideEnabled && chatPrompt.isNotEmpty() ->
+                    deps.uiState.value.systemPromptOverrideEnabled && chatPrompt.isNotEmpty() ->
                         "$projectPrompt\n\n$chatPrompt"
                     else -> projectPrompt
                 }

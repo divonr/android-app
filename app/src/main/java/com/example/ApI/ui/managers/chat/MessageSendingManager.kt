@@ -1,12 +1,9 @@
 package com.example.ApI.ui.managers.chat
 
-import android.content.Context
 import android.util.Log
 import com.example.ApI.data.model.*
-import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.tools.ToolSpecification
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.StateFlow
+import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -16,12 +13,7 @@ import java.util.UUID
  * Split from MessageOperationsManager - this manager owns all actual API calls.
  */
 class MessageSendingManager(
-    private val repository: DataRepository,
-    private val context: Context,
-    private val scope: CoroutineScope,
-    private val appSettings: StateFlow<AppSettings>,
-    private val uiState: StateFlow<ChatUiState>,
-    private val updateUiState: (ChatUiState) -> Unit,
+    private val deps: ManagerDependencies,
     private val getCurrentDateTimeISO: () -> String,
     private val getEffectiveSystemPrompt: () -> String,
     private val getCurrentChatProjectGroup: () -> ChatGroup?,
@@ -48,36 +40,36 @@ class MessageSendingManager(
      * Handles file uploads, multi-message mode, and triggers API call in single-message mode.
      */
     fun sendMessage() {
-        val message = uiState.value.currentMessage.trim()
-        val hasFiles = uiState.value.selectedFiles.isNotEmpty()
+        val message = deps.uiState.value.currentMessage.trim()
+        val hasFiles = deps.uiState.value.selectedFiles.isNotEmpty()
         if (message.isEmpty() && !hasFiles) return
 
-        val currentUser = appSettings.value.current_user
-        val currentChat = uiState.value.currentChat ?: createNewChat(
+        val currentUser = deps.appSettings.value.current_user
+        val currentChat = deps.uiState.value.currentChat ?: createNewChat(
             // Generate preview name from first part of message or file name
             when {
                 message.length > 30 -> "${message.take(30)}..."
                 message.isNotEmpty() -> message
-                hasFiles -> uiState.value.selectedFiles.firstOrNull()?.name ?: "קובץ מצורף"
+                hasFiles -> deps.uiState.value.selectedFiles.firstOrNull()?.name ?: "קובץ מצורף"
                 else -> "שיחה חדשה"
             }
         )
 
         val chatId = currentChat.chat_id
 
-        scope.launch {
-            val multiModeEnabled = appSettings.value.multiMessageMode
+        deps.scope.launch {
+            val multiModeEnabled = deps.appSettings.value.multiMessageMode
             // In multi-message mode we do not start streaming immediately
             if (!multiModeEnabled) {
                 // Use per-chat loading state
-                updateUiState(uiState.value.copy(
-                    loadingChatIds = uiState.value.loadingChatIds + chatId,
-                    streamingChatIds = uiState.value.streamingChatIds + chatId,
-                    streamingTextByChat = uiState.value.streamingTextByChat + (chatId to ""),
+                deps.updateUiState(deps.uiState.value.copy(
+                    loadingChatIds = deps.uiState.value.loadingChatIds + chatId,
+                    streamingChatIds = deps.uiState.value.streamingChatIds + chatId,
+                    streamingTextByChat = deps.uiState.value.streamingTextByChat + (chatId to ""),
                     currentMessage = ""
                 ))
             } else {
-                updateUiState(uiState.value.copy(
+                deps.updateUiState(deps.uiState.value.copy(
                     currentMessage = ""
                 ))
             }
@@ -85,7 +77,7 @@ class MessageSendingManager(
             val userMessage = Message(
                 role = "user",
                 text = if (message.isNotEmpty()) message else "[קובץ מצורף]",
-                attachments = uiState.value.selectedFiles.map { file ->
+                attachments = deps.uiState.value.selectedFiles.map { file ->
                     Attachment(
                         local_file_path = file.localPath,
                         file_name = file.name,
@@ -97,20 +89,20 @@ class MessageSendingManager(
             )
 
             // Always use branching-aware method - it will migrate if needed
-            var updatedChat = repository.addUserMessageAsNewNode(
+            var updatedChat = deps.repository.addUserMessageAsNewNode(
                 currentUser,
                 currentChat.chat_id,
                 userMessage
             )
 
             // Update chat history as well
-            val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
+            val updatedChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
 
-            updateUiState(uiState.value.copy(
+            deps.updateUiState(deps.uiState.value.copy(
                 currentChat = updatedChat,
                 selectedFiles = emptyList(),
                 chatHistory = updatedChatHistory,
-                showReplyButton = multiModeEnabled || uiState.value.showReplyButton
+                showReplyButton = multiModeEnabled || deps.uiState.value.showReplyButton
             ))
 
             // If multi-message mode is enabled, stop here and wait for user to press "reply"
@@ -119,8 +111,8 @@ class MessageSendingManager(
             }
 
             // Send API request and handle response (single-message mode)
-            val currentProvider = uiState.value.currentProvider
-            val currentModel = uiState.value.currentModel
+            val currentProvider = deps.uiState.value.currentProvider
+            val currentModel = deps.uiState.value.currentModel
             val systemPrompt = getEffectiveSystemPrompt()
 
             if (currentProvider != null && currentModel.isNotEmpty()) {
@@ -133,7 +125,7 @@ class MessageSendingManager(
                         for (attachment in userMessage.attachments) {
                             attachment.local_file_path?.let { localPath ->
                                 // Upload file to the selected provider and get file ID
-                                val uploadedAttachment = repository.uploadFile(
+                                val uploadedAttachment = deps.repository.uploadFile(
                                     provider = currentProvider,
                                     filePath = localPath,
                                     fileName = attachment.file_name,
@@ -157,7 +149,7 @@ class MessageSendingManager(
                         val updatedChatWithFiles = updatedChat.copy(messages = allMessages)
 
                         // Save the chat with the updated file IDs
-                        val chatHistory = repository.loadChatHistory(currentUser)
+                        val chatHistory = deps.repository.loadChatHistory(currentUser)
                         val updatedHistoryChats = chatHistory.chat_history.map { chat ->
                             if (chat.chat_id == updatedChatWithFiles.chat_id) {
                                 updatedChatWithFiles
@@ -166,7 +158,7 @@ class MessageSendingManager(
                             }
                         }
                         val finalChatHistory = chatHistory.copy(chat_history = updatedHistoryChats)
-                        repository.saveChatHistory(finalChatHistory)
+                        deps.repository.saveChatHistory(finalChatHistory)
 
                         updatedChat = updatedChatWithFiles
                     }
@@ -190,20 +182,20 @@ class MessageSendingManager(
                         currentModel,
                         chatForRequest.messages,
                         systemPrompt,
-                        uiState.value.webSearchEnabled,
+                        deps.uiState.value.webSearchEnabled,
                         projectAttachments,
                         getEnabledToolSpecifications(),
-                        uiState.value.thinkingBudgetValue,
-                        uiState.value.temperatureValue
+                        deps.uiState.value.thinkingBudgetValue,
+                        deps.uiState.value.temperatureValue
                     )
 
                     // Reload chat to get any updated file IDs from re-uploads
-                    val refreshedChatHistory = repository.loadChatHistory(currentUser)
+                    val refreshedChatHistory = deps.repository.loadChatHistory(currentUser)
                     val refreshedCurrentChat = refreshedChatHistory.chat_history.find {
                         it.chat_id == chatForRequest.chat_id
                     } ?: chatForRequest
 
-                    updateUiState(uiState.value.copy(
+                    deps.updateUiState(deps.uiState.value.copy(
                         currentChat = refreshedCurrentChat,
                         chatHistory = refreshedChatHistory.chat_history
                     ))
@@ -213,19 +205,19 @@ class MessageSendingManager(
                     Log.e("MessageSendingManager", "Error starting streaming request", e)
 
                     // Clear loading state for this chat
-                    updateUiState(uiState.value.copy(
-                        loadingChatIds = uiState.value.loadingChatIds - chatId,
-                        streamingChatIds = uiState.value.streamingChatIds - chatId,
-                        streamingTextByChat = uiState.value.streamingTextByChat - chatId,
+                    deps.updateUiState(deps.uiState.value.copy(
+                        loadingChatIds = deps.uiState.value.loadingChatIds - chatId,
+                        streamingChatIds = deps.uiState.value.streamingChatIds - chatId,
+                        streamingTextByChat = deps.uiState.value.streamingTextByChat - chatId,
                         snackbarMessage = "Error: ${e.message}"
                     ))
                 }
             } else {
                 // No provider selected, clear loading state
-                updateUiState(uiState.value.copy(
-                    loadingChatIds = uiState.value.loadingChatIds - chatId,
-                    streamingChatIds = uiState.value.streamingChatIds - chatId,
-                    streamingTextByChat = uiState.value.streamingTextByChat - chatId
+                deps.updateUiState(deps.uiState.value.copy(
+                    loadingChatIds = deps.uiState.value.loadingChatIds - chatId,
+                    streamingChatIds = deps.uiState.value.streamingChatIds - chatId,
+                    streamingTextByChat = deps.uiState.value.streamingTextByChat - chatId
                 ))
             }
         }
@@ -236,21 +228,21 @@ class MessageSendingManager(
      * Used in multi-message mode when user clicks "reply" button.
      */
     fun sendBufferedBatch() {
-        val currentUser = appSettings.value.current_user
-        val currentChat = uiState.value.currentChat ?: return
+        val currentUser = deps.appSettings.value.current_user
+        val currentChat = deps.uiState.value.currentChat ?: return
         val chatId = currentChat.chat_id
 
-        scope.launch {
+        deps.scope.launch {
             // Use per-chat loading state
-            updateUiState(uiState.value.copy(
-                loadingChatIds = uiState.value.loadingChatIds + chatId,
-                streamingChatIds = uiState.value.streamingChatIds + chatId,
-                streamingTextByChat = uiState.value.streamingTextByChat + (chatId to ""),
+            deps.updateUiState(deps.uiState.value.copy(
+                loadingChatIds = deps.uiState.value.loadingChatIds + chatId,
+                streamingChatIds = deps.uiState.value.streamingChatIds + chatId,
+                streamingTextByChat = deps.uiState.value.streamingTextByChat + (chatId to ""),
                 showReplyButton = false
             ))
 
-            val currentProvider = uiState.value.currentProvider
-            val currentModel = uiState.value.currentModel
+            val currentProvider = deps.uiState.value.currentProvider
+            val currentModel = deps.uiState.value.currentModel
             val systemPrompt = getEffectiveSystemPrompt()
 
             if (currentProvider != null && currentModel.isNotEmpty()) {
@@ -270,34 +262,34 @@ class MessageSendingManager(
                         currentModel,
                         currentChat.messages,
                         systemPrompt,
-                        uiState.value.webSearchEnabled,
+                        deps.uiState.value.webSearchEnabled,
                         projectAttachments,
                         getEnabledToolSpecifications(),
-                        uiState.value.thinkingBudgetValue,
-                        uiState.value.temperatureValue
+                        deps.uiState.value.thinkingBudgetValue,
+                        deps.uiState.value.temperatureValue
                     )
 
                     // Optionally refresh chat after potential file re-uploads
-                    val refreshed = repository.loadChatHistory(currentUser)
+                    val refreshed = deps.repository.loadChatHistory(currentUser)
                     val refreshedCurrentChat = refreshed.chat_history.find { it.chat_id == chatId } ?: currentChat
-                    updateUiState(uiState.value.copy(
+                    deps.updateUiState(deps.uiState.value.copy(
                         currentChat = refreshedCurrentChat,
                         chatHistory = refreshed.chat_history
                     ))
                 } catch (e: Exception) {
                     Log.e("MessageSendingManager", "Error starting buffered batch request", e)
-                    updateUiState(uiState.value.copy(
-                        loadingChatIds = uiState.value.loadingChatIds - chatId,
-                        streamingChatIds = uiState.value.streamingChatIds - chatId,
-                        streamingTextByChat = uiState.value.streamingTextByChat - chatId,
+                    deps.updateUiState(deps.uiState.value.copy(
+                        loadingChatIds = deps.uiState.value.loadingChatIds - chatId,
+                        streamingChatIds = deps.uiState.value.streamingChatIds - chatId,
+                        streamingTextByChat = deps.uiState.value.streamingTextByChat - chatId,
                         snackbarMessage = "Error: ${e.message}"
                     ))
                 }
             } else {
-                updateUiState(uiState.value.copy(
-                    loadingChatIds = uiState.value.loadingChatIds - chatId,
-                    streamingChatIds = uiState.value.streamingChatIds - chatId,
-                    streamingTextByChat = uiState.value.streamingTextByChat - chatId
+                deps.updateUiState(deps.uiState.value.copy(
+                    loadingChatIds = deps.uiState.value.loadingChatIds - chatId,
+                    streamingChatIds = deps.uiState.value.streamingChatIds - chatId,
+                    streamingTextByChat = deps.uiState.value.streamingTextByChat - chatId
                 ))
             }
         }
@@ -308,9 +300,9 @@ class MessageSendingManager(
      * This is called by MessageEditingManager when creating new branches or resending.
      */
     fun sendApiRequestForCurrentBranch(chat: Chat) {
-        val currentUser = appSettings.value.current_user
-        val currentProvider = uiState.value.currentProvider
-        val currentModel = uiState.value.currentModel
+        val currentUser = deps.appSettings.value.current_user
+        val currentProvider = deps.uiState.value.currentProvider
+        val currentModel = deps.uiState.value.currentModel
         val systemPrompt = getEffectiveSystemPrompt()
         val chatId = chat.chat_id
 
@@ -319,13 +311,13 @@ class MessageSendingManager(
         }
 
         // Use per-chat loading state
-        updateUiState(uiState.value.copy(
-            loadingChatIds = uiState.value.loadingChatIds + chatId,
-            streamingChatIds = uiState.value.streamingChatIds + chatId,
-            streamingTextByChat = uiState.value.streamingTextByChat + (chatId to "")
+        deps.updateUiState(deps.uiState.value.copy(
+            loadingChatIds = deps.uiState.value.loadingChatIds + chatId,
+            streamingChatIds = deps.uiState.value.streamingChatIds + chatId,
+            streamingTextByChat = deps.uiState.value.streamingTextByChat + (chatId to "")
         ))
 
-        scope.launch {
+        deps.scope.launch {
             try {
                 val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()
 
@@ -341,18 +333,18 @@ class MessageSendingManager(
                     currentModel,
                     chat.messages,
                     systemPrompt,
-                    uiState.value.webSearchEnabled,
+                    deps.uiState.value.webSearchEnabled,
                     projectAttachments,
                     getEnabledToolSpecifications(),
-                    uiState.value.thinkingBudgetValue,
-                    uiState.value.temperatureValue
+                    deps.uiState.value.thinkingBudgetValue,
+                    deps.uiState.value.temperatureValue
                 )
             } catch (e: Exception) {
                 Log.e("MessageSendingManager", "Error starting branch request", e)
-                updateUiState(uiState.value.copy(
-                    loadingChatIds = uiState.value.loadingChatIds - chatId,
-                    streamingChatIds = uiState.value.streamingChatIds - chatId,
-                    streamingTextByChat = uiState.value.streamingTextByChat - chatId,
+                deps.updateUiState(deps.uiState.value.copy(
+                    loadingChatIds = deps.uiState.value.loadingChatIds - chatId,
+                    streamingChatIds = deps.uiState.value.streamingChatIds - chatId,
+                    streamingTextByChat = deps.uiState.value.streamingTextByChat - chatId,
                     snackbarMessage = "Error: ${e.message}"
                 ))
             }

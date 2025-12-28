@@ -1,13 +1,9 @@
 package com.example.ApI.ui.managers.settings
 
-import android.content.Context
 import com.example.ApI.data.ParentalControlManager
 import com.example.ApI.data.model.AppSettings
-import com.example.ApI.data.model.ChatUiState
 import com.example.ApI.data.model.ChildLockSettings
-import com.example.ApI.data.repository.DataRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.StateFlow
+import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.launch
 import java.time.LocalTime
 
@@ -17,13 +13,8 @@ import java.time.LocalTime
  * Extracted from ChatViewModel to reduce complexity.
  */
 class ChildLockManager(
-    private val repository: DataRepository,
-    private val context: Context,
-    private val scope: CoroutineScope,
-    private val appSettings: StateFlow<AppSettings>,
-    private val uiState: StateFlow<ChatUiState>,
-    private val updateAppSettings: (AppSettings) -> Unit,
-    private val updateUiState: (ChatUiState) -> Unit
+    private val deps: ManagerDependencies,
+    private val updateAppSettings: (AppSettings) -> Unit
 ) {
 
     /**
@@ -34,13 +25,13 @@ class ChildLockManager(
      * @param deviceId Device ID for password encryption
      */
     fun setupChildLock(password: String, startTime: String, endTime: String, deviceId: String) {
-        scope.launch {
+        deps.scope.launch {
             try {
-                val parentalControlManager = ParentalControlManager(context)
+                val parentalControlManager = ParentalControlManager(deps.context)
                 parentalControlManager.setParentalPassword(password, deviceId)
 
                 // Update settings with child lock enabled
-                val updatedSettings = appSettings.value.copy(
+                val updatedSettings = deps.appSettings.value.copy(
                     childLockSettings = ChildLockSettings(
                         enabled = true,
                         encryptedPassword = parentalControlManager.getEncryptedPassword(),
@@ -49,11 +40,11 @@ class ChildLockManager(
                     )
                 )
 
-                repository.saveAppSettings(updatedSettings)
+                deps.repository.saveAppSettings(updatedSettings)
                 updateAppSettings(updatedSettings)
             } catch (e: Exception) {
-                updateUiState(
-                    uiState.value.copy(
+                deps.updateUiState(
+                    deps.uiState.value.copy(
                         snackbarMessage = "שגיאה בהגדרת נעילת ילדים: ${e.message}"
                     )
                 )
@@ -69,12 +60,12 @@ class ChildLockManager(
      */
     fun verifyAndDisableChildLock(password: String, deviceId: String): Boolean {
         return try {
-            val parentalControlManager = ParentalControlManager(context)
+            val parentalControlManager = ParentalControlManager(deps.context)
             val isValidPassword = parentalControlManager.verifyParentalPassword(password, deviceId)
 
             if (isValidPassword) {
                 // Disable child lock
-                val updatedSettings = appSettings.value.copy(
+                val updatedSettings = deps.appSettings.value.copy(
                     childLockSettings = ChildLockSettings(
                         enabled = false,
                         encryptedPassword = "",
@@ -83,21 +74,21 @@ class ChildLockManager(
                     )
                 )
 
-                repository.saveAppSettings(updatedSettings)
+                deps.repository.saveAppSettings(updatedSettings)
                 updateAppSettings(updatedSettings)
                 true
             } else {
                 // Show error message
-                updateUiState(
-                    uiState.value.copy(
+                deps.updateUiState(
+                    deps.uiState.value.copy(
                         snackbarMessage = "סיסמה שגויה"
                     )
                 )
                 false
             }
         } catch (e: Exception) {
-            updateUiState(
-                uiState.value.copy(
+            deps.updateUiState(
+                deps.uiState.value.copy(
                     snackbarMessage = "שגיאה בביטול נעילת ילדים: ${e.message}"
                 )
             )
@@ -113,7 +104,7 @@ class ChildLockManager(
      * @param endTime Lock end time
      */
     fun updateChildLockSettings(enabled: Boolean, password: String, startTime: String, endTime: String) {
-        val updatedSettings = appSettings.value.copy(
+        val updatedSettings = deps.appSettings.value.copy(
             childLockSettings = ChildLockSettings(
                 enabled = enabled,
                 encryptedPassword = password,
@@ -122,7 +113,7 @@ class ChildLockManager(
             )
         )
 
-        repository.saveAppSettings(updatedSettings)
+        deps.repository.saveAppSettings(updatedSettings)
         updateAppSettings(updatedSettings)
     }
 
@@ -131,7 +122,7 @@ class ChildLockManager(
      * @return True if child lock is enabled and current time is within lock range
      */
     fun isChildLockActive(): Boolean {
-        val settings = appSettings.value.childLockSettings
+        val settings = deps.appSettings.value.childLockSettings
         if (!settings.enabled) return false
 
         return isCurrentTimeInLockRange(settings.startTime, settings.endTime)
@@ -169,7 +160,7 @@ class ChildLockManager(
      * @return Lock end time string
      */
     fun getLockEndTime(): String {
-        val settings = appSettings.value.childLockSettings
+        val settings = deps.appSettings.value.childLockSettings
         return settings.endTime
     }
 }

@@ -30,6 +30,7 @@ import com.example.ApI.service.StreamingService
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
 import com.example.ApI.tools.ToolExecutionResult
+import com.example.ApI.ui.managers.ManagerDependencies
 import com.example.ApI.ui.managers.chat.MessageSendingManager
 import com.example.ApI.ui.managers.chat.MessageEditingManager
 import com.example.ApI.ui.managers.chat.BranchingManager
@@ -85,6 +86,18 @@ class ChatViewModel(
     private val _appSettings = MutableStateFlow(AppSettings("default", "openai", "gpt-4o"))
     val appSettings: StateFlow<AppSettings> = _appSettings.asStateFlow()
 
+    // Shared dependencies for managers
+    private val managerDeps by lazy {
+        ManagerDependencies(
+            repository = repository,
+            context = context,
+            scope = viewModelScope,
+            appSettings = _appSettings,
+            uiState = _uiState,
+            updateUiState = { newState -> _uiState.value = newState }
+        )
+    }
+
     // Service binding for streaming requests
     private var streamingService: StreamingService? = null
     private var serviceBound = false
@@ -92,12 +105,7 @@ class ChatViewModel(
     // Group management delegate
     private val groupManager: GroupManager by lazy {
         GroupManager(
-            repository = repository,
-            context = context,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState },
+            deps = managerDeps,
             navigateToScreen = { screen -> navigateToScreen(screen) }
         )
     }
@@ -105,10 +113,7 @@ class ChatViewModel(
     // Integration management delegate (GitHub + Google Workspace)
     private val authManager: AuthManager by lazy {
         AuthManager(
-            repository = repository,
-            context = context,
-            scope = viewModelScope,
-            appSettings = _appSettings,
+            deps = managerDeps,
             updateAppSettings = { newSettings -> _appSettings.value = newSettings },
             showSnackbar = { message -> showSnackbar(message) }
         )
@@ -117,10 +122,7 @@ class ChatViewModel(
     // Search functionality delegate
     private val searchManager: SearchManager by lazy {
         SearchManager(
-            repository = repository,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState },
+            deps = managerDeps,
             getCurrentScreen = { _currentScreen.value }
         )
     }
@@ -128,36 +130,22 @@ class ChatViewModel(
     // Child lock (parental controls) delegate
     private val childLockManager: ChildLockManager by lazy {
         ChildLockManager(
-            repository = repository,
-            context = context,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateAppSettings = { newSettings -> _appSettings.value = newSettings },
-            updateUiState = { newState -> _uiState.value = newState }
+            deps = managerDeps,
+            updateAppSettings = { newSettings -> _appSettings.value = newSettings }
         )
     }
 
     // File management delegate
     private val attachmentManager: AttachmentManager by lazy {
         AttachmentManager(
-            repository = repository,
-            context = context,
-            scope = viewModelScope,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState }
+            deps = managerDeps
         )
     }
 
     // Export/Import functionality delegate
     private val exportImportManager: ExportImportManager by lazy {
         ExportImportManager(
-            repository = repository,
-            context = context,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState },
+            deps = managerDeps,
             selectChat = { chat -> selectChat(chat) },
             navigateToScreen = { screen -> navigateToScreen(screen) },
             addFileFromUri = { uri, name, mime -> attachmentManager.addFileFromUri(uri, name, mime) }
@@ -167,20 +155,14 @@ class ChatViewModel(
     // Branching/variant navigation delegate
     private val branchingManager: BranchingManager by lazy {
         BranchingManager(
-            repository = repository,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState }
+            deps = managerDeps
         )
     }
 
     // Top bar controls delegate (temperature, thinking budget, text direction)
     private val topBarManager: TopBarManager by lazy {
         TopBarManager(
-            context = context,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState }
+            deps = managerDeps
         )
     }
 
@@ -188,25 +170,15 @@ class ChatViewModel(
     // Provider and model selection management delegate
     private val modelSelectionManager: ModelSelectionManager by lazy {
         ModelSelectionManager(
-            repository = repository,
-            context = context,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateAppSettings = { newSettings -> _appSettings.value = newSettings },
-            updateUiState = { newState -> _uiState.value = newState }
+            deps = managerDeps,
+            updateAppSettings = { newSettings -> _appSettings.value = newSettings }
         )
     }
 
     // Message sending delegate (send, batch send, API calls)
     private val messageSendingManager: MessageSendingManager by lazy {
         MessageSendingManager(
-            repository = repository,
-            context = context,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState },
+            deps = managerDeps,
             getCurrentDateTimeISO = { getCurrentDateTimeISO() },
             getEffectiveSystemPrompt = { systemPromptManager.getEffectiveSystemPrompt() },
             getCurrentChatProjectGroup = { systemPromptManager.getCurrentChatProjectGroup() },
@@ -221,11 +193,7 @@ class ChatViewModel(
     // Message editing delegate (edit, delete, resend - delegates API calls to messageSendingManager)
     private val messageEditingManager: MessageEditingManager by lazy {
         MessageEditingManager(
-            repository = repository,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState },
+            deps = managerDeps,
             getCurrentDateTimeISO = { getCurrentDateTimeISO() },
             sendApiRequestForBranch = { chat -> messageSendingManager.sendApiRequestForCurrentBranch(chat) }
         )
@@ -234,9 +202,7 @@ class ChatViewModel(
     // Tool management delegate
     private val toolManager: ToolManager by lazy {
         ToolManager(
-            repository = repository,
-            appSettings = _appSettings,
-            uiState = _uiState,
+            deps = managerDeps,
             updateAppSettings = { newSettings -> _appSettings.value = newSettings }
         )
     }
@@ -244,33 +210,22 @@ class ChatViewModel(
     // Title generation delegate
     private val titleGenerationManager: TitleGenerationManager by lazy {
         TitleGenerationManager(
-            repository = repository,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateAppSettings = { newSettings -> _appSettings.value = newSettings },
-            updateUiState = { newState -> _uiState.value = newState }
+            deps = managerDeps,
+            updateAppSettings = { newSettings -> _appSettings.value = newSettings }
         )
     }
 
     // System prompt management delegate
     private val systemPromptManager: SystemPromptManager by lazy {
         SystemPromptManager(
-            repository = repository,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState }
+            deps = managerDeps
         )
     }
 
     // Chat context menu delegate
     private val chatContextMenuManager: ChatContextMenuManager by lazy {
         ChatContextMenuManager(
-            repository = repository,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState },
+            deps = managerDeps,
             navigateToScreen = { screen -> navigateToScreen(screen) },
             updateChatPreviewName = { chatId, newTitle -> titleGenerationManager.updateChatPreviewName(chatId, newTitle) }
         )
@@ -279,11 +234,8 @@ class ChatViewModel(
     // Shared intent handling delegate
     private val sharedIntentManager: SharedIntentManager by lazy {
         SharedIntentManager(
-            repository = repository,
-            context = context,
-            scope = viewModelScope,
+            deps = managerDeps,
             sharedIntent = sharedIntent,
-            uiState = _uiState,
             currentScreen = _currentScreen,
             addFileFromUri = { uri, name, mime -> attachmentManager.addFileFromUri(uri, name, mime) }
         )
@@ -292,12 +244,7 @@ class ChatViewModel(
     // Streaming event handling delegate
     private val streamingEventManager: StreamingEventManager by lazy {
         StreamingEventManager(
-            repository = repository,
-            context = context,
-            scope = viewModelScope,
-            appSettings = _appSettings,
-            uiState = _uiState,
-            updateUiState = { newState -> _uiState.value = newState },
+            deps = managerDeps,
             getCurrentDateTimeISO = { getCurrentDateTimeISO() },
             handleTitleGeneration = { chat -> titleGenerationManager.handleTitleGeneration(chat) },
             executeToolCall = { toolCall -> toolManager.executeToolCall(toolCall) },

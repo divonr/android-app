@@ -2,11 +2,8 @@ package com.example.ApI.ui.managers.streaming
 
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.Chat
-import com.example.ApI.data.model.ChatUiState
 import com.example.ApI.data.model.TitleGenerationSettings
-import com.example.ApI.data.repository.DataRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.StateFlow
+import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.launch
 
 /**
@@ -15,22 +12,18 @@ import kotlinx.coroutines.launch
  * Extracted from ChatViewModel to reduce complexity.
  */
 class TitleGenerationManager(
-    private val repository: DataRepository,
-    private val scope: CoroutineScope,
-    private val appSettings: StateFlow<AppSettings>,
-    private val uiState: StateFlow<ChatUiState>,
-    private val updateAppSettings: (AppSettings) -> Unit,
-    private val updateUiState: (ChatUiState) -> Unit
+    private val deps: ManagerDependencies,
+    private val updateAppSettings: (AppSettings) -> Unit
 ) {
 
     /**
      * Update title generation settings.
      */
     fun updateTitleGenerationSettings(newSettings: TitleGenerationSettings) {
-        val currentSettings = appSettings.value
+        val currentSettings = deps.appSettings.value
         val updatedSettings = currentSettings.copy(titleGenerationSettings = newSettings)
 
-        repository.saveAppSettings(updatedSettings)
+        deps.repository.saveAppSettings(updatedSettings)
         updateAppSettings(updatedSettings)
     }
 
@@ -38,8 +31,8 @@ class TitleGenerationManager(
      * Get available providers for title generation based on active API keys.
      */
     fun getAvailableProvidersForTitleGeneration(): List<String> {
-        val currentUser = appSettings.value.current_user
-        val apiKeys = repository.loadApiKeys(currentUser)
+        val currentUser = deps.appSettings.value.current_user
+        val apiKeys = deps.repository.loadApiKeys(currentUser)
             .filter { it.isActive }
             .map { it.provider }
 
@@ -53,7 +46,7 @@ class TitleGenerationManager(
      * Generates title after first response, and optionally after third response.
      */
     suspend fun handleTitleGeneration(chat: Chat) {
-        val titleGenerationSettings = appSettings.value.titleGenerationSettings
+        val titleGenerationSettings = deps.appSettings.value.titleGenerationSettings
 
         // Skip if title generation is disabled
         if (!titleGenerationSettings.enabled) return
@@ -73,11 +66,11 @@ class TitleGenerationManager(
         if (!shouldGenerateTitle) return
 
         try {
-            val currentUser = appSettings.value.current_user
+            val currentUser = deps.appSettings.value.current_user
             val providerToUse = if (titleGenerationSettings.provider == "auto") null else titleGenerationSettings.provider
 
             // Generate title using our helper function
-            val generatedTitle = repository.generateConversationTitle(
+            val generatedTitle = deps.repository.generateConversationTitle(
                 username = currentUser,
                 conversationId = chat.chat_id,
                 provider = providerToUse
@@ -98,8 +91,8 @@ class TitleGenerationManager(
      * Update the preview name (title) of a chat.
      */
     suspend fun updateChatPreviewName(chatId: String, newTitle: String) {
-        val currentUser = appSettings.value.current_user
-        val chatHistory = repository.loadChatHistory(currentUser)
+        val currentUser = deps.appSettings.value.current_user
+        val chatHistory = deps.repository.loadChatHistory(currentUser)
 
         // Update the chat with the new preview name
         val updatedChats = chatHistory.chat_history.map { chat ->
@@ -111,14 +104,14 @@ class TitleGenerationManager(
         }
 
         val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-        repository.saveChatHistory(updatedHistory)
+        deps.repository.saveChatHistory(updatedHistory)
 
         // Update UI state
-        val finalChatHistory = repository.loadChatHistory(currentUser).chat_history
+        val finalChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
         val updatedCurrentChat = finalChatHistory.find { it.chat_id == chatId }
 
-        updateUiState(
-            uiState.value.copy(
+        deps.updateUiState(
+            deps.uiState.value.copy(
                 currentChat = updatedCurrentChat,
                 chatHistory = finalChatHistory
             )
@@ -131,20 +124,20 @@ class TitleGenerationManager(
      */
     fun renameChatWithAI(chat: Chat) {
         // Add chat to renaming set to show loading indicator
-        updateUiState(
-            uiState.value.copy(
-                renamingChatIds = uiState.value.renamingChatIds + chat.chat_id
+        deps.updateUiState(
+            deps.uiState.value.copy(
+                renamingChatIds = deps.uiState.value.renamingChatIds + chat.chat_id
             )
         )
 
-        scope.launch {
+        deps.scope.launch {
             try {
-                val currentUser = appSettings.value.current_user
-                val titleGenerationSettings = appSettings.value.titleGenerationSettings
+                val currentUser = deps.appSettings.value.current_user
+                val titleGenerationSettings = deps.appSettings.value.titleGenerationSettings
                 val providerToUse = if (titleGenerationSettings.provider == "auto") null else titleGenerationSettings.provider
 
                 // Generate title using our helper function
-                val generatedTitle = repository.generateConversationTitle(
+                val generatedTitle = deps.repository.generateConversationTitle(
                     username = currentUser,
                     conversationId = chat.chat_id,
                     provider = providerToUse
@@ -160,9 +153,9 @@ class TitleGenerationManager(
                 println("AI rename failed: ${e.message}")
             } finally {
                 // Remove chat from renaming set
-                updateUiState(
-                    uiState.value.copy(
-                        renamingChatIds = uiState.value.renamingChatIds - chat.chat_id
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        renamingChatIds = deps.uiState.value.renamingChatIds - chat.chat_id
                     )
                 )
             }
