@@ -144,6 +144,11 @@ class CohereProvider(context: Context) : BaseProvider(context) {
         var detectedToolCall: ToolCall? = null
         var toolPlanText = StringBuilder()
 
+        // Thinking state tracking
+        var isInThinkingPhase = false
+        var thinkingStartTime: Long = 0
+        val thoughtsBuilder = StringBuilder()
+
         var line: String?
         while (reader.readLine().also { line = it } != null) {
             val currentLine = line ?: continue
@@ -171,7 +176,17 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                         }
 
                         "content-start" -> {
-                            // Content block started
+                            // Check if this is a thinking content block
+                            val delta = chunkJson["delta"]?.jsonObject
+                            val message = delta?.get("message")?.jsonObject
+                            val content = message?.get("content")?.jsonObject
+                            val contentType = content?.get("type")?.jsonPrimitive?.contentOrNull
+
+                            if (contentType == "thinking" && !isInThinkingPhase) {
+                                isInThinkingPhase = true
+                                thinkingStartTime = System.currentTimeMillis()
+                                callback.onThinkingStarted()
+                            }
                         }
 
                         "content-delta" -> {
@@ -180,15 +195,39 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                                 val message = delta?.get("message")?.jsonObject
                                 val contentElement = message?.get("content")
 
-                                val text = when (contentElement) {
-                                    is JsonObject -> contentElement["text"]?.jsonPrimitive?.contentOrNull ?: ""
-                                    is JsonPrimitive -> contentElement.contentOrNull ?: ""
-                                    else -> ""
-                                }
-
-                                if (text.isNotEmpty()) {
-                                    fullResponse.append(text)
-                                    callback.onPartialResponse(text)
+                                when (contentElement) {
+                                    is JsonObject -> {
+                                        // Check for thinking content first
+                                        val thinkingText = contentElement["thinking"]?.jsonPrimitive?.contentOrNull
+                                        if (thinkingText != null && thinkingText.isNotEmpty()) {
+                                            thoughtsBuilder.append(thinkingText)
+                                            callback.onThinkingPartial(thinkingText)
+                                        } else {
+                                            // Regular text content
+                                            val text = contentElement["text"]?.jsonPrimitive?.contentOrNull ?: ""
+                                            if (text.isNotEmpty()) {
+                                                // Transition from thinking to response
+                                                if (isInThinkingPhase) {
+                                                    completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                                                    isInThinkingPhase = false
+                                                }
+                                                fullResponse.append(text)
+                                                callback.onPartialResponse(text)
+                                            }
+                                        }
+                                    }
+                                    is JsonPrimitive -> {
+                                        val text = contentElement.contentOrNull ?: ""
+                                        if (text.isNotEmpty()) {
+                                            if (isInThinkingPhase) {
+                                                completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                                                isInThinkingPhase = false
+                                            }
+                                            fullResponse.append(text)
+                                            callback.onPartialResponse(text)
+                                        }
+                                    }
+                                    else -> {}
                                 }
                             } catch (e: Exception) {
                                 // Error parsing content-delta
@@ -196,7 +235,8 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                         }
 
                         "content-end" -> {
-                            // Content block ended
+                            // Content block ended - if thinking phase just ended, it will be
+                            // completed when text content starts
                         }
 
                         "tool-plan-delta" -> {
@@ -288,9 +328,27 @@ class CohereProvider(context: Context) : BaseProvider(context) {
         return when {
             detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
                 toolCall = detectedToolCall!!,
-                precedingText = fullResponse.toString()
+                precedingText = fullResponse.toString(),
+                thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() },
+                thinkingDurationSeconds = if (thoughtsBuilder.isNotEmpty()) {
+                    (thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f })
+                } else null,
+                thoughtsStatus = when {
+                    thoughtsBuilder.isNotEmpty() -> ThoughtsStatus.PRESENT
+                    else -> ThoughtsStatus.NONE
+                }
             )
-            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(fullResponse.toString())
+            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
+                fullText = fullResponse.toString(),
+                thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() },
+                thinkingDurationSeconds = if (thoughtsBuilder.isNotEmpty()) {
+                    (thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f })
+                } else null,
+                thoughtsStatus = when {
+                    thoughtsBuilder.isNotEmpty() -> ThoughtsStatus.PRESENT
+                    else -> ThoughtsStatus.NONE
+                }
+            )
             else -> ProviderStreamingResult.Error("Empty response from Cohere")
         }
     }
