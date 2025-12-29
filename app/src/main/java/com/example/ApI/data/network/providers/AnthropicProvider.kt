@@ -70,6 +70,9 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
 
                         callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, precedingText)
 
+                        // Add assistant message so buildMessages can combine it with tool_call
+                        // This ensures proper API message structure: [text (if any), tool_use]
+                        conversationMessages.add(createAssistantMessage(precedingText, modelName))
                         conversationMessages.add(toolCallMessage)
                         conversationMessages.add(toolResponseMessage)
 
