@@ -65,11 +65,25 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
 
                         val toolResult = callback.onToolCall(toolCall, precedingText)
 
-                        val toolCallMessage = createToolCallMessageForAnthropic(toolCall, toolResult, precedingText, modelName)
+                        val toolCallMessage = createToolCallMessage(toolCall, toolResult)
                         val toolResponseMessage = createToolResponseMessage(toolCall, toolResult)
 
                         callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, precedingText)
 
+                        // Add assistant message WITH THOUGHTS AND SIGNATURE so buildMessages can include thinking block
+                        // Anthropic requires thinking block with signature before tool_use when thinking is enabled
+                        val assistantMessage = Message(
+                            role = "assistant",
+                            text = precedingText,
+                            attachments = emptyList(),
+                            model = modelName,
+                            datetime = java.time.Instant.now().toString(),
+                            thoughts = result.thoughts,
+                            thinkingDurationSeconds = result.thinkingDurationSeconds,
+                            thoughtsStatus = result.thoughtsStatus,
+                            thoughtsSignature = result.thoughtsSignature
+                        )
+                        conversationMessages.add(assistantMessage)
                         conversationMessages.add(toolCallMessage)
                         conversationMessages.add(toolResponseMessage)
 
@@ -87,35 +101,6 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         } catch (e: Exception) {
             callback.onError("Failed to send Anthropic message: ${e.message}")
         }
-    }
-
-    /**
-     * Creates a tool call message specifically for Anthropic format
-     * (stores preceding text in message.text for reconstruction)
-     */
-    private fun createToolCallMessageForAnthropic(
-        toolCall: ToolCall,
-        toolResult: com.example.ApI.tools.ToolExecutionResult,
-        precedingText: String,
-        modelName: String
-    ): Message {
-        val toolDisplayName = com.example.ApI.tools.ToolRegistry.getInstance()
-            .getToolDisplayName(toolCall.toolId)
-
-        return Message(
-            role = "tool_call",
-            text = precedingText, // Store preceding text for reconstruction
-            model = modelName,
-            datetime = java.time.Instant.now().toString(),
-            toolCall = com.example.ApI.tools.ToolCallInfo(
-                toolId = toolCall.toolId,
-                toolName = toolDisplayName,
-                parameters = toolCall.parameters,
-                result = toolResult,
-                timestamp = java.time.Instant.now().toString()
-            ),
-            toolCallId = toolCall.id
-        )
     }
 
     private suspend fun makeStreamingRequest(
@@ -159,8 +144,27 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                 enabledTools, webSearchEnabled, thinkingBudget, temperature
             )
 
+            // DEBUG: Log the request body to verify thinking parameter
+            android.util.Log.d("AnthropicProvider", "Request body: $requestBody")
+            android.util.Log.d("AnthropicProvider", "ThinkingBudget type: ${thinkingBudget::class.simpleName}, value: $thinkingBudget")
+
             connection.outputStream.write(requestBody.toString().toByteArray())
             connection.outputStream.flush()
+
+            val responseCode = connection.responseCode
+            if (responseCode >= 400) {
+                // Read error response from Anthropic
+                val errorStream = connection.errorStream
+                val errorBody = errorStream?.bufferedReader()?.use { it.readText() } ?: "Unknown error"
+                val errorMessage = try {
+                    val errorJson = json.parseToJsonElement(errorBody).jsonObject
+                    errorJson["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: errorBody
+                } catch (e: Exception) {
+                    errorBody
+                }
+                callback.onError("Anthropic API error ($responseCode): $errorMessage")
+                return@withContext ProviderStreamingResult.Error("Anthropic API error ($responseCode): $errorMessage")
+            }
 
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             parseStreamingResponse(reader, connection, callback)
@@ -188,6 +192,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         var isInThinkingPhase = false
         var thinkingStartTime: Long = 0
         val thoughtsBuilder = StringBuilder()
+        val signatureBuilder = StringBuilder()  // Capture signature for follow-up requests
         var currentBlockIndex: Int = -1
         var currentBlockType: String? = null
 
@@ -274,7 +279,9 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                                     currentToolInput.append(partialJson)
                                 }
                                 "signature_delta" -> {
-                                    // Ignore signature for display purposes
+                                    // Capture signature for follow-up requests (required by Anthropic API)
+                                    val signature = delta?.get("signature")?.jsonPrimitive?.content ?: ""
+                                    signatureBuilder.append(signature)
                                 }
                             }
                         }
@@ -324,6 +331,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         connection.disconnect()
 
         val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+        val thoughtsSignature = signatureBuilder.toString().takeIf { it.isNotEmpty() }
         val thinkingDuration = if (thinkingStartTime > 0) {
             (System.currentTimeMillis() - thinkingStartTime) / 1000f
         } else null
@@ -339,13 +347,15 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                 precedingText = fullResponse.toString(),
                 thoughts = thoughtsContent,
                 thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus
+                thoughtsStatus = thoughtsStatus,
+                thoughtsSignature = thoughtsSignature
             )
             fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
                 fullText = fullResponse.toString(),
                 thoughts = thoughtsContent,
                 thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus
+                thoughtsStatus = thoughtsStatus,
+                thoughtsSignature = thoughtsSignature
             )
             else -> ProviderStreamingResult.Error("Empty response from Anthropic")
         }
@@ -353,8 +363,11 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
 
     private suspend fun buildMessages(messages: List<Message>): List<JsonObject> = withContext(Dispatchers.IO) {
         val anthropicMessages = mutableListOf<JsonObject>()
+        var i = 0
 
-        messages.forEach { message ->
+        while (i < messages.size) {
+            val message = messages[i]
+
             when (message.role) {
                 "user" -> {
                     val contentArray = buildJsonArray {
@@ -398,20 +411,77 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                         put("role", "user")
                         put("content", contentArray)
                     })
+                    i++
                 }
                 "assistant" -> {
-                    anthropicMessages.add(buildJsonObject {
-                        put("role", "assistant")
-                        put("content", buildJsonArray {
+                    // Check if next message is tool_call - combine them into one API message
+                    val nextMessage = messages.getOrNull(i + 1)
+                    if (nextMessage?.role == "tool_call") {
+                        // Combine thinking (if any) + text + tool_use into one message
+                        // Anthropic requires thinking block FIRST when thinking is enabled
+                        val contentArray = buildJsonArray {
+                            // Add thinking block with signature if present (required by Anthropic when thinking is enabled)
+                            if (!message.thoughts.isNullOrBlank()) {
+                                add(buildJsonObject {
+                                    put("type", "thinking")
+                                    put("thinking", message.thoughts)
+                                    message.thoughtsSignature?.let { put("signature", it) }
+                                })
+                            }
+                            if (message.text.isNotBlank()) {
+                                add(buildJsonObject {
+                                    put("type", "text")
+                                    put("text", message.text)
+                                })
+                            }
+                            nextMessage.toolCall?.let { toolCall ->
+                                add(buildJsonObject {
+                                    put("type", "tool_use")
+                                    put("id", nextMessage.toolCallId ?: "")
+                                    put("name", toolCall.toolId)
+                                    put("input", toolCall.parameters)
+                                })
+                            }
+                        }
+                        anthropicMessages.add(buildJsonObject {
+                            put("role", "assistant")
+                            put("content", contentArray)
+                        })
+                        i += 2  // Skip both messages
+                    } else {
+                        // Regular assistant message (may have thoughts from extended thinking)
+                        val contentArray = buildJsonArray {
+                            if (!message.thoughts.isNullOrBlank()) {
+                                add(buildJsonObject {
+                                    put("type", "thinking")
+                                    put("thinking", message.thoughts)
+                                    message.thoughtsSignature?.let { put("signature", it) }
+                                })
+                            }
                             add(buildJsonObject {
                                 put("type", "text")
                                 put("text", message.text)
                             })
+                        }
+                        anthropicMessages.add(buildJsonObject {
+                            put("role", "assistant")
+                            put("content", contentArray)
                         })
-                    })
+                        i++
+                    }
                 }
                 "tool_call" -> {
+                    // Standalone tool_call (old format with text, or new format without preceding assistant)
                     val contentArray = buildJsonArray {
+                        // Add thinking block with signature if present (for backward compatibility)
+                        if (!message.thoughts.isNullOrBlank()) {
+                            add(buildJsonObject {
+                                put("type", "thinking")
+                                put("thinking", message.thoughts)
+                                message.thoughtsSignature?.let { put("signature", it) }
+                            })
+                        }
+                        // Backward compatibility: old format stored preceding text in tool_call.text
                         if (message.text.isNotBlank()) {
                             add(buildJsonObject {
                                 put("type", "text")
@@ -433,6 +503,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                         put("role", "assistant")
                         put("content", contentArray)
                     })
+                    i++
                 }
                 "tool_response" -> {
                     anthropicMessages.add(buildJsonObject {
@@ -445,7 +516,9 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                             })
                         })
                     })
+                    i++
                 }
+                else -> i++
             }
         }
 

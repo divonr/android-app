@@ -298,12 +298,33 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
         reader.close()
         connection.disconnect()
 
+        // Calculate thoughts data (shared by both TextComplete and ToolCallDetected)
+        val thoughtsContent = reasoningBuilder.toString().takeIf { it.isNotEmpty() }
+        val thinkingDuration = if (reasoningStartTime > 0) {
+            (System.currentTimeMillis() - reasoningStartTime) / 1000f
+        } else null
+        val thoughtsStatus = when {
+            thoughtsContent != null -> ThoughtsStatus.PRESENT
+            // Reasoning was enabled but summaries unavailable
+            thinkingBudget is ThinkingBudgetValue.Effort && thinkingBudget.level.isNotBlank() && !requestReasoningSummary ->
+                ThoughtsStatus.UNAVAILABLE
+            else -> ThoughtsStatus.NONE
+        }
+
         return when {
             detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
                 toolCall = detectedToolCall!!,
-                precedingText = fullResponse.toString()
+                precedingText = fullResponse.toString(),
+                thoughts = thoughtsContent,
+                thinkingDurationSeconds = thinkingDuration,
+                thoughtsStatus = thoughtsStatus
             )
-            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(fullResponse.toString())
+            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
+                fullText = fullResponse.toString(),
+                thoughts = thoughtsContent,
+                thinkingDurationSeconds = thinkingDuration,
+                thoughtsStatus = thoughtsStatus
+            )
             else -> ProviderStreamingResult.Error("Empty response from OpenAI")
         }
     }
@@ -551,7 +572,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                     val toolResult = callback.onToolCall(response.toolCall)
                     Log.d("TOOL_CALL_DEBUG", "Non-streaming: Tool executed with result: $toolResult")
 
-                    val toolCallMessage = createToolCallMessage(response.toolCall, toolResult, "")
+                    val toolCallMessage = createToolCallMessage(response.toolCall, toolResult)
                     val toolResponseMessage = createToolResponseMessage(response.toolCall, toolResult)
 
                     callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, "")

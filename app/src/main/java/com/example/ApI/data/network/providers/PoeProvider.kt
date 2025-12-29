@@ -79,7 +79,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         )
         Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool executed with result: $toolResult")
 
-        val toolCallMessage = createToolCallMessage(initialResponse.toolCall, toolResult, "")
+        val toolCallMessage = createToolCallMessage(initialResponse.toolCall, toolResult)
         val toolResponseMessage = createToolResponseMessage(initialResponse.toolCall, toolResult)
 
         callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, initialResponse.precedingText)
@@ -131,7 +131,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                         precedingText = currentResponse.precedingText
                     )
 
-                    val nextToolCallMessage = createToolCallMessage(currentResponse.toolCall, nextToolResult, "")
+                    val nextToolCallMessage = createToolCallMessage(currentResponse.toolCall, nextToolResult)
                     val nextToolResponseMessage = createToolResponseMessage(currentResponse.toolCall, nextToolResult)
 
                     callback.onSaveToolMessages(nextToolCallMessage, nextToolResponseMessage, currentResponse.precedingText)

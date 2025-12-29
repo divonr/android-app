@@ -38,17 +38,17 @@ abstract class BaseProvider(protected val context: Context) {
 
     /**
      * Creates a tool call message from a detected tool call.
+     * Note: Preceding text and thoughts are saved separately as an assistant message.
      */
     protected fun createToolCallMessage(
         toolCall: ToolCall,
-        toolResult: ToolExecutionResult,
-        precedingText: String = ""
+        toolResult: ToolExecutionResult
     ): Message {
         val toolDisplayName = ToolRegistry.getInstance().getToolDisplayName(toolCall.toolId)
 
         return Message(
             role = "tool_call",
-            text = if (precedingText.isNotBlank()) precedingText else "Tool call: $toolDisplayName",
+            text = "",  // Clean format - preceding text saved as separate assistant message
             toolCallId = toolCall.id,
             toolCall = ToolCallInfo(
                 toolId = toolCall.toolId,
@@ -198,7 +198,7 @@ abstract class BaseProvider(protected val context: Context) {
         )
 
         // Create tool messages
-        val toolCallMessage = createToolCallMessage(initialToolCall, toolResult, "")
+        val toolCallMessage = createToolCallMessage(initialToolCall, toolResult)
         val toolResponseMessage = createToolResponseMessage(initialToolCall, toolResult)
 
         // Save the tool messages
@@ -230,7 +230,7 @@ abstract class BaseProvider(protected val context: Context) {
                 chainedMessagesToAdd.add(createAssistantMessage(currentResponse.precedingText, modelName))
             }
 
-            val chainedToolCallMessage = createToolCallMessage(currentResponse.toolCall, chainedToolResult, "")
+            val chainedToolCallMessage = createToolCallMessage(currentResponse.toolCall, chainedToolResult)
             chainedMessagesToAdd.add(chainedToolCallMessage)
 
             val chainedToolResponseMessage = createToolResponseMessage(currentResponse.toolCall, chainedToolResult)

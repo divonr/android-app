@@ -418,16 +418,21 @@ class StreamingService : Service() {
             override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message, precedingText: String) {
                 // Save tool messages to chat history
                 try {
-                    // First, save preceding text as assistant message if it exists
-                    if (precedingText.isNotBlank()) {
+                    // Save preceding text AND thoughts as assistant message if either exists
+                    if (precedingText.isNotBlank() || thoughtsData != null) {
                         val precedingMessage = Message(
                             role = "assistant",
                             text = precedingText,
                             attachments = emptyList(),
                             model = modelName,
-                            datetime = Instant.now().toString()
+                            datetime = Instant.now().toString(),
+                            thoughts = thoughtsData?.first,
+                            thinkingDurationSeconds = thoughtsData?.second,
+                            thoughtsStatus = thoughtsData?.third ?: ThoughtsStatus.NONE
                         )
                         repository.addResponseToCurrentVariant(username, chatId, precedingMessage)
+                        // Clear thoughts after using - they belong to this message, not the final response
+                        thoughtsData = null
                     }
                     repository.addResponseToCurrentVariant(username, chatId, toolCallMessage)
                     repository.addResponseToCurrentVariant(username, chatId, toolResponseMessage)

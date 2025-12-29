@@ -15,7 +15,8 @@ sealed class ProviderStreamingResult {
         val fullText: String,
         val thoughts: String? = null,
         val thinkingDurationSeconds: Float? = null,
-        val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
+        val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE,
+        val thoughtsSignature: String? = null  // Cryptographic signature for Anthropic thinking blocks
     ) : ProviderStreamingResult()
 
     /**
@@ -26,7 +27,8 @@ sealed class ProviderStreamingResult {
         val precedingText: String = "",
         val thoughts: String? = null,
         val thinkingDurationSeconds: Float? = null,
-        val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE
+        val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE,
+        val thoughtsSignature: String? = null  // Cryptographic signature for Anthropic thinking blocks
     ) : ProviderStreamingResult()
 
     /**

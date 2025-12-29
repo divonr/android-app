@@ -64,7 +64,7 @@ class CohereProvider(context: Context) : BaseProvider(context) {
 
                         val toolResult = callback.onToolCall(toolCall, precedingText)
 
-                        val toolCallMessage = createToolCallMessage(toolCall, toolResult, precedingText)
+                        val toolCallMessage = createToolCallMessage(toolCall, toolResult)
                         val toolResponseMessage = createToolResponseMessage(toolCall, toolResult)
 
                         callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, precedingText)
@@ -363,7 +363,10 @@ class CohereProvider(context: Context) : BaseProvider(context) {
             })
         }
 
-        messages.forEach { message ->
+        var i = 0
+        while (i < messages.size) {
+            val message = messages[i]
+
             when (message.role) {
                 "user" -> {
                     if (message.attachments.isEmpty()) {
@@ -397,16 +400,46 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                             })
                         })
                     }
+                    i++
                 }
                 "assistant" -> {
-                    cohereMessages.add(buildJsonObject {
-                        put("role", "assistant")
-                        put("content", message.text)
-                    })
+                    // Check if next message is tool_call - combine them into one assistant message
+                    val nextMessage = messages.getOrNull(i + 1)
+                    if (nextMessage?.role == "tool_call") {
+                        // Combine assistant text + tool_calls into one message
+                        cohereMessages.add(buildJsonObject {
+                            put("role", "assistant")
+                            if (message.text.isNotBlank()) {
+                                put("content", message.text)
+                            }
+                            put("tool_calls", buildJsonArray {
+                                nextMessage.toolCall?.let { toolCall ->
+                                    add(buildJsonObject {
+                                        put("id", nextMessage.toolCallId ?: "")
+                                        put("type", "function")
+                                        put("function", buildJsonObject {
+                                            put("name", toolCall.toolId)
+                                            put("arguments", toolCall.parameters.toString())
+                                        })
+                                    })
+                                }
+                            })
+                        })
+                        i += 2  // Skip both messages
+                    } else {
+                        // Regular assistant message
+                        cohereMessages.add(buildJsonObject {
+                            put("role", "assistant")
+                            put("content", message.text)
+                        })
+                        i++
+                    }
                 }
                 "tool_call" -> {
+                    // Standalone tool_call (old format with text, or no preceding assistant)
                     cohereMessages.add(buildJsonObject {
                         put("role", "assistant")
+                        // Backward compatibility: old format stored preceding text in tool_call.text
                         if (message.text.isNotBlank()) {
                             put("content", message.text)
                         }
@@ -423,6 +456,7 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                             }
                         })
                     })
+                    i++
                 }
                 "tool_response" -> {
                     cohereMessages.add(buildJsonObject {
@@ -430,7 +464,9 @@ class CohereProvider(context: Context) : BaseProvider(context) {
                         put("tool_call_id", message.toolResponseCallId ?: "")
                         put("content", message.toolResponseOutput ?: "")
                     })
+                    i++
                 }
+                else -> i++
             }
         }
 
