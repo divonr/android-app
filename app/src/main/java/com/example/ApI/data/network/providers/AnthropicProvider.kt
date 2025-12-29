@@ -144,6 +144,10 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                 enabledTools, webSearchEnabled, thinkingBudget, temperature
             )
 
+            // DEBUG: Log the request body to verify thinking parameter
+            android.util.Log.d("AnthropicProvider", "Request body: $requestBody")
+            android.util.Log.d("AnthropicProvider", "ThinkingBudget type: ${thinkingBudget::class.simpleName}, value: $thinkingBudget")
+
             connection.outputStream.write(requestBody.toString().toByteArray())
             connection.outputStream.flush()
 
