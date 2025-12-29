@@ -81,7 +81,7 @@ object ThinkingBudgetConfig {
      * Get the thinking budget type for a specific provider and model combination.
      * First checks if the model has a remote config, then falls back to hardcoded defaults.
      *
-     * @param provider The provider name (e.g., "openai", "anthropic", "google")
+     * @param provider The provider name (e.g., "openai", "anthropic", "google", "openrouter")
      * @param model The model name
      * @param modelConfig Optional thinking config from the remote models.json
      */
@@ -100,6 +100,7 @@ object ThinkingBudgetConfig {
             "openai" -> getOpenAIThinkingBudget(model)
             "anthropic" -> getAnthropicThinkingBudget(model)
             "google" -> getGoogleThinkingBudget(model)
+            "openrouter" -> getOpenRouterThinkingBudget(model)
             else -> ThinkingBudgetType.InDevelopment
         }
     }
@@ -213,6 +214,66 @@ object ThinkingBudgetConfig {
             }
             // Unknown Google model
             else -> ThinkingBudgetType.InDevelopment
+        }
+    }
+
+    /**
+     * OpenRouter thinking budget configuration.
+     * OpenRouter uses discrete effort levels: xhigh, high, medium, low, minimal
+     * Supported by: OpenAI reasoning models (o1, o3, gpt-5) and Grok models
+     *
+     * Note: OpenRouter routes to underlying providers, so we check model names
+     * to determine which ones support reasoning.
+     */
+    private fun getOpenRouterThinkingBudget(model: String): ThinkingBudgetType {
+        val modelLower = model.lowercase()
+
+        return when {
+            // OpenAI o-series models via OpenRouter (o1, o1-mini, o1-pro, o3, o3-mini, o4-mini)
+            modelLower.contains("openai/o1") ||
+            modelLower.contains("openai/o3") ||
+            modelLower.contains("openai/o4") -> {
+                ThinkingBudgetType.Discrete(
+                    options = listOf("low", "medium", "high"),
+                    default = "medium",
+                    displayNames = hebrewDisplayNames
+                )
+            }
+            // OpenAI GPT-5 series via OpenRouter
+            modelLower.contains("openai/gpt-5") -> {
+                ThinkingBudgetType.Discrete(
+                    options = listOf("minimal", "low", "medium", "high", "xhigh"),
+                    default = "medium",
+                    displayNames = hebrewDisplayNames
+                )
+            }
+            // Grok models via OpenRouter
+            modelLower.contains("x-ai/grok") || modelLower.contains("xai/grok") -> {
+                ThinkingBudgetType.Discrete(
+                    options = listOf("low", "medium", "high"),
+                    default = "medium",
+                    displayNames = hebrewDisplayNames
+                )
+            }
+            // DeepSeek R1 (reasoning model)
+            modelLower.contains("deepseek/deepseek-r1") ||
+            modelLower.contains("deepseek-r1") -> {
+                ThinkingBudgetType.Discrete(
+                    options = listOf("low", "medium", "high"),
+                    default = "medium",
+                    displayNames = hebrewDisplayNames
+                )
+            }
+            // Qwen QWQ (reasoning model)
+            modelLower.contains("qwen/qwq") || modelLower.contains("qwq") -> {
+                ThinkingBudgetType.Discrete(
+                    options = listOf("low", "medium", "high"),
+                    default = "medium",
+                    displayNames = hebrewDisplayNames
+                )
+            }
+            // Other OpenRouter models - reasoning not supported or unknown
+            else -> ThinkingBudgetType.NotSupported
         }
     }
 
