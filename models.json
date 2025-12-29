@@ -186,6 +186,10 @@
   {
     "provider": "cohere",
     "models": [
+      {
+        "name": "command-a-reasoning-08-2025",
+        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
+      },
       { 
         "name": "command-r-plus-08-2024",
         "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
