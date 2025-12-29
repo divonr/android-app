@@ -70,9 +70,19 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
 
                         callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, precedingText)
 
-                        // Add assistant message so buildMessages can combine it with tool_call
-                        // This ensures proper API message structure: [text (if any), tool_use]
-                        conversationMessages.add(createAssistantMessage(precedingText, modelName))
+                        // Add assistant message WITH THOUGHTS so buildMessages can include thinking block
+                        // Anthropic requires thinking block before tool_use when thinking is enabled
+                        val assistantMessage = Message(
+                            role = "assistant",
+                            text = precedingText,
+                            attachments = emptyList(),
+                            model = modelName,
+                            datetime = java.time.Instant.now().toString(),
+                            thoughts = result.thoughts,
+                            thinkingDurationSeconds = result.thinkingDurationSeconds,
+                            thoughtsStatus = result.thoughtsStatus
+                        )
+                        conversationMessages.add(assistantMessage)
                         conversationMessages.add(toolCallMessage)
                         conversationMessages.add(toolResponseMessage)
 
@@ -396,8 +406,16 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                     // Check if next message is tool_call - combine them into one API message
                     val nextMessage = messages.getOrNull(i + 1)
                     if (nextMessage?.role == "tool_call") {
-                        // Combine assistant text + tool_use into one message
+                        // Combine thinking (if any) + text + tool_use into one message
+                        // Anthropic requires thinking block FIRST when thinking is enabled
                         val contentArray = buildJsonArray {
+                            // Add thinking block if present (required by Anthropic when thinking is enabled)
+                            if (!message.thoughts.isNullOrBlank()) {
+                                add(buildJsonObject {
+                                    put("type", "thinking")
+                                    put("thinking", message.thoughts)
+                                })
+                            }
                             if (message.text.isNotBlank()) {
                                 add(buildJsonObject {
                                     put("type", "text")
@@ -419,15 +437,22 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                         })
                         i += 2  // Skip both messages
                     } else {
-                        // Regular assistant message
+                        // Regular assistant message (may have thoughts from extended thinking)
+                        val contentArray = buildJsonArray {
+                            if (!message.thoughts.isNullOrBlank()) {
+                                add(buildJsonObject {
+                                    put("type", "thinking")
+                                    put("thinking", message.thoughts)
+                                })
+                            }
+                            add(buildJsonObject {
+                                put("type", "text")
+                                put("text", message.text)
+                            })
+                        }
                         anthropicMessages.add(buildJsonObject {
                             put("role", "assistant")
-                            put("content", buildJsonArray {
-                                add(buildJsonObject {
-                                    put("type", "text")
-                                    put("text", message.text)
-                                })
-                            })
+                            put("content", contentArray)
                         })
                         i++
                     }
@@ -435,6 +460,13 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                 "tool_call" -> {
                     // Standalone tool_call (old format with text, or new format without preceding assistant)
                     val contentArray = buildJsonArray {
+                        // Add thinking block if present (for backward compatibility)
+                        if (!message.thoughts.isNullOrBlank()) {
+                            add(buildJsonObject {
+                                put("type", "thinking")
+                                put("thinking", message.thoughts)
+                            })
+                        }
                         // Backward compatibility: old format stored preceding text in tool_call.text
                         if (message.text.isNotBlank()) {
                             add(buildJsonObject {
