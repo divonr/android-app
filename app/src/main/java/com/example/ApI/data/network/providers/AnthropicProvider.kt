@@ -70,8 +70,8 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
 
                         callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, precedingText)
 
-                        // Add assistant message WITH THOUGHTS so buildMessages can include thinking block
-                        // Anthropic requires thinking block before tool_use when thinking is enabled
+                        // Add assistant message WITH THOUGHTS AND SIGNATURE so buildMessages can include thinking block
+                        // Anthropic requires thinking block with signature before tool_use when thinking is enabled
                         val assistantMessage = Message(
                             role = "assistant",
                             text = precedingText,
@@ -80,7 +80,8 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                             datetime = java.time.Instant.now().toString(),
                             thoughts = result.thoughts,
                             thinkingDurationSeconds = result.thinkingDurationSeconds,
-                            thoughtsStatus = result.thoughtsStatus
+                            thoughtsStatus = result.thoughtsStatus,
+                            thoughtsSignature = result.thoughtsSignature
                         )
                         conversationMessages.add(assistantMessage)
                         conversationMessages.add(toolCallMessage)
@@ -187,6 +188,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         var isInThinkingPhase = false
         var thinkingStartTime: Long = 0
         val thoughtsBuilder = StringBuilder()
+        val signatureBuilder = StringBuilder()  // Capture signature for follow-up requests
         var currentBlockIndex: Int = -1
         var currentBlockType: String? = null
 
@@ -273,7 +275,9 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                                     currentToolInput.append(partialJson)
                                 }
                                 "signature_delta" -> {
-                                    // Ignore signature for display purposes
+                                    // Capture signature for follow-up requests (required by Anthropic API)
+                                    val signature = delta?.get("signature")?.jsonPrimitive?.content ?: ""
+                                    signatureBuilder.append(signature)
                                 }
                             }
                         }
@@ -323,6 +327,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         connection.disconnect()
 
         val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+        val thoughtsSignature = signatureBuilder.toString().takeIf { it.isNotEmpty() }
         val thinkingDuration = if (thinkingStartTime > 0) {
             (System.currentTimeMillis() - thinkingStartTime) / 1000f
         } else null
@@ -338,13 +343,15 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                 precedingText = fullResponse.toString(),
                 thoughts = thoughtsContent,
                 thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus
+                thoughtsStatus = thoughtsStatus,
+                thoughtsSignature = thoughtsSignature
             )
             fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
                 fullText = fullResponse.toString(),
                 thoughts = thoughtsContent,
                 thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus
+                thoughtsStatus = thoughtsStatus,
+                thoughtsSignature = thoughtsSignature
             )
             else -> ProviderStreamingResult.Error("Empty response from Anthropic")
         }
@@ -409,11 +416,12 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                         // Combine thinking (if any) + text + tool_use into one message
                         // Anthropic requires thinking block FIRST when thinking is enabled
                         val contentArray = buildJsonArray {
-                            // Add thinking block if present (required by Anthropic when thinking is enabled)
+                            // Add thinking block with signature if present (required by Anthropic when thinking is enabled)
                             if (!message.thoughts.isNullOrBlank()) {
                                 add(buildJsonObject {
                                     put("type", "thinking")
                                     put("thinking", message.thoughts)
+                                    message.thoughtsSignature?.let { put("signature", it) }
                                 })
                             }
                             if (message.text.isNotBlank()) {
@@ -443,6 +451,7 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                                 add(buildJsonObject {
                                     put("type", "thinking")
                                     put("thinking", message.thoughts)
+                                    message.thoughtsSignature?.let { put("signature", it) }
                                 })
                             }
                             add(buildJsonObject {
@@ -460,11 +469,12 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                 "tool_call" -> {
                     // Standalone tool_call (old format with text, or new format without preceding assistant)
                     val contentArray = buildJsonArray {
-                        // Add thinking block if present (for backward compatibility)
+                        // Add thinking block with signature if present (for backward compatibility)
                         if (!message.thoughts.isNullOrBlank()) {
                             add(buildJsonObject {
                                 put("type", "thinking")
                                 put("thinking", message.thoughts)
+                                message.thoughtsSignature?.let { put("signature", it) }
                             })
                         }
                         // Backward compatibility: old format stored preceding text in tool_call.text

@@ -117,7 +117,8 @@ data class Message(
     val variantId: String? = null,  // Reference to the variant this message belongs to (for branching)
     val thoughts: String? = null,  // Model's thinking/reasoning process (for models that support it)
     val thinkingDurationSeconds: Float? = null,  // Duration of thinking phase in seconds
-    val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE  // Status of thoughts for UI display
+    val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE,  // Status of thoughts for UI display
+    val thoughtsSignature: String? = null  // Cryptographic signature for thinking blocks (Anthropic)
 ) {
     // Convenience property
     val content: String get() = text
