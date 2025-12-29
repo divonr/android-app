@@ -136,6 +136,21 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
             connection.outputStream.write(requestBody.toString().toByteArray())
             connection.outputStream.flush()
 
+            val responseCode = connection.responseCode
+            if (responseCode >= 400) {
+                // Read error response from Anthropic
+                val errorStream = connection.errorStream
+                val errorBody = errorStream?.bufferedReader()?.use { it.readText() } ?: "Unknown error"
+                val errorMessage = try {
+                    val errorJson = json.parseToJsonElement(errorBody).jsonObject
+                    errorJson["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: errorBody
+                } catch (e: Exception) {
+                    errorBody
+                }
+                callback.onError("Anthropic API error ($responseCode): $errorMessage")
+                return@withContext ProviderStreamingResult.Error("Anthropic API error ($responseCode): $errorMessage")
+            }
+
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             parseStreamingResponse(reader, connection, callback)
         } catch (e: Exception) {
