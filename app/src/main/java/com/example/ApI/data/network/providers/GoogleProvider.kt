@@ -263,21 +263,29 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         reader.close()
         connection.disconnect()
 
+        // Calculate thoughts data (shared by both TextComplete and ToolCallDetected)
+        val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+        val thinkingDuration = if (thoughtsBuilder.isNotEmpty()) {
+            thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f }
+        } else null
+        val thoughtsStatus = when {
+            thoughtsContent != null -> ThoughtsStatus.PRESENT
+            else -> ThoughtsStatus.NONE
+        }
+
         return when {
             detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
                 toolCall = detectedToolCall!!,
-                precedingText = fullResponse.toString()
+                precedingText = fullResponse.toString(),
+                thoughts = thoughtsContent,
+                thinkingDurationSeconds = thinkingDuration,
+                thoughtsStatus = thoughtsStatus
             )
             fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
                 fullText = fullResponse.toString(),
-                thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() },
-                thinkingDurationSeconds = if (thoughtsBuilder.isNotEmpty()) {
-                    (thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f })
-                } else null,
-                thoughtsStatus = when {
-                    thoughtsBuilder.isNotEmpty() -> ThoughtsStatus.PRESENT
-                    else -> ThoughtsStatus.NONE
-                }
+                thoughts = thoughtsContent,
+                thinkingDurationSeconds = thinkingDuration,
+                thoughtsStatus = thoughtsStatus
             )
             else -> ProviderStreamingResult.Error("Empty response from Google")
         }
@@ -298,7 +306,10 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
             })
         }
 
-        messages.forEach { message ->
+        var i = 0
+        while (i < messages.size) {
+            val message = messages[i]
+
             when (message.role) {
                 "user" -> {
                     val parts = mutableListOf<JsonElement>()
@@ -326,20 +337,50 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                             put("parts", JsonArray(parts))
                         })
                     }
+                    i++
                 }
                 "assistant" -> {
-                    if (message.text.isNotBlank()) {
+                    // Check if next message is tool_call - combine them into one model turn
+                    val nextMessage = messages.getOrNull(i + 1)
+                    if (nextMessage?.role == "tool_call") {
+                        // Combine assistant text + functionCall into one message
                         contents.add(buildJsonObject {
                             put("role", "model")
                             put("parts", buildJsonArray {
+                                if (message.text.isNotBlank()) {
+                                    add(buildJsonObject {
+                                        put("text", message.text)
+                                    })
+                                }
                                 add(buildJsonObject {
-                                    put("text", message.text)
+                                    put("functionCall", buildJsonObject {
+                                        put("name", nextMessage.toolCall?.toolId ?: "unknown")
+                                        put("args", nextMessage.toolCall?.parameters ?: buildJsonObject {})
+                                    })
+                                    nextMessage.toolCall?.thoughtSignature?.let { signature ->
+                                        put("thoughtSignature", signature)
+                                    }
                                 })
                             })
                         })
+                        i += 2  // Skip both messages
+                    } else {
+                        // Regular assistant message
+                        if (message.text.isNotBlank()) {
+                            contents.add(buildJsonObject {
+                                put("role", "model")
+                                put("parts", buildJsonArray {
+                                    add(buildJsonObject {
+                                        put("text", message.text)
+                                    })
+                                })
+                            })
+                        }
+                        i++
                     }
                 }
                 "tool_call" -> {
+                    // Standalone tool_call (old format or no preceding assistant)
                     contents.add(buildJsonObject {
                         put("role", "model")
                         put("parts", buildJsonArray {
@@ -348,13 +389,13 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                                     put("name", message.toolCall?.toolId ?: "unknown")
                                     put("args", message.toolCall?.parameters ?: buildJsonObject {})
                                 })
-                                // Include thoughtSignature if available (required for Gemini 3+)
                                 message.toolCall?.thoughtSignature?.let { signature ->
                                     put("thoughtSignature", signature)
                                 }
                             })
                         })
                     })
+                    i++
                 }
                 "tool_response" -> {
                     contents.add(buildJsonObject {
@@ -370,7 +411,9 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                             })
                         })
                     })
+                    i++
                 }
+                else -> i++
             }
         }
 
