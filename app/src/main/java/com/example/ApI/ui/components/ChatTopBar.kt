@@ -269,7 +269,7 @@ fun NormalModeTopBar(
                 } ?: "",
                 style = MaterialTheme.typography.labelMedium,
                 color = OnSurfaceVariant,
-                modifier = Modifier.clickable { viewModel.showProviderSelector() }
+                modifier = Modifier.clickable { viewModel.showModelSelector() }
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(

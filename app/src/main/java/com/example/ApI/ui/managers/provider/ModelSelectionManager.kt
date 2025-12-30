@@ -43,7 +43,6 @@ class ModelSelectionManager(
             deps.uiState.value.copy(
                 currentProvider = provider,
                 currentModel = firstModel,
-                showProviderSelector = false,
                 webSearchSupport = webSearchSupport,
                 webSearchEnabled = webSearchEnabled
             )
@@ -77,17 +76,35 @@ class ModelSelectionManager(
     }
 
     /**
-     * Show the provider selection dialog.
+     * Select a model with explicit provider.
+     * Used when selecting from the model dialog with provider tabs.
+     * This ensures we use the exact provider shown in the tab, not a guess based on model name.
      */
-    fun showProviderSelector() {
-        deps.updateUiState(deps.uiState.value.copy(showProviderSelector = true))
-    }
+    fun selectModelWithProvider(provider: Provider, modelName: String) {
+        val updatedSettings = deps.appSettings.value.copy(
+            selected_provider = provider.provider,
+            selected_model = modelName
+        )
 
-    /**
-     * Hide the provider selection dialog.
-     */
-    fun hideProviderSelector() {
-        deps.updateUiState(deps.uiState.value.copy(showProviderSelector = false))
+        deps.repository.saveAppSettings(updatedSettings)
+        updateAppSettings(updatedSettings)
+
+        val webSearchSupport = getWebSearchSupport(provider.provider, modelName)
+        val webSearchEnabled = when (webSearchSupport) {
+            WebSearchSupport.REQUIRED -> true
+            WebSearchSupport.OPTIONAL -> deps.uiState.value.webSearchEnabled
+            WebSearchSupport.UNSUPPORTED -> false
+        }
+
+        deps.updateUiState(
+            deps.uiState.value.copy(
+                currentProvider = provider,
+                currentModel = modelName,
+                showModelSelector = false,
+                webSearchSupport = webSearchSupport,
+                webSearchEnabled = webSearchEnabled
+            )
+        )
     }
 
     /**
@@ -102,6 +119,32 @@ class ModelSelectionManager(
      */
     fun hideModelSelector() {
         deps.updateUiState(deps.uiState.value.copy(showModelSelector = false))
+    }
+
+    /**
+     * Toggle the starred status of a model.
+     * If the model is starred, remove it from favorites.
+     * If not starred, add it to favorites.
+     */
+    fun toggleStarredModel(providerKey: String, modelName: String) {
+        val currentSettings = deps.appSettings.value
+        val starred = StarredModel(provider = providerKey, modelName = modelName)
+
+        val newStarredModels = if (currentSettings.starredModels.any {
+                it.provider == providerKey && it.modelName == modelName
+            }) {
+            // Remove from starred
+            currentSettings.starredModels.filter {
+                !(it.provider == providerKey && it.modelName == modelName)
+            }
+        } else {
+            // Add to starred
+            currentSettings.starredModels + starred
+        }
+
+        val updatedSettings = currentSettings.copy(starredModels = newStarredModels)
+        deps.repository.saveAppSettings(updatedSettings)
+        updateAppSettings(updatedSettings)
     }
 
     /**

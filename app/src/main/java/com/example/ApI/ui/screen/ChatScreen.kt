@@ -47,6 +47,7 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val searchFocusRequester = remember { FocusRequester() }
+    val appSettings by viewModel.appSettings.collectAsState()
     
     LaunchedEffect(uiState.snackbarMessage) {
         uiState.snackbarMessage?.let {
@@ -402,21 +403,18 @@ fun ChatScreen(
                 )
             }
 
-            // Provider Selector
-            if (uiState.showProviderSelector) {
-                ProviderSelectorDialog(
-                    providers = uiState.availableProviders,
-                    onProviderSelected = { viewModel.selectProvider(it) },
-                    onDismiss = { viewModel.hideProviderSelector() },
-                    onRefresh = { viewModel.refreshModels() }
-                )
-            }
-
-            // Model Selector
+            // Model Selector with provider tabs and favorites
             if (uiState.showModelSelector) {
                 ModelSelectorDialog(
-                    models = uiState.currentProvider?.models ?: emptyList(),
-                    onModelSelected = { viewModel.selectModel(it) },
+                    availableProviders = uiState.availableProviders,
+                    currentProvider = uiState.currentProvider,
+                    starredModels = appSettings.starredModels,
+                    onModelSelected = { provider, modelName ->
+                        viewModel.selectModelWithProvider(provider, modelName)
+                    },
+                    onToggleStar = { providerKey, modelName ->
+                        viewModel.toggleStarredModel(providerKey, modelName)
+                    },
                     onDismiss = { viewModel.hideModelSelector() },
                     onRefresh = { viewModel.refreshModels() }
                 )
