@@ -305,12 +305,17 @@ fun MessageBubble(
                         color = Primary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(
-                            start = 16.dp,
-                            end = 16.dp,
-                            top = 12.dp,
-                            bottom = 4.dp
-                        )
+                        modifier = Modifier
+                            .clickable {
+                                // Select this model when clicked
+                                viewModel.selectModelByName(message.model)
+                            }
+                            .padding(
+                                start = 16.dp,
+                                end = 16.dp,
+                                top = 12.dp,
+                                bottom = 4.dp
+                            )
                     )
                 }
 
