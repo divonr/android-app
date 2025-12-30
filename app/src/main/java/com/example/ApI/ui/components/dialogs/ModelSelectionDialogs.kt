@@ -108,8 +108,9 @@ fun ProviderSelectorDialog(
 }
 
 /**
- * Model selection dialog with provider tabs.
- * Shows tabs for all available providers (those with active API keys).
+ * Model selection dialog with provider tabs and favorites.
+ * Shows tabs for all available providers (those with active API keys),
+ * plus a star/favorites tab as the first tab.
  * User can switch between providers by tapping tabs or swiping.
  *
  * NOTE: Switching tabs does NOT change the selected provider - only browsing.
@@ -118,7 +119,9 @@ fun ProviderSelectorDialog(
  *
  * @param availableProviders List of providers with active API keys
  * @param currentProvider The currently selected provider (determines initial tab)
+ * @param starredModels List of starred/favorite models
  * @param onModelSelected Callback when a model is selected, receives provider and model name
+ * @param onToggleStar Callback when star icon is clicked, receives provider key and model name
  * @param onDismiss Callback when dialog is dismissed without selection
  * @param onRefresh Optional callback to refresh the model list
  */
@@ -127,7 +130,9 @@ fun ProviderSelectorDialog(
 fun ModelSelectorDialog(
     availableProviders: List<Provider>,
     currentProvider: Provider?,
+    starredModels: List<StarredModel>,
     onModelSelected: (Provider, String) -> Unit,
+    onToggleStar: (String, String) -> Unit,
     onDismiss: () -> Unit,
     onRefresh: (() -> Unit)? = null
 ) {
@@ -135,16 +140,26 @@ fun ModelSelectorDialog(
     var showPricing by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
+    // Reverse providers for RTL display (rightmost = first)
+    val reversedProviders = remember(availableProviders) { availableProviders.reversed() }
+
+    // Total pages = star tab (1) + providers
+    val totalPages = reversedProviders.size + 1
+
     // Find the initial page index based on current provider
-    val initialPageIndex = remember(currentProvider, availableProviders) {
-        availableProviders.indexOfFirst { it.provider == currentProvider?.provider }
-            .takeIf { it >= 0 } ?: 0
+    // Page 0 = star tab, Page 1+ = providers (reversed)
+    val initialPageIndex = remember(currentProvider, reversedProviders) {
+        if (currentProvider == null) 0
+        else {
+            val providerIndex = reversedProviders.indexOfFirst { it.provider == currentProvider.provider }
+            if (providerIndex >= 0) providerIndex + 1 else 1
+        }
     }
 
     // Pager state for swiping between providers
     val pagerState = rememberPagerState(
         initialPage = initialPageIndex,
-        pageCount = { availableProviders.size }
+        pageCount = { totalPages }
     )
 
     Dialog(onDismissRequest = onDismiss) {
@@ -230,10 +245,15 @@ fun ModelSelectorDialog(
                         singleLine = true
                     )
 
-                    // Use custom model button - uses the currently viewed provider
-                    if (customModelName.isNotBlank() && availableProviders.isNotEmpty()) {
+                    // Use custom model button - uses the currently viewed provider (not star tab)
+                    if (customModelName.isNotBlank() && reversedProviders.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
-                        val viewedProvider = availableProviders.getOrNull(pagerState.currentPage)
+                        // If on star tab (page 0), use first provider; otherwise use current provider
+                        val viewedProvider = if (pagerState.currentPage == 0) {
+                            reversedProviders.firstOrNull()
+                        } else {
+                            reversedProviders.getOrNull(pagerState.currentPage - 1)
+                        }
                         Button(
                             onClick = {
                                 viewedProvider?.let { provider ->
@@ -258,57 +278,88 @@ fun ModelSelectorDialog(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     // Provider tabs - only show if there are providers
-                    if (availableProviders.isNotEmpty()) {
-                        // RTL TabRow - we need to reverse the direction for proper RTL swiping
-                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                            ScrollableTabRow(
-                                selectedTabIndex = pagerState.currentPage,
-                                containerColor = Surface,
-                                contentColor = Primary,
-                                edgePadding = 0.dp,
-                                divider = {}
-                            ) {
-                                availableProviders.forEachIndexed { index, provider ->
-                                    Tab(
-                                        selected = pagerState.currentPage == index,
-                                        onClick = {
-                                            coroutineScope.launch {
-                                                pagerState.animateScrollToPage(index)
-                                            }
-                                        },
-                                        text = {
-                                            Text(
-                                                text = getProviderDisplayName(provider.provider),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                style = MaterialTheme.typography.bodyMedium
-                                            )
-                                        },
-                                        selectedContentColor = Primary,
-                                        unselectedContentColor = OnSurface.copy(alpha = 0.6f)
+                    if (reversedProviders.isNotEmpty()) {
+                        // Tabs in RTL order (star first on right, then providers)
+                        ScrollableTabRow(
+                            selectedTabIndex = pagerState.currentPage,
+                            containerColor = Surface,
+                            contentColor = Primary,
+                            edgePadding = 0.dp,
+                            divider = {}
+                        ) {
+                            // Star/favorites tab (first = rightmost in RTL)
+                            Tab(
+                                selected = pagerState.currentPage == 0,
+                                onClick = {
+                                    coroutineScope.launch {
+                                        pagerState.animateScrollToPage(0)
+                                    }
+                                },
+                                icon = {
+                                    Icon(
+                                        imageVector = if (starredModels.isNotEmpty()) Icons.Default.Star else Icons.Default.StarBorder,
+                                        contentDescription = "מועדפים",
+                                        modifier = Modifier.size(20.dp)
                                     )
-                                }
+                                },
+                                selectedContentColor = Primary,
+                                unselectedContentColor = OnSurface.copy(alpha = 0.6f)
+                            )
+
+                            // Provider tabs (reversed for RTL)
+                            reversedProviders.forEachIndexed { index, provider ->
+                                Tab(
+                                    selected = pagerState.currentPage == index + 1,
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(index + 1)
+                                        }
+                                    },
+                                    text = {
+                                        Text(
+                                            text = getProviderDisplayName(provider.provider),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    },
+                                    selectedContentColor = Primary,
+                                    unselectedContentColor = OnSurface.copy(alpha = 0.6f)
+                                )
                             }
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
 
                         // HorizontalPager for swipeable model lists
-                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                            HorizontalPager(
-                                state = pagerState,
-                                modifier = Modifier.heightIn(max = 300.dp)
-                            ) { pageIndex ->
-                                val provider = availableProviders[pageIndex]
-                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                                    ModelListForProvider(
-                                        provider = provider,
-                                        showPricing = showPricing,
-                                        onModelSelected = { modelName ->
-                                            onModelSelected(provider, modelName)
-                                        }
-                                    )
-                                }
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.heightIn(max = 300.dp),
+                            reverseLayout = true // RTL swipe direction
+                        ) { pageIndex ->
+                            if (pageIndex == 0) {
+                                // Star/favorites page
+                                StarredModelsPage(
+                                    starredModels = starredModels,
+                                    availableProviders = availableProviders,
+                                    showPricing = showPricing,
+                                    onModelSelected = onModelSelected,
+                                    onToggleStar = onToggleStar
+                                )
+                            } else {
+                                // Provider page
+                                val provider = reversedProviders[pageIndex - 1]
+                                ModelListForProvider(
+                                    provider = provider,
+                                    showPricing = showPricing,
+                                    starredModels = starredModels,
+                                    onModelSelected = { modelName ->
+                                        onModelSelected(provider, modelName)
+                                    },
+                                    onToggleStar = { modelName ->
+                                        onToggleStar(provider.provider, modelName)
+                                    }
+                                )
                             }
                         }
                     } else {
@@ -320,6 +371,114 @@ fun ModelSelectorDialog(
                             modifier = Modifier.padding(vertical = 16.dp)
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Empty state / starred models page
+ */
+@Composable
+private fun StarredModelsPage(
+    starredModels: List<StarredModel>,
+    availableProviders: List<Provider>,
+    showPricing: Boolean,
+    onModelSelected: (Provider, String) -> Unit,
+    onToggleStar: (String, String) -> Unit
+) {
+    if (starredModels.isEmpty()) {
+        // Empty state
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "גישה מהירה",
+                style = MaterialTheme.typography.titleLarge,
+                color = OnSurface,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "כאן יופיעו המודלים ששמרת בכוכב",
+                style = MaterialTheme.typography.bodyMedium,
+                color = OnSurface.copy(alpha = 0.7f)
+            )
+        }
+    } else {
+        // List of starred models
+        LazyColumn(
+            modifier = Modifier.fillMaxHeight()
+        ) {
+            items(starredModels) { starred ->
+                // Find the provider and model for this starred item
+                val provider = availableProviders.find { it.provider == starred.provider }
+                val model = provider?.models?.find { it.name == starred.modelName }
+
+                if (provider != null) {
+                    val modelName = starred.modelName
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onModelSelected(provider, modelName) },
+                        color = Surface
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = modelName,
+                                    color = OnSurface,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                // Show provider name for starred models
+                                Text(
+                                    text = getProviderDisplayName(starred.provider),
+                                    color = OnSurface.copy(alpha = 0.5f),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                // Display pricing information when toggle is enabled
+                                if (showPricing && model != null) {
+                                    model.pricing?.let { pricing ->
+                                        PricingText(pricing)
+                                    } ?: run {
+                                        model.min_points?.let { points ->
+                                            Text(
+                                                text = "Min points: $points",
+                                                color = OnSurface.copy(alpha = 0.7f),
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            // Star icon (always filled for starred items)
+                            IconButton(
+                                onClick = { onToggleStar(starred.provider, modelName) },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = "הסר ממועדפים",
+                                    tint = Primary
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = OnSurface.copy(alpha = 0.2f))
                 }
             }
         }
@@ -349,41 +508,66 @@ private fun getProviderDisplayName(providerKey: String): String {
 private fun ModelListForProvider(
     provider: Provider,
     showPricing: Boolean,
-    onModelSelected: (String) -> Unit
+    starredModels: List<StarredModel>,
+    onModelSelected: (String) -> Unit,
+    onToggleStar: (String) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxHeight()
     ) {
         items(provider.models) { model ->
             val modelName = model.name ?: model.toString()
+            val isStarred = starredModels.any {
+                it.provider == provider.provider && it.modelName == modelName
+            }
+
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onModelSelected(modelName) },
                 color = Surface
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = modelName,
-                        color = OnSurface,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    // Display pricing information when toggle is enabled
-                    if (showPricing) {
-                        model.pricing?.let { pricing ->
-                            PricingText(pricing)
-                        } ?: run {
-                            // Fallback to legacy min_points if no pricing object
-                            model.min_points?.let { points ->
-                                Text(
-                                    text = "Min points: $points",
-                                    color = OnSurface.copy(alpha = 0.7f),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = modelName,
+                            color = OnSurface,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        // Display pricing information when toggle is enabled
+                        if (showPricing) {
+                            model.pricing?.let { pricing ->
+                                PricingText(pricing)
+                            } ?: run {
+                                // Fallback to legacy min_points if no pricing object
+                                model.min_points?.let { points ->
+                                    Text(
+                                        text = "Min points: $points",
+                                        color = OnSurface.copy(alpha = 0.7f),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
                             }
                         }
+                    }
+                    // Star toggle icon
+                    IconButton(
+                        onClick = { onToggleStar(modelName) },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isStarred) Icons.Default.Star else Icons.Default.StarBorder,
+                            contentDescription = if (isStarred) "הסר ממועדפים" else "הוסף למועדפים",
+                            tint = if (isStarred) Primary else OnSurface.copy(alpha = 0.3f)
+                        )
                     }
                 }
             }

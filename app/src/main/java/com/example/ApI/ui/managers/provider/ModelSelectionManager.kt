@@ -137,6 +137,32 @@ class ModelSelectionManager(
     }
 
     /**
+     * Toggle the starred status of a model.
+     * If the model is starred, remove it from favorites.
+     * If not starred, add it to favorites.
+     */
+    fun toggleStarredModel(providerKey: String, modelName: String) {
+        val currentSettings = deps.appSettings.value
+        val starred = StarredModel(provider = providerKey, modelName = modelName)
+
+        val newStarredModels = if (currentSettings.starredModels.any {
+                it.provider == providerKey && it.modelName == modelName
+            }) {
+            // Remove from starred
+            currentSettings.starredModels.filter {
+                !(it.provider == providerKey && it.modelName == modelName)
+            }
+        } else {
+            // Add to starred
+            currentSettings.starredModels + starred
+        }
+
+        val updatedSettings = currentSettings.copy(starredModels = newStarredModels)
+        deps.repository.saveAppSettings(updatedSettings)
+        updateAppSettings(updatedSettings)
+    }
+
+    /**
      * Force refresh the models list from providers.
      * Fetches latest models from configured providers and updates UI.
      */

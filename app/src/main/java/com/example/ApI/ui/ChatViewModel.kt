@@ -601,6 +601,8 @@ class ChatViewModel(
     fun hideModelSelector() = modelSelectionManager.hideModelSelector()
     fun refreshModels() = modelSelectionManager.refreshModels()
     fun refreshAvailableProviders() = modelSelectionManager.refreshAvailableProviders()
+    fun toggleStarredModel(providerKey: String, modelName: String) =
+        modelSelectionManager.toggleStarredModel(providerKey, modelName)
 
     /**
      * Search for a model by name (case-sensitive) across all available providers and select it.

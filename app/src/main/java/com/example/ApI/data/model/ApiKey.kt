@@ -23,7 +23,8 @@ data class AppSettings(
     val enabledTools: List<String> = emptyList(), // List of enabled tool IDs
     val githubConnections: Map<String, GitHubConnectionInfo> = emptyMap(), // GitHub connections per user (username -> connection info)
     val googleWorkspaceConnections: Map<String, GoogleWorkspaceConnectionInfo> = emptyMap(), // Google Workspace connections per user
-    val skipWelcomeScreen: Boolean = false // Whether to skip the welcome/onboarding screen
+    val skipWelcomeScreen: Boolean = false, // Whether to skip the welcome/onboarding screen
+    val starredModels: List<StarredModel> = emptyList() // User's favorite models for quick access
 )
 
 /**
@@ -50,4 +51,15 @@ data class ChildLockSettings(
     val encryptedPassword: String = "",
     val startTime: String = "23:00", // Default start time
     val endTime: String = "07:00" // Default end time
+)
+
+/**
+ * Represents a starred/favorite model for quick access.
+ * Stores both provider and model name since the same model name
+ * can exist across multiple providers.
+ */
+@Serializable
+data class StarredModel(
+    val provider: String,
+    val modelName: String
 )
