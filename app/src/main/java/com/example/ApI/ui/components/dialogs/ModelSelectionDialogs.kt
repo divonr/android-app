@@ -334,8 +334,7 @@ fun ModelSelectorDialog(
                         // HorizontalPager for swipeable model lists
                         HorizontalPager(
                             state = pagerState,
-                            modifier = Modifier.heightIn(max = 300.dp),
-                            reverseLayout = true // RTL swipe direction
+                            modifier = Modifier.heightIn(max = 300.dp)
                         ) { pageIndex ->
                             if (pageIndex == 0) {
                                 // Star/favorites page
