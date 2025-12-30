@@ -305,9 +305,12 @@ class PoeProvider(context: Context) : BaseProvider(context) {
 
                                 // Handle thinking detection and extraction
                                 if (!thinkingDetected) {
-                                    // Check if this is the start of thinking
+                                    // Check if this is the start of thinking using flexible pattern detection
                                     val currentFull = fullResponse.toString()
-                                    if (currentFull.startsWith("*Thinking...*\n\n")) {
+                                    val thinkingResult = detectThinkingPattern(currentFull)
+
+                                    if (thinkingResult != null) {
+                                        val (_, afterPrefix) = thinkingResult
                                         thinkingDetected = true
                                         thinkingInProgress = true
                                         thinkingStartTime = System.currentTimeMillis()
@@ -315,7 +318,6 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                                         Log.d("POE_THINKING", "Thinking started")
 
                                         // Extract thinking content from this chunk (after prefix)
-                                        val afterPrefix = currentFull.removePrefix("*Thinking...*\n\n")
                                         if (afterPrefix.isNotBlank()) {
                                             val (thinking, response) = parseThinkingChunk(afterPrefix)
                                             if (thinking.isNotBlank()) {
@@ -331,7 +333,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                                             }
                                         }
                                     } else {
-                                        // No thinking, regular response
+                                        // No thinking pattern detected, regular response
                                         actualResponseBuilder.append(text)
                                         callback.onPartialResponse(text)
                                     }
@@ -370,13 +372,14 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                                 thinkingInProgress = false
                                 thinkingComplete = false
                                 thinkingStartTime = 0
-                                // Re-process as if it's a fresh chunk
-                                if (replacementText.startsWith("*Thinking...*\n\n")) {
+                                // Re-process as if it's a fresh chunk using flexible pattern detection
+                                val thinkingResult = detectThinkingPattern(replacementText)
+                                if (thinkingResult != null) {
+                                    val (_, afterPrefix) = thinkingResult
                                     thinkingDetected = true
                                     thinkingInProgress = true
                                     thinkingStartTime = System.currentTimeMillis()
                                     callback.onThinkingStarted()
-                                    val afterPrefix = replacementText.removePrefix("*Thinking...*\n\n")
                                     if (afterPrefix.isNotBlank()) {
                                         val (thinking, response) = parseThinkingChunk(afterPrefix)
                                         if (thinking.isNotBlank()) {
@@ -551,6 +554,31 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         }
 
         return Pair(thinkingLines.joinToString("\n"), responseLines.joinToString("\n"))
+    }
+
+    /**
+     * Detects if the text starts with a thinking pattern and extracts the content after the prefix.
+     * Supports both bold (*Thinking...*) and non-bold (Thinking...) formats.
+     * The pattern is: "Thinking..." followed by newlines, then blockquoted content (lines starting with >).
+     * @return Pair of (isThinking, contentAfterPrefix) or null if not a thinking pattern
+     */
+    private fun detectThinkingPattern(text: String): Pair<Boolean, String>? {
+        // Patterns to detect: "*Thinking...*\n" or "Thinking...\n"
+        val boldPattern = Regex("""^\*Thinking\.\.\.\*\n+""")
+        val plainPattern = Regex("""^Thinking\.\.\.\n+""")
+
+        val matchResult = boldPattern.find(text) ?: plainPattern.find(text)
+
+        if (matchResult != null) {
+            val afterPrefix = text.substring(matchResult.range.last + 1)
+            // Check if the content after prefix starts with blockquote (after any leading whitespace/newlines)
+            val trimmedAfter = afterPrefix.trimStart('\n', '\r')
+            if (trimmedAfter.isEmpty() || trimmedAfter.startsWith(">")) {
+                return Pair(true, afterPrefix)
+            }
+        }
+
+        return null
     }
 
     private fun buildMessages(
