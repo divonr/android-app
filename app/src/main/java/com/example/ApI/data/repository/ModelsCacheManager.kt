@@ -305,9 +305,10 @@ class ModelsCacheManager(
      */
     private fun remoteModelsToModels(remoteModels: List<RemoteModel>): List<Model> {
         return remoteModels.map { remote ->
-            // Check if any pricing info is available
+            // Check if any pricing info is available (Poe points or USD)
             val hasPricing = remote.min_points != null || remote.points != null ||
-                    remote.input_points_per_1k != null || remote.output_points_per_1k != null
+                    remote.input_points_per_1k != null || remote.output_points_per_1k != null ||
+                    remote.input_price_per_1k != null || remote.output_price_per_1k != null
 
             // Convert thinking config
             val thinkingConfig = convertThinkingConfig(remote.thinking)
@@ -315,11 +316,13 @@ class ModelsCacheManager(
             val temperatureConfig = convertTemperatureConfig(remote.temperature)
 
             if (hasPricing) {
-                val pricing = PoePricing(
+                val pricing = ModelPricing(
                     min_points = remote.min_points,
                     points = remote.points,
                     input_points_per_1k = remote.input_points_per_1k,
-                    output_points_per_1k = remote.output_points_per_1k
+                    output_points_per_1k = remote.output_points_per_1k,
+                    input_price_per_1k = remote.input_price_per_1k,
+                    output_price_per_1k = remote.output_price_per_1k
                 )
                 Model.ComplexModel(
                     name = remote.name,

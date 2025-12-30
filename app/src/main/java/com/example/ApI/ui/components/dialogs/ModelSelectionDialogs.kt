@@ -111,6 +111,7 @@ fun ModelSelectorDialog(
     onRefresh: (() -> Unit)? = null
 ) {
     var customModelName by remember { mutableStateOf("") }
+    var showPricing by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -137,16 +138,33 @@ fun ModelSelectorDialog(
                             fontWeight = FontWeight.Bold
                         )
 
-                        if (onRefresh != null) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Pricing toggle button
                             IconButton(
-                                onClick = onRefresh,
+                                onClick = { showPricing = !showPricing },
                                 modifier = Modifier.size(32.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Refresh models",
-                                    tint = Primary
+                                    imageVector = Icons.Default.AttachMoney,
+                                    contentDescription = if (showPricing) "Hide pricing" else "Show pricing",
+                                    tint = if (showPricing) Primary else OnSurface.copy(alpha = 0.5f)
                                 )
+                            }
+
+                            if (onRefresh != null) {
+                                IconButton(
+                                    onClick = onRefresh,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Refresh models",
+                                        tint = Primary
+                                    )
+                                }
                             }
                         }
                     }
@@ -227,17 +245,19 @@ fun ModelSelectorDialog(
                                         color = OnSurface,
                                         style = MaterialTheme.typography.bodyLarge
                                     )
-                                    // Display pricing information for Poe models
-                                    model.pricing?.let { pricing ->
-                                        PricingText(pricing)
-                                    } ?: run {
-                                        // Fallback to legacy min_points if no pricing object
-                                        model.min_points?.let { points ->
-                                            Text(
-                                                text = "Min points: $points",
-                                                color = OnSurface.copy(alpha = 0.7f),
-                                                style = MaterialTheme.typography.bodySmall
-                                            )
+                                    // Display pricing information when toggle is enabled
+                                    if (showPricing) {
+                                        model.pricing?.let { pricing ->
+                                            PricingText(pricing)
+                                        } ?: run {
+                                            // Fallback to legacy min_points if no pricing object
+                                            model.min_points?.let { points ->
+                                                Text(
+                                                    text = "Min points: $points",
+                                                    color = OnSurface.copy(alpha = 0.7f),
+                                                    style = MaterialTheme.typography.bodySmall
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -252,15 +272,35 @@ fun ModelSelectorDialog(
 }
 
 /**
- * Displays pricing information for Poe models.
- * Supports three pricing types:
- * - Fixed pricing: exact points per message
- * - Token-based pricing: points per 1k input/output tokens
+ * Displays pricing information for models.
+ * Supports pricing types:
+ * - USD pricing: price per 1k input/output tokens
+ * - Fixed pricing: exact points per message (Poe)
+ * - Token-based pricing: points per 1k input/output tokens (Poe)
  * - Legacy pricing: minimum points (deprecated)
  */
 @Composable
-private fun PricingText(pricing: PoePricing) {
+private fun PricingText(pricing: ModelPricing) {
     when {
+        // USD pricing (price per 1k tokens)
+        pricing.hasUsdPricing -> {
+            Column {
+                pricing.input_price_per_1k?.let { inputPrice ->
+                    Text(
+                        text = "Input: ${formatPrice(inputPrice)}/1k tokens",
+                        color = OnSurface.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                pricing.output_price_per_1k?.let { outputPrice ->
+                    Text(
+                        text = "Output: ${formatPrice(outputPrice)}/1k tokens",
+                        color = OnSurface.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
         // Fixed pricing (exact points per message)
         pricing.isFixedPricing -> {
             Text(
@@ -269,7 +309,7 @@ private fun PricingText(pricing: PoePricing) {
                 style = MaterialTheme.typography.bodySmall
             )
         }
-        // Token-based pricing (points per 1k tokens)
+        // Token-based pricing (points per 1k tokens - Poe)
         pricing.isTokenBasedPricing -> {
             Column {
                 pricing.input_points_per_1k?.let { inputPoints ->
@@ -296,6 +336,21 @@ private fun PricingText(pricing: PoePricing) {
                 style = MaterialTheme.typography.bodySmall
             )
         }
+    }
+}
+
+/**
+ * Formats USD price value with dollar sign
+ */
+private fun formatPrice(price: Double): String {
+    return if (price < 0.001) {
+        String.format("$%.5f", price)
+    } else if (price < 0.01) {
+        String.format("$%.4f", price)
+    } else if (price == price.toLong().toDouble()) {
+        String.format("$%.0f", price)
+    } else {
+        String.format("$%.4f", price)
     }
 }
 

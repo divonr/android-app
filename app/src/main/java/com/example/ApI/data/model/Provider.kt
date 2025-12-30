@@ -13,19 +13,23 @@ data class Provider(
 )
 
 /**
- * Represents Poe pricing information for a model.
- * Can be either fixed (exact points per message) or token-based (points per 1k tokens).
+ * Represents pricing information for a model.
+ * Supports both Poe points-based pricing and USD pricing.
  */
 @Serializable
-data class PoePricing(
+data class ModelPricing(
     // Fixed pricing - exact points per message (mutually exclusive with token-based)
     val points: Int? = null,
     // Legacy minimum points field (deprecated)
     val min_points: Int? = null,
-    // Token-based pricing - points per 1000 input tokens
+    // Token-based pricing - points per 1000 input tokens (Poe)
     val input_points_per_1k: Double? = null,
-    // Token-based pricing - points per 1000 output tokens
-    val output_points_per_1k: Double? = null
+    // Token-based pricing - points per 1000 output tokens (Poe)
+    val output_points_per_1k: Double? = null,
+    // USD pricing - price per 1000 input tokens
+    val input_price_per_1k: Double? = null,
+    // USD pricing - price per 1000 output tokens
+    val output_price_per_1k: Double? = null
 ) {
     /**
      * Returns true if this is fixed pricing (exact points per message)
@@ -34,10 +38,16 @@ data class PoePricing(
         get() = points != null
 
     /**
-     * Returns true if this is token-based pricing
+     * Returns true if this is token-based Poe points pricing
      */
     val isTokenBasedPricing: Boolean
         get() = input_points_per_1k != null || output_points_per_1k != null
+
+    /**
+     * Returns true if this has USD pricing
+     */
+    val hasUsdPricing: Boolean
+        get() = input_price_per_1k != null || output_price_per_1k != null
 
     /**
      * Returns true if this uses the legacy min_points field
@@ -49,8 +59,11 @@ data class PoePricing(
      * Returns true if any pricing information is available
      */
     val hasPricing: Boolean
-        get() = points != null || min_points != null || isTokenBasedPricing
+        get() = points != null || min_points != null || isTokenBasedPricing || hasUsdPricing
 }
+
+// Type alias for backwards compatibility
+typealias PoePricing = ModelPricing
 
 @Serializable
 sealed class Model {

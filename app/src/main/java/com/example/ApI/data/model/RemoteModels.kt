@@ -27,6 +27,12 @@ data class RemoteModel(
     // Token-based pricing - points per 1000 output tokens
     @kotlinx.serialization.SerialName("1k_output_points")
     val output_points_per_1k: Double? = null,
+    // USD pricing - price per 1000 input tokens
+    @kotlinx.serialization.SerialName("1k_input_price")
+    val input_price_per_1k: Double? = null,
+    // USD pricing - price per 1000 output tokens
+    @kotlinx.serialization.SerialName("1k_output_price")
+    val output_price_per_1k: Double? = null,
     // Thinking budget configuration
     val thinking: RemoteThinkingConfig? = null,
     // Temperature configuration
