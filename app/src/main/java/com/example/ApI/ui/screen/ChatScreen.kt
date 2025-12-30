@@ -412,11 +412,14 @@ fun ChatScreen(
                 )
             }
 
-            // Model Selector
+            // Model Selector with provider tabs
             if (uiState.showModelSelector) {
                 ModelSelectorDialog(
-                    models = uiState.currentProvider?.models ?: emptyList(),
-                    onModelSelected = { viewModel.selectModel(it) },
+                    availableProviders = uiState.availableProviders,
+                    currentProvider = uiState.currentProvider,
+                    onModelSelected = { provider, modelName ->
+                        viewModel.selectModelWithProvider(provider, modelName)
+                    },
                     onDismiss = { viewModel.hideModelSelector() },
                     onRefresh = { viewModel.refreshModels() }
                 )

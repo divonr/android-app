@@ -593,6 +593,8 @@ class ChatViewModel(
     // ==================== Provider/Model Selection (delegated to ModelSelectionManager) ====================
     fun selectProvider(provider: Provider) = modelSelectionManager.selectProvider(provider)
     fun selectModel(modelName: String) = modelSelectionManager.selectModel(modelName)
+    fun selectModelWithProvider(provider: Provider, modelName: String) =
+        modelSelectionManager.selectModelWithProvider(provider, modelName)
     fun showProviderSelector() = modelSelectionManager.showProviderSelector()
     fun hideProviderSelector() = modelSelectionManager.hideProviderSelector()
     fun showModelSelector() = modelSelectionManager.showModelSelector()

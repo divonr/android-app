@@ -77,6 +77,38 @@ class ModelSelectionManager(
     }
 
     /**
+     * Select a model with explicit provider.
+     * Used when selecting from the model dialog with provider tabs.
+     * This ensures we use the exact provider shown in the tab, not a guess based on model name.
+     */
+    fun selectModelWithProvider(provider: Provider, modelName: String) {
+        val updatedSettings = deps.appSettings.value.copy(
+            selected_provider = provider.provider,
+            selected_model = modelName
+        )
+
+        deps.repository.saveAppSettings(updatedSettings)
+        updateAppSettings(updatedSettings)
+
+        val webSearchSupport = getWebSearchSupport(provider.provider, modelName)
+        val webSearchEnabled = when (webSearchSupport) {
+            WebSearchSupport.REQUIRED -> true
+            WebSearchSupport.OPTIONAL -> deps.uiState.value.webSearchEnabled
+            WebSearchSupport.UNSUPPORTED -> false
+        }
+
+        deps.updateUiState(
+            deps.uiState.value.copy(
+                currentProvider = provider,
+                currentModel = modelName,
+                showModelSelector = false,
+                webSearchSupport = webSearchSupport,
+                webSearchEnabled = webSearchEnabled
+            )
+        )
+    }
+
+    /**
      * Show the provider selection dialog.
      */
     fun showProviderSelector() {
