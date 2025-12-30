@@ -600,6 +600,49 @@ class ChatViewModel(
     fun refreshModels() = modelSelectionManager.refreshModels()
     fun refreshAvailableProviders() = modelSelectionManager.refreshAvailableProviders()
 
+    /**
+     * Search for a model by name (case-sensitive) across all available providers and select it.
+     * Prioritizes direct providers over routers (Poe and OpenRouter).
+     * If the model is not found, does nothing.
+     */
+    fun selectModelByName(modelName: String) {
+        val availableProviders = _uiState.value.availableProviders
+
+        // Router providers that should have lower priority
+        val routerProviders = setOf("poe", "openrouter")
+
+        // Search for the model in all providers
+        val matchingProviders = mutableListOf<Pair<Provider, String>>()
+
+        for (provider in availableProviders) {
+            val matchingModel = provider.models.find { model ->
+                model.name == modelName  // Case-sensitive comparison
+            }
+
+            if (matchingModel != null) {
+                matchingProviders.add(provider to matchingModel.name!!)
+            }
+        }
+
+        // If no matching model found, do nothing
+        if (matchingProviders.isEmpty()) {
+            return
+        }
+
+        // Prioritize direct providers over routers
+        val selectedProvider = matchingProviders.firstOrNull { (provider, _) ->
+            !routerProviders.contains(provider.provider.lowercase())
+        }?.first ?: matchingProviders.first().first
+
+        val selectedModelName = matchingProviders.first { (provider, _) ->
+            provider == selectedProvider
+        }.second
+
+        // Select the provider and model
+        selectProvider(selectedProvider)
+        selectModel(selectedModelName)
+    }
+
     // ==================== System Prompt Management (delegated to SystemPromptManager) ====================
     fun updateSystemPrompt(prompt: String) = systemPromptManager.updateSystemPrompt(prompt)
     fun showSystemPromptDialog() = systemPromptManager.showSystemPromptDialog()
