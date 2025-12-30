@@ -269,9 +269,17 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         callback: StreamingCallback
     ): ProviderStreamingResult {
         val fullResponse = StringBuilder()
+        val actualResponseBuilder = StringBuilder()  // Response without thinking content
+        val thoughtsBuilder = StringBuilder()
         var detectedToolCall: ToolCall? = null
         val toolCallBuffer = mutableMapOf<Int, MutableMap<String, Any>>()
         var line: String?
+
+        // Thinking state tracking
+        var thinkingDetected = false
+        var thinkingInProgress = false
+        var thinkingComplete = false
+        var thinkingStartTime: Long = 0
 
         Log.d("TOOL_CALL_DEBUG", "Poe: Starting to read stream...")
 
@@ -294,16 +302,99 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                             val text = eventJson["text"]?.jsonPrimitive?.content
                             if (text != null) {
                                 fullResponse.append(text)
-                                callback.onPartialResponse(text)
+
+                                // Handle thinking detection and extraction
+                                if (!thinkingDetected) {
+                                    // Check if this is the start of thinking
+                                    val currentFull = fullResponse.toString()
+                                    if (currentFull.startsWith("*Thinking...*\n\n")) {
+                                        thinkingDetected = true
+                                        thinkingInProgress = true
+                                        thinkingStartTime = System.currentTimeMillis()
+                                        callback.onThinkingStarted()
+                                        Log.d("POE_THINKING", "Thinking started")
+
+                                        // Extract thinking content from this chunk (after prefix)
+                                        val afterPrefix = currentFull.removePrefix("*Thinking...*\n\n")
+                                        if (afterPrefix.isNotBlank()) {
+                                            val (thinking, response) = parseThinkingChunk(afterPrefix)
+                                            if (thinking.isNotBlank()) {
+                                                thoughtsBuilder.append(thinking)
+                                                callback.onThinkingPartial(thinking)
+                                            }
+                                            if (response.isNotBlank()) {
+                                                thinkingInProgress = false
+                                                thinkingComplete = true
+                                                completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                                                actualResponseBuilder.append(response)
+                                                callback.onPartialResponse(response)
+                                            }
+                                        }
+                                    } else {
+                                        // No thinking, regular response
+                                        actualResponseBuilder.append(text)
+                                        callback.onPartialResponse(text)
+                                    }
+                                } else if (thinkingInProgress) {
+                                    // Continue processing thinking content
+                                    val (thinking, response) = parseThinkingChunk(text)
+                                    if (thinking.isNotBlank()) {
+                                        thoughtsBuilder.append(thinking)
+                                        callback.onThinkingPartial(thinking)
+                                    }
+                                    if (response.isNotBlank()) {
+                                        thinkingInProgress = false
+                                        thinkingComplete = true
+                                        completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                                        Log.d("POE_THINKING", "Thinking complete, duration: ${(System.currentTimeMillis() - thinkingStartTime) / 1000f}s")
+                                        actualResponseBuilder.append(response)
+                                        callback.onPartialResponse(response)
+                                    }
+                                } else {
+                                    // Thinking complete, just response content
+                                    actualResponseBuilder.append(text)
+                                    callback.onPartialResponse(text)
+                                }
                             }
                         }
                         "replace_response" -> {
                             val eventJson = json.parseToJsonElement(dataContent).jsonObject
                             val replacementText = eventJson["text"]?.jsonPrimitive?.content
                             if (replacementText != null && replacementText.isNotBlank()) {
+                                // Reset all state on replace_response
                                 fullResponse.clear()
                                 fullResponse.append(replacementText)
-                                callback.onPartialResponse(replacementText)
+                                actualResponseBuilder.clear()
+                                thoughtsBuilder.clear()
+                                thinkingDetected = false
+                                thinkingInProgress = false
+                                thinkingComplete = false
+                                thinkingStartTime = 0
+                                // Re-process as if it's a fresh chunk
+                                if (replacementText.startsWith("*Thinking...*\n\n")) {
+                                    thinkingDetected = true
+                                    thinkingInProgress = true
+                                    thinkingStartTime = System.currentTimeMillis()
+                                    callback.onThinkingStarted()
+                                    val afterPrefix = replacementText.removePrefix("*Thinking...*\n\n")
+                                    if (afterPrefix.isNotBlank()) {
+                                        val (thinking, response) = parseThinkingChunk(afterPrefix)
+                                        if (thinking.isNotBlank()) {
+                                            thoughtsBuilder.append(thinking)
+                                            callback.onThinkingPartial(thinking)
+                                        }
+                                        if (response.isNotBlank()) {
+                                            thinkingInProgress = false
+                                            thinkingComplete = true
+                                            completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                                            actualResponseBuilder.append(response)
+                                            callback.onPartialResponse(response)
+                                        }
+                                    }
+                                } else {
+                                    actualResponseBuilder.append(replacementText)
+                                    callback.onPartialResponse(replacementText)
+                                }
                             }
                         }
                         "json" -> {
@@ -396,14 +487,70 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         reader.close()
         connection.disconnect()
 
+        // Complete thinking phase if still in progress
+        if (thinkingInProgress) {
+            completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+            Log.d("POE_THINKING", "Thinking completed at stream end")
+        }
+
+        // Calculate thinking duration if thinking occurred
+        val thinkingDuration = if (thinkingDetected && thinkingStartTime > 0) {
+            (System.currentTimeMillis() - thinkingStartTime) / 1000f
+        } else null
+
+        // Use actualResponseBuilder for the response (without thinking prefix/blockquotes)
+        val finalResponse = if (thinkingDetected) {
+            actualResponseBuilder.toString()
+        } else {
+            fullResponse.toString()
+        }
+
         return when {
             detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
                 toolCall = detectedToolCall!!,
-                precedingText = fullResponse.toString()
+                precedingText = actualResponseBuilder.toString(),
+                thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() },
+                thinkingDurationSeconds = thinkingDuration
             )
-            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(fullResponse.toString())
+            finalResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
+                fullText = finalResponse,
+                thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() },
+                thinkingDurationSeconds = thinkingDuration
+            )
             else -> ProviderStreamingResult.Error("Empty response from Poe")
         }
+    }
+
+    /**
+     * Parse a chunk of text to separate thinking content (blockquotes) from response content.
+     * @return Pair of (thinkingContent, responseContent)
+     */
+    private fun parseThinkingChunk(text: String): Pair<String, String> {
+        val lines = text.lines()
+        val thinkingLines = mutableListOf<String>()
+        val responseLines = mutableListOf<String>()
+        var foundNonBlockquote = false
+
+        for (line in lines) {
+            if (!foundNonBlockquote && (line.startsWith(">") || line.isBlank())) {
+                // Still in thinking section - strip the > prefix
+                val cleanedLine = when {
+                    line.startsWith("> ") -> line.removePrefix("> ")
+                    line.startsWith(">") -> line.removePrefix(">")
+                    else -> line
+                }
+                thinkingLines.add(cleanedLine)
+            } else if (line.isNotBlank()) {
+                // First non-blank, non-blockquote line - transition to response
+                foundNonBlockquote = true
+                responseLines.add(line)
+            } else if (foundNonBlockquote) {
+                // Blank line after we've started response
+                responseLines.add(line)
+            }
+        }
+
+        return Pair(thinkingLines.joinToString("\n"), responseLines.joinToString("\n"))
     }
 
     private fun buildMessages(
