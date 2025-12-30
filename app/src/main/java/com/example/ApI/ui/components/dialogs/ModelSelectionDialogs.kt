@@ -25,88 +25,6 @@ import com.example.ApI.data.model.*
 import com.example.ApI.ui.theme.*
 import kotlinx.coroutines.launch
 
-@Composable
-fun ProviderSelectorDialog(
-    providers: List<Provider>,
-    onProviderSelected: (Provider) -> Unit,
-    onDismiss: () -> Unit,
-    onRefresh: (() -> Unit)? = null
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-            Surface(
-                shape = MaterialTheme.shapes.medium,
-                color = Surface
-            ) {
-                Column(
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .widthIn(max = 300.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "בחירת ספק API",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = OnSurface,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        if (onRefresh != null) {
-                            IconButton(
-                                onClick = onRefresh,
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Refresh models",
-                                    tint = Primary
-                                )
-                            }
-                        }
-                    }
-
-                    LazyColumn(
-                        modifier = Modifier.heightIn(max = 400.dp)
-                    ) {
-                        items(providers) { provider ->
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onProviderSelected(provider) },
-                                color = Surface
-                            ) {
-                                Text(
-                                    text = stringResource(id = when(provider.provider) {
-                                        "openai" -> R.string.provider_openai
-                                        "poe" -> R.string.provider_poe
-                                        "google" -> R.string.provider_google
-                                        "anthropic" -> R.string.provider_anthropic
-                                        "cohere" -> R.string.provider_cohere
-                                        "openrouter" -> R.string.provider_openrouter
-                                        else -> R.string.provider_openai
-                                    }),
-                                    color = OnSurface,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier
-                                        .padding(16.dp)
-                                        .fillMaxWidth()
-                                )
-                            }
-                            HorizontalDivider(color = OnSurface.copy(alpha = 0.2f))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 /**
  * Model selection dialog with provider tabs and favorites.
  * Shows tabs for all available providers (those with active API keys),
@@ -140,18 +58,15 @@ fun ModelSelectorDialog(
     var showPricing by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
-    // Reverse providers for RTL display (rightmost = first)
-    val reversedProviders = remember(availableProviders) { availableProviders.reversed() }
-
     // Total pages = star tab (1) + providers
-    val totalPages = reversedProviders.size + 1
+    val totalPages = availableProviders.size + 1
 
     // Find the initial page index based on current provider
-    // Page 0 = star tab, Page 1+ = providers (reversed)
-    val initialPageIndex = remember(currentProvider, reversedProviders) {
+    // Page 0 = star tab, Page 1+ = providers
+    val initialPageIndex = remember(currentProvider, availableProviders) {
         if (currentProvider == null) 0
         else {
-            val providerIndex = reversedProviders.indexOfFirst { it.provider == currentProvider.provider }
+            val providerIndex = availableProviders.indexOfFirst { it.provider == currentProvider.provider }
             if (providerIndex >= 0) providerIndex + 1 else 1
         }
     }
@@ -246,13 +161,13 @@ fun ModelSelectorDialog(
                     )
 
                     // Use custom model button - uses the currently viewed provider (not star tab)
-                    if (customModelName.isNotBlank() && reversedProviders.isNotEmpty()) {
+                    if (customModelName.isNotBlank() && availableProviders.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         // If on star tab (page 0), use first provider; otherwise use current provider
                         val viewedProvider = if (pagerState.currentPage == 0) {
-                            reversedProviders.firstOrNull()
+                            availableProviders.firstOrNull()
                         } else {
-                            reversedProviders.getOrNull(pagerState.currentPage - 1)
+                            availableProviders.getOrNull(pagerState.currentPage - 1)
                         }
                         Button(
                             onClick = {
@@ -278,7 +193,7 @@ fun ModelSelectorDialog(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     // Provider tabs - only show if there are providers
-                    if (reversedProviders.isNotEmpty()) {
+                    if (availableProviders.isNotEmpty()) {
                         // Tabs in RTL order (star first on right, then providers)
                         ScrollableTabRow(
                             selectedTabIndex = pagerState.currentPage,
@@ -306,8 +221,8 @@ fun ModelSelectorDialog(
                                 unselectedContentColor = OnSurface.copy(alpha = 0.6f)
                             )
 
-                            // Provider tabs (reversed for RTL)
-                            reversedProviders.forEachIndexed { index, provider ->
+                            // Provider tabs
+                            availableProviders.forEachIndexed { index, provider ->
                                 Tab(
                                     selected = pagerState.currentPage == index + 1,
                                     onClick = {
@@ -347,7 +262,7 @@ fun ModelSelectorDialog(
                                 )
                             } else {
                                 // Provider page
-                                val provider = reversedProviders[pageIndex - 1]
+                                val provider = availableProviders[pageIndex - 1]
                                 ModelListForProvider(
                                     provider = provider,
                                     showPricing = showPricing,

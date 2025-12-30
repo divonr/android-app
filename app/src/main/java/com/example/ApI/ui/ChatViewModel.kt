@@ -595,8 +595,6 @@ class ChatViewModel(
     fun selectModel(modelName: String) = modelSelectionManager.selectModel(modelName)
     fun selectModelWithProvider(provider: Provider, modelName: String) =
         modelSelectionManager.selectModelWithProvider(provider, modelName)
-    fun showProviderSelector() = modelSelectionManager.showProviderSelector()
-    fun hideProviderSelector() = modelSelectionManager.hideProviderSelector()
     fun showModelSelector() = modelSelectionManager.showModelSelector()
     fun hideModelSelector() = modelSelectionManager.hideModelSelector()
     fun refreshModels() = modelSelectionManager.refreshModels()

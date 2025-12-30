@@ -403,16 +403,6 @@ fun ChatScreen(
                 )
             }
 
-            // Provider Selector
-            if (uiState.showProviderSelector) {
-                ProviderSelectorDialog(
-                    providers = uiState.availableProviders,
-                    onProviderSelected = { viewModel.selectProvider(it) },
-                    onDismiss = { viewModel.hideProviderSelector() },
-                    onRefresh = { viewModel.refreshModels() }
-                )
-            }
-
             // Model Selector with provider tabs and favorites
             if (uiState.showModelSelector) {
                 ModelSelectorDialog(

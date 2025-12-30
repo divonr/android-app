@@ -26,7 +26,6 @@ data class ChatUiState(
     val thinkingStartTimeByChat: Map<String, Long> = emptyMap(),
     val streamingThoughtsTextByChat: Map<String, String> = emptyMap(),
     val completedThinkingDurationByChat: Map<String, Float> = emptyMap(),
-    val showProviderSelector: Boolean = false,
     val showModelSelector: Boolean = false,
     val showSystemPromptDialog: Boolean = false,
     val showFileSelection: Boolean = false,

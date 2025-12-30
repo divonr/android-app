@@ -43,7 +43,6 @@ class ModelSelectionManager(
             deps.uiState.value.copy(
                 currentProvider = provider,
                 currentModel = firstModel,
-                showProviderSelector = false,
                 webSearchSupport = webSearchSupport,
                 webSearchEnabled = webSearchEnabled
             )
@@ -106,20 +105,6 @@ class ModelSelectionManager(
                 webSearchEnabled = webSearchEnabled
             )
         )
-    }
-
-    /**
-     * Show the provider selection dialog.
-     */
-    fun showProviderSelector() {
-        deps.updateUiState(deps.uiState.value.copy(showProviderSelector = true))
-    }
-
-    /**
-     * Hide the provider selection dialog.
-     */
-    fun hideProviderSelector() {
-        deps.updateUiState(deps.uiState.value.copy(showProviderSelector = false))
     }
 
     /**
