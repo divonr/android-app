@@ -2,9 +2,11 @@
   {
     "provider": "openai",
     "models": [
-      { 
+      {
         "name": "gpt-4o",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.0025,
+        "1k_output_price": 0.01
       },
       {
         "name": "gpt-5.2",
@@ -14,7 +16,9 @@
             "options": ["none", "low", "medium", "high", "xhigh"],
             "default": "medium"
           }
-        }
+        },
+        "1k_input_price": 0.00175,
+        "1k_output_price": 0.014
       },
       {
         "name": "gpt-5.1",
@@ -24,11 +28,15 @@
             "options": ["none", "low", "medium", "high"],
             "default": "none"
           }
-        }
+        },
+        "1k_input_price": 0.00125,
+        "1k_output_price": 0.01
       },
-      { 
+      {
         "name": "gpt-4.1",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.002,
+        "1k_output_price": 0.008
       },
       {
         "name": "o1",
@@ -38,7 +46,9 @@
             "options": ["low", "medium", "high"],
             "default": "medium"
           }
-        }
+        },
+        "1k_input_price": 0.015,
+        "1k_output_price": 0.06
       },
       {
         "name": "o3",
@@ -48,7 +58,9 @@
             "options": ["low", "medium", "high"],
             "default": "medium"
           }
-        }
+        },
+        "1k_input_price": 0.002,
+        "1k_output_price": 0.008
       },
       {
         "name": "o4-mini",
@@ -58,7 +70,9 @@
             "options": ["low", "medium", "high"],
             "default": "medium"
           }
-        }
+        },
+        "1k_input_price": 0.0011,
+        "1k_output_price": 0.0044
       },
       {
         "name": "o4-mini-deep-research",
@@ -68,7 +82,9 @@
             "options": ["low", "medium", "high"],
             "default": "medium"
           }
-        }
+        },
+        "1k_input_price": 0.002,
+        "1k_output_price": 0.008
       }
     ]
   },
@@ -80,35 +96,45 @@
         "temperature": { "min": 0, "max": 1, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
-        }
+        },
+        "1k_input_price": 0.003,
+        "1k_output_price": 0.015
       },
       {
         "name": "claude-opus-4-5",
         "temperature": { "min": 0, "max": 1, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
-        }
+        },
+        "1k_input_price": 0.005,
+        "1k_output_price": 0.025
       },
       {
         "name": "claude-haiku-4-5",
         "temperature": { "min": 0, "max": 1, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
-        }
+        },
+        "1k_input_price": 0.001,
+        "1k_output_price": 0.005
       },
       {
         "name": "claude-sonnet-4-0",
         "temperature": { "min": 0, "max": 1, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
-        }
+        },
+        "1k_input_price": 0.003,
+        "1k_output_price": 0.015
       },
       {
         "name": "claude-3-7-sonnet-latest",
         "temperature": { "min": 0, "max": 1, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 1024, "max": 120000, "default": 10000, "step": 1024, "supports_off": true }
-        }
+        },
+        "1k_input_price": 0.003,
+        "1k_output_price": 0.015
       }
     ]
   },
@@ -123,7 +149,9 @@
             "options": ["minimal", "low", "medium", "high"],
             "default": "high"
           }
-        }
+        },
+        "1k_input_price": 0.0005,
+        "1k_output_price": 0.003
       },
       {
         "name": "gemini-3-pro-preview",
@@ -133,29 +161,39 @@
             "options": ["low", "high"],
             "default": "high"
           }
-        }
+        },
+        "1k_input_price": 0.002,
+        "1k_output_price": 0.012
       },
       {
         "name": "gemini-2.5-flash",
         "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 0, "max": 24576, "default": 8192, "step": 256, "supports_off": true }
-        }
+        },
+        "1k_input_price": 0.0003,
+        "1k_output_price": 0.0025
       },
       {
         "name": "gemini-2.5-pro",
         "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
         "thinking": {
           "continuous": { "min": 128, "max": 32768, "default": 8192, "step": 128, "supports_off": false }
-        }
+        },
+        "1k_input_price": 0.00125,
+        "1k_output_price": 0.01
       },
-      { 
+      {
         "name": "gemini-2.5-flash-lite",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.0001,
+        "1k_output_price": 0.0004
       },
-      { 
+      {
         "name": "gemini-2.0-flash-lite",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.000075,
+        "1k_output_price": 0.0003
       }
     ]
   },
@@ -176,11 +214,11 @@
       { "name": "Grok-4", "1k_input_points": 100, "1k_output_points": 500 },
       { "name": "Grok-4.1-Fast-Reasoning", "1k_input_points": 7, "1k_output_points": 17 },
       { "name": "Grok-Code-Fast-1", "1k_input_points": 7, "1k_output_points": 50 },
-      { "name": "GLM-4.6", "points": 220 },
-      { "name": "GPT-OSS-120B-T", "points": 50 },
+      { "name": "GLM-4.6", "1k_input_points": 6, "1k_output_points": 24 },
+      { "name": "GPT-OSS-120B-T", "1k_input_points": 2, "1k_output_points": 6 },
       { "name": "DeepSeek-V3.2", "1k_input_points": 9, "1k_output_points": 14 },
-      { "name": "DeepSeek-R1", "points": 600 },
-      { "name": "Kimi-K2-Instruct", "points": 200 }
+      { "name": "DeepSeek-R1", "1k_input_points": 12, "1k_output_points": 53 },
+      { "name": "Kimi-K2-Instruct", "1k_input_points": 6, "1k_output_points": 24 }
     ]
   },
   {
@@ -188,68 +226,98 @@
     "models": [
       {
         "name": "command-a-reasoning-08-2025",
-        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
+        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 },
+        "1k_input_price": 0.0025,
+        "1k_output_price": 0.01
       },
-      { 
+      {
         "name": "command-r-plus-08-2024",
-        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
+        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 },
+        "1k_input_price": 0.0025,
+        "1k_output_price": 0.01
       },
-      { 
+      {
         "name": "command-a-vision-07-2025",
-        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
+        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 },
+        "1k_input_price": 0.0025,
+        "1k_output_price": 0.01
       },
-      { 
+      {
         "name": "command-r-08-2024",
-        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
+        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 },
+        "1k_input_price": 0.0005,
+        "1k_output_price": 0.0015
       },
-      { 
+      {
         "name": "command-a-03-2025",
-        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 }
+        "temperature": { "min": 0, "max": 1, "default": 0.3, "step": 0.1 },
+        "1k_input_price": 0.0025,
+        "1k_output_price": 0.01
       }
     ]
   },
   {
     "provider": "openrouter",
     "models": [
-      { 
+      {
         "name": "x-ai/grok-code-fast-1",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.0002,
+        "1k_output_price": 0.0015
       },
-      { 
+      {
         "name": "anthropic/claude-sonnet-4.5",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.003,
+        "1k_output_price": 0.015
       },
-      { 
+      {
         "name": "google/gemini-2.5-flash",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.0003,
+        "1k_output_price": 0.0025
       },
-      { 
+      {
         "name": "openai/gpt-4o",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.0025,
+        "1k_output_price": 0.01
       },
-      { 
+      {
         "name": "anthropic/claude-opus-4.5",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.005,
+        "1k_output_price": 0.025
       },
-      { 
+      {
         "name": "google/gemini-3-pro-preview",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.002,
+        "1k_output_price": 0.012
       },
-      { 
+      {
         "name": "google/gemini-2.5-pro",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.00125,
+        "1k_output_price": 0.01
       },
-      { 
+      {
         "name": "x-ai/grok-4-fast",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.0002,
+        "1k_output_price": 0.0005
       },
-      { 
+      {
         "name": "minimax/minimax-m2",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.0003,
+        "1k_output_price": 0.0012
       },
-      { 
+      {
         "name": "openai/gpt-oss-120b",
-        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 }
+        "temperature": { "min": 0, "max": 2, "default": 1.0, "step": 0.1 },
+        "1k_input_price": 0.0001,
+        "1k_output_price": 0.0003
       }
     ]
   }
