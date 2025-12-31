@@ -16,6 +16,8 @@ data class RemoteProviderModels(
 @Serializable
 data class RemoteModel(
     val name: String,
+    // Release order for sorting (1 = oldest, higher = newer)
+    val release_order: Int? = null,
     // Legacy field - minimum points (deprecated, use pricing fields below)
     val min_points: Int? = null,
     // New pricing fields for Poe:

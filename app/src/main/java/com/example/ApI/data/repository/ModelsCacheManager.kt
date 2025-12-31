@@ -329,13 +329,15 @@ class ModelsCacheManager(
                     min_points = remote.min_points,
                     pricing = pricing,
                     thinkingConfig = thinkingConfig,
-                    temperatureConfig = temperatureConfig
+                    temperatureConfig = temperatureConfig,
+                    releaseOrder = remote.release_order
                 )
             } else {
                 Model.SimpleModel(
                     name = remote.name,
                     thinkingConfig = thinkingConfig,
-                    temperatureConfig = temperatureConfig
+                    temperatureConfig = temperatureConfig,
+                    releaseOrder = remote.release_order
                 )
             }
         }

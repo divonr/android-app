@@ -9,6 +9,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +25,15 @@ import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.theme.*
 import kotlinx.coroutines.launch
+
+/**
+ * Sort options for model list
+ */
+enum class ModelSortOption {
+    RECOMMENDED,  // Default order from the JSON file
+    BY_PRICE,     // Sort by price (cheapest first)
+    NEWEST_FIRST  // Sort by release date (newest first)
+}
 
 /**
  * Model selection dialog with provider tabs and favorites.
@@ -56,6 +66,8 @@ fun ModelSelectorDialog(
 ) {
     var customModelName by remember { mutableStateOf("") }
     var showPricing by remember { mutableStateOf(false) }
+    var sortOption by remember { mutableStateOf(ModelSortOption.RECOMMENDED) }
+    var showSortMenu by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     // Total pages = star tab (1) + providers
@@ -116,6 +128,61 @@ fun ModelSelectorDialog(
                                     contentDescription = if (showPricing) "Hide pricing" else "Show pricing",
                                     tint = if (showPricing) Primary else OnSurface.copy(alpha = 0.5f)
                                 )
+                            }
+
+                            // Sort button with dropdown menu
+                            Box {
+                                IconButton(
+                                    onClick = { showSortMenu = true },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Sort,
+                                        contentDescription = "Sort models",
+                                        tint = if (sortOption != ModelSortOption.RECOMMENDED) Primary else OnSurface.copy(alpha = 0.5f)
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showSortMenu,
+                                    onDismissRequest = { showSortMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("לפי מחיר") },
+                                        onClick = {
+                                            sortOption = ModelSortOption.BY_PRICE
+                                            showSortMenu = false
+                                        },
+                                        leadingIcon = {
+                                            if (sortOption == ModelSortOption.BY_PRICE) {
+                                                Icon(Icons.Default.Check, contentDescription = null, tint = Primary)
+                                            }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("מהחדש לישן") },
+                                        onClick = {
+                                            sortOption = ModelSortOption.NEWEST_FIRST
+                                            showSortMenu = false
+                                        },
+                                        leadingIcon = {
+                                            if (sortOption == ModelSortOption.NEWEST_FIRST) {
+                                                Icon(Icons.Default.Check, contentDescription = null, tint = Primary)
+                                            }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("מומלץ") },
+                                        onClick = {
+                                            sortOption = ModelSortOption.RECOMMENDED
+                                            showSortMenu = false
+                                        },
+                                        leadingIcon = {
+                                            if (sortOption == ModelSortOption.RECOMMENDED) {
+                                                Icon(Icons.Default.Check, contentDescription = null, tint = Primary)
+                                            }
+                                        }
+                                    )
+                                }
                             }
 
                             if (onRefresh != null) {
@@ -267,6 +334,7 @@ fun ModelSelectorDialog(
                                     provider = provider,
                                     showPricing = showPricing,
                                     starredModels = starredModels,
+                                    sortOption = sortOption,
                                     onModelSelected = { modelName ->
                                         onModelSelected(provider, modelName)
                                     },
@@ -416,6 +484,46 @@ private fun getProviderDisplayName(providerKey: String): String {
 }
 
 /**
+ * Compares two models by price.
+ * Returns negative if a is cheaper, positive if b is cheaper, 0 if equal.
+ * Output price is more important than input price in case of conflict.
+ */
+private fun compareByPrice(a: Model, b: Model): Int {
+    val aPricing = a.pricing
+    val bPricing = b.pricing
+
+    // Get input prices (use points if USD not available)
+    val aInput = aPricing?.input_price_per_1k ?: aPricing?.input_points_per_1k ?: Double.MAX_VALUE
+    val bInput = bPricing?.input_price_per_1k ?: bPricing?.input_points_per_1k ?: Double.MAX_VALUE
+
+    // Get output prices (use points if USD not available)
+    val aOutput = aPricing?.output_price_per_1k ?: aPricing?.output_points_per_1k ?: Double.MAX_VALUE
+    val bOutput = bPricing?.output_price_per_1k ?: bPricing?.output_points_per_1k ?: Double.MAX_VALUE
+
+    // Compare: output is more important than input
+    return when {
+        aInput < bInput && aOutput < bOutput -> -1  // a is cheaper
+        aInput > bInput && aOutput > bOutput -> 1   // b is cheaper
+        aInput == bInput && aOutput < bOutput -> -1 // same input, a cheaper output
+        aInput == bInput && aOutput > bOutput -> 1  // same input, b cheaper output
+        aOutput < bOutput -> -1  // output wins in conflict: a cheaper output
+        aOutput > bOutput -> 1   // output wins in conflict: b cheaper output
+        else -> 0  // equal
+    }
+}
+
+/**
+ * Sorts the model list based on the selected sort option
+ */
+private fun sortModels(models: List<Model>, sortOption: ModelSortOption): List<Model> {
+    return when (sortOption) {
+        ModelSortOption.RECOMMENDED -> models  // Keep original order
+        ModelSortOption.BY_PRICE -> models.sortedWith { a, b -> compareByPrice(a, b) }
+        ModelSortOption.NEWEST_FIRST -> models.sortedByDescending { it.releaseOrder ?: 0 }
+    }
+}
+
+/**
  * Model list for a single provider page
  */
 @Composable
@@ -423,13 +531,18 @@ private fun ModelListForProvider(
     provider: Provider,
     showPricing: Boolean,
     starredModels: List<StarredModel>,
+    sortOption: ModelSortOption,
     onModelSelected: (String) -> Unit,
     onToggleStar: (String) -> Unit
 ) {
+    val sortedModels = remember(provider.models, sortOption) {
+        sortModels(provider.models, sortOption)
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxHeight()
     ) {
-        items(provider.models) { model ->
+        items(sortedModels) { model ->
             val modelName = model.name ?: model.toString()
             val isStarred = starredModels.any {
                 it.provider == provider.provider && it.modelName == modelName
