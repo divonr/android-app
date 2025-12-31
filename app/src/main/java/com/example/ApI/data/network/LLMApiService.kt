@@ -33,6 +33,7 @@ class LLMApiService(private val context: Context) {
     private val poeProvider by lazy { PoeProvider(context) }
     private val cohereProvider by lazy { CohereProvider(context) }
     private val openRouterProvider by lazy { OpenRouterProvider(context) }
+    private val llmStatsProvider by lazy { LLMStatsProvider(context) }
 
     /**
      * Send a message to the specified LLM provider.
@@ -91,6 +92,10 @@ class LLMApiService(private val context: Context) {
                 webSearchEnabled, enabledTools, thinkingBudget, temperature, callback
             )
             "openrouter" -> openRouterProvider.sendMessage(
+                provider, modelName, messages, systemPrompt, apiKey,
+                webSearchEnabled, enabledTools, thinkingBudget, temperature, callback
+            )
+            "llmstats" -> llmStatsProvider.sendMessage(
                 provider, modelName, messages, systemPrompt, apiKey,
                 webSearchEnabled, enabledTools, thinkingBudget, temperature, callback
             )

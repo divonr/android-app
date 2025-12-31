@@ -391,6 +391,12 @@ class ModelsCacheManager(
         Model.SimpleModel("anthropic/claude-3.5-sonnet")
     )
 
+    val defaultLLMStatsModels = listOf(
+        Model.SimpleModel("gpt-5-nano"),
+        Model.SimpleModel("gpt-4o-mini"),
+        Model.SimpleModel("claude-3-haiku-20240307")
+    )
+
     // ============ Provider Building ============
 
     /**
@@ -549,6 +555,24 @@ class ModelsCacheManager(
                     response_format = "server_sent_events"
                 ),
                 upload_files_request = null,  // OpenRouter uses inline base64 for images
+                upload_files_response_important_fields = null
+            ),
+            Provider(
+                provider = "llmstats",
+                models = getModelsForProvider("llmstats", defaultLLMStatsModels),
+                request = ApiRequest(
+                    request_type = "POST",
+                    base_url = "https://api.zeroeval.com/v1/chat/completions",
+                    headers = mapOf(
+                        "Authorization" to "Bearer {LLMSTATS_API_KEY_HERE}",
+                        "Content-Type" to "application/json"
+                    ),
+                    body = null
+                ),
+                response_important_fields = ResponseFields(
+                    response_format = "server_sent_events"
+                ),
+                upload_files_request = null,
                 upload_files_response_important_fields = null
             )
         )
