@@ -525,11 +525,7 @@ class LLMStatsProvider(context: Context) : BaseProvider(context) {
                         put("name", toolSpec.name)
                         put("description", toolSpec.description)
                         if (toolSpec.parameters != null) {
-                            put("parameters", buildJsonObject {
-                                put("type", "object")
-                                put("properties", toolSpec.parameters)
-                                put("required", buildJsonArray {})
-                            })
+                            put("parameters", toolSpec.parameters)
                         } else {
                             put("parameters", buildJsonObject {
                                 put("type", "object")
