@@ -38,6 +38,8 @@
     <string name="provider_anthropic">Anthropic</string>
     <string name="provider_cohere">Cohere</string>
     <string name="provider_openrouter">OpenRouter</string>
+    <string name="provider_llmstats">LLM Stats</string>
+    <string name="llmstats_model">gpt-5-nano via LLM Stats</string>
 
     <!-- Permissions and errors -->
     <string name="camera_permission_required">נדרשת הרשאת מצלמה</string>

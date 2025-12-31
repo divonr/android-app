@@ -89,6 +89,7 @@ fun AddApiKeyDialog(
                                                 "anthropic" -> R.string.provider_anthropic
                                                 "cohere" -> R.string.provider_cohere
                                                 "openrouter" -> R.string.provider_openrouter
+                                                "llmstats" -> R.string.provider_llmstats
                                                 else -> R.string.provider_openai
                                             }),
                                             color = OnSurface

@@ -483,6 +483,10 @@ private fun ApiKeyItem(
             Color.White.copy(alpha = 0.35f),
             Color.White.copy(alpha = 0.20f)
         )
+        "llmstats" -> listOf(
+            Color(0xFF0EA5E9).copy(alpha = 0.25f),
+            Color(0xFF0EA5E9).copy(alpha = 0.15f)
+        )
         else -> listOf(
             SurfaceVariant,
             SurfaceVariant

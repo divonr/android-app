@@ -264,6 +264,7 @@ fun NormalModeTopBar(
                         "poe" -> R.string.provider_poe
                         "cohere" -> R.string.provider_cohere
                         "openrouter" -> R.string.provider_openrouter
+                        "llmstats" -> R.string.provider_llmstats
                         else -> R.string.provider_openai
                     })
                 } ?: "",
