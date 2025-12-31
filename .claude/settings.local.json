@@ -27,7 +27,8 @@
       "Bash(wc:*)",
       "Bash(./gradlew compileDebugKotlin:*)",
       "Bash(ls:*)",
-      "Bash(./gradlew clean:*)"
+      "Bash(./gradlew clean:*)",
+      "WebFetch(domain:docs.zeroeval.com)"
     ],
     "deny": [],
     "ask": []
