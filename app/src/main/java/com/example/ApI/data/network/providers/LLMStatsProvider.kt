@@ -158,7 +158,7 @@ class LLMStatsProvider(context: Context) : BaseProvider(context) {
             }
 
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
-            parseStreamingResponse(reader, connection, callback, thinkingBudget)
+            parseStreamingResponse(reader, connection, callback, thinkingBudget, enabledTools)
         } catch (e: Exception) {
             ProviderStreamingResult.Error("LLM Stats request failed: ${e.message}")
         }
@@ -168,7 +168,8 @@ class LLMStatsProvider(context: Context) : BaseProvider(context) {
         reader: BufferedReader,
         connection: HttpURLConnection,
         callback: StreamingCallback,
-        thinkingBudget: ThinkingBudgetValue
+        thinkingBudget: ThinkingBudgetValue,
+        enabledTools: List<ToolSpecification>
     ): ProviderStreamingResult {
         val fullResponse = StringBuilder()
         val reasoningBuilder = StringBuilder()
@@ -366,7 +367,14 @@ class LLMStatsProvider(context: Context) : BaseProvider(context) {
                 thinkingDurationSeconds = thinkingDuration,
                 thoughtsStatus = thoughtsStatus
             )
-            else -> ProviderStreamingResult.Error("Empty response from LLM Stats")
+            else -> {
+                // Check if tools were sent in the request
+                if (enabledTools.isNotEmpty()) {
+                    ProviderStreamingResult.Error("LLM_STATS_EMPTY_RESPONSE_WITH_TOOLS")
+                } else {
+                    ProviderStreamingResult.Error("Empty response from LLM Stats")
+                }
+            }
         }
     }
 

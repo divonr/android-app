@@ -99,6 +99,13 @@ class StreamingEventManager(
                     "בחרו מודל שתומך בתמונה, כמו command-a-vision-07-2025",
                     Toast.LENGTH_LONG
                 ).show()
+            } else if (event.error == "LLM_STATS_EMPTY_RESPONSE_WITH_TOOLS") {
+                // LLM Stats empty response with tools - show Hebrew toast
+                Toast.makeText(
+                    deps.context,
+                    "חזרה תשובה ריקה. נסו לכבות את ה-MCPs או להחליף מודל.",
+                    Toast.LENGTH_LONG
+                ).show()
             } else {
                 deps.updateUiState(
                     deps.uiState.value.copy(
