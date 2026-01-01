@@ -509,9 +509,13 @@ fun ToolToggleButton(
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier) {
-        val enabledToolIds = remember(uiState.currentChat) {
+        // Get enabled tools - update when excluded tools change to ensure reactivity
+        val enabledToolIds = remember(uiState.currentChat, uiState.excludedToolIds) {
             viewModel.getEnabledToolIds()
         }
+
+        // Button is "active" (purple) when some tools are excluded
+        // Button is "off" (gray) when all tools are enabled (none excluded)
         val hasExcludedTools = uiState.excludedToolIds.isNotEmpty()
 
         Surface(
