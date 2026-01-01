@@ -73,7 +73,10 @@ data class ChatUiState(
     val thinkingBudgetValue: ThinkingBudgetValue = ThinkingBudgetValue.None,
     // Temperature state
     val showTemperaturePopup: Boolean = false,
-    val temperatureValue: Float? = null // null means use API default (don't send parameter)
+    val temperatureValue: Float? = null, // null means use API default (don't send parameter)
+    // Tool toggle state
+    val showToolToggleDropdown: Boolean = false,
+    val excludedToolIds: List<String> = emptyList() // Tools excluded via chat screen shortcut
 ) {
     // Helper functions for per-chat state checks
     fun isLoadingChat(chatId: String): Boolean = chatId in loadingChatIds

@@ -370,6 +370,14 @@ fun QuickSettingsBar(
 
                 Spacer(modifier = Modifier.width(12.dp))
 
+                // Tool Toggle Button
+                ToolToggleButton(
+                    uiState = uiState,
+                    viewModel = viewModel
+                )
+
+                Spacer(modifier = Modifier.width(12.dp))
+
                 // Text Direction Toggle Button
                 TextDirectionButton(
                     textDirectionMode = uiState.textDirectionMode,
@@ -487,6 +495,50 @@ fun TemperatureButton(
             currentValue = uiState.temperatureValue,
             onValueChange = { viewModel.setTemperatureValue(it) },
             onDismiss = { viewModel.hideTemperaturePopup() }
+        )
+    }
+}
+
+/**
+ * Tool toggle button with dropdown menu
+ */
+@Composable
+fun ToolToggleButton(
+    uiState: ChatUiState,
+    viewModel: ChatViewModel,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier) {
+        val enabledToolIds = remember(uiState.currentChat) {
+            viewModel.getEnabledToolIds()
+        }
+        val hasExcludedTools = uiState.excludedToolIds.isNotEmpty()
+
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = if (hasExcludedTools) Primary.copy(alpha = 0.15f) else SurfaceVariant,
+            modifier = Modifier
+                .size(36.dp)
+                .clickable { viewModel.toggleToolDropdown() }
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.Extension,
+                    contentDescription = "Toggle Tools",
+                    tint = if (hasExcludedTools) Primary else OnSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        ToolToggleDropdown(
+            visible = uiState.showToolToggleDropdown,
+            enabledToolIds = enabledToolIds,
+            excludedToolIds = uiState.excludedToolIds,
+            onToolToggle = { toolId, isEnabled ->
+                viewModel.toggleToolExclusion(toolId, !isEnabled)
+            },
+            onDismiss = { viewModel.dismissToolDropdown() }
         )
     }
 }

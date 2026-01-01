@@ -506,7 +506,8 @@ class ChatViewModel(
                 chatHistory = chatHistory.chat_history,
                 groups = chatHistory.groups,
                 webSearchSupport = webSearchSupport,
-                webSearchEnabled = webSearchEnabled
+                webSearchEnabled = webSearchEnabled,
+                excludedToolIds = settings.excludedToolIds
             )
 
             // Update settings if we changed anything
@@ -813,6 +814,54 @@ class ChatViewModel(
         _uiState.value = _uiState.value.copy(
             quickSettingsExpanded = !_uiState.value.quickSettingsExpanded
         )
+    }
+
+    // ==================== Tool Toggle Dropdown ====================
+    fun toggleToolDropdown() {
+        _uiState.value = _uiState.value.copy(
+            showToolToggleDropdown = !_uiState.value.showToolToggleDropdown
+        )
+    }
+
+    fun dismissToolDropdown() {
+        _uiState.value = _uiState.value.copy(
+            showToolToggleDropdown = false
+        )
+    }
+
+    /**
+     * Toggle tool exclusion. If exclude is true, adds the tool to excluded list.
+     * If exclude is false, removes it from excluded list.
+     */
+    fun toggleToolExclusion(toolId: String, exclude: Boolean) {
+        val currentExcluded = _appSettings.value.excludedToolIds
+
+        val updatedExcluded = if (exclude) {
+            if (toolId !in currentExcluded) currentExcluded + toolId else currentExcluded
+        } else {
+            currentExcluded - toolId
+        }
+
+        val updatedSettings = _appSettings.value.copy(excludedToolIds = updatedExcluded)
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+
+        // Also update UI state
+        _uiState.value = _uiState.value.copy(excludedToolIds = updatedExcluded)
+    }
+
+    /**
+     * Get the list of enabled tool IDs (from app settings)
+     */
+    fun getEnabledToolIds(): List<String> {
+        val tools = _appSettings.value.enabledTools.toMutableList()
+        // Add group conversations tool if in a group
+        if (_uiState.value.currentChat?.group != null) {
+            if (!tools.contains("get_current_group_conversations")) {
+                tools.add("get_current_group_conversations")
+            }
+        }
+        return tools
     }
 
     // ==================== Thinking Budget Settings (delegated to TopBarManager) ====================

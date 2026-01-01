@@ -21,9 +21,23 @@ class ToolManager(
     /**
      * Get the list of enabled tool specifications for the current provider.
      * Handles special tools like group_conversations that need context.
+     * Filters out tools excluded via the chat screen shortcut.
      */
     fun getEnabledToolSpecifications(): List<ToolSpecification> {
-        val enabledToolIds = deps.appSettings.value.enabledTools
+        val baseEnabledTools = deps.appSettings.value.enabledTools.toMutableList()
+        
+        // Add group conversations tool if in a group
+        if (deps.uiState.value.currentChat?.group != null) {
+            if (!baseEnabledTools.contains("get_current_group_conversations")) {
+                baseEnabledTools.add("get_current_group_conversations")
+            }
+        }
+
+        val excludedTools = deps.uiState.value.excludedToolIds
+
+        // Final list of enabled tools = base enabled tools - excluded tools
+        val enabledToolIds = baseEnabledTools.filter { it !in excludedTools }
+
         val toolRegistry = ToolRegistry.getInstance()
         val currentProvider = deps.uiState.value.currentProvider?.provider ?: "openai"
 

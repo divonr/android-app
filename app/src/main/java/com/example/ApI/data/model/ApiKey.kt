@@ -20,7 +20,8 @@ data class AppSettings(
     val titleGenerationSettings: TitleGenerationSettings = TitleGenerationSettings(),
     val multiMessageMode: Boolean = false,
     val childLockSettings: ChildLockSettings = ChildLockSettings(),
-    val enabledTools: List<String> = emptyList(), // List of enabled tool IDs
+    val enabledTools: List<String> = emptyList(), // List of enabled tool IDs from integrations
+    val excludedToolIds: List<String> = emptyList(), // Tools excluded via chat screen shortcut (overrides enabledTools)
     val githubConnections: Map<String, GitHubConnectionInfo> = emptyMap(), // GitHub connections per user (username -> connection info)
     val googleWorkspaceConnections: Map<String, GoogleWorkspaceConnectionInfo> = emptyMap(), // Google Workspace connections per user
     val skipWelcomeScreen: Boolean = false, // Whether to skip the welcome/onboarding screen
