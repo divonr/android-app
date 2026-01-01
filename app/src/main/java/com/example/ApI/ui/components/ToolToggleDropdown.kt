@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ApI.tools.ToolRegistry
@@ -65,6 +66,11 @@ fun ToolToggleDropdown(
             .toSortedMap() // Sort by integration title
     }
 
+    // Calculate master checkbox state
+    val allToolIds = remember(toolItems) { toolItems.map { it.id } }
+    val allEnabled = allToolIds.isNotEmpty() && allToolIds.none { it in excludedToolIds }
+    val noneEnabled = allToolIds.isNotEmpty() && allToolIds.all { it in excludedToolIds }
+
     DropdownMenu(
         expanded = visible,
         onDismissRequest = onDismiss,
@@ -94,6 +100,62 @@ fun ToolToggleDropdown(
                     .verticalScroll(rememberScrollState())
                     .padding(vertical = 8.dp)
             ) {
+                // Master checkbox - controls all tools
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "כל הכלים",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = OnSurface,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TriStateCheckbox(
+                                state = when {
+                                    allEnabled -> ToggleableState.On
+                                    noneEnabled -> ToggleableState.Off
+                                    else -> ToggleableState.Indeterminate
+                                },
+                                onClick = null, // Handled by DropdownMenuItem onClick
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = Primary,
+                                    uncheckedColor = OnSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                            )
+                        }
+                    },
+                    onClick = {
+                        // If all enabled or some enabled -> disable all (exclude all)
+                        // If none enabled -> enable all (remove all exclusions)
+                        if (allEnabled || !noneEnabled) {
+                            // Exclude all tools
+                            allToolIds.forEach { toolId ->
+                                if (toolId !in excludedToolIds) {
+                                    onToolToggle(toolId, false) // false = not enabled = exclude
+                                }
+                            }
+                        } else {
+                            // Enable all tools (remove exclusions)
+                            allToolIds.forEach { toolId ->
+                                if (toolId in excludedToolIds) {
+                                    onToolToggle(toolId, true) // true = enabled = remove exclusion
+                                }
+                            }
+                        }
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    color = OnSurfaceVariant.copy(alpha = 0.2f),
+                    thickness = 1.dp
+                )
+
                 groupedTools.entries.forEachIndexed { index, (integrationTitle, tools) ->
                     // Integration header
                     Text(
