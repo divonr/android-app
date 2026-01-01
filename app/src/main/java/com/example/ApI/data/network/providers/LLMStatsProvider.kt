@@ -265,7 +265,7 @@ class LLMStatsProvider(context: Context) : BaseProvider(context) {
                             }
 
                             // Check for tool calls
-                            val toolCalls = delta["tool_calls"]?.jsonArray
+                            val toolCalls = delta["tool_calls"]?.takeIf { it !is JsonNull }?.jsonArray
                             if (toolCalls != null) {
                                 // If we were in reasoning phase, complete it
                                 if (isInReasoningPhase) {
