@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,6 +39,7 @@ import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.ui.components.dialogs.AddApiKeyDialog
+import com.example.ApI.ui.components.dialogs.CustomProviderDialog
 import com.example.ApI.ui.components.dialogs.DeleteApiKeyConfirmationDialog
 import com.example.ApI.ui.theme.*
 import kotlinx.coroutines.launch
@@ -50,6 +52,7 @@ fun ApiKeysScreen(
     providers: List<Provider>,
     onBackClick: () -> Unit,
     onSkipWelcomeChanged: (Boolean) -> Unit = {},
+    onProvidersChanged: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var apiKeys by remember { mutableStateOf(repository.loadApiKeys(currentUser)) }
@@ -57,6 +60,11 @@ fun ApiKeysScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var keyToDelete by remember { mutableStateOf<ApiKey?>(null) }
     var showWelcomeDialog by remember { mutableStateOf(false) }
+
+    // Custom providers state
+    var showCreateCustomProviderDialog by remember { mutableStateOf(false) }
+    var customProviderToEdit by remember { mutableStateOf<CustomProviderConfig?>(null) }
+    var customProviders by remember { mutableStateOf(repository.loadCustomProviders(currentUser)) }
     
     // Load initial skip welcome state from settings
     val appSettings = remember { repository.loadAppSettings() }
@@ -225,6 +233,66 @@ fun ApiKeysScreen(
                     }
                 }
 
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Create Custom Provider Button
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF2196F3).copy(alpha = 0.15f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showCreateCustomProviderDialog = true }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = Color(0xFF2196F3),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(R.string.create_custom_provider),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color(0xFF2196F3),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                // Custom Providers Section
+                if (customProviders.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = stringResource(R.string.custom_providers),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = OnSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    customProviders.forEach { customProvider ->
+                        CustomProviderItem(
+                            config = customProvider,
+                            onEdit = { customProviderToEdit = customProvider },
+                            onDelete = {
+                                repository.deleteCustomProvider(currentUser, customProvider.id)
+                                customProviders = repository.loadCustomProviders(currentUser)
+                                onProvidersChanged()
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(24.dp))
 
                 // API Keys List with drag and drop
@@ -336,14 +404,14 @@ fun ApiKeysScreen(
             )
         ) {
             WelcomeScreen(
-                onNavigateToApiKeys = { 
+                onNavigateToApiKeys = {
                     // Already on API keys screen, just close the dialog
-                    showWelcomeDialog = false 
+                    showWelcomeDialog = false
                 },
-                onNavigateToMain = { 
-                    showWelcomeDialog = false 
+                onNavigateToMain = {
+                    showWelcomeDialog = false
                 },
-                onSkipWelcomeChanged = { skip -> 
+                onSkipWelcomeChanged = { skip ->
                     currentSkipWelcome = skip
                     onSkipWelcomeChanged(skip)
                 },
@@ -353,6 +421,28 @@ fun ApiKeysScreen(
                 initialSkipWelcome = currentSkipWelcome
             )
         }
+    }
+
+    // Create/Edit Custom Provider Dialog
+    if (showCreateCustomProviderDialog || customProviderToEdit != null) {
+        CustomProviderDialog(
+            existingConfig = customProviderToEdit,
+            onConfirm = { config ->
+                if (customProviderToEdit != null) {
+                    repository.updateCustomProvider(currentUser, config.id, config)
+                } else {
+                    repository.addCustomProvider(currentUser, config)
+                }
+                customProviders = repository.loadCustomProviders(currentUser)
+                showCreateCustomProviderDialog = false
+                customProviderToEdit = null
+                onProvidersChanged()
+            },
+            onDismiss = {
+                showCreateCustomProviderDialog = false
+                customProviderToEdit = null
+            }
+        )
     }
 }
 
@@ -611,5 +701,83 @@ private fun maskApiKey(key: String): String {
         "••••••••"
     } else {
         "${key.first()}${"•".repeat(8)}${key.last()}"
+    }
+}
+
+/**
+ * Display item for a custom provider configuration
+ */
+@Composable
+private fun CustomProviderItem(
+    config: CustomProviderConfig,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF2196F3).copy(alpha = 0.1f),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Provider icon
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF2196F3).copy(alpha = 0.2f),
+                modifier = Modifier.size(48.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = config.name.firstOrNull()?.uppercase() ?: "C",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color(0xFF2196F3),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = config.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = OnSurface,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = config.baseUrl,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant,
+                    maxLines = 1
+                )
+                Text(
+                    text = "Model: ${config.defaultModel}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant
+                )
+            }
+
+            IconButton(onClick = onEdit) {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "Edit",
+                    tint = OnSurfaceVariant
+                )
+            }
+
+            IconButton(onClick = onDelete) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    tint = Color.Red.copy(alpha = 0.7f)
+                )
+            }
+        }
     }
 }

@@ -16,6 +16,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.ApI.R
 import com.example.ApI.data.model.Provider
+import com.example.ApI.data.model.getDisplayNameFromProviderKey
+import com.example.ApI.data.model.isCustomProvider
 import com.example.ApI.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,16 +84,20 @@ fun AddApiKeyDialog(
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            text = stringResource(id = when(provider.provider) {
-                                                "openai" -> R.string.provider_openai
-                                                "poe" -> R.string.provider_poe
-                                                "google" -> R.string.provider_google
-                                                "anthropic" -> R.string.provider_anthropic
-                                                "cohere" -> R.string.provider_cohere
-                                                "openrouter" -> R.string.provider_openrouter
-                                                "llmstats" -> R.string.provider_llmstats
-                                                else -> R.string.provider_openai
-                                            }),
+                                            text = if (isCustomProvider(provider.provider)) {
+                                                getDisplayNameFromProviderKey(provider.provider)
+                                            } else {
+                                                stringResource(id = when(provider.provider) {
+                                                    "openai" -> R.string.provider_openai
+                                                    "poe" -> R.string.provider_poe
+                                                    "google" -> R.string.provider_google
+                                                    "anthropic" -> R.string.provider_anthropic
+                                                    "cohere" -> R.string.provider_cohere
+                                                    "openrouter" -> R.string.provider_openrouter
+                                                    "llmstats" -> R.string.provider_llmstats
+                                                    else -> R.string.provider_openai
+                                                })
+                                            },
                                             color = OnSurface
                                         )
                                     },

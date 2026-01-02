@@ -2,6 +2,7 @@ package com.example.ApI.data.repository
 
 import com.example.ApI.data.model.ApiKey
 import com.example.ApI.data.model.AppSettings
+import com.example.ApI.data.model.CustomProviderConfig
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import java.io.File
@@ -128,6 +129,51 @@ class LocalStorageManager(
         } catch (e: IOException) {
             // Handle error
         }
+    }
+
+    // ============ Custom Providers ============
+
+    fun loadCustomProviders(username: String): List<CustomProviderConfig> {
+        val file = File(internalDir, "custom_providers_$username.json")
+        return if (file.exists()) {
+            try {
+                val content = file.readText()
+                json.decodeFromString<List<CustomProviderConfig>>(content)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+    }
+
+    fun saveCustomProviders(username: String, providers: List<CustomProviderConfig>) {
+        val file = File(internalDir, "custom_providers_$username.json")
+        try {
+            file.writeText(json.encodeToString(providers))
+        } catch (e: IOException) {
+            // Handle error
+        }
+    }
+
+    fun addCustomProvider(username: String, provider: CustomProviderConfig) {
+        val current = loadCustomProviders(username).toMutableList()
+        current.add(provider)
+        saveCustomProviders(username, current)
+    }
+
+    fun updateCustomProvider(username: String, providerId: String, updated: CustomProviderConfig) {
+        val current = loadCustomProviders(username).toMutableList()
+        val index = current.indexOfFirst { it.id == providerId }
+        if (index >= 0) {
+            current[index] = updated
+            saveCustomProviders(username, current)
+        }
+    }
+
+    fun deleteCustomProvider(username: String, providerId: String) {
+        val current = loadCustomProviders(username).filter { it.id != providerId }
+        saveCustomProviders(username, current)
     }
 
     // ============ File Management ============

@@ -48,6 +48,14 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
         return "Empty response from $providerName"
     }
 
+    /**
+     * Override to customize how the authorization header is applied.
+     * Default implementation uses standard Bearer token format.
+     */
+    protected open fun applyAuthorizationHeader(connection: HttpURLConnection, apiKey: String) {
+        connection.setRequestProperty("Authorization", "Bearer $apiKey")
+    }
+
     override suspend fun sendMessage(
         provider: Provider,
         modelName: String,
@@ -146,7 +154,7 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
             val connection = url.openConnection() as HttpURLConnection
 
             connection.requestMethod = provider.request.request_type
-            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            applyAuthorizationHeader(connection, apiKey)
             connection.setRequestProperty("Content-Type", "application/json")
             
             // Add provider-specific headers

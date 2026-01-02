@@ -38,6 +38,12 @@ class DataRepository(private val context: Context) {
         if (!internalDir.exists()) {
             internalDir.mkdirs()
         }
+
+        // Wire up custom providers loader for ModelsCacheManager
+        modelsCacheManager.setCustomProvidersLoader {
+            val username = loadAppSettings().current_user
+            localStorageManager.loadCustomProviders(username)
+        }
     }
 
     // ============ Models Cache (delegated to ModelsCacheManager) ============
@@ -104,7 +110,46 @@ class DataRepository(private val context: Context) {
     fun saveAppSettings(settings: AppSettings) = localStorageManager.saveAppSettings(settings)
     fun saveFileLocally(fileName: String, data: ByteArray): String? = localStorageManager.saveFileLocally(fileName, data)
     fun deleteFile(filePath: String): Boolean = localStorageManager.deleteFile(filePath)
-    
+
+    // ============ Custom Providers (delegated to LocalStorageManager) ============
+
+    fun loadCustomProviders(username: String): List<CustomProviderConfig> =
+        localStorageManager.loadCustomProviders(username)
+
+    fun saveCustomProviders(username: String, providers: List<CustomProviderConfig>) {
+        localStorageManager.saveCustomProviders(username, providers)
+        apiService.reloadCustomProviders(providers.filter { it.isEnabled })
+    }
+
+    fun addCustomProvider(username: String, provider: CustomProviderConfig) {
+        localStorageManager.addCustomProvider(username, provider)
+        if (provider.isEnabled) {
+            apiService.registerCustomProvider(provider)
+        }
+    }
+
+    fun updateCustomProvider(username: String, providerId: String, updated: CustomProviderConfig) {
+        localStorageManager.updateCustomProvider(username, providerId, updated)
+        // Reload all to handle key changes
+        val all = localStorageManager.loadCustomProviders(username)
+        apiService.reloadCustomProviders(all.filter { it.isEnabled })
+    }
+
+    fun deleteCustomProvider(username: String, providerId: String) {
+        val toDelete = localStorageManager.loadCustomProviders(username).find { it.id == providerId }
+        localStorageManager.deleteCustomProvider(username, providerId)
+        toDelete?.let { apiService.unregisterCustomProvider(it.providerKey) }
+    }
+
+    /**
+     * Initialize custom providers in LLMApiService.
+     * Should be called when the repository is first used.
+     */
+    fun initializeCustomProviders(username: String) {
+        val customConfigs = localStorageManager.loadCustomProviders(username)
+        apiService.reloadCustomProviders(customConfigs.filter { it.isEnabled })
+    }
+
     fun replaceMessageInChat(username: String, chatId: String, oldMessage: Message, newMessage: Message): Chat? = chatHistoryManager.replaceMessageInChat(username, chatId, oldMessage, newMessage)
     fun deleteMessagesFromPoint(username: String, chatId: String, fromMessage: Message): Chat? = chatHistoryManager.deleteMessagesFromPoint(username, chatId, fromMessage)
     

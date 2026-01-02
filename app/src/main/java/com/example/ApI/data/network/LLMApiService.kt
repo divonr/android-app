@@ -2,6 +2,7 @@ package com.example.ApI.data.network
 
 import android.content.Context
 import com.example.ApI.data.model.*
+import com.example.ApI.data.model.CustomProviderConfig
 import com.example.ApI.data.network.providers.*
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +35,35 @@ class LLMApiService(private val context: Context) {
     private val cohereProvider by lazy { CohereProvider(context) }
     private val openRouterProvider by lazy { OpenRouterProvider(context) }
     private val llmStatsProvider by lazy { LLMStatsProvider(context) }
+
+    // Cache for dynamic custom providers (by providerKey)
+    private val customProviderCache = mutableMapOf<String, DynamicCustomProvider>()
+
+    /**
+     * Registers a custom provider configuration.
+     * Creates a DynamicCustomProvider instance and caches it.
+     */
+    fun registerCustomProvider(config: CustomProviderConfig) {
+        customProviderCache[config.providerKey] = DynamicCustomProvider(context, config)
+    }
+
+    /**
+     * Unregisters a custom provider by its key.
+     */
+    fun unregisterCustomProvider(providerKey: String) {
+        customProviderCache.remove(providerKey)
+    }
+
+    /**
+     * Clears and reloads all custom providers.
+     * Should be called when custom providers are updated.
+     */
+    fun reloadCustomProviders(configs: List<CustomProviderConfig>) {
+        customProviderCache.clear()
+        configs.forEach { config ->
+            customProviderCache[config.providerKey] = DynamicCustomProvider(context, config)
+        }
+    }
 
     /**
      * Send a message to the specified LLM provider.
@@ -100,7 +130,16 @@ class LLMApiService(private val context: Context) {
                 webSearchEnabled, enabledTools, thinkingBudget, temperature, callback
             )
             else -> {
-                callback.onError("Unknown provider: ${provider.provider}")
+                // Check if it's a custom provider
+                val customProvider = customProviderCache[provider.provider]
+                if (customProvider != null) {
+                    customProvider.sendMessage(
+                        provider, modelName, messages, systemPrompt, apiKey,
+                        webSearchEnabled, enabledTools, thinkingBudget, temperature, callback
+                    )
+                } else {
+                    callback.onError("Unknown provider: ${provider.provider}")
+                }
             }
         }
     }

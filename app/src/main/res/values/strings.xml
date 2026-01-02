@@ -41,6 +41,22 @@
     <string name="provider_llmstats">LLM Stats</string>
     <string name="llmstats_model">gpt-5-nano via LLM Stats</string>
 
+    <!-- Custom Providers -->
+    <string name="create_custom_provider">צור ספק מותאם אישית</string>
+    <string name="edit_custom_provider">ערוך ספק מותאם אישית</string>
+    <string name="custom_providers">ספקים מותאמים אישית</string>
+    <string name="provider_name">שם הספק</string>
+    <string name="api_base_url">כתובת API בסיסית</string>
+    <string name="default_model">שם מודל ברירת מחדל</string>
+    <string name="auth_header_name">שם כותרת אימות</string>
+    <string name="auth_header_format">פורמט כותרת אימות</string>
+    <string name="auth_format_hint">השתמש ב-{key} כמקום שמור למפתח API</string>
+    <string name="extra_headers">כותרות נוספות (אופציונלי)</string>
+    <string name="show_advanced">הצג הגדרות מתקדמות</string>
+    <string name="hide_advanced">הסתר הגדרות מתקדמות</string>
+    <string name="add_header">הוסף כותרת</string>
+    <string name="create">צור</string>
+
     <!-- Permissions and errors -->
     <string name="camera_permission_required">נדרשת הרשאת מצלמה</string>
     <string name="storage_permission_required">נדרשת הרשאת אחסון</string>

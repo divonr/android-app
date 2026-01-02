@@ -1,6 +1,7 @@
 package com.example.ApI.data.repository
 
 import com.example.ApI.data.model.*
+import com.example.ApI.data.model.CustomProviderConfig
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.withContext
@@ -397,6 +398,47 @@ class ModelsCacheManager(
         Model.SimpleModel("claude-3-haiku-20240307")
     )
 
+    // ============ Custom Providers ============
+
+    // Loader function for custom providers (set by DataRepository)
+    private var customProvidersLoader: (() -> List<CustomProviderConfig>)? = null
+
+    /**
+     * Sets the loader function for custom providers.
+     * This should be called by DataRepository during initialization.
+     */
+    fun setCustomProvidersLoader(loader: () -> List<CustomProviderConfig>) {
+        customProvidersLoader = loader
+    }
+
+    /**
+     * Builds Provider objects from custom provider configs
+     */
+    private fun buildCustomProviders(): List<Provider> {
+        val customConfigs = customProvidersLoader?.invoke() ?: return emptyList()
+
+        return customConfigs.filter { it.isEnabled }.map { config ->
+            Provider(
+                provider = config.providerKey,
+                models = listOf(Model.SimpleModel(config.defaultModel)),
+                request = ApiRequest(
+                    request_type = "POST",
+                    base_url = config.baseUrl,
+                    headers = buildMap {
+                        put("Content-Type", "application/json")
+                        put(config.authHeaderName, config.authHeaderFormat)
+                        putAll(config.extraHeaders)
+                    }
+                ),
+                response_important_fields = ResponseFields(
+                    response_format = "server_sent_events"
+                ),
+                upload_files_request = null,  // Custom providers use inline base64
+                upload_files_response_important_fields = null
+            )
+        }
+    }
+
     // ============ Provider Building ============
 
     /**
@@ -575,6 +617,6 @@ class ModelsCacheManager(
                 upload_files_request = null,
                 upload_files_response_important_fields = null
             )
-        )
+        ) + buildCustomProviders()
     }
 }
