@@ -45,6 +45,7 @@
     <string name="create_custom_provider">צור ספק מותאם אישית</string>
     <string name="edit_custom_provider">ערוך ספק מותאם אישית</string>
     <string name="custom_providers">ספקים מותאמים אישית</string>
+    <string name="define_new_provider">הגדר ספק חדש...</string>
     <string name="provider_name">שם הספק</string>
     <string name="api_base_url">כתובת API בסיסית</string>
     <string name="default_model">שם מודל ברירת מחדל</string>

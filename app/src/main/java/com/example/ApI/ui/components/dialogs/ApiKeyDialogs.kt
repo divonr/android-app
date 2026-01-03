@@ -3,6 +3,10 @@ package com.example.ApI.ui.components.dialogs
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,6 +19,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.ApI.R
+import com.example.ApI.data.model.CustomProviderConfig
 import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.getDisplayNameFromProviderKey
 import com.example.ApI.data.model.isCustomProvider
@@ -24,8 +29,12 @@ import com.example.ApI.ui.theme.*
 @Composable
 fun AddApiKeyDialog(
     providers: List<Provider>,
+    customProviders: List<CustomProviderConfig> = emptyList(),
     onConfirm: (String, String, String?) -> Unit,
     onDismiss: () -> Unit,
+    onCreateCustomProvider: (CustomProviderConfig) -> Unit = {},
+    onEditCustomProvider: (CustomProviderConfig) -> Unit = {},
+    onDeleteCustomProvider: (CustomProviderConfig) -> Unit = {},
     initialProvider: String? = null,
     initialApiKey: String? = null
 ) {
@@ -33,6 +42,22 @@ fun AddApiKeyDialog(
     var apiKey by remember { mutableStateOf(initialApiKey ?: "") }
     var customName by remember { mutableStateOf("") }
     var showProviderDropdown by remember { mutableStateOf(false) }
+
+    // Custom provider dialog state
+    var showCreateCustomProviderDialog by remember { mutableStateOf(false) }
+    var customProviderToEdit by remember { mutableStateOf<CustomProviderConfig?>(null) }
+
+    // Get display name for selected provider
+    val selectedProviderDisplayName = remember(selectedProvider, customProviders) {
+        if (selectedProvider.isEmpty()) {
+            ""
+        } else if (isCustomProvider(selectedProvider)) {
+            customProviders.find { it.providerKey == selectedProvider }?.name
+                ?: getDisplayNameFromProviderKey(selectedProvider)
+        } else {
+            selectedProvider
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -60,7 +85,7 @@ fun AddApiKeyDialog(
                         onExpandedChange = { showProviderDropdown = !showProviderDropdown }
                     ) {
                         OutlinedTextField(
-                            value = selectedProvider,
+                            value = selectedProviderDisplayName,
                             onValueChange = {},
                             readOnly = true,
                             modifier = Modifier
@@ -80,24 +105,21 @@ fun AddApiKeyDialog(
                             expanded = showProviderDropdown,
                             onDismissRequest = { showProviderDropdown = false }
                         ) {
-                            providers.forEach { provider ->
+                            // Built-in providers
+                            providers.filter { !isCustomProvider(it.provider) }.forEach { provider ->
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            text = if (isCustomProvider(provider.provider)) {
-                                                getDisplayNameFromProviderKey(provider.provider)
-                                            } else {
-                                                stringResource(id = when(provider.provider) {
-                                                    "openai" -> R.string.provider_openai
-                                                    "poe" -> R.string.provider_poe
-                                                    "google" -> R.string.provider_google
-                                                    "anthropic" -> R.string.provider_anthropic
-                                                    "cohere" -> R.string.provider_cohere
-                                                    "openrouter" -> R.string.provider_openrouter
-                                                    "llmstats" -> R.string.provider_llmstats
-                                                    else -> R.string.provider_openai
-                                                })
-                                            },
+                                            text = stringResource(id = when(provider.provider) {
+                                                "openai" -> R.string.provider_openai
+                                                "poe" -> R.string.provider_poe
+                                                "google" -> R.string.provider_google
+                                                "anthropic" -> R.string.provider_anthropic
+                                                "cohere" -> R.string.provider_cohere
+                                                "openrouter" -> R.string.provider_openrouter
+                                                "llmstats" -> R.string.provider_llmstats
+                                                else -> R.string.provider_openai
+                                            }),
                                             color = OnSurface
                                         )
                                     },
@@ -107,6 +129,97 @@ fun AddApiKeyDialog(
                                     }
                                 )
                             }
+
+                            // Custom providers with edit/delete icons
+                            if (customProviders.isNotEmpty()) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    color = OnSurface.copy(alpha = 0.1f)
+                                )
+
+                                customProviders.forEach { customProvider ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = customProvider.name,
+                                                    color = Color(0xFF2196F3),
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Row {
+                                                    IconButton(
+                                                        onClick = {
+                                                            showProviderDropdown = false
+                                                            customProviderToEdit = customProvider
+                                                        },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Edit,
+                                                            contentDescription = "Edit",
+                                                            tint = OnSurfaceVariant,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                    IconButton(
+                                                        onClick = {
+                                                            showProviderDropdown = false
+                                                            onDeleteCustomProvider(customProvider)
+                                                        },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Delete,
+                                                            contentDescription = "Delete",
+                                                            tint = Color.Red.copy(alpha = 0.7f),
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedProvider = customProvider.providerKey
+                                            showProviderDropdown = false
+                                        }
+                                    )
+                                }
+                            }
+
+                            // "Create new provider" option
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                color = OnSurface.copy(alpha = 0.1f)
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Add,
+                                            contentDescription = null,
+                                            tint = Primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Text(
+                                            text = stringResource(R.string.define_new_provider),
+                                            color = Primary,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    showProviderDropdown = false
+                                    showCreateCustomProviderDialog = true
+                                }
+                            )
                         }
                     }
 
@@ -173,6 +286,28 @@ fun AddApiKeyDialog(
                 }
             }
         }
+    }
+
+    // Create/Edit Custom Provider Dialog
+    if (showCreateCustomProviderDialog || customProviderToEdit != null) {
+        CustomProviderDialog(
+            existingConfig = customProviderToEdit,
+            onConfirm = { config ->
+                if (customProviderToEdit != null) {
+                    onEditCustomProvider(config)
+                } else {
+                    onCreateCustomProvider(config)
+                    // Auto-select the newly created provider
+                    selectedProvider = config.providerKey
+                }
+                showCreateCustomProviderDialog = false
+                customProviderToEdit = null
+            },
+            onDismiss = {
+                showCreateCustomProviderDialog = false
+                customProviderToEdit = null
+            }
+        )
     }
 }
 
