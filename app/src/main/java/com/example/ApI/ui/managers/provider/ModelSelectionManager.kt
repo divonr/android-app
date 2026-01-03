@@ -231,6 +231,10 @@ class ModelSelectionManager(
     fun refreshAvailableProviders() {
         deps.scope.launch {
             val currentUser = deps.appSettings.value.current_user
+
+            // Reinitialize custom providers in LLMApiService cache
+            deps.repository.initializeCustomProviders(currentUser)
+
             val allProviders = deps.repository.loadProviders()
             val activeApiKeyProviders = deps.repository.loadApiKeys(currentUser)
                 .filter { it.isActive }
