@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ApI.R
 import com.example.ApI.data.model.*
+import com.example.ApI.data.model.getDisplayNameFromProviderKey
+import com.example.ApI.data.model.isCustomProvider
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.theme.*
 
@@ -257,16 +259,20 @@ fun NormalModeTopBar(
         ) {
             Text(
                 text = uiState.currentProvider?.provider?.let { provider ->
-                    stringResource(id = when(provider) {
-                        "openai" -> R.string.provider_openai
-                        "anthropic" -> R.string.provider_anthropic
-                        "google" -> R.string.provider_google
-                        "poe" -> R.string.provider_poe
-                        "cohere" -> R.string.provider_cohere
-                        "openrouter" -> R.string.provider_openrouter
-                        "llmstats" -> R.string.provider_llmstats
-                        else -> R.string.provider_openai
-                    })
+                    if (isCustomProvider(provider)) {
+                        getDisplayNameFromProviderKey(provider)
+                    } else {
+                        stringResource(id = when(provider) {
+                            "openai" -> R.string.provider_openai
+                            "anthropic" -> R.string.provider_anthropic
+                            "google" -> R.string.provider_google
+                            "poe" -> R.string.provider_poe
+                            "cohere" -> R.string.provider_cohere
+                            "openrouter" -> R.string.provider_openrouter
+                            "llmstats" -> R.string.provider_llmstats
+                            else -> R.string.provider_default_name
+                        })
+                    }
                 } ?: "",
                 style = MaterialTheme.typography.labelMedium,
                 color = OnSurfaceVariant,

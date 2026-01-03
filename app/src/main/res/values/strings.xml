@@ -32,6 +32,7 @@
     <string name="delete">מחק</string>
     
     <!-- Provider names -->
+    <string name="provider_default_name">DefaultName</string>
     <string name="provider_openai">OpenAI</string>
     <string name="provider_poe">Poe</string>
     <string name="provider_google">Google</string>

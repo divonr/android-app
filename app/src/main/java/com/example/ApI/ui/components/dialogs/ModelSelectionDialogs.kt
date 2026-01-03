@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.ApI.R
 import com.example.ApI.data.model.*
+import com.example.ApI.data.model.getDisplayNameFromProviderKey
+import com.example.ApI.data.model.isCustomProvider
 import com.example.ApI.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -472,16 +474,20 @@ private fun StarredModelsPage(
  */
 @Composable
 private fun getProviderDisplayName(providerKey: String): String {
-    return stringResource(id = when(providerKey) {
-        "openai" -> R.string.provider_openai
-        "poe" -> R.string.provider_poe
-        "google" -> R.string.provider_google
-        "anthropic" -> R.string.provider_anthropic
-        "cohere" -> R.string.provider_cohere
-        "openrouter" -> R.string.provider_openrouter
-        "llmstats" -> R.string.provider_llmstats
-        else -> R.string.provider_openai
-    })
+    return if (isCustomProvider(providerKey)) {
+        getDisplayNameFromProviderKey(providerKey)
+    } else {
+        stringResource(id = when(providerKey) {
+            "openai" -> R.string.provider_openai
+            "poe" -> R.string.provider_poe
+            "google" -> R.string.provider_google
+            "anthropic" -> R.string.provider_anthropic
+            "cohere" -> R.string.provider_cohere
+            "openrouter" -> R.string.provider_openrouter
+            "llmstats" -> R.string.provider_llmstats
+            else -> R.string.provider_default_name
+        })
+    }
 }
 
 /**

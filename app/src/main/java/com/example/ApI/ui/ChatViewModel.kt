@@ -453,6 +453,9 @@ class ChatViewModel(
             val settings = repository.loadAppSettings()
             _appSettings.value = settings
 
+            // Initialize custom providers in LLMApiService
+            repository.initializeCustomProviders(settings.current_user)
+
             // Refresh models from remote if needed (24-hour cache)
             repository.refreshModelsIfNeeded()
 
