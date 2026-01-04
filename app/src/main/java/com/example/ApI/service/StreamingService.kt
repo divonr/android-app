@@ -321,6 +321,10 @@ class StreamingService : Service() {
     ) {
         Log.d(TAG, "Executing streaming request: requestId=$requestId")
 
+        // Initialize custom providers in case user added a new one
+        // (StreamingService has its own LLMApiService instance, so custom providers need to be loaded)
+        repository.initializeCustomProviders(username)
+
         // Update status to streaming
         activeRequests[requestId] = activeRequests[requestId]?.copy(status = RequestStatus.STREAMING)
             ?: return
