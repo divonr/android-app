@@ -3,6 +3,10 @@ package com.example.ApI.data.network.providers
 import android.content.Context
 import android.util.Log
 import com.example.ApI.data.model.*
+import com.example.ApI.data.network.streaming.DataOnlyStreamParser
+import com.example.ApI.data.network.streaming.StreamAction
+import com.example.ApI.data.network.streaming.StreamEventHandler
+import com.example.ApI.data.network.streaming.StreamResult
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.coroutines.Dispatchers
@@ -141,154 +145,197 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                 return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorBody")
             }
 
-            parseStreamingResponse(connection, callback)
+            val reader = BufferedReader(InputStreamReader(connection.inputStream))
+            parseStreamingResponse(reader, connection, callback)
         } catch (e: Exception) {
             callback.onError("Failed to make Google streaming request: ${e.message}")
             ProviderStreamingResult.Error("Failed to make Google streaming request: ${e.message}")
         }
     }
 
-    private fun parseStreamingResponse(
-        connection: HttpURLConnection,
-        callback: StreamingCallback
-    ): ProviderStreamingResult {
-        Log.d("TOOL_CALL_DEBUG", "Starting to read Google stream...")
-        val reader = BufferedReader(InputStreamReader(connection.inputStream))
+    /**
+     * Inner class to handle Google SSE events.
+     * Implements StreamEventHandler for use with DataOnlyStreamParser.
+     */
+    private inner class GoogleEventHandler(
+        private val callback: StreamingCallback
+    ) : StreamEventHandler {
+
+        // Response accumulation
         val fullResponse = StringBuilder()
+
+        // Tool call tracking
         var detectedToolCall: ToolCall? = null
-        var line: String?
 
         // Thinking state tracking
         var isInThinkingPhase = false
         var thinkingStartTime: Long = 0
         val thoughtsBuilder = StringBuilder()
 
-        while (reader.readLine().also { line = it } != null) {
-            val currentLine = line!!
+        // Error tracking
+        var errorMessage: String? = null
 
-            if (currentLine.startsWith("data:")) {
-                val dataContent = currentLine.substring(5).trim()
+        init {
+            Log.d("TOOL_CALL_DEBUG", "Starting to read Google stream...")
+        }
 
-                if (dataContent.isBlank()) continue
+        override fun onEvent(eventType: String?, data: JsonObject): StreamAction {
+            // Check for error
+            val error = data["error"]?.jsonObject
+            if (error != null) {
+                errorMessage = error["message"]?.jsonPrimitive?.content ?: "Unknown Google API streaming error"
+                callback.onError("Google API streaming error: $errorMessage")
+                return StreamAction.Error("Google API streaming error: $errorMessage")
+            }
 
-                try {
-                    val chunkJson = json.parseToJsonElement(dataContent).jsonObject
+            val candidates = data["candidates"]?.jsonArray
 
-                    // Check for error
-                    val error = chunkJson["error"]?.jsonObject
-                    if (error != null) {
-                        val errorMessage = error["message"]?.jsonPrimitive?.content ?: "Unknown Google API streaming error"
-                        callback.onError("Google API streaming error: $errorMessage")
-                        reader.close()
-                        connection.disconnect()
-                        return ProviderStreamingResult.Error("Google API streaming error: $errorMessage")
-                    }
+            if (candidates != null && candidates.isNotEmpty()) {
+                val firstCandidate = candidates[0].jsonObject
 
-                    val candidates = chunkJson["candidates"]?.jsonArray
+                // Check for safety blocks
+                val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.content
+                if (finishReason != null && finishReason != "STOP") {
+                    errorMessage = "Google API streaming blocked due to: $finishReason"
+                    callback.onError(errorMessage!!)
+                    return StreamAction.Error(errorMessage!!)
+                }
 
-                    if (candidates != null && candidates.isNotEmpty()) {
-                        val firstCandidate = candidates[0].jsonObject
+                val content = firstCandidate["content"]?.jsonObject
+                val parts = content?.get("parts")?.jsonArray
 
-                        // Check for safety blocks
-                        val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.content
-                        if (finishReason != null && finishReason != "STOP") {
-                            callback.onError("Google API streaming blocked due to: $finishReason")
-                            return ProviderStreamingResult.Error("Google API streaming blocked due to: $finishReason")
-                        }
+                if (parts != null && parts.isNotEmpty()) {
+                    for (partElement in parts) {
+                        val part = partElement.jsonObject
 
-                        val content = firstCandidate["content"]?.jsonObject
-                        val parts = content?.get("parts")?.jsonArray
+                        val isThought = part["thought"]?.jsonPrimitive?.booleanOrNull == true
+                        val text = part["text"]?.jsonPrimitive?.contentOrNull
+                        val functionCall = part["functionCall"]?.jsonObject
 
-                        if (parts != null && parts.isNotEmpty()) {
-                            for (partElement in parts) {
-                                val part = partElement.jsonObject
-
-                                val isThought = part["thought"]?.jsonPrimitive?.booleanOrNull == true
-                                val text = part["text"]?.jsonPrimitive?.contentOrNull
-                                val functionCall = part["functionCall"]?.jsonObject
-
-                                when {
-                                    isThought && text != null -> {
-                                        if (!isInThinkingPhase) {
-                                            isInThinkingPhase = true
-                                            thinkingStartTime = System.currentTimeMillis()
-                                            callback.onThinkingStarted()
-                                        }
-                                        thoughtsBuilder.append(text)
-                                        callback.onThinkingPartial(text)
-                                    }
-
-                                    functionCall != null -> {
-                                        Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found functionCall part: $functionCall")
-                                        val name = functionCall["name"]?.jsonPrimitive?.content
-                                        val args = functionCall["args"]?.jsonObject
-                                        // Capture thoughtSignature - required for Gemini 3+ function calling
-                                        val thoughtSignature = part["thoughtSignature"]?.jsonPrimitive?.contentOrNull
-
-                                        if (name != null && args != null) {
-                                            detectedToolCall = ToolCall(
-                                                id = "google_${System.currentTimeMillis()}",
-                                                toolId = name,
-                                                parameters = args,
-                                                provider = "google",
-                                                thoughtSignature = thoughtSignature
-                                            )
-                                            Log.d("TOOL_CALL_DEBUG", "Google Streaming: Detected tool call in chunk, thoughtSignature=${thoughtSignature != null}")
-                                        }
-                                    }
-
-                                    text != null -> {
-                                        // Transition from thinking to response
-                                        if (isInThinkingPhase) {
-                                            completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
-                                            isInThinkingPhase = false
-                                        }
-
-                                        Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found text part: '$text'")
-                                        fullResponse.append(text)
-                                        callback.onPartialResponse(text)
-                                    }
+                        when {
+                            isThought && text != null -> {
+                                if (!isInThinkingPhase) {
+                                    isInThinkingPhase = true
+                                    thinkingStartTime = System.currentTimeMillis()
+                                    callback.onThinkingStarted()
                                 }
+                                thoughtsBuilder.append(text)
+                                callback.onThinkingPartial(text)
+                            }
+
+                            functionCall != null -> {
+                                Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found functionCall part: $functionCall")
+                                val name = functionCall["name"]?.jsonPrimitive?.content
+                                val args = functionCall["args"]?.jsonObject
+                                // Capture thoughtSignature - required for Gemini 3+ function calling
+                                val thoughtSignature = part["thoughtSignature"]?.jsonPrimitive?.contentOrNull
+
+                                if (name != null && args != null) {
+                                    detectedToolCall = ToolCall(
+                                        id = "google_${System.currentTimeMillis()}",
+                                        toolId = name,
+                                        parameters = args,
+                                        provider = "google",
+                                        thoughtSignature = thoughtSignature
+                                    )
+                                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Detected tool call in chunk, thoughtSignature=${thoughtSignature != null}")
+                                }
+                            }
+
+                            text != null -> {
+                                // Transition from thinking to response
+                                if (isInThinkingPhase) {
+                                    completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                                    isInThinkingPhase = false
+                                }
+
+                                Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found text part: '$text'")
+                                fullResponse.append(text)
+                                callback.onPartialResponse(text)
                             }
                         }
                     }
-                } catch (jsonException: Exception) {
-                    println("[DEBUG] Error parsing Google streaming chunk: ${jsonException.message}")
-                    println("[DEBUG] Problematic chunk: $dataContent")
-                    continue
                 }
             }
+
+            return StreamAction.Continue
         }
+
+        override fun onStreamEnd() {
+            // Stream ended - complete thinking phase if still in progress
+            if (isInThinkingPhase) {
+                completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                isInThinkingPhase = false
+            }
+        }
+
+        override fun onParseError(line: String, error: Exception) {
+            println("[DEBUG] Error parsing Google streaming chunk: ${error.message}")
+            println("[DEBUG] Problematic chunk: $line")
+        }
+
+        /**
+         * Build the final result based on accumulated state.
+         */
+        fun getResult(): ProviderStreamingResult {
+            // Check for error first
+            errorMessage?.let {
+                return ProviderStreamingResult.Error(it)
+            }
+
+            val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+            val thinkingDuration = if (thoughtsBuilder.isNotEmpty()) {
+                thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f }
+            } else null
+            val thoughtsStatus = when {
+                thoughtsContent != null -> ThoughtsStatus.PRESENT
+                else -> ThoughtsStatus.NONE
+            }
+
+            return when {
+                detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
+                    toolCall = detectedToolCall!!,
+                    precedingText = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus
+                )
+                fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
+                    fullText = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus
+                )
+                else -> ProviderStreamingResult.Error("Empty response from Google")
+            }
+        }
+    }
+
+    private fun parseStreamingResponse(
+        reader: BufferedReader,
+        connection: HttpURLConnection,
+        callback: StreamingCallback
+    ): ProviderStreamingResult {
+        val parser = DataOnlyStreamParser(
+            json = json,
+            eventTypeField = null,  // Structure-based parsing (no event type field)
+            doneMarker = "[DONE]",  // Not typically used by Google
+            skipKeepalives = false,
+            logTag = "GoogleProvider"
+        )
+        val handler = GoogleEventHandler(callback)
+
+        val result = parser.parse(reader, handler)
 
         reader.close()
         connection.disconnect()
 
-        // Calculate thoughts data (shared by both TextComplete and ToolCallDetected)
-        val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
-        val thinkingDuration = if (thoughtsBuilder.isNotEmpty()) {
-            thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f }
-        } else null
-        val thoughtsStatus = when {
-            thoughtsContent != null -> ThoughtsStatus.PRESENT
-            else -> ThoughtsStatus.NONE
+        // If parser returned an error (from StreamAction.Error), use that
+        if (result is StreamResult.Error) {
+            return ProviderStreamingResult.Error(result.message)
         }
 
-        return when {
-            detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
-                toolCall = detectedToolCall!!,
-                precedingText = fullResponse.toString(),
-                thoughts = thoughtsContent,
-                thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus
-            )
-            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
-                fullText = fullResponse.toString(),
-                thoughts = thoughtsContent,
-                thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus
-            )
-            else -> ProviderStreamingResult.Error("Empty response from Google")
-        }
+        return handler.getResult()
     }
 
     private fun buildContents(messages: List<Message>, systemPrompt: String): List<JsonObject> {

@@ -3,6 +3,10 @@ package com.example.ApI.data.network.providers
 import android.content.Context
 import android.util.Log
 import com.example.ApI.data.model.*
+import com.example.ApI.data.network.streaming.DataOnlyStreamParser
+import com.example.ApI.data.network.streaming.StreamAction
+import com.example.ApI.data.network.streaming.StreamEventHandler
+import com.example.ApI.data.network.streaming.StreamResult
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.coroutines.Dispatchers
@@ -172,7 +176,8 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                 }
             }
 
-            parseStreamingResponse(connection, callback, thinkingBudget, requestReasoningSummary)
+            val reader = BufferedReader(InputStreamReader(connection.inputStream))
+            parseStreamingResponse(reader, connection, callback, thinkingBudget, requestReasoningSummary)
         } catch (e: Exception) {
             callback.onError("Failed to make OpenAI streaming request: ${e.message}")
             ProviderStreamingResult.Error("Failed to make OpenAI streaming request: ${e.message}")
@@ -180,153 +185,198 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
     }
 
     /**
-     * Parses the streaming response from OpenAI
+     * Inner class to handle OpenAI SSE events.
+     * Implements StreamEventHandler for use with DataOnlyStreamParser.
      */
-    private fun parseStreamingResponse(
-        connection: HttpURLConnection,
-        callback: StreamingCallback,
-        thinkingBudget: ThinkingBudgetValue,
-        requestReasoningSummary: Boolean
-    ): ProviderStreamingResult {
-        val reader = BufferedReader(InputStreamReader(connection.inputStream))
+    private inner class OpenAIEventHandler(
+        private val callback: StreamingCallback,
+        private val thinkingBudget: ThinkingBudgetValue,
+        private val requestReasoningSummary: Boolean
+    ) : StreamEventHandler {
+
+        // Response accumulation
         val fullResponse = StringBuilder()
+
+        // Tool call tracking
         var detectedToolCall: ToolCall? = null
-        var line: String?
 
         // Reasoning/thinking state tracking
         var isInReasoningPhase = false
         var reasoningStartTime: Long = 0
         val reasoningBuilder = StringBuilder()
 
-        // Track if reasoning summaries are unavailable
-        val reasoningSummariesUnavailable = !requestReasoningSummary &&
-            thinkingBudget is ThinkingBudgetValue.Effort &&
-            thinkingBudget.level.isNotBlank()
+        // Error tracking
+        var errorMessage: String? = null
 
-        if (reasoningSummariesUnavailable) {
-            isInReasoningPhase = true
-            reasoningStartTime = System.currentTimeMillis()
-            callback.onThinkingStarted()
-            Log.d("OPENAI_REASONING", "Reasoning phase started (summaries unavailable, timing from request)")
-        }
+        init {
+            // Track if reasoning summaries are unavailable
+            val reasoningSummariesUnavailable = !requestReasoningSummary &&
+                thinkingBudget is ThinkingBudgetValue.Effort &&
+                thinkingBudget.level.isNotBlank()
 
-        while (reader.readLine().also { line = it } != null) {
-            val currentLine = line!!
-
-            if (currentLine.startsWith("data:")) {
-                val dataContent = currentLine.substring(5).trim()
-
-                if (dataContent == "[DONE]") break
-                if (dataContent.isBlank() || dataContent == "{}") continue
-
-                try {
-                    val chunkJson = json.parseToJsonElement(dataContent).jsonObject
-                    val eventType = chunkJson["type"]?.jsonPrimitive?.content
-
-                    when (eventType) {
-                        "response.output_item.added" -> {
-                            val item = chunkJson["item"]?.jsonObject
-                            val itemType = item?.get("type")?.jsonPrimitive?.content
-                            if (itemType == "reasoning") {
-                                if (!isInReasoningPhase) {
-                                    isInReasoningPhase = true
-                                    reasoningStartTime = System.currentTimeMillis()
-                                    callback.onThinkingStarted()
-                                    Log.d("OPENAI_REASONING", "Reasoning phase started")
-                                }
-                            }
-                        }
-                        "response.reasoning_summary_text.delta" -> {
-                            val deltaText = chunkJson["delta"]?.jsonPrimitive?.content
-                            if (deltaText != null && deltaText.isNotEmpty()) {
-                                reasoningBuilder.append(deltaText)
-                                callback.onThinkingPartial(deltaText)
-                            }
-                        }
-                        "response.output_text.delta" -> {
-                            if (isInReasoningPhase) {
-                                completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
-                                isInReasoningPhase = false
-                            }
-
-                            val deltaText = chunkJson["delta"]?.jsonPrimitive?.content
-                            if (deltaText != null) {
-                                fullResponse.append(deltaText)
-                                callback.onPartialResponse(deltaText)
-                            }
-                        }
-                        "response.output_item.done" -> {
-                            val item = chunkJson["item"]?.jsonObject
-                            val itemType = item?.get("type")?.jsonPrimitive?.content
-
-                            if (itemType == "function_call") {
-                                if (isInReasoningPhase) {
-                                    completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
-                                    isInReasoningPhase = false
-                                }
-
-                                detectedToolCall = parseToolCall(item)
-                            }
-                        }
-                        "response.completed" -> {
-                            if (isInReasoningPhase) {
-                                completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
-                                isInReasoningPhase = false
-                            }
-
-                            if (detectedToolCall == null) {
-                                detectedToolCall = parseToolCallFromResponse(chunkJson)
-                            }
-                            break
-                        }
-                        "response.failed" -> {
-                            val error = chunkJson["response"]?.jsonObject?.get("error")?.jsonObject
-                            val errorMessage = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
-                            callback.onError("OpenAI API error: $errorMessage")
-                            reader.close()
-                            connection.disconnect()
-                            return ProviderStreamingResult.Error("OpenAI API error: $errorMessage")
-                        }
-                    }
-                } catch (jsonException: Exception) {
-                    Log.e("TOOL_CALL_DEBUG", "Error parsing streaming chunk: ${jsonException.message}")
-                    continue
-                }
+            if (reasoningSummariesUnavailable) {
+                isInReasoningPhase = true
+                reasoningStartTime = System.currentTimeMillis()
+                callback.onThinkingStarted()
+                Log.d("OPENAI_REASONING", "Reasoning phase started (summaries unavailable, timing from request)")
             }
         }
+
+        override fun onEvent(eventType: String?, data: JsonObject): StreamAction {
+            when (eventType) {
+                "response.output_item.added" -> {
+                    val item = data["item"]?.jsonObject
+                    val itemType = item?.get("type")?.jsonPrimitive?.content
+                    if (itemType == "reasoning") {
+                        if (!isInReasoningPhase) {
+                            isInReasoningPhase = true
+                            reasoningStartTime = System.currentTimeMillis()
+                            callback.onThinkingStarted()
+                            Log.d("OPENAI_REASONING", "Reasoning phase started")
+                        }
+                    }
+                }
+
+                "response.reasoning_summary_text.delta" -> {
+                    val deltaText = data["delta"]?.jsonPrimitive?.content
+                    if (deltaText != null && deltaText.isNotEmpty()) {
+                        reasoningBuilder.append(deltaText)
+                        callback.onThinkingPartial(deltaText)
+                    }
+                }
+
+                "response.output_text.delta" -> {
+                    if (isInReasoningPhase) {
+                        completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
+                        isInReasoningPhase = false
+                    }
+
+                    val deltaText = data["delta"]?.jsonPrimitive?.content
+                    if (deltaText != null) {
+                        fullResponse.append(deltaText)
+                        callback.onPartialResponse(deltaText)
+                    }
+                }
+
+                "response.output_item.done" -> {
+                    val item = data["item"]?.jsonObject
+                    val itemType = item?.get("type")?.jsonPrimitive?.content
+
+                    if (itemType == "function_call") {
+                        if (isInReasoningPhase) {
+                            completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
+                            isInReasoningPhase = false
+                        }
+
+                        detectedToolCall = parseToolCall(item)
+                    }
+                }
+
+                "response.completed" -> {
+                    if (isInReasoningPhase) {
+                        completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
+                        isInReasoningPhase = false
+                    }
+
+                    if (detectedToolCall == null) {
+                        detectedToolCall = parseToolCallFromResponse(data)
+                    }
+                    return StreamAction.Stop
+                }
+
+                "response.failed" -> {
+                    val error = data["response"]?.jsonObject?.get("error")?.jsonObject
+                    errorMessage = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
+                    callback.onError("OpenAI API error: $errorMessage")
+                    return StreamAction.Error("OpenAI API error: $errorMessage")
+                }
+            }
+
+            return StreamAction.Continue
+        }
+
+        override fun onStreamEnd() {
+            // Stream ended - complete thinking phase if still in progress
+            if (isInReasoningPhase) {
+                completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
+                isInReasoningPhase = false
+            }
+        }
+
+        override fun onParseError(line: String, error: Exception) {
+            Log.e("TOOL_CALL_DEBUG", "Error parsing streaming chunk: ${error.message}")
+        }
+
+        /**
+         * Build the final result based on accumulated state.
+         */
+        fun getResult(): ProviderStreamingResult {
+            // Check for error first
+            errorMessage?.let {
+                return ProviderStreamingResult.Error(it)
+            }
+
+            val thoughtsContent = reasoningBuilder.toString().takeIf { it.isNotEmpty() }
+            val thinkingDuration = if (reasoningStartTime > 0) {
+                (System.currentTimeMillis() - reasoningStartTime) / 1000f
+            } else null
+            val thoughtsStatus = when {
+                thoughtsContent != null -> ThoughtsStatus.PRESENT
+                // Reasoning was enabled but summaries unavailable
+                thinkingBudget is ThinkingBudgetValue.Effort && thinkingBudget.level.isNotBlank() && !requestReasoningSummary ->
+                    ThoughtsStatus.UNAVAILABLE
+                else -> ThoughtsStatus.NONE
+            }
+
+            return when {
+                detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
+                    toolCall = detectedToolCall!!,
+                    precedingText = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus
+                )
+                fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
+                    fullText = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus
+                )
+                else -> ProviderStreamingResult.Error("Empty response from OpenAI")
+            }
+        }
+    }
+
+    /**
+     * Parses the streaming response from OpenAI
+     */
+    private fun parseStreamingResponse(
+        reader: BufferedReader,
+        connection: HttpURLConnection,
+        callback: StreamingCallback,
+        thinkingBudget: ThinkingBudgetValue,
+        requestReasoningSummary: Boolean
+    ): ProviderStreamingResult {
+        val parser = DataOnlyStreamParser(
+            json = json,
+            eventTypeField = "type",
+            doneMarker = "[DONE]",
+            skipKeepalives = false,
+            logTag = "OpenAIProvider"
+        )
+        val handler = OpenAIEventHandler(callback, thinkingBudget, requestReasoningSummary)
+
+        val result = parser.parse(reader, handler)
 
         reader.close()
         connection.disconnect()
 
-        // Calculate thoughts data (shared by both TextComplete and ToolCallDetected)
-        val thoughtsContent = reasoningBuilder.toString().takeIf { it.isNotEmpty() }
-        val thinkingDuration = if (reasoningStartTime > 0) {
-            (System.currentTimeMillis() - reasoningStartTime) / 1000f
-        } else null
-        val thoughtsStatus = when {
-            thoughtsContent != null -> ThoughtsStatus.PRESENT
-            // Reasoning was enabled but summaries unavailable
-            thinkingBudget is ThinkingBudgetValue.Effort && thinkingBudget.level.isNotBlank() && !requestReasoningSummary ->
-                ThoughtsStatus.UNAVAILABLE
-            else -> ThoughtsStatus.NONE
+        // If parser returned an error (from StreamAction.Error), use that
+        if (result is StreamResult.Error) {
+            return ProviderStreamingResult.Error(result.message)
         }
 
-        return when {
-            detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
-                toolCall = detectedToolCall!!,
-                precedingText = fullResponse.toString(),
-                thoughts = thoughtsContent,
-                thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus
-            )
-            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
-                fullText = fullResponse.toString(),
-                thoughts = thoughtsContent,
-                thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus
-            )
-            else -> ProviderStreamingResult.Error("Empty response from OpenAI")
-        }
+        return handler.getResult()
     }
 
     private fun parseToolCall(item: JsonObject?): ToolCall? {
