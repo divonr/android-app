@@ -2,6 +2,10 @@ package com.example.ApI.data.network.providers
 
 import android.content.Context
 import com.example.ApI.data.model.*
+import com.example.ApI.data.network.streaming.EventDataStreamParser
+import com.example.ApI.data.network.streaming.StreamAction
+import com.example.ApI.data.network.streaming.StreamEventHandler
+import com.example.ApI.data.network.streaming.StreamResult
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.coroutines.Dispatchers
@@ -174,17 +178,21 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         }
     }
 
-    private fun parseStreamingResponse(
-        reader: BufferedReader,
-        connection: HttpURLConnection,
-        callback: StreamingCallback
-    ): ProviderStreamingResult {
+    /**
+     * Inner class to handle Anthropic SSE events.
+     * Implements StreamEventHandler for use with EventDataStreamParser.
+     */
+    private inner class AnthropicEventHandler(
+        private val callback: StreamingCallback
+    ) : StreamEventHandler {
+
+        // Response accumulation
         val fullResponse = StringBuilder()
 
-        // Track tool use
+        // Tool use tracking
         var currentToolUseId: String? = null
         var currentToolName: String? = null
-        var currentToolInput = StringBuilder()
+        val currentToolInput = StringBuilder()
         var isAccumulatingToolInput = false
         var detectedToolCall: ToolCall? = null
 
@@ -192,173 +200,195 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
         var isInThinkingPhase = false
         var thinkingStartTime: Long = 0
         val thoughtsBuilder = StringBuilder()
-        val signatureBuilder = StringBuilder()  // Capture signature for follow-up requests
+        val signatureBuilder = StringBuilder()
         var currentBlockIndex: Int = -1
         var currentBlockType: String? = null
 
-        var line: String?
-        while (reader.readLine().also { line = it } != null) {
-            val currentLine = line ?: continue
+        // Error tracking
+        var errorMessage: String? = null
 
-            if (currentLine.startsWith("event: ")) {
-                val eventType = currentLine.substring(7).trim()
+        override fun onEvent(eventType: String?, data: JsonObject): StreamAction {
+            when (eventType) {
+                "message_start" -> {
+                    // Message started - nothing to do
+                }
 
-                val dataLine = reader.readLine() ?: continue
-                if (!dataLine.startsWith("data: ")) continue
+                "content_block_start" -> {
+                    val contentBlock = data["content_block"]?.jsonObject
+                    val blockType = contentBlock?.get("type")?.jsonPrimitive?.content
+                    currentBlockIndex = data["index"]?.jsonPrimitive?.intOrNull ?: -1
+                    currentBlockType = blockType
 
-                val dataContent = dataLine.substring(6).trim()
-                if (dataContent.isEmpty()) continue
-
-                try {
-                    val chunkJson = json.parseToJsonElement(dataContent).jsonObject
-
-                    when (eventType) {
-                        "message_start" -> {
-                            // Message started
-                        }
-
-                        "content_block_start" -> {
-                            val contentBlock = chunkJson["content_block"]?.jsonObject
-                            val blockType = contentBlock?.get("type")?.jsonPrimitive?.content
-                            currentBlockIndex = chunkJson["index"]?.jsonPrimitive?.intOrNull ?: -1
-                            currentBlockType = blockType
-
-                            when (blockType) {
-                                "thinking" -> {
-                                    if (!isInThinkingPhase) {
-                                        isInThinkingPhase = true
-                                        thinkingStartTime = System.currentTimeMillis()
-                                        callback.onThinkingStarted()
-                                    }
-                                }
-                                "text" -> {
-                                    if (isInThinkingPhase) {
-                                        completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
-                                        isInThinkingPhase = false
-                                    }
-                                }
-                                "tool_use" -> {
-                                    if (isInThinkingPhase) {
-                                        completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
-                                        isInThinkingPhase = false
-                                    }
-
-                                    currentToolUseId = contentBlock?.get("id")?.jsonPrimitive?.content
-                                    currentToolName = contentBlock?.get("name")?.jsonPrimitive?.content
-                                    currentToolInput.clear()
-
-                                    val initialInput = contentBlock?.get("input")?.jsonObject
-                                    if (initialInput != null) {
-                                        currentToolInput.append(initialInput.toString())
-                                    }
-
-                                    isAccumulatingToolInput = true
-                                }
+                    when (blockType) {
+                        "thinking" -> {
+                            if (!isInThinkingPhase) {
+                                isInThinkingPhase = true
+                                thinkingStartTime = System.currentTimeMillis()
+                                callback.onThinkingStarted()
                             }
                         }
-
-                        "content_block_delta" -> {
-                            val delta = chunkJson["delta"]?.jsonObject
-                            val deltaType = delta?.get("type")?.jsonPrimitive?.content
-
-                            when (deltaType) {
-                                "thinking_delta" -> {
-                                    val thinkingText = delta?.get("thinking")?.jsonPrimitive?.content ?: ""
-                                    if (thinkingText.isNotEmpty()) {
-                                        thoughtsBuilder.append(thinkingText)
-                                        callback.onThinkingPartial(thinkingText)
-                                    }
-                                }
-                                "text_delta" -> {
-                                    val text = delta?.get("text")?.jsonPrimitive?.content ?: ""
-                                    fullResponse.append(text)
-                                    callback.onPartialResponse(text)
-                                }
-                                "input_json_delta" -> {
-                                    val partialJson = delta?.get("partial_json")?.jsonPrimitive?.content ?: ""
-                                    currentToolInput.append(partialJson)
-                                }
-                                "signature_delta" -> {
-                                    // Capture signature for follow-up requests (required by Anthropic API)
-                                    val signature = delta?.get("signature")?.jsonPrimitive?.content ?: ""
-                                    signatureBuilder.append(signature)
-                                }
+                        "text" -> {
+                            if (isInThinkingPhase) {
+                                completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                                isInThinkingPhase = false
                             }
                         }
-
-                        "content_block_stop" -> {
-                            if (isAccumulatingToolInput && currentToolUseId != null && currentToolName != null) {
-                                try {
-                                    val inputString = currentToolInput.toString().ifEmpty { "{}" }
-                                    val toolInputJson = json.parseToJsonElement(inputString).jsonObject
-
-                                    detectedToolCall = ToolCall(
-                                        id = currentToolUseId!!,
-                                        toolId = currentToolName!!,
-                                        parameters = toolInputJson,
-                                        provider = "anthropic"
-                                    )
-                                } catch (e: Exception) {
-                                    // Error parsing tool input
-                                }
-
-                                isAccumulatingToolInput = false
+                        "tool_use" -> {
+                            if (isInThinkingPhase) {
+                                completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                                isInThinkingPhase = false
                             }
-                        }
 
-                        "message_delta" -> {
-                            // Message delta received
-                        }
+                            currentToolUseId = contentBlock?.get("id")?.jsonPrimitive?.content
+                            currentToolName = contentBlock?.get("name")?.jsonPrimitive?.content
+                            currentToolInput.clear()
 
-                        "message_stop" -> {
-                            break
-                        }
+                            val initialInput = contentBlock?.get("input")?.jsonObject
+                            if (initialInput != null) {
+                                currentToolInput.append(initialInput.toString())
+                            }
 
-                        "error" -> {
-                            val error = chunkJson["error"]?.jsonObject
-                            val errorMessage = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
-                            callback.onError("Anthropic API error: $errorMessage")
-                            return ProviderStreamingResult.Error(errorMessage)
+                            isAccumulatingToolInput = true
                         }
                     }
-                } catch (jsonException: Exception) {
-                    continue
+                }
+
+                "content_block_delta" -> {
+                    val delta = data["delta"]?.jsonObject
+                    val deltaType = delta?.get("type")?.jsonPrimitive?.content
+
+                    when (deltaType) {
+                        "thinking_delta" -> {
+                            val thinkingText = delta?.get("thinking")?.jsonPrimitive?.content ?: ""
+                            if (thinkingText.isNotEmpty()) {
+                                thoughtsBuilder.append(thinkingText)
+                                callback.onThinkingPartial(thinkingText)
+                            }
+                        }
+                        "text_delta" -> {
+                            val text = delta?.get("text")?.jsonPrimitive?.content ?: ""
+                            fullResponse.append(text)
+                            callback.onPartialResponse(text)
+                        }
+                        "input_json_delta" -> {
+                            val partialJson = delta?.get("partial_json")?.jsonPrimitive?.content ?: ""
+                            currentToolInput.append(partialJson)
+                        }
+                        "signature_delta" -> {
+                            // Capture signature for follow-up requests (required by Anthropic API)
+                            val signature = delta?.get("signature")?.jsonPrimitive?.content ?: ""
+                            signatureBuilder.append(signature)
+                        }
+                    }
+                }
+
+                "content_block_stop" -> {
+                    if (isAccumulatingToolInput && currentToolUseId != null && currentToolName != null) {
+                        try {
+                            val inputString = currentToolInput.toString().ifEmpty { "{}" }
+                            val toolInputJson = json.parseToJsonElement(inputString).jsonObject
+
+                            detectedToolCall = ToolCall(
+                                id = currentToolUseId!!,
+                                toolId = currentToolName!!,
+                                parameters = toolInputJson,
+                                provider = "anthropic"
+                            )
+                        } catch (e: Exception) {
+                            // Error parsing tool input - continue without tool call
+                        }
+
+                        isAccumulatingToolInput = false
+                    }
+                }
+
+                "message_delta" -> {
+                    // Message delta received - nothing to do
+                }
+
+                "error" -> {
+                    val error = data["error"]?.jsonObject
+                    errorMessage = error?.get("message")?.jsonPrimitive?.content ?: "Unknown error"
+                    callback.onError("Anthropic API error: $errorMessage")
+                    return StreamAction.Error(errorMessage!!)
                 }
             }
+
+            return StreamAction.Continue
         }
+
+        override fun onStreamEnd() {
+            // Stream ended - nothing specific needed here as result is built in getResult()
+        }
+
+        override fun onParseError(line: String, error: Exception) {
+            // JSON parse error - continue processing (matches previous behavior)
+        }
+
+        /**
+         * Build the final result based on accumulated state.
+         */
+        fun getResult(): ProviderStreamingResult {
+            // Check for error first
+            errorMessage?.let {
+                return ProviderStreamingResult.Error(it)
+            }
+
+            val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+            val thoughtsSignature = signatureBuilder.toString().takeIf { it.isNotEmpty() }
+            val thinkingDuration = if (thinkingStartTime > 0) {
+                (System.currentTimeMillis() - thinkingStartTime) / 1000f
+            } else null
+            val thoughtsStatus = when {
+                thoughtsContent != null -> ThoughtsStatus.PRESENT
+                thinkingStartTime > 0 -> ThoughtsStatus.UNAVAILABLE
+                else -> ThoughtsStatus.NONE
+            }
+
+            return when {
+                detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
+                    toolCall = detectedToolCall!!,
+                    precedingText = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus,
+                    thoughtsSignature = thoughtsSignature
+                )
+                fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
+                    fullText = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus,
+                    thoughtsSignature = thoughtsSignature
+                )
+                else -> ProviderStreamingResult.Error("Empty response from Anthropic")
+            }
+        }
+    }
+
+    private fun parseStreamingResponse(
+        reader: BufferedReader,
+        connection: HttpURLConnection,
+        callback: StreamingCallback
+    ): ProviderStreamingResult {
+        val parser = EventDataStreamParser(
+            json = json,
+            stopEvents = setOf("message_stop"),
+            logTag = "AnthropicProvider"
+        )
+        val handler = AnthropicEventHandler(callback)
+
+        val result = parser.parse(reader, handler)
 
         reader.close()
         connection.disconnect()
 
-        val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
-        val thoughtsSignature = signatureBuilder.toString().takeIf { it.isNotEmpty() }
-        val thinkingDuration = if (thinkingStartTime > 0) {
-            (System.currentTimeMillis() - thinkingStartTime) / 1000f
-        } else null
-        val thoughtsStatus = when {
-            thoughtsContent != null -> ThoughtsStatus.PRESENT
-            thinkingStartTime > 0 -> ThoughtsStatus.UNAVAILABLE
-            else -> ThoughtsStatus.NONE
+        // If parser returned an error (from StreamAction.Error), use that
+        if (result is StreamResult.Error) {
+            return ProviderStreamingResult.Error(result.message)
         }
 
-        return when {
-            detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
-                toolCall = detectedToolCall!!,
-                precedingText = fullResponse.toString(),
-                thoughts = thoughtsContent,
-                thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus,
-                thoughtsSignature = thoughtsSignature
-            )
-            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
-                fullText = fullResponse.toString(),
-                thoughts = thoughtsContent,
-                thinkingDurationSeconds = thinkingDuration,
-                thoughtsStatus = thoughtsStatus,
-                thoughtsSignature = thoughtsSignature
-            )
-            else -> ProviderStreamingResult.Error("Empty response from Anthropic")
-        }
+        return handler.getResult()
     }
 
     private suspend fun buildMessages(messages: List<Message>): List<JsonObject> = withContext(Dispatchers.IO) {
