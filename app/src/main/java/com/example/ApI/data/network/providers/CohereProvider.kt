@@ -2,6 +2,10 @@ package com.example.ApI.data.network.providers
 
 import android.content.Context
 import com.example.ApI.data.model.*
+import com.example.ApI.data.network.streaming.EventDataStreamParser
+import com.example.ApI.data.network.streaming.StreamAction
+import com.example.ApI.data.network.streaming.StreamEventHandler
+import com.example.ApI.data.network.streaming.StreamResult
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.coroutines.Dispatchers
@@ -131,226 +135,247 @@ class CohereProvider(context: Context) : BaseProvider(context) {
         }
     }
 
-    private fun parseStreamingResponse(
-        reader: BufferedReader,
-        connection: HttpURLConnection,
-        callback: StreamingCallback
-    ): ProviderStreamingResult {
+    /**
+     * Inner class to handle Cohere SSE events.
+     * Implements StreamEventHandler for use with EventDataStreamParser.
+     */
+    private inner class CohereEventHandler(
+        private val callback: StreamingCallback
+    ) : StreamEventHandler {
+
+        // Response accumulation
         val fullResponse = StringBuilder()
 
+        // Tool use tracking
         var currentToolCallId: String? = null
         var currentToolName: String? = null
-        var currentToolArguments = StringBuilder()
+        val currentToolArguments = StringBuilder()
         var detectedToolCall: ToolCall? = null
-        var toolPlanText = StringBuilder()
+        val toolPlanText = StringBuilder()
 
         // Thinking state tracking
         var isInThinkingPhase = false
         var thinkingStartTime: Long = 0
         val thoughtsBuilder = StringBuilder()
 
-        var line: String?
-        while (reader.readLine().also { line = it } != null) {
-            val currentLine = line ?: continue
+        // Error tracking
+        var errorMessage: String? = null
 
-            if (currentLine.isBlank()) continue
-            if (currentLine == "data: [DONE]") {
-                break
-            }
+        override fun onEvent(eventType: String?, data: JsonObject): StreamAction {
+            when (eventType) {
+                "message-start" -> {
+                    // Message started - nothing to do
+                }
 
-            if (currentLine.startsWith("event: ")) {
-                val eventType = currentLine.substring(7).trim()
+                "content-start" -> {
+                    // Check if this is a thinking content block
+                    val delta = data["delta"]?.jsonObject
+                    val message = delta?.get("message")?.jsonObject
+                    val content = message?.get("content")?.jsonObject
+                    val contentType = content?.get("type")?.jsonPrimitive?.contentOrNull
 
-                val dataLine = reader.readLine() ?: continue
-                if (!dataLine.startsWith("data: ")) continue
+                    if (contentType == "thinking" && !isInThinkingPhase) {
+                        isInThinkingPhase = true
+                        thinkingStartTime = System.currentTimeMillis()
+                        callback.onThinkingStarted()
+                    }
+                }
 
-                val dataContent = dataLine.substring(6).trim()
-                if (dataContent.isEmpty() || dataContent == "[DONE]") continue
+                "content-delta" -> {
+                    try {
+                        val delta = data["delta"]?.jsonObject
+                        val message = delta?.get("message")?.jsonObject
+                        val contentElement = message?.get("content")
 
-                try {
-                    val chunkJson = json.parseToJsonElement(dataContent).jsonObject
-
-                    when (eventType) {
-                        "message-start" -> {
-                            // Message started
-                        }
-
-                        "content-start" -> {
-                            // Check if this is a thinking content block
-                            val delta = chunkJson["delta"]?.jsonObject
-                            val message = delta?.get("message")?.jsonObject
-                            val content = message?.get("content")?.jsonObject
-                            val contentType = content?.get("type")?.jsonPrimitive?.contentOrNull
-
-                            if (contentType == "thinking" && !isInThinkingPhase) {
-                                isInThinkingPhase = true
-                                thinkingStartTime = System.currentTimeMillis()
-                                callback.onThinkingStarted()
-                            }
-                        }
-
-                        "content-delta" -> {
-                            try {
-                                val delta = chunkJson["delta"]?.jsonObject
-                                val message = delta?.get("message")?.jsonObject
-                                val contentElement = message?.get("content")
-
-                                when (contentElement) {
-                                    is JsonObject -> {
-                                        // Check for thinking content first
-                                        val thinkingText = contentElement["thinking"]?.jsonPrimitive?.contentOrNull
-                                        if (thinkingText != null && thinkingText.isNotEmpty()) {
-                                            thoughtsBuilder.append(thinkingText)
-                                            callback.onThinkingPartial(thinkingText)
-                                        } else {
-                                            // Regular text content
-                                            val text = contentElement["text"]?.jsonPrimitive?.contentOrNull ?: ""
-                                            if (text.isNotEmpty()) {
-                                                // Transition from thinking to response
-                                                if (isInThinkingPhase) {
-                                                    completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
-                                                    isInThinkingPhase = false
-                                                }
-                                                fullResponse.append(text)
-                                                callback.onPartialResponse(text)
-                                            }
+                        when (contentElement) {
+                            is JsonObject -> {
+                                // Check for thinking content first
+                                val thinkingText = contentElement["thinking"]?.jsonPrimitive?.contentOrNull
+                                if (thinkingText != null && thinkingText.isNotEmpty()) {
+                                    thoughtsBuilder.append(thinkingText)
+                                    callback.onThinkingPartial(thinkingText)
+                                } else {
+                                    // Regular text content
+                                    val text = contentElement["text"]?.jsonPrimitive?.contentOrNull ?: ""
+                                    if (text.isNotEmpty()) {
+                                        // Transition from thinking to response
+                                        if (isInThinkingPhase) {
+                                            completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                                            isInThinkingPhase = false
                                         }
+                                        fullResponse.append(text)
+                                        callback.onPartialResponse(text)
                                     }
-                                    is JsonPrimitive -> {
-                                        val text = contentElement.contentOrNull ?: ""
-                                        if (text.isNotEmpty()) {
-                                            if (isInThinkingPhase) {
-                                                completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
-                                                isInThinkingPhase = false
-                                            }
-                                            fullResponse.append(text)
-                                            callback.onPartialResponse(text)
-                                        }
+                                }
+                            }
+                            is JsonPrimitive -> {
+                                val text = contentElement.contentOrNull ?: ""
+                                if (text.isNotEmpty()) {
+                                    if (isInThinkingPhase) {
+                                        completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
+                                        isInThinkingPhase = false
                                     }
-                                    else -> {}
-                                }
-                            } catch (e: Exception) {
-                                // Error parsing content-delta
-                            }
-                        }
-
-                        "content-end" -> {
-                            // Content block ended - if thinking phase just ended, it will be
-                            // completed when text content starts
-                        }
-
-                        "tool-plan-delta" -> {
-                            val delta = chunkJson["delta"]?.jsonObject
-                            val message = delta?.get("message")?.jsonObject
-                            val toolPlan = message?.get("tool_plan")?.jsonPrimitive?.content ?: ""
-                            if (toolPlan.isNotEmpty()) {
-                                toolPlanText.append(toolPlan)
-                            }
-                        }
-
-                        "tool-call-start" -> {
-                            try {
-                                val delta = chunkJson["delta"]?.jsonObject
-                                val message = delta?.get("message")?.jsonObject
-                                val toolCallsElement = message?.get("tool_calls")
-
-                                val toolCalls = when (toolCallsElement) {
-                                    is JsonObject -> toolCallsElement
-                                    is JsonArray -> toolCallsElement.firstOrNull() as? JsonObject
-                                    else -> null
-                                }
-
-                                currentToolCallId = toolCalls?.get("id")?.jsonPrimitive?.contentOrNull
-                                val function = toolCalls?.get("function")?.jsonObject
-                                currentToolName = function?.get("name")?.jsonPrimitive?.contentOrNull
-                                currentToolArguments.clear()
-
-                                val initialArgs = function?.get("arguments")?.jsonPrimitive?.contentOrNull
-                                if (!initialArgs.isNullOrEmpty()) {
-                                    currentToolArguments.append(initialArgs)
-                                }
-                            } catch (e: Exception) {
-                                // Error parsing tool-call-start
-                            }
-                        }
-
-                        "tool-call-delta" -> {
-                            try {
-                                val delta = chunkJson["delta"]?.jsonObject
-                                val message = delta?.get("message")?.jsonObject
-                                val toolCallsElement = message?.get("tool_calls")
-                                val toolCalls = when (toolCallsElement) {
-                                    is JsonObject -> toolCallsElement
-                                    is JsonArray -> toolCallsElement.firstOrNull() as? JsonObject
-                                    else -> null
-                                }
-                                val function = toolCalls?.get("function")?.jsonObject
-                                val argsChunk = function?.get("arguments")?.jsonPrimitive?.contentOrNull ?: ""
-                                if (argsChunk.isNotEmpty()) {
-                                    currentToolArguments.append(argsChunk)
-                                }
-                            } catch (e: Exception) {
-                                // Error parsing tool-call-delta
-                            }
-                        }
-
-                        "tool-call-end" -> {
-                            if (currentToolCallId != null && currentToolName != null) {
-                                try {
-                                    val inputString = currentToolArguments.toString().ifEmpty { "{}" }
-                                    val toolInputJson = json.parseToJsonElement(inputString).jsonObject
-
-                                    detectedToolCall = ToolCall(
-                                        id = currentToolCallId!!,
-                                        toolId = currentToolName!!,
-                                        parameters = toolInputJson,
-                                        provider = "cohere"
-                                    )
-                                } catch (e: Exception) {
-                                    // Error parsing Cohere tool input JSON
+                                    fullResponse.append(text)
+                                    callback.onPartialResponse(text)
                                 }
                             }
+                            else -> {}
+                        }
+                    } catch (e: Exception) {
+                        // Error parsing content-delta
+                    }
+                }
+
+                "content-end" -> {
+                    // Content block ended - if thinking phase just ended, it will be
+                    // completed when text content starts
+                }
+
+                "tool-plan-delta" -> {
+                    val delta = data["delta"]?.jsonObject
+                    val message = delta?.get("message")?.jsonObject
+                    val toolPlan = message?.get("tool_plan")?.jsonPrimitive?.content ?: ""
+                    if (toolPlan.isNotEmpty()) {
+                        toolPlanText.append(toolPlan)
+                    }
+                }
+
+                "tool-call-start" -> {
+                    try {
+                        val delta = data["delta"]?.jsonObject
+                        val message = delta?.get("message")?.jsonObject
+                        val toolCallsElement = message?.get("tool_calls")
+
+                        val toolCalls = when (toolCallsElement) {
+                            is JsonObject -> toolCallsElement
+                            is JsonArray -> toolCallsElement.firstOrNull() as? JsonObject
+                            else -> null
                         }
 
-                        "message-end" -> {
-                            break
+                        currentToolCallId = toolCalls?.get("id")?.jsonPrimitive?.contentOrNull
+                        val function = toolCalls?.get("function")?.jsonObject
+                        currentToolName = function?.get("name")?.jsonPrimitive?.contentOrNull
+                        currentToolArguments.clear()
+
+                        val initialArgs = function?.get("arguments")?.jsonPrimitive?.contentOrNull
+                        if (!initialArgs.isNullOrEmpty()) {
+                            currentToolArguments.append(initialArgs)
+                        }
+                    } catch (e: Exception) {
+                        // Error parsing tool-call-start
+                    }
+                }
+
+                "tool-call-delta" -> {
+                    try {
+                        val delta = data["delta"]?.jsonObject
+                        val message = delta?.get("message")?.jsonObject
+                        val toolCallsElement = message?.get("tool_calls")
+                        val toolCalls = when (toolCallsElement) {
+                            is JsonObject -> toolCallsElement
+                            is JsonArray -> toolCallsElement.firstOrNull() as? JsonObject
+                            else -> null
+                        }
+                        val function = toolCalls?.get("function")?.jsonObject
+                        val argsChunk = function?.get("arguments")?.jsonPrimitive?.contentOrNull ?: ""
+                        if (argsChunk.isNotEmpty()) {
+                            currentToolArguments.append(argsChunk)
+                        }
+                    } catch (e: Exception) {
+                        // Error parsing tool-call-delta
+                    }
+                }
+
+                "tool-call-end" -> {
+                    if (currentToolCallId != null && currentToolName != null) {
+                        try {
+                            val inputString = currentToolArguments.toString().ifEmpty { "{}" }
+                            val toolInputJson = json.parseToJsonElement(inputString).jsonObject
+
+                            detectedToolCall = ToolCall(
+                                id = currentToolCallId!!,
+                                toolId = currentToolName!!,
+                                parameters = toolInputJson,
+                                provider = "cohere"
+                            )
+                        } catch (e: Exception) {
+                            // Error parsing Cohere tool input JSON
                         }
                     }
-                } catch (jsonException: Exception) {
-                    continue
                 }
             }
+
+            return StreamAction.Continue
         }
+
+        override fun onStreamEnd() {
+            // Stream ended - nothing specific needed here as result is built in getResult()
+        }
+
+        override fun onParseError(line: String, error: Exception) {
+            // JSON parse error - continue processing (matches previous behavior)
+        }
+
+        /**
+         * Build the final result based on accumulated state.
+         */
+        fun getResult(): ProviderStreamingResult {
+            // Check for error first
+            errorMessage?.let {
+                return ProviderStreamingResult.Error(it)
+            }
+
+            val thoughtsContent = thoughtsBuilder.toString().takeIf { it.isNotEmpty() }
+            val thinkingDuration = if (thoughtsContent != null && thinkingStartTime > 0) {
+                (System.currentTimeMillis() - thinkingStartTime) / 1000f
+            } else null
+            val thoughtsStatus = when {
+                thoughtsContent != null -> ThoughtsStatus.PRESENT
+                else -> ThoughtsStatus.NONE
+            }
+
+            return when {
+                detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
+                    toolCall = detectedToolCall!!,
+                    precedingText = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus
+                )
+                fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
+                    fullText = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus
+                )
+                else -> ProviderStreamingResult.Error("Empty response from Cohere")
+            }
+        }
+    }
+
+    private fun parseStreamingResponse(
+        reader: BufferedReader,
+        connection: HttpURLConnection,
+        callback: StreamingCallback
+    ): ProviderStreamingResult {
+        val parser = EventDataStreamParser(
+            json = json,
+            stopEvents = setOf("message-end"),
+            logTag = "CohereProvider"
+        )
+        val handler = CohereEventHandler(callback)
+
+        val result = parser.parse(reader, handler)
 
         reader.close()
         connection.disconnect()
 
-        return when {
-            detectedToolCall != null -> ProviderStreamingResult.ToolCallDetected(
-                toolCall = detectedToolCall!!,
-                precedingText = fullResponse.toString(),
-                thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() },
-                thinkingDurationSeconds = if (thoughtsBuilder.isNotEmpty()) {
-                    (thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f })
-                } else null,
-                thoughtsStatus = when {
-                    thoughtsBuilder.isNotEmpty() -> ThoughtsStatus.PRESENT
-                    else -> ThoughtsStatus.NONE
-                }
-            )
-            fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
-                fullText = fullResponse.toString(),
-                thoughts = thoughtsBuilder.toString().takeIf { it.isNotEmpty() },
-                thinkingDurationSeconds = if (thoughtsBuilder.isNotEmpty()) {
-                    (thinkingStartTime.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000f })
-                } else null,
-                thoughtsStatus = when {
-                    thoughtsBuilder.isNotEmpty() -> ThoughtsStatus.PRESENT
-                    else -> ThoughtsStatus.NONE
-                }
-            )
-            else -> ProviderStreamingResult.Error("Empty response from Cohere")
+        // If parser returned an error (from StreamAction.Error), use that
+        if (result is StreamResult.Error) {
+            return ProviderStreamingResult.Error(result.message)
         }
+
+        return handler.getResult()
     }
 
     private suspend fun buildMessages(messages: List<Message>, systemPrompt: String): List<JsonObject> = withContext(Dispatchers.IO) {
