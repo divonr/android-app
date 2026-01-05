@@ -62,6 +62,9 @@ fun ApiKeysScreen(
     // Custom providers state (for AddApiKeyDialog)
     var customProviders by remember { mutableStateOf(repository.loadCustomProviders(currentUser)) }
 
+    // Full custom providers state (for AddApiKeyDialog)
+    var fullCustomProviders by remember { mutableStateOf(repository.loadFullCustomProviders(currentUser)) }
+
     // Load initial skip welcome state from settings
     val appSettings = remember { repository.loadAppSettings() }
     var currentSkipWelcome by remember { mutableStateOf(appSettings.skipWelcomeScreen) }
@@ -307,6 +310,7 @@ fun ApiKeysScreen(
         AddApiKeyDialog(
             providers = providers,
             customProviders = customProviders,
+            fullCustomProviders = fullCustomProviders,
             onConfirm = { provider, key, customName ->
                 onAddApiKey(provider, key, customName)
                 showAddDialog = false
@@ -325,6 +329,21 @@ fun ApiKeysScreen(
             onDeleteCustomProvider = { config ->
                 repository.deleteCustomProvider(currentUser, config.id)
                 customProviders = repository.loadCustomProviders(currentUser)
+                onProvidersChanged()
+            },
+            onCreateFullCustomProvider = { config ->
+                repository.addFullCustomProvider(currentUser, config)
+                fullCustomProviders = repository.loadFullCustomProviders(currentUser)
+                onProvidersChanged()
+            },
+            onEditFullCustomProvider = { config ->
+                repository.updateFullCustomProvider(currentUser, config.id, config)
+                fullCustomProviders = repository.loadFullCustomProviders(currentUser)
+                onProvidersChanged()
+            },
+            onDeleteFullCustomProvider = { config ->
+                repository.deleteFullCustomProvider(currentUser, config.id)
+                fullCustomProviders = repository.loadFullCustomProviders(currentUser)
                 onProvidersChanged()
             }
         )
