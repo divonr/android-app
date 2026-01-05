@@ -2,6 +2,7 @@ package com.example.ApI.data.repository
 
 import android.content.Context
 import com.example.ApI.data.model.*
+import com.example.ApI.data.model.FullCustomProviderConfig
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.network.LLMApiService
 import com.example.ApI.tools.ToolSpecification
@@ -148,6 +149,38 @@ class DataRepository(private val context: Context) {
     fun initializeCustomProviders(username: String) {
         val customConfigs = localStorageManager.loadCustomProviders(username)
         apiService.reloadCustomProviders(customConfigs.filter { it.isEnabled })
+    }
+
+    // ============ Full Custom Providers ============
+
+    fun loadFullCustomProviders(username: String): List<FullCustomProviderConfig> {
+        return localStorageManager.loadFullCustomProviders(username)
+    }
+
+    fun saveFullCustomProviders(username: String, providers: List<FullCustomProviderConfig>) {
+        localStorageManager.saveFullCustomProviders(username, providers)
+    }
+
+    fun addFullCustomProvider(username: String, provider: FullCustomProviderConfig) {
+        localStorageManager.addFullCustomProvider(username, provider)
+        // Note: Provider registration will be added in a later step when FullDynamicCustomProvider exists
+    }
+
+    fun updateFullCustomProvider(username: String, providerId: String, updated: FullCustomProviderConfig) {
+        localStorageManager.updateFullCustomProvider(username, providerId, updated)
+        // Note: Provider re-registration will be added in a later step
+    }
+
+    fun deleteFullCustomProvider(username: String, providerId: String) {
+        val providers = loadFullCustomProviders(username)
+        val toDelete = providers.find { it.id == providerId }
+        localStorageManager.deleteFullCustomProvider(username, providerId)
+        // Note: Provider unregistration will be added in a later step
+    }
+
+    fun initializeFullCustomProviders(username: String) {
+        val providers = loadFullCustomProviders(username).filter { it.isEnabled }
+        // Note: Actual provider registration will be added when FullDynamicCustomProvider exists
     }
 
     fun replaceMessageInChat(username: String, chatId: String, oldMessage: Message, newMessage: Message): Chat? = chatHistoryManager.replaceMessageInChat(username, chatId, oldMessage, newMessage)
