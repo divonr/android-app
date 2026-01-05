@@ -31,12 +31,14 @@ import com.example.ApI.ui.theme.*
  *
  * @param existingConfig If provided, the dialog is in edit mode; otherwise in create mode
  * @param onConfirm Callback when user confirms with the provider config
+ * @param onSwitchToFullCustom Callback when user wants to switch to full custom provider dialog
  * @param onDismiss Callback when user dismisses the dialog
  */
 @Composable
 fun CustomProviderDialog(
     existingConfig: CustomProviderConfig? = null,
     onConfirm: (CustomProviderConfig) -> Unit,
+    onSwitchToFullCustom: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val isEditing = existingConfig != null

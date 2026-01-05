@@ -20,9 +20,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.ApI.R
 import com.example.ApI.data.model.CustomProviderConfig
+import com.example.ApI.data.model.FullCustomProviderConfig
 import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.getDisplayNameFromProviderKey
 import com.example.ApI.data.model.isCustomProvider
+import com.example.ApI.data.model.isFullCustomProvider
 import com.example.ApI.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -30,11 +32,15 @@ import com.example.ApI.ui.theme.*
 fun AddApiKeyDialog(
     providers: List<Provider>,
     customProviders: List<CustomProviderConfig> = emptyList(),
+    fullCustomProviders: List<FullCustomProviderConfig> = emptyList(),
     onConfirm: (String, String, String?) -> Unit,
     onDismiss: () -> Unit,
     onCreateCustomProvider: (CustomProviderConfig) -> Unit = {},
     onEditCustomProvider: (CustomProviderConfig) -> Unit = {},
     onDeleteCustomProvider: (CustomProviderConfig) -> Unit = {},
+    onCreateFullCustomProvider: (FullCustomProviderConfig) -> Unit = {},
+    onEditFullCustomProvider: (FullCustomProviderConfig) -> Unit = {},
+    onDeleteFullCustomProvider: (FullCustomProviderConfig) -> Unit = {},
     initialProvider: String? = null,
     initialApiKey: String? = null
 ) {
@@ -47,10 +53,17 @@ fun AddApiKeyDialog(
     var showCreateCustomProviderDialog by remember { mutableStateOf(false) }
     var customProviderToEdit by remember { mutableStateOf<CustomProviderConfig?>(null) }
 
+    // Full custom provider dialog state
+    var showFullCustomProviderDialog by remember { mutableStateOf(false) }
+    var fullCustomProviderToEdit by remember { mutableStateOf<FullCustomProviderConfig?>(null) }
+
     // Get display name for selected provider
-    val selectedProviderDisplayName = remember(selectedProvider, customProviders) {
+    val selectedProviderDisplayName = remember(selectedProvider, customProviders, fullCustomProviders) {
         if (selectedProvider.isEmpty()) {
             ""
+        } else if (isFullCustomProvider(selectedProvider)) {
+            fullCustomProviders.find { it.providerKey == selectedProvider }?.name
+                ?: getDisplayNameFromProviderKey(selectedProvider)
         } else if (isCustomProvider(selectedProvider)) {
             customProviders.find { it.providerKey == selectedProvider }?.name
                 ?: getDisplayNameFromProviderKey(selectedProvider)
@@ -190,6 +203,66 @@ fun AddApiKeyDialog(
                                 }
                             }
 
+                            // Full custom providers with edit/delete icons
+                            if (fullCustomProviders.isNotEmpty()) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    color = OnSurface.copy(alpha = 0.1f)
+                                )
+
+                                fullCustomProviders.forEach { fullCustomProvider ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = fullCustomProvider.name,
+                                                    color = Color(0xFF9C27B0),  // Purple for full custom providers
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Row {
+                                                    IconButton(
+                                                        onClick = {
+                                                            showProviderDropdown = false
+                                                            fullCustomProviderToEdit = fullCustomProvider
+                                                        },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Edit,
+                                                            contentDescription = "Edit",
+                                                            tint = OnSurfaceVariant,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                    IconButton(
+                                                        onClick = {
+                                                            showProviderDropdown = false
+                                                            onDeleteFullCustomProvider(fullCustomProvider)
+                                                        },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Delete,
+                                                            contentDescription = "Delete",
+                                                            tint = Color.Red.copy(alpha = 0.7f),
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedProvider = fullCustomProvider.providerKey
+                                            showProviderDropdown = false
+                                        }
+                                    )
+                                }
+                            }
+
                             // "Create new provider" option
                             HorizontalDivider(
                                 modifier = Modifier.padding(vertical = 8.dp),
@@ -217,7 +290,7 @@ fun AddApiKeyDialog(
                                 },
                                 onClick = {
                                     showProviderDropdown = false
-                                    showCreateCustomProviderDialog = true
+                                    showFullCustomProviderDialog = true
                                 }
                             )
                         }
@@ -303,9 +376,40 @@ fun AddApiKeyDialog(
                 showCreateCustomProviderDialog = false
                 customProviderToEdit = null
             },
+            onSwitchToFullCustom = {
+                showCreateCustomProviderDialog = false
+                customProviderToEdit = null
+                showFullCustomProviderDialog = true
+            },
             onDismiss = {
                 showCreateCustomProviderDialog = false
                 customProviderToEdit = null
+            }
+        )
+    }
+
+    // Create/Edit Full Custom Provider Dialog
+    if (showFullCustomProviderDialog || fullCustomProviderToEdit != null) {
+        FullCustomProviderDialog(
+            existingConfig = fullCustomProviderToEdit,
+            onConfirm = { config ->
+                if (fullCustomProviderToEdit != null) {
+                    onEditFullCustomProvider(config)
+                } else {
+                    onCreateFullCustomProvider(config)
+                    selectedProvider = config.providerKey
+                }
+                showFullCustomProviderDialog = false
+                fullCustomProviderToEdit = null
+            },
+            onSwitchToOpenAICompatible = {
+                showFullCustomProviderDialog = false
+                fullCustomProviderToEdit = null
+                showCreateCustomProviderDialog = true
+            },
+            onDismiss = {
+                showFullCustomProviderDialog = false
+                fullCustomProviderToEdit = null
             }
         )
     }
