@@ -3,6 +3,7 @@ package com.example.ApI.data.repository
 import com.example.ApI.data.model.ApiKey
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.CustomProviderConfig
+import com.example.ApI.data.model.FullCustomProviderConfig
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import java.io.File
@@ -174,6 +175,51 @@ class LocalStorageManager(
     fun deleteCustomProvider(username: String, providerId: String) {
         val current = loadCustomProviders(username).filter { it.id != providerId }
         saveCustomProviders(username, current)
+    }
+
+    // ============ Full Custom Providers ============
+
+    fun loadFullCustomProviders(username: String): List<FullCustomProviderConfig> {
+        val file = File(internalDir, "full_custom_providers_$username.json")
+        return if (file.exists()) {
+            try {
+                val content = file.readText()
+                json.decodeFromString<List<FullCustomProviderConfig>>(content)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+    }
+
+    fun saveFullCustomProviders(username: String, providers: List<FullCustomProviderConfig>) {
+        val file = File(internalDir, "full_custom_providers_$username.json")
+        try {
+            file.writeText(json.encodeToString(providers))
+        } catch (e: IOException) {
+            // Handle error
+        }
+    }
+
+    fun addFullCustomProvider(username: String, provider: FullCustomProviderConfig) {
+        val current = loadFullCustomProviders(username).toMutableList()
+        current.add(provider)
+        saveFullCustomProviders(username, current)
+    }
+
+    fun updateFullCustomProvider(username: String, providerId: String, updated: FullCustomProviderConfig) {
+        val current = loadFullCustomProviders(username).toMutableList()
+        val index = current.indexOfFirst { it.id == providerId }
+        if (index >= 0) {
+            current[index] = updated
+            saveFullCustomProviders(username, current)
+        }
+    }
+
+    fun deleteFullCustomProvider(username: String, providerId: String) {
+        val current = loadFullCustomProviders(username).filter { it.id != providerId }
+        saveFullCustomProviders(username, current)
     }
 
     // ============ File Management ============
