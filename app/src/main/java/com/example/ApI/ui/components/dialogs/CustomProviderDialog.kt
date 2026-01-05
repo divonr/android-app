@@ -11,6 +11,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +76,33 @@ fun CustomProviderDialog(
                         color = OnSurface,
                         fontWeight = FontWeight.Bold
                     )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // OpenAI Compatible checkbox (always checked in this dialog)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = true,
+                            onCheckedChange = { isChecked ->
+                                if (!isChecked) {
+                                    onSwitchToFullCustom()
+                                }
+                            },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = Primary,
+                                uncheckedColor = OnSurface.copy(alpha = 0.6f)
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "ספק תומך פורמט OpenAI",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = OnSurface
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
