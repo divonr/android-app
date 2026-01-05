@@ -104,4 +104,12 @@
     <string name="rename">שנה שם</string>
     <string name="chat_title">כותרת השיחה</string>
     <string name="save">שמור</string>
+
+    <!-- Full Custom Provider Feature -->
+    <!-- Note: The following UI components use hardcoded Hebrew strings and do not reference string resources:
+         - FullCustomProviderDialog.kt: Full custom provider creation/editing dialog with tabs for Request, Streaming, and Model configuration
+         - StreamingConfigComponents.kt: Parser type selector, parser config editor, and event mappings editor
+         - BodyTemplateEditor.kt: Body template editor with placeholder indicators and examples
+         These components are Hebrew-focused and strings are defined directly in the composables.
+         If internationalization is needed in the future, extract strings from these files. -->
 </resources>
