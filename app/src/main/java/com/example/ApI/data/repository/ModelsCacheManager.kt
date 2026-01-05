@@ -2,6 +2,7 @@ package com.example.ApI.data.repository
 
 import com.example.ApI.data.model.*
 import com.example.ApI.data.model.CustomProviderConfig
+import com.example.ApI.data.model.FullCustomProviderConfig
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.withContext
@@ -411,6 +412,17 @@ class ModelsCacheManager(
         customProvidersLoader = loader
     }
 
+    // Loader function for full custom providers (set by DataRepository)
+    private var fullCustomProvidersLoader: (() -> List<FullCustomProviderConfig>)? = null
+
+    /**
+     * Sets the loader function for full custom providers.
+     * This should be called by DataRepository during initialization.
+     */
+    fun setFullCustomProvidersLoader(loader: () -> List<FullCustomProviderConfig>) {
+        fullCustomProvidersLoader = loader
+    }
+
     /**
      * Builds Provider objects from custom provider configs
      */
@@ -434,6 +446,34 @@ class ModelsCacheManager(
                     response_format = "server_sent_events"
                 ),
                 upload_files_request = null,  // Custom providers use inline base64
+                upload_files_response_important_fields = null
+            )
+        }
+    }
+
+    /**
+     * Builds Provider objects from full custom provider configs
+     */
+    private fun buildFullCustomProviders(): List<Provider> {
+        val fullCustomConfigs = fullCustomProvidersLoader?.invoke() ?: return emptyList()
+
+        return fullCustomConfigs.filter { it.isEnabled }.map { fullCustomConfig ->
+            Provider(
+                provider = fullCustomConfig.providerKey,
+                models = listOf(Model.SimpleModel(fullCustomConfig.defaultModel)),
+                request = ApiRequest(
+                    request_type = "POST",
+                    base_url = fullCustomConfig.baseUrl,
+                    headers = buildMap {
+                        put("Content-Type", "application/json")
+                        put(fullCustomConfig.authHeaderName, fullCustomConfig.authHeaderFormat)
+                        putAll(fullCustomConfig.extraHeaders)
+                    }
+                ),
+                response_important_fields = ResponseFields(
+                    response_format = "server_sent_events"
+                ),
+                upload_files_request = null,  // Full custom providers use inline base64
                 upload_files_response_important_fields = null
             )
         }
@@ -617,6 +657,6 @@ class ModelsCacheManager(
                 upload_files_request = null,
                 upload_files_response_important_fields = null
             )
-        ) + buildCustomProviders()
+        ) + buildCustomProviders() + buildFullCustomProviders()
     }
 }
