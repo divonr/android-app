@@ -2,7 +2,7 @@ package com.example.ApI.util
 
 import com.example.ApI.data.model.BodyTemplatePlaceholders
 import com.example.ApI.data.model.Message
-import com.example.ApI.data.model.ToolSpecification
+import com.example.ApI.tools.ToolSpecification
 import kotlinx.serialization.json.*
 
 /**
@@ -145,8 +145,8 @@ object TemplateExpander {
         if (pattern == null) {
             // Fallback: simple replacement without message expansion
             return simpleSubstitution(template, apiKey, model,
-                messages.lastOrNull { !it.isUser }?.content ?: "",
-                messages.lastOrNull { it.isUser }?.content ?: "",
+                messages.lastOrNull { it.role != "user" }?.content ?: "",
+                messages.lastOrNull { it.role == "user" }?.content ?: "",
                 systemPrompt, tools, thoughts, thoughtsSignature)
         }
 
@@ -186,7 +186,7 @@ object TemplateExpander {
             if (!first) result.append(",")
             first = false
 
-            if (message.isUser) {
+            if (message.role == "user") {
                 val userMsg = pattern.userTemplate.replace(
                     BodyTemplatePlaceholders.PROMPT,
                     escapeJsonString(message.content)

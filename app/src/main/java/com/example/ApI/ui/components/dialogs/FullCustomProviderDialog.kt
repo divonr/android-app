@@ -133,10 +133,13 @@ fun FullCustomProviderDialog(
                         containerColor = SurfaceVariant.copy(alpha = 0.5f),
                         contentColor = Primary,
                         indicator = { tabPositions ->
-                            TabRowDefaults.SecondaryIndicator(
-                                modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
-                                color = Primary
-                            )
+                            if (selectedTabIndex < tabPositions.size) {
+                                TabRowDefaults.SecondaryIndicator(
+                                    modifier = Modifier.offset(x = tabPositions[selectedTabIndex].left)
+                                        .width(tabPositions[selectedTabIndex].width),
+                                    color = Primary
+                                )
+                            }
                         }
                     ) {
                         tabs.forEachIndexed { index, title ->
