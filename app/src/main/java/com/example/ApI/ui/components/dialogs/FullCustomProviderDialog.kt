@@ -69,7 +69,14 @@ fun FullCustomProviderDialog(
 
     // Validation
     val allRequiredPlaceholdersPresent = BodyTemplatePlaceholders.REQUIRED.all { placeholder ->
-        bodyTemplate.contains(placeholder)
+        // Check if placeholder exists in body template
+        bodyTemplate.contains(placeholder) ||
+                // OR in Base URL
+                baseUrl.contains(placeholder) ||
+                // OR in Auth Header Format
+                authHeaderFormat.contains(placeholder) ||
+                // OR in any Extra Header (either key or value)
+                extraHeaders.any { (k, v) -> k.contains(placeholder) || v.contains(placeholder) }
     }
 
     val isValid = name.isNotBlank() &&
