@@ -24,7 +24,9 @@ import androidx.compose.ui.window.Dialog
 import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.data.model.getDisplayNameFromProviderKey
+import com.example.ApI.data.model.getDisplayNameFromFullCustomProviderKey
 import com.example.ApI.data.model.isCustomProvider
+import com.example.ApI.data.model.isFullCustomProvider
 import com.example.ApI.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -474,7 +476,9 @@ private fun StarredModelsPage(
  */
 @Composable
 private fun getProviderDisplayName(providerKey: String): String {
-    return if (isCustomProvider(providerKey)) {
+    return if (isFullCustomProvider(providerKey)) {
+        getDisplayNameFromFullCustomProviderKey(providerKey)
+    } else if (isCustomProvider(providerKey)) {
         getDisplayNameFromProviderKey(providerKey)
     } else {
         stringResource(id = when(providerKey) {
