@@ -455,6 +455,7 @@ class ChatViewModel(
 
             // Initialize custom providers in LLMApiService
             repository.initializeCustomProviders(settings.current_user)
+            repository.initializeFullCustomProviders(settings.current_user)
 
             // Refresh models from remote if needed (24-hour cache)
             repository.refreshModelsIfNeeded()
