@@ -34,6 +34,7 @@ import com.example.ApI.ui.theme.*
 fun BodyTemplateEditor(
     template: String,
     onTemplateChange: (String) -> Unit,
+    presentPlaceholders: Set<String> = emptySet(),
     modifier: Modifier = Modifier
 ) {
     var showExample by remember { mutableStateOf(false) }
@@ -60,7 +61,10 @@ fun BodyTemplateEditor(
             Spacer(modifier = Modifier.height(12.dp))
 
             // Placeholder indicators
-            PlaceholderIndicators(template = template)
+            PlaceholderIndicators(
+                template = template,
+                presentPlaceholders = presentPlaceholders
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -137,7 +141,10 @@ fun BodyTemplateEditor(
  * Row of chips showing placeholder status in the template.
  */
 @Composable
-private fun PlaceholderIndicators(template: String) {
+private fun PlaceholderIndicators(
+    template: String,
+    presentPlaceholders: Set<String>
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
         // Required placeholders
         Text(
@@ -157,9 +164,10 @@ private fun PlaceholderIndicators(template: String) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 BodyTemplatePlaceholders.REQUIRED.forEach { placeholder ->
+                    val isPresent = template.contains(placeholder) || presentPlaceholders.contains(placeholder)
                     PlaceholderChip(
                         placeholder = placeholder,
-                        isPresent = template.contains(placeholder),
+                        isPresent = isPresent,
                         isRequired = true
                     )
                 }
@@ -186,9 +194,10 @@ private fun PlaceholderIndicators(template: String) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 BodyTemplatePlaceholders.OPTIONAL.forEach { placeholder ->
+                    val isPresent = template.contains(placeholder) || presentPlaceholders.contains(placeholder)
                     PlaceholderChip(
                         placeholder = placeholder,
-                        isPresent = template.contains(placeholder),
+                        isPresent = isPresent,
                         isRequired = false
                     )
                 }

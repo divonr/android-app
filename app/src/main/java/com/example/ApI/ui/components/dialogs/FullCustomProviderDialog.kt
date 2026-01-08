@@ -67,10 +67,17 @@ fun FullCustomProviderDialog(
     // Model tab state
     var defaultModel by remember { mutableStateOf(existingConfig?.defaultModel ?: "") }
 
-    // Validation
-    val allRequiredPlaceholdersPresent = BodyTemplatePlaceholders.REQUIRED.all { placeholder ->
-        bodyTemplate.contains(placeholder)
+    // Validation: Calculate which placeholders are present anywhere in the config
+    val presentPlaceholders = remember(bodyTemplate, baseUrl, authHeaderFormat, extraHeaders) {
+        BodyTemplatePlaceholders.ALL.filter { placeholder ->
+            bodyTemplate.contains(placeholder) ||
+                    baseUrl.contains(placeholder) ||
+                    authHeaderFormat.contains(placeholder) ||
+                    extraHeaders.any { (k, v) -> k.contains(placeholder) || v.contains(placeholder) }
+        }.toSet()
     }
+
+    val allRequiredPlaceholdersPresent = BodyTemplatePlaceholders.REQUIRED.all { it in presentPlaceholders }
 
     val isValid = name.isNotBlank() &&
             baseUrl.isNotBlank() &&
@@ -187,7 +194,8 @@ fun FullCustomProviderDialog(
                                 bodyTemplate = bodyTemplate,
                                 onBodyTemplateChange = { bodyTemplate = it },
                                 streamingConfirmed = streamingConfirmed,
-                                onStreamingConfirmedChange = { streamingConfirmed = it }
+                                onStreamingConfirmedChange = { streamingConfirmed = it },
+                                presentPlaceholders = presentPlaceholders
                             )
                             1 -> StreamingTabContent(
                                 parserType = parserType,
@@ -275,7 +283,8 @@ private fun RequestTabContent(
     bodyTemplate: String,
     onBodyTemplateChange: (String) -> Unit,
     streamingConfirmed: Boolean,
-    onStreamingConfirmedChange: (Boolean) -> Unit
+    onStreamingConfirmedChange: (Boolean) -> Unit,
+    presentPlaceholders: Set<String>
 ) {
     Column(
         modifier = Modifier
@@ -442,7 +451,8 @@ private fun RequestTabContent(
         // Body Template Editor
         BodyTemplateEditor(
             template = bodyTemplate,
-            onTemplateChange = onBodyTemplateChange
+            onTemplateChange = onBodyTemplateChange,
+            presentPlaceholders = presentPlaceholders
         )
 
         Spacer(modifier = Modifier.height(16.dp))
