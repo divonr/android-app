@@ -9,7 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -124,7 +125,7 @@ fun FileSelectionDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Add,
+                                imageVector = Icons.Default.CameraAlt,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -154,7 +155,7 @@ fun FileSelectionDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Add,
+                                imageVector = Icons.Default.PhotoLibrary,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -249,19 +250,19 @@ fun FileSelectionDropdown(
     ) {
         // Take photo row (table-like)
         DropdownMenuItem(
-            text = { 
+            text = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Add,
+                        imageVector = Icons.Default.CameraAlt,
                         contentDescription = null,
                         tint = OnSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = stringResource(R.string.take_photo), 
+                        text = stringResource(R.string.take_photo),
                         color = OnSurface
                     )
                 }
@@ -286,7 +287,7 @@ fun FileSelectionDropdown(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Add,
+                        imageVector = Icons.Default.PhotoLibrary,
                         contentDescription = null,
                         tint = OnSurfaceVariant,
                         modifier = Modifier.size(18.dp)
