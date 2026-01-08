@@ -19,12 +19,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.ApI.R
 import com.example.ApI.data.model.SelectedFile
 import com.example.ApI.data.model.WebSearchSupport
@@ -329,15 +327,15 @@ fun WebSearchToggle(
             .clickable { onClick() }
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = "\uD83C\uDF10", // 🌐
-                fontSize = 20.sp,
-                color = when {
+            Icon(
+                imageVector = Icons.Default.Language,
+                contentDescription = "Web search",
+                tint = when {
                     enabled -> Primary
                     required -> Primary.copy(alpha = 0.7f)
-                    else -> OnSurfaceVariant.copy(alpha = 0.5f)
+                    else -> OnSurfaceVariant
                 },
-                fontWeight = FontWeight.Bold
+                modifier = Modifier.size(22.dp)
             )
         }
     }
