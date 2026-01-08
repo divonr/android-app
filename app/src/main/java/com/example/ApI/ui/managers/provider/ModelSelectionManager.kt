@@ -234,6 +234,7 @@ class ModelSelectionManager(
 
             // Reinitialize custom providers in LLMApiService cache
             deps.repository.initializeCustomProviders(currentUser)
+            deps.repository.initializeFullCustomProviders(currentUser)
 
             val allProviders = deps.repository.loadProviders()
             val activeApiKeyProviders = deps.repository.loadApiKeys(currentUser)

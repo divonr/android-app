@@ -90,40 +90,93 @@ class FullDynamicCustomProvider(
         temperature: Float?
     ): ProviderStreamingResult = withContext(Dispatchers.IO) {
         try {
-            val url = URL(config.baseUrl)
+            // Expand placeholders in URL
+            val expandedUrl = TemplateExpander.expandSimplePlaceholders(
+                template = config.baseUrl,
+                apiKey = apiKey,
+                model = modelName,
+                systemPrompt = systemPrompt
+            )
+            val url = URL(expandedUrl)
             val connection = url.openConnection() as HttpURLConnection
 
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
 
-            // Apply authorization header
-            applyAuthorizationHeader(connection, apiKey)
+            // Apply authorization header (with placeholder expansion)
+            applyAuthorizationHeader(connection, apiKey, modelName, systemPrompt)
 
-            // Add extra headers from config
+            // Add extra headers from config (with placeholder expansion)
             config.extraHeaders.forEach { (name, value) ->
-                connection.setRequestProperty(name, value)
+                val expandedValue = TemplateExpander.expandSimplePlaceholders(
+                    template = value,
+                    apiKey = apiKey,
+                    model = modelName,
+                    systemPrompt = systemPrompt
+                )
+                connection.setRequestProperty(name, expandedValue)
             }
 
             // Build request body using template expander
-            val requestBody = TemplateExpander.expandTemplate(
-                template = config.bodyTemplate,
+            // Use messageFields if configured, otherwise fall back to auto-detection
+            val requestBody = if (config.messageFields != null && config.messageFields.hasAnyFields()) {
+                TemplateExpander.expandTemplateWithMessageFields(
+                    template = config.bodyTemplate,
+                    messageFields = config.messageFields,
+                    apiKey = apiKey,
+                    model = modelName,
+                    messages = messages,
+                    systemPrompt = systemPrompt,
+                    tools = enabledTools
+                )
+            } else {
+                TemplateExpander.expandTemplate(
+                    template = config.bodyTemplate,
+                    apiKey = apiKey,
+                    model = modelName,
+                    messages = messages,
+                    systemPrompt = systemPrompt,
+                    tools = enabledTools
+                )
+            }
+
+            // Log request details (with expanded values)
+            val expandedAuthHeader = TemplateExpander.expandSimplePlaceholders(
+                template = config.authHeaderFormat,
                 apiKey = apiKey,
                 model = modelName,
-                messages = messages,
-                systemPrompt = systemPrompt,
-                tools = enabledTools
+                systemPrompt = systemPrompt
             )
-
-            Log.d(logTag, "Request body: $requestBody")
+            val headers = mutableMapOf<String, String>(
+                "Content-Type" to "application/json",
+                config.authHeaderName to expandedAuthHeader
+            )
+            config.extraHeaders.forEach { (name, value) ->
+                val expandedValue = TemplateExpander.expandSimplePlaceholders(
+                    template = value,
+                    apiKey = apiKey,
+                    model = modelName,
+                    systemPrompt = systemPrompt
+                )
+                headers[name] = expandedValue
+            }
+            logApiRequestDetails(
+                baseUrl = expandedUrl,
+                headers = headers,
+                body = requestBody
+            )
 
             connection.outputStream.write(requestBody.toByteArray())
             connection.outputStream.flush()
 
             val responseCode = connection.responseCode
+            logApiResponse(responseCode)
+
             if (responseCode >= 400) {
                 val errorStream = connection.errorStream
                 val errorBody = errorStream?.bufferedReader()?.use { it.readText() } ?: "Unknown error"
+                logApiError(errorBody)
                 val errorMessage = parseErrorMessage(errorBody, responseCode)
                 callback.onError(errorMessage)
                 return@withContext ProviderStreamingResult.Error(errorMessage)
@@ -140,9 +193,20 @@ class FullDynamicCustomProvider(
 
     /**
      * Apply authorization header using the configured format.
+     * Supports placeholder expansion for {key}, {model}, {system}.
      */
-    private fun applyAuthorizationHeader(connection: HttpURLConnection, apiKey: String) {
-        val headerValue = config.authHeaderFormat.replace("{key}", apiKey)
+    private fun applyAuthorizationHeader(
+        connection: HttpURLConnection,
+        apiKey: String,
+        modelName: String,
+        systemPrompt: String
+    ) {
+        val headerValue = TemplateExpander.expandSimplePlaceholders(
+            template = config.authHeaderFormat,
+            apiKey = apiKey,
+            model = modelName,
+            systemPrompt = systemPrompt
+        )
         connection.setRequestProperty(config.authHeaderName, headerValue)
     }
 

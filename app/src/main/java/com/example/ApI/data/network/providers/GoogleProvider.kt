@@ -130,7 +130,12 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
             val requestBody = buildRequestBody(modelName, contents, webSearchEnabled, enabledTools, thinkingBudget, temperature)
             val requestBodyJson = json.encodeToString(requestBody)
 
-            println("[DEBUG] Google Streaming API Request: $requestBodyJson")
+            // Log request details (API key is in URL, so we mask the full URL)
+            logApiRequestDetails(
+                baseUrl = baseUrl.substringBefore("?"),
+                headers = mapOf("Content-Type" to "application/json"),
+                body = requestBodyJson
+            )
 
             val writer = OutputStreamWriter(connection.outputStream)
             writer.write(requestBodyJson)
@@ -138,9 +143,11 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
             writer.close()
 
             val responseCode = connection.responseCode
+            logApiResponse(responseCode)
 
             if (responseCode >= 400) {
                 val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                logApiError(errorBody)
                 callback.onError("HTTP $responseCode: $errorBody")
                 return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorBody")
             }

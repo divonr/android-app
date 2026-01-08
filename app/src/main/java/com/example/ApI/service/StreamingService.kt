@@ -19,6 +19,7 @@ import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.AppLogger
 import com.example.ApI.util.JsonConfig
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -321,9 +322,17 @@ class StreamingService : Service() {
     ) {
         Log.d(TAG, "Executing streaming request: requestId=$requestId")
 
+        // Log the API request to the app logs
+        val chatHistory = repository.loadChatHistory(username)
+        val chat = chatHistory.chat_history.find { it.chat_id == chatId }
+        val conversationName = chat?.preview_name ?: chatId
+        AppLogger.i("API request sent from conversation \"$conversationName\".")
+        AppLogger.i("Model: $modelName, provider: ${provider.provider}.")
+
         // Initialize custom providers in case user added a new one
         // (StreamingService has its own LLMApiService instance, so custom providers need to be loaded)
         repository.initializeCustomProviders(username)
+        repository.initializeFullCustomProviders(username)
 
         // Update status to streaming
         activeRequests[requestId] = activeRequests[requestId]?.copy(status = RequestStatus.STREAMING)

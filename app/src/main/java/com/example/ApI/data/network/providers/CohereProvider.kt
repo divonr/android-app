@@ -115,13 +115,26 @@ class CohereProvider(context: Context) : BaseProvider(context) {
             val cohereMessages = buildMessages(messages, systemPrompt)
             val requestBody = buildRequestBody(modelName, cohereMessages, enabledTools, webSearchEnabled, temperature)
 
+            // Log request details
+            logApiRequestDetails(
+                baseUrl = provider.request.base_url,
+                headers = mapOf(
+                    "Authorization" to "Bearer $apiKey",
+                    "Content-Type" to "application/json"
+                ),
+                body = requestBody.toString()
+            )
+
             connection.outputStream.write(requestBody.toString().toByteArray())
             connection.outputStream.flush()
 
             val responseCode = connection.responseCode
+            logApiResponse(responseCode)
+
             if (responseCode >= 400) {
                 val errorReader = BufferedReader(InputStreamReader(connection.errorStream))
                 val errorResponse = errorReader.readText()
+                logApiError(errorResponse)
                 errorReader.close()
                 connection.disconnect()
                 return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorResponse")

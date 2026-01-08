@@ -26,6 +26,7 @@ import com.example.ApI.ui.screen.UserSettingsScreen
 import com.example.ApI.ui.screen.ChildLockScreen
 import com.example.ApI.ui.screen.IntegrationsScreen
 import com.example.ApI.ui.screen.WelcomeScreen
+import com.example.ApI.ui.screen.LogsScreen
 import com.example.ApI.ui.theme.ApITheme
 import com.example.ApI.ui.theme.Background
 
@@ -129,6 +130,10 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
                 // Go back to UserSettings from Integrations
                 viewModel.navigateToScreen(Screen.UserSettings)
             }
+            effectiveScreen is Screen.Logs -> {
+                // Go back to UserSettings from Logs
+                viewModel.navigateToScreen(Screen.UserSettings)
+            }
             effectiveScreen !is Screen.ChatHistory -> {
                 viewModel.navigateToScreen(Screen.ChatHistory)
             }
@@ -193,6 +198,11 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
             IntegrationsScreen(
                 viewModel = viewModel,
                 appSettings = appSettings,
+                onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) }
+            )
+        }
+        is Screen.Logs -> {
+            LogsScreen(
                 onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) }
             )
         }

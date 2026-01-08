@@ -196,15 +196,30 @@ class PoeProvider(context: Context) : BaseProvider(context) {
 
             val conversationMessages = buildMessages(messages, systemPrompt)
             val requestBody = buildRequestBody(conversationMessages, enabledTools)
+            val requestBodyString = json.encodeToString(requestBody)
+
+            // Log request details
+            logApiRequestDetails(
+                baseUrl = baseUrl,
+                headers = mapOf(
+                    "Authorization" to "Bearer $apiKey",
+                    "Content-Type" to "application/json",
+                    "Accept" to "application/json"
+                ),
+                body = requestBodyString
+            )
 
             val writer = OutputStreamWriter(connection.outputStream)
-            writer.write(json.encodeToString(requestBody))
+            writer.write(requestBodyString)
             writer.flush()
             writer.close()
 
             val responseCode = connection.responseCode
+            logApiResponse(responseCode)
+
             if (responseCode >= 400) {
                 val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                logApiError(errorBody)
                 callback.onError("HTTP $responseCode: $errorBody")
                 return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorBody")
             }
@@ -242,17 +257,32 @@ class PoeProvider(context: Context) : BaseProvider(context) {
 
             val conversationMessages = buildMessages(messages, systemPrompt, skipToolMessages = true)
             val requestBody = buildRequestBodyWithToolResults(conversationMessages, enabledTools, toolCall, toolResult)
+            val requestBodyString = json.encodeToString(requestBody)
 
-            Log.d("TOOL_CALL_DEBUG", "Poe: Sending request with tool results: ${json.encodeToString(requestBody)}")
+            // Log request details
+            logApiRequestDetails(
+                baseUrl = baseUrl,
+                headers = mapOf(
+                    "Authorization" to "Bearer $apiKey",
+                    "Content-Type" to "application/json",
+                    "Accept" to "application/json"
+                ),
+                body = requestBodyString
+            )
+
+            Log.d("TOOL_CALL_DEBUG", "Poe: Sending request with tool results: $requestBodyString")
 
             val writer = OutputStreamWriter(connection.outputStream)
-            writer.write(json.encodeToString(requestBody))
+            writer.write(requestBodyString)
             writer.flush()
             writer.close()
 
             val responseCode = connection.responseCode
+            logApiResponse(responseCode)
+
             if (responseCode >= 400) {
                 val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                logApiError(errorBody)
                 callback.onError("HTTP $responseCode: $errorBody")
                 return@withContext ProviderStreamingResult.Error("HTTP $responseCode: $errorBody")
             }

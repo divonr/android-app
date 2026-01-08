@@ -142,17 +142,30 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                 thinkingBudget, requestReasoningSummary, temperature
             )
 
+            // Log request details
+            val requestBodyString = json.encodeToString(requestBody)
+            logApiRequestDetails(
+                baseUrl = provider.request.base_url,
+                headers = mapOf(
+                    "Authorization" to "Bearer $apiKey",
+                    "Content-Type" to "application/json"
+                ),
+                body = requestBodyString
+            )
+
             // Send request
             val writer = OutputStreamWriter(connection.outputStream)
-            writer.write(json.encodeToString(requestBody))
+            writer.write(requestBodyString)
             writer.flush()
             writer.close()
 
             // Read streaming response
             val responseCode = connection.responseCode
+            logApiResponse(responseCode)
 
             if (responseCode >= 400) {
                 val errorBody = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                logApiError(errorBody)
                 connection.disconnect()
 
                 if (responseCode == 400) {

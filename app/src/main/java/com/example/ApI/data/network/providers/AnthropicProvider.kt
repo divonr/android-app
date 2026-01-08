@@ -148,18 +148,28 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                 enabledTools, webSearchEnabled, thinkingBudget, temperature
             )
 
-            // DEBUG: Log the request body to verify thinking parameter
-            android.util.Log.d("AnthropicProvider", "Request body: $requestBody")
-            android.util.Log.d("AnthropicProvider", "ThinkingBudget type: ${thinkingBudget::class.simpleName}, value: $thinkingBudget")
+            // Log request details
+            logApiRequestDetails(
+                baseUrl = provider.request.base_url,
+                headers = mapOf(
+                    "x-api-key" to apiKey,
+                    "anthropic-version" to "2023-06-01",
+                    "Content-Type" to "application/json"
+                ),
+                body = requestBody.toString()
+            )
 
             connection.outputStream.write(requestBody.toString().toByteArray())
             connection.outputStream.flush()
 
             val responseCode = connection.responseCode
+            logApiResponse(responseCode)
+
             if (responseCode >= 400) {
                 // Read error response from Anthropic
                 val errorStream = connection.errorStream
                 val errorBody = errorStream?.bufferedReader()?.use { it.readText() } ?: "Unknown error"
+                logApiError(errorBody)
                 val errorMessage = try {
                     val errorJson = json.parseToJsonElement(errorBody).jsonObject
                     errorJson["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: errorBody

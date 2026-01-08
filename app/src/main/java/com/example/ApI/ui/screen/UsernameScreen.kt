@@ -228,6 +228,31 @@ fun UserSettingsScreen(
                     onShowDisableDialog = { showChildLockDisableDialog = true },
                     deviceId = deviceId
                 )
+
+                // 6. Logs Screen Navigation
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.navigateToScreen(Screen.Logs) },
+                    shape = RoundedCornerShape(16.dp),
+                    color = Surface,
+                    shadowElevation = 2.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "מסך לוגים",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = OnSurface,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
 

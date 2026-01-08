@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.ApI.data.model.*
 import com.example.ApI.tools.ToolCall
+import com.example.ApI.util.AppLogger
 import com.example.ApI.tools.ToolCallInfo
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolRegistry
@@ -253,6 +254,48 @@ abstract class BaseProvider(protected val context: Context) {
                 null
             }
         }
+    }
+
+    /**
+     * Log API request details to the app logs.
+     * Note: Conversation name, model, and provider are logged at StreamingService level.
+     */
+    protected fun logApiRequestDetails(
+        baseUrl: String,
+        headers: Map<String, String>,
+        body: String
+    ) {
+        // Mask sensitive data in headers
+        val maskedHeaders = headers.mapValues { (key, value) ->
+            if (key.lowercase().contains("authorization") || key.lowercase().contains("api-key") || key.lowercase().contains("x-api-key")) {
+                "***MASKED***"
+            } else {
+                value
+            }
+        }
+
+        // Truncate body if too long
+        val truncatedBody = if (body.length > 500) {
+            body.take(500) + "... [truncated]"
+        } else {
+            body
+        }
+
+        AppLogger.i("Request structure; base url: $baseUrl, headers: $maskedHeaders, body: $truncatedBody")
+    }
+
+    /**
+     * Log API response code to the app logs.
+     */
+    protected fun logApiResponse(responseCode: Int) {
+        AppLogger.logApiResponse(responseCode)
+    }
+
+    /**
+     * Log API error to the app logs.
+     */
+    protected fun logApiError(errorContent: String) {
+        AppLogger.logApiError(errorContent)
     }
 
     companion object {

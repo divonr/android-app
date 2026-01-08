@@ -2,6 +2,7 @@ package com.example.ApI.util
 
 import com.example.ApI.data.model.BodyTemplatePlaceholders
 import com.example.ApI.data.model.Message
+import com.example.ApI.data.model.MessageFieldsConfig
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.serialization.json.*
 
@@ -317,6 +318,29 @@ object TemplateExpander {
     }
 
     /**
+     * Expands simple placeholders in a string without JSON escaping.
+     * Use this for URL and header value expansion where JSON escaping is not needed.
+     *
+     * @param template The string containing placeholders
+     * @param apiKey The API key to substitute for {key}
+     * @param model The model name to substitute for {model}
+     * @param systemPrompt The system prompt to substitute for {system} (optional)
+     * @return The expanded string with placeholders replaced
+     */
+    fun expandSimplePlaceholders(
+        template: String,
+        apiKey: String,
+        model: String,
+        systemPrompt: String = ""
+    ): String {
+        var result = template
+        result = result.replace(BodyTemplatePlaceholders.KEY, apiKey)
+        result = result.replace(BodyTemplatePlaceholders.MODEL, model)
+        result = result.replace(BodyTemplatePlaceholders.SYSTEM, systemPrompt)
+        return result
+    }
+
+    /**
      * Extracts a value from a JsonObject using dot notation path.
      * e.g., "delta.text" extracts obj["delta"]["text"]
      */
@@ -339,5 +363,253 @@ object TemplateExpander {
             current is JsonPrimitive -> current.contentOrNull
             else -> current.toString()
         }
+    }
+
+    // ==================== Path-Based Message Injection ====================
+
+    /**
+     * Expands a body template using explicit message field configuration.
+     * This is the new approach where the user specifies separate paths and templates
+     * for system/user/assistant messages.
+     *
+     * @param template The base body template (the "hard" parts that are always sent)
+     * @param messageFields Configuration specifying paths and templates for message injection
+     * @param apiKey The API key to substitute for {key}
+     * @param model The model name to substitute for {model}
+     * @param messages The conversation history
+     * @param systemPrompt The system prompt (may be empty)
+     * @param tools List of enabled tools (may be empty)
+     * @param thoughts Previous thinking content (may be null)
+     * @param thoughtsSignature Thoughts signature for continuity (may be null)
+     * @return The expanded body string ready for API request
+     */
+    fun expandTemplateWithMessageFields(
+        template: String,
+        messageFields: MessageFieldsConfig,
+        apiKey: String,
+        model: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        tools: List<ToolSpecification> = emptyList(),
+        thoughts: String? = null,
+        thoughtsSignature: String? = null
+    ): String {
+        val json = Json { ignoreUnknownKeys = true }
+
+        // Parse the base template as JSON
+        val rootObject = try {
+            json.parseToJsonElement(template).jsonObject.toMutableMap()
+        } catch (e: Exception) {
+            // If parsing fails, fall back to simple substitution
+            return simpleSubstitution(
+                template, apiKey, model, "", "", systemPrompt,
+                tools, thoughts, thoughtsSignature
+            )
+        }
+
+        // Collect all messages to inject, grouped by path
+        val messagesByPath = mutableMapOf<String, MutableList<String>>()
+
+        // Add system message if configured and system prompt is not empty
+        if (messageFields.systemField != null && systemPrompt.isNotBlank()) {
+            val systemJson = messageFields.systemField.template.replace(
+                BodyTemplatePlaceholders.SYSTEM,
+                escapeJsonString(systemPrompt)
+            )
+            val path = messageFields.systemField.path
+            messagesByPath.getOrPut(path) { mutableListOf() }.add(systemJson)
+        }
+
+        // Add conversation messages
+        for (message in messages) {
+            when (message.role) {
+                "user" -> {
+                    if (messageFields.userField != null) {
+                        val userJson = messageFields.userField.template.replace(
+                            BodyTemplatePlaceholders.PROMPT,
+                            escapeJsonString(message.content)
+                        )
+                        val path = messageFields.userField.path
+                        messagesByPath.getOrPut(path) { mutableListOf() }.add(userJson)
+                    }
+                }
+                else -> { // assistant
+                    if (messageFields.assistantField != null) {
+                        val assistantJson = messageFields.assistantField.template.replace(
+                            BodyTemplatePlaceholders.ASSISTANT,
+                            escapeJsonString(message.content)
+                        )
+                        val path = messageFields.assistantField.path
+                        messagesByPath.getOrPut(path) { mutableListOf() }.add(assistantJson)
+                    }
+                }
+            }
+        }
+
+        // Inject messages at each path
+        for ((path, messagesJson) in messagesByPath) {
+            val arrayJson = "[" + messagesJson.joinToString(",") + "]"
+            val arrayElement = json.parseToJsonElement(arrayJson)
+            setByPath(rootObject, path, arrayElement)
+        }
+
+        // Build the result and apply simple substitutions
+        var result = Json.encodeToString(JsonObject.serializer(), JsonObject(rootObject))
+
+        // Apply remaining simple substitutions
+        result = simpleSubstitution(
+            result, apiKey, model, "", "", systemPrompt,
+            tools, thoughts, thoughtsSignature
+        )
+
+        return result
+    }
+
+    /**
+     * Sets a value at a dot-notation path in a mutable JSON object map.
+     * Creates intermediate objects as needed.
+     *
+     * e.g., setByPath(root, "a.b.c", value) will create root["a"]["b"]["c"] = value
+     *
+     * If the path targets an existing array, the value (which should be a JsonArray)
+     * will replace it. If the path targets a non-existent location, objects are created.
+     *
+     * @param root The root mutable map to modify
+     * @param path The dot-notation path
+     * @param value The JsonElement to set at the path
+     */
+    private fun setByPath(root: MutableMap<String, JsonElement>, path: String, value: JsonElement) {
+        val parts = path.split(".")
+        if (parts.isEmpty()) return
+
+        if (parts.size == 1) {
+            // Direct key at root level
+            root[parts[0]] = value
+            return
+        }
+
+        // Navigate/create intermediate objects
+        var current: MutableMap<String, JsonElement> = root
+        for (i in 0 until parts.size - 1) {
+            val part = parts[i]
+            val existing = current[part]
+
+            current = when {
+                existing is JsonObject -> existing.toMutableMap().also { current[part] = JsonObject(it) }
+                existing == null -> {
+                    // Create new object at this path
+                    val newObj = mutableMapOf<String, JsonElement>()
+                    current[part] = JsonObject(newObj)
+                    newObj
+                }
+                else -> {
+                    // Can't navigate through non-object (like primitive or array in middle of path)
+                    // Just set at current level and return
+                    current[path] = value
+                    return
+                }
+            }
+        }
+
+        // Set the final value
+        current[parts.last()] = value
+
+        // Rebuild the path in root (since we created new mutable maps)
+        rebuildPath(root, parts, value)
+    }
+
+    /**
+     * Rebuilds the path in the root object after setting a value.
+     * This is needed because we create new mutable maps while navigating,
+     * and those need to be properly nested in the original root.
+     */
+    private fun rebuildPath(root: MutableMap<String, JsonElement>, parts: List<String>, finalValue: JsonElement) {
+        if (parts.isEmpty()) return
+
+        if (parts.size == 1) {
+            root[parts[0]] = finalValue
+            return
+        }
+
+        // Build from the end backwards
+        var currentValue: JsonElement = finalValue
+        for (i in parts.size - 1 downTo 1) {
+            val existingAtParent = navigateTo(root, parts.take(i))
+            val parentMap = when (existingAtParent) {
+                is JsonObject -> existingAtParent.toMutableMap()
+                else -> mutableMapOf()
+            }
+            parentMap[parts[i]] = currentValue
+            currentValue = JsonObject(parentMap)
+        }
+
+        root[parts[0]] = currentValue
+    }
+
+    /**
+     * Navigates to a path in the root and returns the element at that path.
+     */
+    private fun navigateTo(root: Map<String, JsonElement>, parts: List<String>): JsonElement? {
+        var current: JsonElement = JsonObject(root)
+        for (part in parts) {
+            current = when (current) {
+                is JsonObject -> current[part] ?: return null
+                else -> return null
+            }
+        }
+        return current
+    }
+
+    /**
+     * Validates that message field templates contain the required placeholders.
+     *
+     * @return A list of validation errors, empty if valid
+     */
+    fun validateMessageFields(messageFields: MessageFieldsConfig): List<String> {
+        val errors = mutableListOf<String>()
+
+        messageFields.userField?.let { field ->
+            if (!field.template.contains(BodyTemplatePlaceholders.PROMPT)) {
+                errors.add("User field template must contain {prompt}")
+            }
+            if (field.path.isBlank()) {
+                errors.add("User field path cannot be empty")
+            }
+        }
+
+        messageFields.assistantField?.let { field ->
+            if (!field.template.contains(BodyTemplatePlaceholders.ASSISTANT)) {
+                errors.add("Assistant field template must contain {assistant}")
+            }
+            if (field.path.isBlank()) {
+                errors.add("Assistant field path cannot be empty")
+            }
+        }
+
+        messageFields.systemField?.let { field ->
+            if (!field.template.contains(BodyTemplatePlaceholders.SYSTEM)) {
+                errors.add("System field template must contain {system}")
+            }
+            if (field.path.isBlank()) {
+                errors.add("System field path cannot be empty")
+            }
+        }
+
+        return errors
+    }
+
+    /**
+     * Finds placeholders present across all message field templates.
+     */
+    fun findPlaceholdersInMessageFields(messageFields: MessageFieldsConfig?): Set<String> {
+        if (messageFields == null) return emptySet()
+
+        val allTemplates = listOfNotNull(
+            messageFields.systemField?.template,
+            messageFields.userField?.template,
+            messageFields.assistantField?.template
+        ).joinToString(" ")
+
+        return BodyTemplatePlaceholders.ALL.filter { allTemplates.contains(it) }.toSet()
     }
 }

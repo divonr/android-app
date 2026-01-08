@@ -22,6 +22,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.graphics.Color
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.theme.*
+import com.example.ApI.util.TemplateExpander
 
 /**
  * Dialog for creating or editing a full custom provider with complete streaming configuration.
@@ -54,6 +55,7 @@ fun FullCustomProviderDialog(
         mutableStateOf(existingConfig?.extraHeaders?.toList() ?: emptyList())
     }
     var bodyTemplate by remember { mutableStateOf(existingConfig?.bodyTemplate ?: DEFAULT_BODY_TEMPLATE) }
+    var messageFields by remember { mutableStateOf(existingConfig?.messageFields) }
     var streamingConfirmed by remember { mutableStateOf(existingConfig != null) }
     var showAdvancedHeaders by remember { mutableStateOf(false) }
 
@@ -68,16 +70,32 @@ fun FullCustomProviderDialog(
     var defaultModel by remember { mutableStateOf(existingConfig?.defaultModel ?: "") }
 
     // Validation: Calculate which placeholders are present anywhere in the config
-    val presentPlaceholders = remember(bodyTemplate, baseUrl, authHeaderFormat, extraHeaders) {
-        BodyTemplatePlaceholders.ALL.filter { placeholder ->
+    // Include messageFields templates in the placeholder search
+    val messageFieldsPlaceholders = TemplateExpander.findPlaceholdersInMessageFields(messageFields)
+    val presentPlaceholders = remember(bodyTemplate, baseUrl, authHeaderFormat, extraHeaders, messageFields) {
+        val bodyAndHeaderPlaceholders = BodyTemplatePlaceholders.ALL.filter { placeholder ->
             bodyTemplate.contains(placeholder) ||
                     baseUrl.contains(placeholder) ||
                     authHeaderFormat.contains(placeholder) ||
                     extraHeaders.any { (k, v) -> k.contains(placeholder) || v.contains(placeholder) }
         }.toSet()
+        bodyAndHeaderPlaceholders + messageFieldsPlaceholders
     }
 
-    val allRequiredPlaceholdersPresent = BodyTemplatePlaceholders.REQUIRED.all { it in presentPlaceholders }
+    // When messageFields is enabled, {prompt}, {assistant}, {system} are expected there, not in bodyTemplate
+    // But {key} and {model} are still required in bodyTemplate or headers
+    val requiredInBodyOrHeaders = if (messageFields?.hasAnyFields() == true) {
+        setOf(BodyTemplatePlaceholders.KEY, BodyTemplatePlaceholders.MODEL)
+    } else {
+        BodyTemplatePlaceholders.REQUIRED
+    }
+
+    // Validate that messageFields templates contain their required placeholders
+    val messageFieldsValid = messageFields?.let { fields ->
+        TemplateExpander.validateMessageFields(fields).isEmpty()
+    } ?: true
+
+    val allRequiredPlaceholdersPresent = requiredInBodyOrHeaders.all { it in presentPlaceholders } && messageFieldsValid
 
     val isValid = name.isNotBlank() &&
             baseUrl.isNotBlank() &&
@@ -193,6 +211,8 @@ fun FullCustomProviderDialog(
                                 onShowAdvancedHeadersChange = { showAdvancedHeaders = it },
                                 bodyTemplate = bodyTemplate,
                                 onBodyTemplateChange = { bodyTemplate = it },
+                                messageFields = messageFields,
+                                onMessageFieldsChange = { messageFields = it },
                                 streamingConfirmed = streamingConfirmed,
                                 onStreamingConfirmedChange = { streamingConfirmed = it },
                                 presentPlaceholders = presentPlaceholders
@@ -242,6 +262,7 @@ fun FullCustomProviderDialog(
                                         .filter { it.first.isNotBlank() && it.second.isNotBlank() }
                                         .toMap(),
                                     bodyTemplate = bodyTemplate,
+                                    messageFields = messageFields,
                                     parserType = parserType,
                                     parserConfig = parserConfig,
                                     eventMappings = eventMappings,
@@ -282,6 +303,8 @@ private fun RequestTabContent(
     onShowAdvancedHeadersChange: (Boolean) -> Unit,
     bodyTemplate: String,
     onBodyTemplateChange: (String) -> Unit,
+    messageFields: MessageFieldsConfig?,
+    onMessageFieldsChange: (MessageFieldsConfig?) -> Unit,
     streamingConfirmed: Boolean,
     onStreamingConfirmedChange: (Boolean) -> Unit,
     presentPlaceholders: Set<String>
@@ -453,6 +476,14 @@ private fun RequestTabContent(
             template = bodyTemplate,
             onTemplateChange = onBodyTemplateChange,
             presentPlaceholders = presentPlaceholders
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Dynamic Message Fields Editor
+        MessageFieldsEditor(
+            messageFields = messageFields,
+            onMessageFieldsChange = onMessageFieldsChange
         )
 
         Spacer(modifier = Modifier.height(16.dp))

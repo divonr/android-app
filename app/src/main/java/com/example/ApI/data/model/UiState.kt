@@ -192,6 +192,7 @@ sealed class Screen {
     object UserSettings : Screen()
     object ChildLock : Screen()
     object Integrations : Screen()
+    object Logs : Screen()
     data class Group(val groupId: String) : Screen()
 }
 

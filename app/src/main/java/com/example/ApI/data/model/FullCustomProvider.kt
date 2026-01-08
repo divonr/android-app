@@ -49,6 +49,42 @@ data class ParserConfig(
 )
 
 /**
+ * Configuration for a single message field injection.
+ * Defines where in the body to inject content and the template to use.
+ *
+ * @param path Dot-notation path where to inject (e.g., "messages", "contents", "system_instruction.parts")
+ * @param template The template for each message, containing the appropriate placeholder.
+ *                 For user messages: must contain {prompt}
+ *                 For assistant messages: must contain {assistant}
+ *                 For system messages: must contain {system}
+ */
+@Serializable
+data class MessageFieldConfig(
+    val path: String,
+    val template: String
+)
+
+/**
+ * Configuration for all message field injections.
+ * When provided, the app will inject messages at the specified paths instead of
+ * auto-detecting the messages array in the body template.
+ *
+ * The system, user, and assistant messages can have different paths if needed,
+ * but typically user and assistant share the same path (the messages array).
+ */
+@Serializable
+data class MessageFieldsConfig(
+    val systemField: MessageFieldConfig? = null,
+    val userField: MessageFieldConfig? = null,
+    val assistantField: MessageFieldConfig? = null
+) {
+    /**
+     * Checks if this config has any fields defined.
+     */
+    fun hasAnyFields(): Boolean = systemField != null || userField != null || assistantField != null
+}
+
+/**
  * Full custom provider configuration - extends beyond OpenAI-compatible
  * Stored in full_custom_providers_{username}.json
  */
@@ -65,8 +101,12 @@ data class FullCustomProviderConfig(
     val authHeaderFormat: String = "Bearer {key}",           // Format string ({key} placeholder)
     val extraHeaders: Map<String, String> = emptyMap(),      // Additional headers
 
-    // Body template with placeholders
+    // Body template with placeholders (for static/hard parts)
     val bodyTemplate: String,
+
+    // Dynamic message field injection configuration
+    // When provided, messages are injected at specified paths instead of auto-detection
+    val messageFields: MessageFieldsConfig? = null,
 
     // Streaming configuration
     val parserType: StreamParserType = StreamParserType.DATA_ONLY,
