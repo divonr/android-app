@@ -1,7 +1,10 @@
 package com.example.ApI.ui.components.dialogs
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -16,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -33,6 +38,7 @@ import com.example.ApI.util.TemplateExpander
  * @param onSwitchToOpenAICompatible Callback when user checks the OpenAI-compatible checkbox
  * @param onDismiss Callback when user dismisses the dialog
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FullCustomProviderDialog(
     existingConfig: FullCustomProviderConfig? = null,
@@ -41,10 +47,11 @@ fun FullCustomProviderDialog(
     onDismiss: () -> Unit
 ) {
     val isEditing = existingConfig != null
+    val coroutineScope = rememberCoroutineScope()
 
-    // Tab state
-    var selectedTabIndex by remember { mutableIntStateOf(0) }
+    // Tab state with pager
     val tabs = listOf("Request", "Streaming", "Model")
+    val pagerState = rememberPagerState(pageCount = { tabs.size })
 
     // Request tab state
     var name by remember { mutableStateOf(existingConfig?.name ?: "") }
@@ -154,15 +161,19 @@ fun FullCustomProviderDialog(
 
                     // Tab Row
                     TabRow(
-                        selectedTabIndex = selectedTabIndex,
+                        selectedTabIndex = pagerState.currentPage,
                         containerColor = Surface,
                         contentColor = Primary,
                         divider = {}
                     ) {
                         tabs.forEachIndexed { index, title ->
                             Tab(
-                                selected = selectedTabIndex == index,
-                                onClick = { selectedTabIndex = index },
+                                selected = pagerState.currentPage == index,
+                                onClick = {
+                                    coroutineScope.launch {
+                                        pagerState.animateScrollToPage(index)
+                                    }
+                                },
                                 text = {
                                     Text(
                                         text = when (title) {
@@ -171,7 +182,9 @@ fun FullCustomProviderDialog(
                                             "Model" -> "מודל"
                                             else -> title
                                         },
-                                        style = MaterialTheme.typography.bodyMedium
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 },
                                 selectedContentColor = Primary,
@@ -182,13 +195,14 @@ fun FullCustomProviderDialog(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Tab Content
-                    Box(
+                    // Tab Content with HorizontalPager for swipe support
+                    HorizontalPager(
+                        state = pagerState,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                    ) {
-                        when (selectedTabIndex) {
+                    ) { pageIndex ->
+                        when (pageIndex) {
                             0 -> RequestTabContent(
                                 name = name,
                                 onNameChange = { name = it },
