@@ -4,34 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Android multi-provider LLM chat client built with Kotlin and Jetpack Compose, following MVVM architecture. The app allows users to chat with multiple AI providers (OpenAI, Google Gemini, Poe) with support for file attachments, streaming responses, and chat organization.
+This is an Android multi-provider LLM chat client built with Kotlin and Jetpack Compose, following MVVM architecture. The app allows users to chat with multiple AI providers (OpenAI, Google Gemini, Poe etc.) with support for file attachments, streaming responses, and chat organization.
 
-## Build Commands
+## Build, commit and push
 
-```bash
-# Build the project (assembles and runs tests)
-./gradlew build
-
-# Assemble debug APK
-./gradlew assembleDebug
-
-# Assemble release APK
-./gradlew assembleRelease
-
-# Run unit tests
-./gradlew test
-./gradlew testDebugUnitTest
-
-# Run lint checks
-./gradlew lint
-./gradlew lintDebug
-
-# Clean build artifacts
-./gradlew clean
-
-# Install and run on connected device
-./gradlew installDebug
-```
+Here is Termux enviroent, and therefore gradle isn't available here and you can't build.
+Hence, you should not try to build. Instead, the user wants you to commit and push after each task you finish.
+Commit messages must be short and clean, without crediting yourself. One sentence is recommended, when relevant.
 
 ## Architecture
 
@@ -48,11 +27,7 @@ This is an Android multi-provider LLM chat client built with Kotlin and Jetpack 
   - `PoeProvider.kt` - Poe API with tool result handling
   - `CohereProvider.kt` - Cohere v2 API
   - `OpenRouterProvider.kt` - OpenRouter (OpenAI-compatible)
-  - `BaseProvider.kt` - Abstract base class with common utilities
-
-### Provider Configuration
-
-`app/src/main/assets/providers.json` defines API endpoints, request structure, headers, body format, and available models for each provider. This is the configuration source for all provider integrations.
+  - `BaseProvider.kt` - Abstract base class with common utilities.
 
 ### Data Models
 

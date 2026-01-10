@@ -155,17 +155,9 @@ fun FullCustomProviderDialog(
                     // Tab Row
                     TabRow(
                         selectedTabIndex = selectedTabIndex,
-                        containerColor = SurfaceVariant.copy(alpha = 0.5f),
+                        containerColor = Surface,
                         contentColor = Primary,
-                        indicator = { tabPositions ->
-                            if (selectedTabIndex < tabPositions.size) {
-                                TabRowDefaults.SecondaryIndicator(
-                                    modifier = Modifier.offset(x = tabPositions[selectedTabIndex].left)
-                                        .width(tabPositions[selectedTabIndex].width),
-                                    color = Primary
-                                )
-                            }
-                        }
+                        divider = {}
                     ) {
                         tabs.forEachIndexed { index, title ->
                             Tab(
@@ -179,10 +171,11 @@ fun FullCustomProviderDialog(
                                             "Model" -> "מודל"
                                             else -> title
                                         },
-                                        color = if (selectedTabIndex == index) Primary else OnSurface.copy(alpha = 0.7f),
-                                        fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Normal
+                                        style = MaterialTheme.typography.bodyMedium
                                     )
-                                }
+                                },
+                                selectedContentColor = Primary,
+                                unselectedContentColor = OnSurface.copy(alpha = 0.6f)
                             )
                         }
                     }
