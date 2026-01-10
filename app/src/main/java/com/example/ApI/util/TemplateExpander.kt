@@ -293,16 +293,48 @@ object TemplateExpander {
             result = result.replace(BodyTemplatePlaceholders.THOUGHTS_SIGNATURE, "")
         }
 
-        // Tool placeholders - for now, just clear them if tools are empty
-        // Full tool support would require more complex logic
+        // Tool placeholders
         if (tools.isEmpty()) {
             result = result.replace(BodyTemplatePlaceholders.TOOL_NAME, "")
             result = result.replace(BodyTemplatePlaceholders.TOOL_DESCRIPTION, "")
             result = result.replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, "")
             result = result.replace(BodyTemplatePlaceholders.TOOL_RESPONSE, "")
+            result = result.replace(BodyTemplatePlaceholders.TOOL_DEFINITIONS, "[]")
+            result = result.replace(BodyTemplatePlaceholders.TOOL_CALL, "")
+            result = result.replace(BodyTemplatePlaceholders.TOOL_RESULT, "")
+        } else {
+            // Build tool definitions JSON array
+            if (result.contains(BodyTemplatePlaceholders.TOOL_DEFINITIONS)) {
+                val toolsJson = buildToolDefinitionsJson(tools)
+                result = result.replace(BodyTemplatePlaceholders.TOOL_DEFINITIONS, toolsJson)
+            }
+            // Individual tool placeholders remain for per-tool expansion
+            // {tool_call} and {tool_result} are handled in message context
         }
 
         return result
+    }
+
+    /**
+     * Builds JSON array of tool definitions for the {tool_definitions} placeholder.
+     */
+    private fun buildToolDefinitionsJson(tools: List<ToolSpecification>): String {
+        if (tools.isEmpty()) return "[]"
+
+        val json = Json { encodeDefaults = true }
+        val toolsArray = buildList {
+            for (tool in tools) {
+                add(buildJsonObject {
+                    put("type", "function")
+                    putJsonObject("function") {
+                        put("name", tool.name)
+                        put("description", tool.description)
+                        put("parameters", json.parseToJsonElement(tool.parameters.toString()))
+                    }
+                })
+            }
+        }
+        return Json.encodeToString(JsonArray(toolsArray))
     }
 
     /**
@@ -370,7 +402,7 @@ object TemplateExpander {
     /**
      * Expands a body template using explicit message field configuration.
      * This is the new approach where the user specifies separate paths and templates
-     * for system/user/assistant messages.
+     * for system/user/assistant messages, as well as tool-related fields.
      *
      * @param template The base body template (the "hard" parts that are always sent)
      * @param messageFields Configuration specifying paths and templates for message injection
@@ -420,7 +452,7 @@ object TemplateExpander {
             messagesByPath.getOrPut(path) { mutableListOf() }.add(systemJson)
         }
 
-        // Add conversation messages
+        // Add conversation messages (including tool calls and responses)
         for (message in messages) {
             when (message.role) {
                 "user" -> {
@@ -431,6 +463,28 @@ object TemplateExpander {
                         )
                         val path = messageFields.userField.path
                         messagesByPath.getOrPut(path) { mutableListOf() }.add(userJson)
+                    }
+                }
+                "tool_call" -> {
+                    // Handle tool call messages from assistant
+                    if (messageFields.toolCallField != null) {
+                        val toolCallJson = messageFields.toolCallField.template.replace(
+                            BodyTemplatePlaceholders.TOOL_CALL,
+                            escapeJsonString(message.content)
+                        )
+                        val path = messageFields.toolCallField.path
+                        messagesByPath.getOrPut(path) { mutableListOf() }.add(toolCallJson)
+                    }
+                }
+                "tool_result", "tool_response", "tool" -> {
+                    // Handle tool response messages
+                    if (messageFields.toolResponseField != null) {
+                        val toolResponseJson = messageFields.toolResponseField.template.replace(
+                            BodyTemplatePlaceholders.TOOL_RESULT,
+                            escapeJsonString(message.content)
+                        )
+                        val path = messageFields.toolResponseField.path
+                        messagesByPath.getOrPut(path) { mutableListOf() }.add(toolResponseJson)
                     }
                 }
                 else -> { // assistant
@@ -451,6 +505,24 @@ object TemplateExpander {
             val arrayJson = "[" + messagesJson.joinToString(",") + "]"
             val arrayElement = json.parseToJsonElement(arrayJson)
             setByPath(rootObject, path, arrayElement)
+        }
+
+        // Inject tool definitions if configured and tools are provided
+        if (messageFields.toolDefinitionField != null && tools.isNotEmpty()) {
+            val toolDefsJson = buildToolDefinitionsJson(tools)
+            val expandedTemplate = messageFields.toolDefinitionField.template.replace(
+                BodyTemplatePlaceholders.TOOL_DEFINITIONS,
+                toolDefsJson
+            )
+            val path = messageFields.toolDefinitionField.path
+            try {
+                val toolsElement = json.parseToJsonElement(expandedTemplate)
+                setByPath(rootObject, path, toolsElement)
+            } catch (e: Exception) {
+                // If the expanded template isn't valid JSON, try injecting the raw tools array
+                val toolsElement = json.parseToJsonElement(toolDefsJson)
+                setByPath(rootObject, path, toolsElement)
+            }
         }
 
         // Build the result and apply simple substitutions
@@ -595,11 +667,39 @@ object TemplateExpander {
             }
         }
 
+        // Tool field validations
+        messageFields.toolDefinitionField?.let { field ->
+            if (!field.template.contains(BodyTemplatePlaceholders.TOOL_DEFINITIONS)) {
+                errors.add("Tool definition field template must contain {tool_definitions}")
+            }
+            if (field.path.isBlank()) {
+                errors.add("Tool definition field path cannot be empty")
+            }
+        }
+
+        messageFields.toolCallField?.let { field ->
+            if (!field.template.contains(BodyTemplatePlaceholders.TOOL_CALL)) {
+                errors.add("Tool call field template must contain {tool_call}")
+            }
+            if (field.path.isBlank()) {
+                errors.add("Tool call field path cannot be empty")
+            }
+        }
+
+        messageFields.toolResponseField?.let { field ->
+            if (!field.template.contains(BodyTemplatePlaceholders.TOOL_RESULT)) {
+                errors.add("Tool response field template must contain {tool_result}")
+            }
+            if (field.path.isBlank()) {
+                errors.add("Tool response field path cannot be empty")
+            }
+        }
+
         return errors
     }
 
     /**
-     * Finds placeholders present across all message field templates.
+     * Finds placeholders present across all message field templates (including tool fields).
      */
     fun findPlaceholdersInMessageFields(messageFields: MessageFieldsConfig?): Set<String> {
         if (messageFields == null) return emptySet()
@@ -607,7 +707,10 @@ object TemplateExpander {
         val allTemplates = listOfNotNull(
             messageFields.systemField?.template,
             messageFields.userField?.template,
-            messageFields.assistantField?.template
+            messageFields.assistantField?.template,
+            messageFields.toolDefinitionField?.template,
+            messageFields.toolCallField?.template,
+            messageFields.toolResponseField?.template
         ).joinToString(" ")
 
         return BodyTemplatePlaceholders.ALL.filter { allTemplates.contains(it) }.toSet()

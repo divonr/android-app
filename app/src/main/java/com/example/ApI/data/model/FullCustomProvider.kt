@@ -71,17 +71,31 @@ data class MessageFieldConfig(
  *
  * The system, user, and assistant messages can have different paths if needed,
  * but typically user and assistant share the same path (the messages array).
+ *
+ * Tool-related fields are optional and only used when tools are enabled:
+ * - toolDefinitionField: For injecting tool definitions (uses {tool_definitions})
+ * - toolCallField: For tool call messages from assistant (uses {tool_call})
+ * - toolResponseField: For tool response messages (uses {tool_result})
  */
 @Serializable
 data class MessageFieldsConfig(
     val systemField: MessageFieldConfig? = null,
     val userField: MessageFieldConfig? = null,
-    val assistantField: MessageFieldConfig? = null
+    val assistantField: MessageFieldConfig? = null,
+    // Tool-related fields (optional)
+    val toolDefinitionField: MessageFieldConfig? = null,
+    val toolCallField: MessageFieldConfig? = null,
+    val toolResponseField: MessageFieldConfig? = null
 ) {
     /**
-     * Checks if this config has any fields defined.
+     * Checks if this config has any message fields defined.
      */
     fun hasAnyFields(): Boolean = systemField != null || userField != null || assistantField != null
+
+    /**
+     * Checks if this config has any tool fields defined.
+     */
+    fun hasToolFields(): Boolean = toolDefinitionField != null || toolCallField != null || toolResponseField != null
 }
 
 /**
@@ -133,14 +147,22 @@ object BodyTemplatePlaceholders {
     const val THOUGHTS = "{thoughts}"
     const val THOUGHTS_SIGNATURE = "{thoughts_signature}"
     const val SYSTEM = "{system}"
+
+    // Tool-related placeholders (for body template)
     const val TOOL_NAME = "{tool_name}"
     const val TOOL_DESCRIPTION = "{tool_description}"
     const val TOOL_PARAMETERS = "{tool_parameters}"
     const val TOOL_RESPONSE = "{tool_response}"
 
+    // Tool field injection placeholders (for MessageFieldsConfig tool fields)
+    const val TOOL_DEFINITIONS = "{tool_definitions}"  // Full tool definitions array
+    const val TOOL_CALL = "{tool_call}"                // Tool call content in message
+    const val TOOL_RESULT = "{tool_result}"            // Tool result/response content
+
     val REQUIRED = setOf(KEY, MODEL, PROMPT, ASSISTANT)
     val OPTIONAL = setOf(THOUGHTS, THOUGHTS_SIGNATURE, SYSTEM,
-                         TOOL_NAME, TOOL_DESCRIPTION, TOOL_PARAMETERS, TOOL_RESPONSE)
+                         TOOL_NAME, TOOL_DESCRIPTION, TOOL_PARAMETERS, TOOL_RESPONSE,
+                         TOOL_DEFINITIONS, TOOL_CALL, TOOL_RESULT)
     val ALL = REQUIRED + OPTIONAL
 }
 

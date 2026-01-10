@@ -27,7 +27,10 @@ import com.example.ApI.ui.theme.*
 
 /**
  * Editor for configuring dynamic message field injection.
- * Allows users to specify separate paths and templates for system, user, and assistant messages.
+ * Allows users to specify separate paths and templates for system, user, assistant messages,
+ * as well as tool-related fields (tool definitions, tool calls, tool responses).
+ *
+ * All fields are optional - if a path is left blank, that field won't be injected.
  *
  * @param messageFields The current message fields configuration
  * @param onMessageFieldsChange Callback when configuration changes
@@ -39,10 +42,9 @@ fun MessageFieldsEditor(
     onMessageFieldsChange: (MessageFieldsConfig?) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var isExpanded by remember { mutableStateOf(messageFields?.hasAnyFields() == true) }
-    var isEnabled by remember { mutableStateOf(messageFields?.hasAnyFields() == true) }
+    var isExpanded by remember { mutableStateOf(true) }
 
-    // Local state for the fields
+    // Message fields state
     var systemPath by remember { mutableStateOf(messageFields?.systemField?.path ?: "") }
     var systemTemplate by remember { mutableStateOf(messageFields?.systemField?.template ?: DEFAULT_SYSTEM_TEMPLATE) }
     var userPath by remember { mutableStateOf(messageFields?.userField?.path ?: "") }
@@ -50,13 +52,16 @@ fun MessageFieldsEditor(
     var assistantPath by remember { mutableStateOf(messageFields?.assistantField?.path ?: "") }
     var assistantTemplate by remember { mutableStateOf(messageFields?.assistantField?.template ?: DEFAULT_ASSISTANT_TEMPLATE) }
 
+    // Tool fields state
+    var toolDefinitionPath by remember { mutableStateOf(messageFields?.toolDefinitionField?.path ?: "") }
+    var toolDefinitionTemplate by remember { mutableStateOf(messageFields?.toolDefinitionField?.template ?: DEFAULT_TOOL_DEFINITION_TEMPLATE) }
+    var toolCallPath by remember { mutableStateOf(messageFields?.toolCallField?.path ?: "") }
+    var toolCallTemplate by remember { mutableStateOf(messageFields?.toolCallField?.template ?: DEFAULT_TOOL_CALL_TEMPLATE) }
+    var toolResponsePath by remember { mutableStateOf(messageFields?.toolResponseField?.path ?: "") }
+    var toolResponseTemplate by remember { mutableStateOf(messageFields?.toolResponseField?.template ?: DEFAULT_TOOL_RESPONSE_TEMPLATE) }
+
     // Update parent when local state changes
     fun updateParent() {
-        if (!isEnabled) {
-            onMessageFieldsChange(null)
-            return
-        }
-
         val systemField = if (systemPath.isNotBlank() && systemTemplate.isNotBlank()) {
             MessageFieldConfig(systemPath.trim(), systemTemplate)
         } else null
@@ -69,13 +74,34 @@ fun MessageFieldsEditor(
             MessageFieldConfig(assistantPath.trim(), assistantTemplate)
         } else null
 
-        val config = MessageFieldsConfig(systemField, userField, assistantField)
-        onMessageFieldsChange(if (config.hasAnyFields()) config else null)
+        val toolDefinitionField = if (toolDefinitionPath.isNotBlank() && toolDefinitionTemplate.isNotBlank()) {
+            MessageFieldConfig(toolDefinitionPath.trim(), toolDefinitionTemplate)
+        } else null
+
+        val toolCallField = if (toolCallPath.isNotBlank() && toolCallTemplate.isNotBlank()) {
+            MessageFieldConfig(toolCallPath.trim(), toolCallTemplate)
+        } else null
+
+        val toolResponseField = if (toolResponsePath.isNotBlank() && toolResponseTemplate.isNotBlank()) {
+            MessageFieldConfig(toolResponsePath.trim(), toolResponseTemplate)
+        } else null
+
+        val config = MessageFieldsConfig(
+            systemField = systemField,
+            userField = userField,
+            assistantField = assistantField,
+            toolDefinitionField = toolDefinitionField,
+            toolCallField = toolCallField,
+            toolResponseField = toolResponseField
+        )
+
+        val hasAnyField = config.hasAnyFields() || config.hasToolFields()
+        onMessageFieldsChange(if (hasAnyField) config else null)
     }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Column(modifier = modifier.fillMaxWidth()) {
-            // Header with toggle
+            // Header
             Surface(
                 shape = RoundedCornerShape(8.dp),
                 color = SurfaceVariant.copy(alpha = 0.5f),
@@ -89,49 +115,28 @@ fun MessageFieldsEditor(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Checkbox(
-                            checked = isEnabled,
-                            onCheckedChange = { checked ->
-                                isEnabled = checked
-                                if (checked) {
-                                    isExpanded = true  // Auto-expand when enabled
-                                    updateParent()
-                                } else {
-                                    onMessageFieldsChange(null)
-                                }
-                            },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = Primary,
-                                uncheckedColor = OnSurface.copy(alpha = 0.6f)
-                            )
+                    Column {
+                        Text(
+                            text = "הזרקת הודעות דינמית",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Primary,
+                            fontWeight = FontWeight.SemiBold
                         )
-                        Column {
-                            Text(
-                                text = "הזרקת הודעות דינמית",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (isEnabled) Primary else OnSurface,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "הגדר נתיבים ותבניות נפרדות לכל סוג הודעה",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = OnSurface.copy(alpha = 0.6f)
-                            )
-                        }
+                        Text(
+                            text = "הגדר נתיבים ותבניות נפרדות לכל סוג הודעה",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurface.copy(alpha = 0.6f)
+                        )
                     }
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null,
-                        tint = if (isEnabled) Primary else OnSurface.copy(alpha = 0.5f)
+                        tint = Primary
                     )
                 }
             }
 
-            if (isExpanded && isEnabled) {
+            if (isExpanded) {
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Info box
@@ -151,7 +156,8 @@ fun MessageFieldsEditor(
                         Text(
                             text = "• נתיב: היכן להזריק בגוף הבקשה (לדוגמה: messages או system.parts)\n" +
                                     "• תבנית: JSON של הודעה בודדת עם placeholder מתאים\n" +
-                                    "• נתיב עם נקודות (a.b) יוזרק בעומק (body.a.b)",
+                                    "• נתיב עם נקודות (a.b) יוזרק בעומק (body.a.b)\n" +
+                                    "• השאר נתיב ריק אם לא נדרש",
                             style = MaterialTheme.typography.bodySmall,
                             color = OnSurface.copy(alpha = 0.7f)
                         )
@@ -159,6 +165,16 @@ fun MessageFieldsEditor(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // Section: Message Fields
+                Text(
+                    text = "שדות הודעות",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = OnSurface,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // System Message Field
                 MessageFieldEditor(
@@ -173,7 +189,7 @@ fun MessageFieldsEditor(
                     isValid = systemPath.isBlank() || systemTemplate.contains(BodyTemplatePlaceholders.SYSTEM)
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // User Message Field
                 MessageFieldEditor(
@@ -188,7 +204,7 @@ fun MessageFieldsEditor(
                     isValid = userPath.isBlank() || userTemplate.contains(BodyTemplatePlaceholders.PROMPT)
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Assistant Message Field
                 MessageFieldEditor(
@@ -201,6 +217,71 @@ fun MessageFieldsEditor(
                     pathPlaceholder = "messages",
                     templatePlaceholder = DEFAULT_ASSISTANT_TEMPLATE,
                     isValid = assistantPath.isBlank() || assistantTemplate.contains(BodyTemplatePlaceholders.ASSISTANT)
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Divider
+                HorizontalDivider(color = OnSurface.copy(alpha = 0.2f))
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Section: Tool Fields (Optional)
+                Text(
+                    text = "שדות כלים (אופציונלי)",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = OnSurface,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "הגדר רק אם הספק תומך בכלים",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface.copy(alpha = 0.5f)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Tool Definition Field
+                MessageFieldEditor(
+                    title = "הגדרת כלים (Tool Definitions)",
+                    placeholder = BodyTemplatePlaceholders.TOOL_DEFINITIONS,
+                    path = toolDefinitionPath,
+                    onPathChange = { toolDefinitionPath = it; updateParent() },
+                    template = toolDefinitionTemplate,
+                    onTemplateChange = { toolDefinitionTemplate = it; updateParent() },
+                    pathPlaceholder = "tools",
+                    templatePlaceholder = DEFAULT_TOOL_DEFINITION_TEMPLATE,
+                    isValid = toolDefinitionPath.isBlank() || toolDefinitionTemplate.contains(BodyTemplatePlaceholders.TOOL_DEFINITIONS)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Tool Call Field
+                MessageFieldEditor(
+                    title = "קריאת כלי (Tool Call)",
+                    placeholder = BodyTemplatePlaceholders.TOOL_CALL,
+                    path = toolCallPath,
+                    onPathChange = { toolCallPath = it; updateParent() },
+                    template = toolCallTemplate,
+                    onTemplateChange = { toolCallTemplate = it; updateParent() },
+                    pathPlaceholder = "messages",
+                    templatePlaceholder = DEFAULT_TOOL_CALL_TEMPLATE,
+                    isValid = toolCallPath.isBlank() || toolCallTemplate.contains(BodyTemplatePlaceholders.TOOL_CALL)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Tool Response Field
+                MessageFieldEditor(
+                    title = "תגובת כלי (Tool Response)",
+                    placeholder = BodyTemplatePlaceholders.TOOL_RESULT,
+                    path = toolResponsePath,
+                    onPathChange = { toolResponsePath = it; updateParent() },
+                    template = toolResponseTemplate,
+                    onTemplateChange = { toolResponseTemplate = it; updateParent() },
+                    pathPlaceholder = "messages",
+                    templatePlaceholder = DEFAULT_TOOL_RESPONSE_TEMPLATE,
+                    isValid = toolResponsePath.isBlank() || toolResponseTemplate.contains(BodyTemplatePlaceholders.TOOL_RESULT)
                 )
             }
         }
@@ -370,7 +451,12 @@ private fun messageFieldColors() = OutlinedTextFieldDefaults.colors(
     errorBorderColor = AccentRed
 )
 
-// Default templates for each message type
+// Default templates for message types
 private const val DEFAULT_SYSTEM_TEMPLATE = """{"role": "system", "content": "{system}"}"""
 private const val DEFAULT_USER_TEMPLATE = """{"role": "user", "content": "{prompt}"}"""
 private const val DEFAULT_ASSISTANT_TEMPLATE = """{"role": "assistant", "content": "{assistant}"}"""
+
+// Default templates for tool types
+private const val DEFAULT_TOOL_DEFINITION_TEMPLATE = """{tool_definitions}"""
+private const val DEFAULT_TOOL_CALL_TEMPLATE = """{"role": "assistant", "tool_calls": [{tool_call}]}"""
+private const val DEFAULT_TOOL_RESPONSE_TEMPLATE = """{"role": "tool", "content": "{tool_result}"}"""

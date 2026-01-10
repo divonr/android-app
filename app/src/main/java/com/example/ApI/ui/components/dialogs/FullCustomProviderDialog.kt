@@ -159,11 +159,12 @@ fun FullCustomProviderDialog(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Tab Row
-                    TabRow(
+                    // Tab Row - Scrollable to allow titles to flow horizontally
+                    ScrollableTabRow(
                         selectedTabIndex = pagerState.currentPage,
                         containerColor = Surface,
                         contentColor = Primary,
+                        edgePadding = 0.dp,
                         divider = {}
                     ) {
                         tabs.forEachIndexed { index, title ->
@@ -183,8 +184,7 @@ fun FullCustomProviderDialog(
                                             else -> title
                                         },
                                         style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        maxLines = 1
                                     )
                                 },
                                 selectedContentColor = Primary,
