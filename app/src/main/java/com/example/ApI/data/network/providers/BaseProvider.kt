@@ -274,14 +274,7 @@ abstract class BaseProvider(protected val context: Context) {
             }
         }
 
-        // Truncate body if too long
-        val truncatedBody = if (body.length > 500) {
-            body.take(500) + "... [truncated]"
-        } else {
-            body
-        }
-
-        AppLogger.i("Request structure; base url: $baseUrl, headers: $maskedHeaders, body: $truncatedBody")
+        AppLogger.i("Request structure; base url: $baseUrl, headers: $maskedHeaders, body: $body")
     }
 
     /**
