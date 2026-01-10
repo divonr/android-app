@@ -73,9 +73,9 @@ data class MessageFieldConfig(
  * but typically user and assistant share the same path (the messages array).
  *
  * Tool-related fields are optional and only used when tools are enabled:
- * - toolDefinitionField: For injecting tool definitions (uses {tool_definitions})
- * - toolCallField: For tool call messages from assistant (uses {tool_call})
- * - toolResponseField: For tool response messages (uses {tool_result})
+ * - toolDefinitionField: For injecting tool definitions (uses {tool_name}, {tool_description}, {tool_parameters})
+ * - toolCallField: For tool call messages from assistant (uses {tool_name}, {tool_parameters})
+ * - toolResponseField: For tool response messages (uses {tool_response})
  */
 @Serializable
 data class MessageFieldsConfig(
@@ -148,21 +148,15 @@ object BodyTemplatePlaceholders {
     const val THOUGHTS_SIGNATURE = "{thoughts_signature}"
     const val SYSTEM = "{system}"
 
-    // Tool-related placeholders (for body template)
+    // Tool-related placeholders
     const val TOOL_NAME = "{tool_name}"
     const val TOOL_DESCRIPTION = "{tool_description}"
     const val TOOL_PARAMETERS = "{tool_parameters}"
     const val TOOL_RESPONSE = "{tool_response}"
 
-    // Tool field injection placeholders (for MessageFieldsConfig tool fields)
-    const val TOOL_DEFINITIONS = "{tool_definitions}"  // Full tool definitions array
-    const val TOOL_CALL = "{tool_call}"                // Tool call content in message
-    const val TOOL_RESULT = "{tool_result}"            // Tool result/response content
-
     val REQUIRED = setOf(KEY, MODEL, PROMPT, ASSISTANT)
     val OPTIONAL = setOf(THOUGHTS, THOUGHTS_SIGNATURE, SYSTEM,
-                         TOOL_NAME, TOOL_DESCRIPTION, TOOL_PARAMETERS, TOOL_RESPONSE,
-                         TOOL_DEFINITIONS, TOOL_CALL, TOOL_RESULT)
+                         TOOL_NAME, TOOL_DESCRIPTION, TOOL_PARAMETERS, TOOL_RESPONSE)
     val ALL = REQUIRED + OPTIONAL
 }
 

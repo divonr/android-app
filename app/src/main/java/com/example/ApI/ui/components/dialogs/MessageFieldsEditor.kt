@@ -244,14 +244,18 @@ fun MessageFieldsEditor(
                 // Tool Definition Field
                 MessageFieldEditor(
                     title = "הגדרת כלים (Tool Definitions)",
-                    placeholder = BodyTemplatePlaceholders.TOOL_DEFINITIONS,
+                    placeholder = "{tool_name}, {tool_description}, {tool_parameters}",
                     path = toolDefinitionPath,
                     onPathChange = { toolDefinitionPath = it; updateParent() },
                     template = toolDefinitionTemplate,
                     onTemplateChange = { toolDefinitionTemplate = it; updateParent() },
                     pathPlaceholder = "tools",
                     templatePlaceholder = DEFAULT_TOOL_DEFINITION_TEMPLATE,
-                    isValid = toolDefinitionPath.isBlank() || toolDefinitionTemplate.contains(BodyTemplatePlaceholders.TOOL_DEFINITIONS)
+                    isValid = toolDefinitionPath.isBlank() || (
+                        toolDefinitionTemplate.contains(BodyTemplatePlaceholders.TOOL_NAME) &&
+                        toolDefinitionTemplate.contains(BodyTemplatePlaceholders.TOOL_DESCRIPTION) &&
+                        toolDefinitionTemplate.contains(BodyTemplatePlaceholders.TOOL_PARAMETERS)
+                    )
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -259,14 +263,17 @@ fun MessageFieldsEditor(
                 // Tool Call Field
                 MessageFieldEditor(
                     title = "קריאת כלי (Tool Call)",
-                    placeholder = BodyTemplatePlaceholders.TOOL_CALL,
+                    placeholder = "{tool_name}, {tool_parameters}",
                     path = toolCallPath,
                     onPathChange = { toolCallPath = it; updateParent() },
                     template = toolCallTemplate,
                     onTemplateChange = { toolCallTemplate = it; updateParent() },
                     pathPlaceholder = "messages",
                     templatePlaceholder = DEFAULT_TOOL_CALL_TEMPLATE,
-                    isValid = toolCallPath.isBlank() || toolCallTemplate.contains(BodyTemplatePlaceholders.TOOL_CALL)
+                    isValid = toolCallPath.isBlank() || (
+                        toolCallTemplate.contains(BodyTemplatePlaceholders.TOOL_NAME) &&
+                        toolCallTemplate.contains(BodyTemplatePlaceholders.TOOL_PARAMETERS)
+                    )
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -274,14 +281,14 @@ fun MessageFieldsEditor(
                 // Tool Response Field
                 MessageFieldEditor(
                     title = "תגובת כלי (Tool Response)",
-                    placeholder = BodyTemplatePlaceholders.TOOL_RESULT,
+                    placeholder = BodyTemplatePlaceholders.TOOL_RESPONSE,
                     path = toolResponsePath,
                     onPathChange = { toolResponsePath = it; updateParent() },
                     template = toolResponseTemplate,
                     onTemplateChange = { toolResponseTemplate = it; updateParent() },
                     pathPlaceholder = "messages",
                     templatePlaceholder = DEFAULT_TOOL_RESPONSE_TEMPLATE,
-                    isValid = toolResponsePath.isBlank() || toolResponseTemplate.contains(BodyTemplatePlaceholders.TOOL_RESULT)
+                    isValid = toolResponsePath.isBlank() || toolResponseTemplate.contains(BodyTemplatePlaceholders.TOOL_RESPONSE)
                 )
             }
         }
@@ -457,6 +464,6 @@ private const val DEFAULT_USER_TEMPLATE = """{"role": "user", "content": "{promp
 private const val DEFAULT_ASSISTANT_TEMPLATE = """{"role": "assistant", "content": "{assistant}"}"""
 
 // Default templates for tool types
-private const val DEFAULT_TOOL_DEFINITION_TEMPLATE = """{tool_definitions}"""
-private const val DEFAULT_TOOL_CALL_TEMPLATE = """{"role": "assistant", "tool_calls": [{tool_call}]}"""
-private const val DEFAULT_TOOL_RESPONSE_TEMPLATE = """{"role": "tool", "content": "{tool_result}"}"""
+private const val DEFAULT_TOOL_DEFINITION_TEMPLATE = """{"type": "function", "function": {"name": "{tool_name}", "description": "{tool_description}", "parameters": {tool_parameters}}}"""
+private const val DEFAULT_TOOL_CALL_TEMPLATE = """{"role": "assistant", "tool_calls": [{"type": "function", "function": {"name": "{tool_name}", "arguments": "{tool_parameters}"}}]}"""
+private const val DEFAULT_TOOL_RESPONSE_TEMPLATE = """{"role": "tool", "content": "{tool_response}"}"""
