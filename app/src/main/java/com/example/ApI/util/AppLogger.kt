@@ -98,7 +98,7 @@ object AppLogger {
                 value
             }
         }
-        i("Request structure; base url: $baseUrl, headers: $maskedHeaders, body: ${truncateBody(body)}")
+        i("Request structure; base url: $baseUrl, headers: $maskedHeaders, body: $body")
     }
 
     /**
@@ -137,11 +137,4 @@ object AppLogger {
         }
     }
 
-    private fun truncateBody(body: String, maxLength: Int = 500): String {
-        return if (body.length > maxLength) {
-            body.take(maxLength) + "... [truncated]"
-        } else {
-            body
-        }
-    }
 }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -207,31 +208,33 @@ private fun LogRow(
         LogLevel.INFO -> LogsInfoColor
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(backgroundColor)
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.Start,
-        verticalAlignment = Alignment.Top
-    ) {
-        Text(
-            text = log.timestamp,
-            style = MaterialTheme.typography.bodySmall,
-            color = LogsTimestampColor,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            modifier = Modifier.width(70.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = log.message,
-            style = MaterialTheme.typography.bodySmall,
-            color = textColor,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            lineHeight = 14.sp
-        )
+    SelectionContainer {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(backgroundColor)
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.Top
+        ) {
+            Text(
+                text = log.timestamp,
+                style = MaterialTheme.typography.bodySmall,
+                color = LogsTimestampColor,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                modifier = Modifier.width(70.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = log.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                lineHeight = 14.sp
+            )
+        }
     }
 }
