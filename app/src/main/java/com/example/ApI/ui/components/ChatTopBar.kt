@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ApI.R
@@ -276,7 +277,10 @@ fun NormalModeTopBar(
                 } ?: "",
                 style = MaterialTheme.typography.labelMedium,
                 color = OnSurfaceVariant,
-                modifier = Modifier.clickable { viewModel.showModelSelector() }
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { viewModel.showModelSelector() }
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
@@ -284,7 +288,10 @@ fun NormalModeTopBar(
                 style = MaterialTheme.typography.titleSmall,
                 color = OnSurface,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable { viewModel.showModelSelector() }
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { viewModel.showModelSelector() }
             )
         }
 

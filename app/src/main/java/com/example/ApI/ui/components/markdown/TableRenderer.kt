@@ -30,10 +30,10 @@ internal fun RenderTable(
     enableInlineLatex: Boolean = false,
     onLongPress: () -> Unit = {}
 ) {
+    val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
+            .horizontalScroll(scrollState)
             .padding(vertical = 8.dp)
     ) {
         var row = table.firstChild
@@ -67,7 +67,6 @@ internal fun RenderTableRow(
     CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
         Row(
             modifier = Modifier
-                .wrapContentWidth()
                 .background(
                     if (isHeader) style.color.copy(alpha = 0.1f)
                     else Color.Transparent
@@ -78,7 +77,7 @@ internal fun RenderTableRow(
                 if (cell is TableCell) {
                     Box(
                         modifier = Modifier
-                            .weight(1f)
+                            .widthIn(min = 80.dp)
                             .padding(8.dp)
                     ) {
                         val cellStyle = if (isHeader) {
@@ -116,7 +115,6 @@ internal fun RenderTableRow(
 
         // Border line after each row
         HorizontalDivider(
-            modifier = Modifier.wrapContentWidth(),
             color = style.color.copy(alpha = 0.2f),
             thickness = 1.dp
         )
