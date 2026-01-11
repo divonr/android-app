@@ -226,10 +226,10 @@ fun FileAttachmentButton(
 
     Box(modifier = modifier) {
         Surface(
-            shape = RoundedCornerShape(17.dp),
+            shape = RoundedCornerShape(15.dp),
             color = if (hasFiles) Primary.copy(alpha = 0.1f) else Color.Transparent,
             modifier = Modifier
-                .size(34.dp)
+                .size(30.dp)
                 .clickable { showFileMenu = !showFileMenu }
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -237,7 +237,7 @@ fun FileAttachmentButton(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Add files",
                     tint = if (hasFiles) Primary else OnSurfaceVariant,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(15.dp)
                 )
             }
         }

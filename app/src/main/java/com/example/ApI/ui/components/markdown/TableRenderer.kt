@@ -1,7 +1,9 @@
 package com.example.ApI.ui.components.markdown
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -31,6 +33,7 @@ internal fun RenderTable(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(vertical = 8.dp)
     ) {
         var row = table.firstChild
@@ -64,7 +67,7 @@ internal fun RenderTableRow(
     CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
+                .wrapContentWidth()
                 .background(
                     if (isHeader) style.color.copy(alpha = 0.1f)
                     else Color.Transparent
@@ -113,7 +116,7 @@ internal fun RenderTableRow(
 
         // Border line after each row
         HorizontalDivider(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.wrapContentWidth(),
             color = style.color.copy(alpha = 0.2f),
             thickness = 1.dp
         )

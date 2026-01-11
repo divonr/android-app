@@ -246,7 +246,8 @@ fun FileSelectionDropdown(
         onDismissRequest = onDismiss,
         modifier = Modifier
             .background(Surface, RoundedCornerShape(16.dp))
-            .width(220.dp)
+            .widthIn(min = 160.dp)
+            .wrapContentWidth()
     ) {
         // Take photo row (table-like)
         DropdownMenuItem(
