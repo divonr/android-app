@@ -480,10 +480,15 @@ object TemplateExpander {
         // Inject tool definitions if configured and tools are provided
         if (messageFields.toolDefinitionField != null && tools.isNotEmpty()) {
             val toolDefinitions = tools.map { tool ->
+                // Extract just the properties from the parameters schema for flexibility
+                val parametersJson = tool.parameters?.get("properties")?.toString()
+                    ?: tool.parameters?.toString()
+                    ?: "{}"
+
                 messageFields.toolDefinitionField.template
                     .replace(BodyTemplatePlaceholders.TOOL_NAME, escapeJsonString(tool.name))
                     .replace(BodyTemplatePlaceholders.TOOL_DESCRIPTION, escapeJsonString(tool.description))
-                    .replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, tool.parameters.toString())
+                    .replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, parametersJson)
             }
             val path = messageFields.toolDefinitionField.path
             try {
