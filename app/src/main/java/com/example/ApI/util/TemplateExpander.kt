@@ -296,6 +296,7 @@ object TemplateExpander {
         // Tool placeholders - clear if not in tools context
         if (tools.isEmpty()) {
             result = result.replace(BodyTemplatePlaceholders.TOOL_NAME, "")
+            result = result.replace(BodyTemplatePlaceholders.TOOL_ID, "")
             result = result.replace(BodyTemplatePlaceholders.TOOL_DESCRIPTION, "")
             result = result.replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, "")
             result = result.replace(BodyTemplatePlaceholders.TOOL_RESPONSE, "")
@@ -436,10 +437,14 @@ object TemplateExpander {
                 "tool_call" -> {
                     // Handle tool call messages from assistant
                     if (messageFields.toolCallField != null && message.toolCall != null) {
-                        val toolName = message.toolCall.toolName
+                        // Use toolId (internal name like "get_date_time") for {tool_name}
+                        val toolInternalName = message.toolCall.toolId
                         val toolArgs = message.toolCall.parameters.toString()
+                        // Use toolCallId (unique call ID like "call_abc123") for {tool_id}
+                        val callId = message.toolCallId ?: ""
                         val toolCallJson = messageFields.toolCallField.template
-                            .replace(BodyTemplatePlaceholders.TOOL_NAME, escapeJsonString(toolName))
+                            .replace(BodyTemplatePlaceholders.TOOL_NAME, escapeJsonString(toolInternalName))
+                            .replace(BodyTemplatePlaceholders.TOOL_ID, escapeJsonString(callId))
                             .replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, toolArgs)
                         val path = messageFields.toolCallField.path
                         messagesByPath.getOrPut(path) { mutableListOf() }.add(toolCallJson)
@@ -449,10 +454,11 @@ object TemplateExpander {
                     // Handle tool response messages
                     if (messageFields.toolResponseField != null) {
                         val responseContent = message.toolResponseOutput ?: message.content
-                        val toolResponseJson = messageFields.toolResponseField.template.replace(
-                            BodyTemplatePlaceholders.TOOL_RESPONSE,
-                            escapeJsonString(responseContent)
-                        )
+                        // Use toolResponseCallId for {tool_id} - links response back to tool call
+                        val callId = message.toolResponseCallId ?: ""
+                        val toolResponseJson = messageFields.toolResponseField.template
+                            .replace(BodyTemplatePlaceholders.TOOL_RESPONSE, escapeJsonString(responseContent))
+                            .replace(BodyTemplatePlaceholders.TOOL_ID, escapeJsonString(callId))
                         val path = messageFields.toolResponseField.path
                         messagesByPath.getOrPut(path) { mutableListOf() }.add(toolResponseJson)
                     }

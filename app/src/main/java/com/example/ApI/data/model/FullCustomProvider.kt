@@ -186,14 +186,15 @@ object BodyTemplatePlaceholders {
     const val SYSTEM = "{system}"
 
     // Tool-related placeholders
-    const val TOOL_NAME = "{tool_name}"
+    const val TOOL_NAME = "{tool_name}"              // Internal tool name (e.g., "get_date_time")
+    const val TOOL_ID = "{tool_id}"                  // Unique call ID (e.g., "call_abc123")
     const val TOOL_DESCRIPTION = "{tool_description}"
     const val TOOL_PARAMETERS = "{tool_parameters}"
     const val TOOL_RESPONSE = "{tool_response}"
 
     val REQUIRED = setOf(KEY, MODEL, PROMPT, ASSISTANT)
     val OPTIONAL = setOf(THOUGHTS, THOUGHTS_SIGNATURE, SYSTEM,
-                         TOOL_NAME, TOOL_DESCRIPTION, TOOL_PARAMETERS, TOOL_RESPONSE)
+                         TOOL_NAME, TOOL_ID, TOOL_DESCRIPTION, TOOL_PARAMETERS, TOOL_RESPONSE)
     val ALL = REQUIRED + OPTIONAL
 }
 
