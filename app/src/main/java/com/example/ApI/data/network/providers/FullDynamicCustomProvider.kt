@@ -317,8 +317,8 @@ class FullDynamicCustomProvider(
         val thoughtsBuilder = StringBuilder()
 
         // Tool call state tracking
-        var detectedToolName: String? = null
-        var detectedToolId: String? = null
+        var detectedToolName: String? = null    // Internal tool name (e.g., "get_date_time") - from toolNamePath
+        var detectedCallId: String? = null      // Unique call ID (e.g., "call_abc123") - from toolIdPath
         val toolParametersBuilder = StringBuilder()
         var toolCallDetected = false
 
@@ -369,8 +369,8 @@ class FullDynamicCustomProvider(
         private fun handleToolCallEvent(eventType: String?, data: JsonObject): StreamAction? {
             val toolConfig = config.toolCallConfig
 
-            // Check if this is a tool name event (start of tool call)
-            val isToolNameEvent = when {
+            // Check if this is a tool call event (using toolNamePath for detection)
+            val isToolCallEvent = when {
                 toolConfig.eventName.isNotBlank() && eventType == toolConfig.eventName -> true
                 toolConfig.eventName.isBlank() && toolConfig.toolNamePath.isNotBlank() -> {
                     // Structure-based matching - check if tool name path exists
@@ -379,17 +379,17 @@ class FullDynamicCustomProvider(
                 else -> false
             }
 
-            if (isToolNameEvent) {
-                // Extract tool name
+            if (isToolCallEvent) {
+                // Extract tool name (required - used for {tool_name} placeholder)
                 val toolName = TemplateExpander.extractByPath(data, toolConfig.toolNamePath)
                 if (toolName != null) {
                     detectedToolName = toolName
-                    Log.d(logTag, "Tool call detected: name=$toolName")
+                    Log.d(logTag, "Tool call detected: toolName=$toolName")
 
-                    // Extract tool ID if configured
+                    // Extract call ID if configured (for {tool_id} placeholder)
                     if (toolConfig.toolIdPath.isNotBlank()) {
-                        detectedToolId = TemplateExpander.extractByPath(data, toolConfig.toolIdPath)
-                        Log.d(logTag, "Tool call ID: $detectedToolId")
+                        detectedCallId = TemplateExpander.extractByPath(data, toolConfig.toolIdPath)
+                        Log.d(logTag, "Tool call ID: $detectedCallId")
                     }
 
                     // If parameters come in the same event, extract them
@@ -516,13 +516,13 @@ class FullDynamicCustomProvider(
                 }
 
                 val toolCall = ToolCall(
-                    id = detectedToolId ?: java.util.UUID.randomUUID().toString(),
-                    toolId = detectedToolName!!,
+                    id = detectedCallId ?: java.util.UUID.randomUUID().toString(),  // {tool_id}
+                    toolId = detectedToolName!!,  // {tool_name} - internal tool name
                     parameters = paramsJson,
                     provider = config.providerKey
                 )
 
-                Log.d(logTag, "Returning ToolCallDetected: toolId=${toolCall.toolId}, params=$paramsJson")
+                Log.d(logTag, "Returning ToolCallDetected: toolName=${toolCall.toolId}, callId=${toolCall.id}, params=$paramsJson")
 
                 return ProviderStreamingResult.ToolCallDetected(
                     toolCall = toolCall,

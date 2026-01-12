@@ -565,13 +565,13 @@ fun ToolCallConfigEditor(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Tool name path
+                // Tool name path - internal tool name for {tool_name} placeholder
                 OutlinedTextField(
                     value = config.toolNamePath,
                     onValueChange = { onConfigChange(config.copy(toolNamePath = it)) },
-                    label = { Text("נתיב שם הכלי *", color = OnSurface.copy(alpha = 0.7f)) },
+                    label = { Text("נתיב שם הכלי ({tool_name}) *", color = OnSurface.copy(alpha = 0.7f)) },
                     placeholder = { Text("content_block.name", color = OnSurface.copy(alpha = 0.4f)) },
-                    supportingText = { Text("נתיב JSON לשם הכלי (למשל: delta.tool_calls[0].function.name)", color = OnSurface.copy(alpha = 0.6f)) },
+                    supportingText = { Text("נתיב JSON לשם הכלי (למשל: get_date_time)", color = OnSurface.copy(alpha = 0.6f)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     colors = streamingTextFieldColors()
@@ -579,13 +579,13 @@ fun ToolCallConfigEditor(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Tool ID path
+                // Tool ID path - unique call ID for {tool_id} placeholder
                 OutlinedTextField(
                     value = config.toolIdPath,
                     onValueChange = { onConfigChange(config.copy(toolIdPath = it)) },
-                    label = { Text("נתיב מזהה הקריאה", color = OnSurface.copy(alpha = 0.7f)) },
+                    label = { Text("נתיב מזהה קריאה ({tool_id})", color = OnSurface.copy(alpha = 0.7f)) },
                     placeholder = { Text("content_block.id", color = OnSurface.copy(alpha = 0.4f)) },
-                    supportingText = { Text("נתיב JSON למזהה הקריאה (אופציונלי)", color = OnSurface.copy(alpha = 0.6f)) },
+                    supportingText = { Text("נתיב JSON למזהה הקריאה (למשל: call_abc123)", color = OnSurface.copy(alpha = 0.6f)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     colors = streamingTextFieldColors()
@@ -648,10 +648,12 @@ fun ToolCallConfigEditor(
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = """OpenAI: toolNamePath = "delta.tool_calls[0].function.name"
-         parametersPath = "delta.tool_calls[0].function.arguments"
+        toolIdPath = "delta.tool_calls[0].id"
+        parametersPath = "delta.tool_calls[0].function.arguments"
 
 Anthropic: eventName = "content_block_start"
            toolNamePath = "content_block.name"
+           toolIdPath = "content_block.id"
            parametersEventName = "content_block_delta"
            parametersPath = "delta.partial_json"""",
                                 style = MaterialTheme.typography.bodySmall.copy(

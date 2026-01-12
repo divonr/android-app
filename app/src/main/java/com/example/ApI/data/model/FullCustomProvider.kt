@@ -24,10 +24,14 @@ enum class StreamEventType {
 
 /**
  * Configuration for parsing tool calls from streaming responses.
- * Defines how to identify tool call events and extract tool name, parameters, and ID.
+ * Defines how to identify tool call events and extract tool name, parameters, and call ID.
+ *
+ * Fields:
+ * - toolNamePath: Internal tool name (e.g., "get_date_time") - used for {tool_name} placeholder
+ * - toolIdPath: Unique call ID (e.g., "call_abc123") - used for {tool_id} placeholder in subsequent requests
  *
  * Example for Anthropic-style tool calls:
- *   eventName = "content_block_start" (or check type field equals "tool_use")
+ *   eventName = "content_block_start"
  *   toolNamePath = "content_block.name"
  *   toolIdPath = "content_block.id"
  *   parametersEventName = "content_block_delta"
@@ -45,8 +49,8 @@ data class ToolCallConfig(
     val eventName: String = "",                // Event name that signals a tool call (empty for structure-based matching)
 
     // Tool identification paths
-    val toolNamePath: String = "",             // JSON path to extract tool name (e.g., "content_block.name")
-    val toolIdPath: String = "",               // JSON path to extract tool call ID (e.g., "content_block.id")
+    val toolNamePath: String = "",             // JSON path to tool name (e.g., "get_date_time") - for {tool_name}
+    val toolIdPath: String = "",               // JSON path to call ID (e.g., "call_abc123") - for {tool_id}
 
     // Parameters extraction (can be same event or different)
     val parametersEventName: String = "",      // Event name for parameter deltas (empty = same as eventName)
