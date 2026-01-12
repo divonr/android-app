@@ -19,10 +19,40 @@ enum class StreamEventType {
     TEXT_CONTENT,       // Main text content delta
     STREAM_END,         // Stream completion signal
     THINKING_START,     // Start of thinking/reasoning phase
-    THINKING_CONTENT,   // Thinking content delta
-    TOOL_CALL_START,    // Tool call initialization
-    TOOL_CALL_DELTA,    // Tool call argument delta
-    TOOL_CALL_END       // Tool call completion
+    THINKING_CONTENT    // Thinking content delta
+}
+
+/**
+ * Configuration for parsing tool calls from streaming responses.
+ * Defines how to identify tool call events and extract tool name, parameters, and ID.
+ *
+ * Example for Anthropic-style tool calls:
+ *   eventName = "content_block_start" (or check type field equals "tool_use")
+ *   toolNamePath = "content_block.name"
+ *   toolIdPath = "content_block.id"
+ *   parametersEventName = "content_block_delta"
+ *   parametersPath = "delta.partial_json"
+ *
+ * Example for OpenAI-style tool calls:
+ *   eventName = "" (structure-based matching)
+ *   toolNamePath = "delta.tool_calls[0].function.name"
+ *   toolIdPath = "delta.tool_calls[0].id"
+ *   parametersPath = "delta.tool_calls[0].function.arguments"
+ */
+@Serializable
+data class ToolCallConfig(
+    // Event identification
+    val eventName: String = "",                // Event name that signals a tool call (empty for structure-based matching)
+
+    // Tool identification paths
+    val toolNamePath: String = "",             // JSON path to extract tool name (e.g., "content_block.name")
+    val toolIdPath: String = "",               // JSON path to extract tool call ID (e.g., "content_block.id")
+
+    // Parameters extraction (can be same event or different)
+    val parametersEventName: String = "",      // Event name for parameter deltas (empty = same as eventName)
+    val parametersPath: String = ""            // JSON path to extract parameters/arguments (e.g., "delta.partial_json")
+) {
+    fun isConfigured(): Boolean = toolNamePath.isNotBlank()
 }
 
 /**
@@ -126,6 +156,9 @@ data class FullCustomProviderConfig(
     val parserType: StreamParserType = StreamParserType.DATA_ONLY,
     val parserConfig: ParserConfig = ParserConfig(),
     val eventMappings: Map<StreamEventType, EventMapping> = emptyMap(),
+
+    // Tool call parsing configuration
+    val toolCallConfig: ToolCallConfig = ToolCallConfig(),
 
     // Metadata
     val isOpenAICompatible: Boolean = false,

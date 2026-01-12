@@ -20,6 +20,7 @@ import com.example.ApI.data.model.EventMapping
 import com.example.ApI.data.model.ParserConfig
 import com.example.ApI.data.model.StreamEventType
 import com.example.ApI.data.model.StreamParserType
+import com.example.ApI.data.model.ToolCallConfig
 import com.example.ApI.ui.theme.*
 
 /**
@@ -266,6 +267,8 @@ private fun DataOnlyParserConfig(
 fun EventMappingsEditor(
     mappings: Map<StreamEventType, EventMapping>,
     onMappingsChange: (Map<StreamEventType, EventMapping>) -> Unit,
+    toolCallConfig: ToolCallConfig,
+    onToolCallConfigChange: (ToolCallConfig) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showAdvanced by remember { mutableStateOf(false) }
@@ -273,10 +276,7 @@ fun EventMappingsEditor(
     val essentialEvents = listOf(StreamEventType.TEXT_CONTENT, StreamEventType.STREAM_END)
     val advancedEvents = listOf(
         StreamEventType.THINKING_START,
-        StreamEventType.THINKING_CONTENT,
-        StreamEventType.TOOL_CALL_START,
-        StreamEventType.TOOL_CALL_DELTA,
-        StreamEventType.TOOL_CALL_END
+        StreamEventType.THINKING_CONTENT
     )
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -358,8 +358,9 @@ fun EventMappingsEditor(
             if (showAdvanced) {
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // Thinking events section
                 Text(
-                    text = "אירועים מתקדמים",
+                    text = "חשיבה (Thinking)",
                     style = MaterialTheme.typography.labelMedium,
                     color = Tertiary,
                     fontWeight = FontWeight.SemiBold
@@ -383,6 +384,14 @@ fun EventMappingsEditor(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Tool call configuration section
+                ToolCallConfigEditor(
+                    config = toolCallConfig,
+                    onConfigChange = onToolCallConfigChange
+                )
             }
         }
     }
@@ -398,30 +407,21 @@ private fun EventMappingRow(
         StreamEventType.TEXT_CONTENT to "תוכן טקסט",
         StreamEventType.STREAM_END to "סיום זרימה",
         StreamEventType.THINKING_START to "תחילת חשיבה",
-        StreamEventType.THINKING_CONTENT to "תוכן חשיבה",
-        StreamEventType.TOOL_CALL_START to "תחילת קריאת כלי",
-        StreamEventType.TOOL_CALL_DELTA to "דלתא קריאת כלי",
-        StreamEventType.TOOL_CALL_END to "סיום קריאת כלי"
+        StreamEventType.THINKING_CONTENT to "תוכן חשיבה"
     )
 
     val eventNamePlaceholders = mapOf(
         StreamEventType.TEXT_CONTENT to "content_block_delta",
         StreamEventType.STREAM_END to "message_stop",
         StreamEventType.THINKING_START to "thinking_start",
-        StreamEventType.THINKING_CONTENT to "thinking_delta",
-        StreamEventType.TOOL_CALL_START to "tool_use",
-        StreamEventType.TOOL_CALL_DELTA to "tool_call_delta",
-        StreamEventType.TOOL_CALL_END to "tool_call_end"
+        StreamEventType.THINKING_CONTENT to "thinking_delta"
     )
 
     val fieldPathPlaceholders = mapOf(
         StreamEventType.TEXT_CONTENT to "delta.text",
         StreamEventType.STREAM_END to "",
         StreamEventType.THINKING_START to "",
-        StreamEventType.THINKING_CONTENT to "delta.thinking",
-        StreamEventType.TOOL_CALL_START to "tool.name",
-        StreamEventType.TOOL_CALL_DELTA to "delta.arguments",
-        StreamEventType.TOOL_CALL_END to "tool.id"
+        StreamEventType.THINKING_CONTENT to "delta.thinking"
     )
 
     var eventName by remember(mapping) { mutableStateOf(mapping?.eventName ?: "") }
@@ -516,3 +516,155 @@ private fun streamingTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = OnSurface,
     unfocusedTextColor = OnSurface
 )
+
+/**
+ * Editor for tool call configuration with clear fields for
+ * tool name path and parameters path.
+ */
+@Composable
+fun ToolCallConfigEditor(
+    config: ToolCallConfig,
+    onConfigChange: (ToolCallConfig) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = SurfaceVariant.copy(alpha = 0.3f),
+            modifier = modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "קריאות כלים (Tool Calls)",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Tertiary,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "הגדר כיצד לזהות קריאות כלים בזרימה",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface.copy(alpha = 0.7f)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Event name for tool calls
+                OutlinedTextField(
+                    value = config.eventName,
+                    onValueChange = { onConfigChange(config.copy(eventName = it)) },
+                    label = { Text("שם אירוע", color = OnSurface.copy(alpha = 0.7f)) },
+                    placeholder = { Text("content_block_start", color = OnSurface.copy(alpha = 0.4f)) },
+                    supportingText = { Text("האירוע שמסמן קריאת כלי (השאר ריק לזיהוי לפי מבנה)", color = OnSurface.copy(alpha = 0.6f)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = streamingTextFieldColors()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Tool name path
+                OutlinedTextField(
+                    value = config.toolNamePath,
+                    onValueChange = { onConfigChange(config.copy(toolNamePath = it)) },
+                    label = { Text("נתיב שם הכלי *", color = OnSurface.copy(alpha = 0.7f)) },
+                    placeholder = { Text("content_block.name", color = OnSurface.copy(alpha = 0.4f)) },
+                    supportingText = { Text("נתיב JSON לשם הכלי (למשל: delta.tool_calls[0].function.name)", color = OnSurface.copy(alpha = 0.6f)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = streamingTextFieldColors()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Tool ID path
+                OutlinedTextField(
+                    value = config.toolIdPath,
+                    onValueChange = { onConfigChange(config.copy(toolIdPath = it)) },
+                    label = { Text("נתיב מזהה הקריאה", color = OnSurface.copy(alpha = 0.7f)) },
+                    placeholder = { Text("content_block.id", color = OnSurface.copy(alpha = 0.4f)) },
+                    supportingText = { Text("נתיב JSON למזהה הקריאה (אופציונלי)", color = OnSurface.copy(alpha = 0.6f)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = streamingTextFieldColors()
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Parameters section header
+                Text(
+                    text = "פרמטרים",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = OnSurface.copy(alpha = 0.8f),
+                    fontWeight = FontWeight.Medium
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Parameters event name
+                OutlinedTextField(
+                    value = config.parametersEventName,
+                    onValueChange = { onConfigChange(config.copy(parametersEventName = it)) },
+                    label = { Text("שם אירוע לפרמטרים", color = OnSurface.copy(alpha = 0.7f)) },
+                    placeholder = { Text("content_block_delta", color = OnSurface.copy(alpha = 0.4f)) },
+                    supportingText = { Text("השאר ריק אם הפרמטרים מגיעים באותו אירוע", color = OnSurface.copy(alpha = 0.6f)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = streamingTextFieldColors()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Parameters path
+                OutlinedTextField(
+                    value = config.parametersPath,
+                    onValueChange = { onConfigChange(config.copy(parametersPath = it)) },
+                    label = { Text("נתיב פרמטרים", color = OnSurface.copy(alpha = 0.7f)) },
+                    placeholder = { Text("delta.partial_json", color = OnSurface.copy(alpha = 0.4f)) },
+                    supportingText = { Text("נתיב JSON לפרמטרים/ארגומנטים (למשל: delta.tool_calls[0].function.arguments)", color = OnSurface.copy(alpha = 0.6f)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = streamingTextFieldColors()
+                )
+
+                // Example format
+                Spacer(modifier = Modifier.height(16.dp))
+
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Background.copy(alpha = 0.8f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "Examples:",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = OnSurface.copy(alpha = 0.7f),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = """OpenAI: toolNamePath = "delta.tool_calls[0].function.name"
+         parametersPath = "delta.tool_calls[0].function.arguments"
+
+Anthropic: eventName = "content_block_start"
+           toolNamePath = "content_block.name"
+           parametersEventName = "content_block_delta"
+           parametersPath = "delta.partial_json"""",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp,
+                                    lineHeight = 14.sp
+                                ),
+                                color = AccentGreen
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

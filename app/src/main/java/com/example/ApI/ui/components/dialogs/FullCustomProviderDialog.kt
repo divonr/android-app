@@ -72,6 +72,9 @@ fun FullCustomProviderDialog(
     var eventMappings by remember {
         mutableStateOf(existingConfig?.eventMappings ?: emptyMap())
     }
+    var toolCallConfig by remember {
+        mutableStateOf(existingConfig?.toolCallConfig ?: ToolCallConfig())
+    }
 
     // Model tab state
     var defaultModel by remember { mutableStateOf(existingConfig?.defaultModel ?: "") }
@@ -230,7 +233,9 @@ fun FullCustomProviderDialog(
                                 parserConfig = parserConfig,
                                 onParserConfigChange = { parserConfig = it },
                                 eventMappings = eventMappings,
-                                onEventMappingsChange = { eventMappings = it }
+                                onEventMappingsChange = { eventMappings = it },
+                                toolCallConfig = toolCallConfig,
+                                onToolCallConfigChange = { toolCallConfig = it }
                             )
                             2 -> ModelTabContent(
                                 defaultModel = defaultModel,
@@ -273,6 +278,7 @@ fun FullCustomProviderDialog(
                                     parserType = parserType,
                                     parserConfig = parserConfig,
                                     eventMappings = eventMappings,
+                                    toolCallConfig = toolCallConfig,
                                     isOpenAICompatible = false,
                                     createdAt = existingConfig?.createdAt ?: System.currentTimeMillis(),
                                     isEnabled = existingConfig?.isEnabled ?: true
@@ -539,7 +545,9 @@ private fun StreamingTabContent(
     parserConfig: ParserConfig,
     onParserConfigChange: (ParserConfig) -> Unit,
     eventMappings: Map<StreamEventType, EventMapping>,
-    onEventMappingsChange: (Map<StreamEventType, EventMapping>) -> Unit
+    onEventMappingsChange: (Map<StreamEventType, EventMapping>) -> Unit,
+    toolCallConfig: ToolCallConfig,
+    onToolCallConfigChange: (ToolCallConfig) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -566,7 +574,9 @@ private fun StreamingTabContent(
         // Event Mappings Editor
         EventMappingsEditor(
             mappings = eventMappings,
-            onMappingsChange = onEventMappingsChange
+            onMappingsChange = onEventMappingsChange,
+            toolCallConfig = toolCallConfig,
+            onToolCallConfigChange = onToolCallConfigChange
         )
     }
 }

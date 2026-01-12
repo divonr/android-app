@@ -9,6 +9,7 @@ import com.example.ApI.data.network.streaming.SSEStreamParser
 import com.example.ApI.data.network.streaming.StreamAction
 import com.example.ApI.data.network.streaming.StreamEventHandler
 import com.example.ApI.data.network.streaming.StreamResult
+import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolSpecification
 import com.example.ApI.util.TemplateExpander
 import kotlinx.coroutines.Dispatchers
@@ -65,9 +66,34 @@ class FullDynamicCustomProvider(
                     callback.onComplete(result.fullText)
                 }
                 is ProviderStreamingResult.ToolCallDetected -> {
-                    // For now, full custom providers don't support tool calling
-                    // Complete with any preceding text
-                    callback.onComplete(result.precedingText)
+                    // Handle tool call using the base provider's tool chain handler
+                    if (config.toolCallConfig.isConfigured()) {
+                        Log.d(logTag, "Tool call detected: ${result.toolCall.toolId}")
+                        val finalText = handleToolCallChain(
+                            initialToolCall = result.toolCall,
+                            initialPrecedingText = result.precedingText,
+                            messages = messages,
+                            modelName = modelName,
+                            callback = callback
+                        ) { updatedMessages ->
+                            makeStreamingRequest(
+                                modelName = modelName,
+                                messages = updatedMessages,
+                                systemPrompt = systemPrompt,
+                                apiKey = apiKey,
+                                enabledTools = enabledTools,
+                                thinkingBudget = thinkingBudget,
+                                callback = callback,
+                                temperature = temperature
+                            )
+                        }
+                        if (finalText != null) {
+                            callback.onComplete(finalText)
+                        }
+                    } else {
+                        // Tool calling not configured - complete with any preceding text
+                        callback.onComplete(result.precedingText)
+                    }
                 }
                 is ProviderStreamingResult.Error -> {
                     callback.onError(result.error)
@@ -290,11 +316,25 @@ class FullDynamicCustomProvider(
         var thinkingStartTime: Long = 0
         val thoughtsBuilder = StringBuilder()
 
+        // Tool call state tracking
+        var detectedToolName: String? = null
+        var detectedToolId: String? = null
+        val toolParametersBuilder = StringBuilder()
+        var toolCallDetected = false
+
         // Error tracking
         var errorMessage: String? = null
 
         override fun onEvent(eventType: String?, data: JsonObject): StreamAction {
             Log.d(logTag, "Event received: type=$eventType, data=$data")
+
+            // First, check for tool calls if configured
+            if (config.toolCallConfig.isConfigured()) {
+                val toolCallAction = handleToolCallEvent(eventType, data)
+                if (toolCallAction != null) {
+                    return toolCallAction
+                }
+            }
 
             // Check each mapping to see if this event matches
             for ((semanticType, mapping) in config.eventMappings) {
@@ -320,6 +360,66 @@ class FullDynamicCustomProvider(
             // No mapping matched - continue processing
             // This is normal for events we don't care about
             return StreamAction.Continue
+        }
+
+        /**
+         * Handle potential tool call events based on toolCallConfig.
+         * Returns StreamAction if this was a tool call event, null otherwise.
+         */
+        private fun handleToolCallEvent(eventType: String?, data: JsonObject): StreamAction? {
+            val toolConfig = config.toolCallConfig
+
+            // Check if this is a tool name event (start of tool call)
+            val isToolNameEvent = when {
+                toolConfig.eventName.isNotBlank() && eventType == toolConfig.eventName -> true
+                toolConfig.eventName.isBlank() && toolConfig.toolNamePath.isNotBlank() -> {
+                    // Structure-based matching - check if tool name path exists
+                    TemplateExpander.extractByPath(data, toolConfig.toolNamePath) != null
+                }
+                else -> false
+            }
+
+            if (isToolNameEvent) {
+                // Extract tool name
+                val toolName = TemplateExpander.extractByPath(data, toolConfig.toolNamePath)
+                if (toolName != null) {
+                    detectedToolName = toolName
+                    Log.d(logTag, "Tool call detected: name=$toolName")
+
+                    // Extract tool ID if configured
+                    if (toolConfig.toolIdPath.isNotBlank()) {
+                        detectedToolId = TemplateExpander.extractByPath(data, toolConfig.toolIdPath)
+                        Log.d(logTag, "Tool call ID: $detectedToolId")
+                    }
+
+                    // If parameters come in the same event, extract them
+                    if (toolConfig.parametersEventName.isBlank() && toolConfig.parametersPath.isNotBlank()) {
+                        val params = TemplateExpander.extractByPath(data, toolConfig.parametersPath)
+                        if (params != null) {
+                            toolParametersBuilder.append(params)
+                        }
+                    }
+
+                    toolCallDetected = true
+                    return StreamAction.Continue
+                }
+            }
+
+            // Check if this is a parameters delta event (when parameters come separately)
+            if (toolConfig.parametersEventName.isNotBlank() && toolConfig.parametersPath.isNotBlank()) {
+                val isParamsEvent = eventType == toolConfig.parametersEventName
+                if (isParamsEvent) {
+                    val paramsChunk = TemplateExpander.extractByPath(data, toolConfig.parametersPath)
+                    if (paramsChunk != null) {
+                        toolParametersBuilder.append(paramsChunk)
+                        Log.d(logTag, "Tool parameters chunk: $paramsChunk")
+                    }
+                    return StreamAction.Continue
+                }
+            }
+
+            // Not a tool call event
+            return null
         }
 
         /**
@@ -363,13 +463,6 @@ class FullDynamicCustomProvider(
                         callback.onThinkingPartial(thinkingText)
                     }
                 }
-
-                StreamEventType.TOOL_CALL_START,
-                StreamEventType.TOOL_CALL_DELTA,
-                StreamEventType.TOOL_CALL_END -> {
-                    // Tool calling not fully supported in dynamic provider yet
-                    Log.d(logTag, "Tool call event received but not handled: $semanticType")
-                }
             }
 
             return StreamAction.Continue
@@ -405,6 +498,39 @@ class FullDynamicCustomProvider(
                 thoughtsContent != null -> ThoughtsStatus.PRESENT
                 thinkingStartTime > 0 -> ThoughtsStatus.UNAVAILABLE
                 else -> ThoughtsStatus.NONE
+            }
+
+            // Check if a tool call was detected
+            if (toolCallDetected && detectedToolName != null) {
+                // Parse tool parameters as JSON
+                val paramsJson = try {
+                    val paramsStr = toolParametersBuilder.toString().trim()
+                    if (paramsStr.isNotBlank()) {
+                        json.parseToJsonElement(paramsStr).jsonObject
+                    } else {
+                        JsonObject(emptyMap())
+                    }
+                } catch (e: Exception) {
+                    Log.w(logTag, "Failed to parse tool parameters as JSON: ${e.message}")
+                    JsonObject(emptyMap())
+                }
+
+                val toolCall = ToolCall(
+                    id = detectedToolId ?: java.util.UUID.randomUUID().toString(),
+                    toolId = detectedToolName!!,
+                    parameters = paramsJson,
+                    provider = config.providerKey
+                )
+
+                Log.d(logTag, "Returning ToolCallDetected: toolId=${toolCall.toolId}, params=$paramsJson")
+
+                return ProviderStreamingResult.ToolCallDetected(
+                    toolCall = toolCall,
+                    precedingText = fullResponse.toString(),
+                    thoughts = thoughtsContent,
+                    thinkingDurationSeconds = thinkingDuration,
+                    thoughtsStatus = thoughtsStatus
+                )
             }
 
             return if (fullResponse.isNotEmpty()) {
