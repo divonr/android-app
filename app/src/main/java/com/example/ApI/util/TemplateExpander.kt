@@ -486,15 +486,22 @@ object TemplateExpander {
         // Inject tool definitions if configured and tools are provided
         if (messageFields.toolDefinitionField != null && tools.isNotEmpty()) {
             val toolDefinitions = tools.map { tool ->
-                // Extract just the properties from the parameters schema for flexibility
+                // Extract properties and required from the parameters schema
                 val parametersJson = tool.parameters?.get("properties")?.toString()
                     ?: tool.parameters?.toString()
                     ?: "{}"
+                val requiredArray = tool.parameters?.get("required")
 
-                messageFields.toolDefinitionField.template
+                // First do basic placeholder replacement
+                var toolDefJson = messageFields.toolDefinitionField.template
                     .replace(BodyTemplatePlaceholders.TOOL_NAME, escapeJsonString(tool.name))
                     .replace(BodyTemplatePlaceholders.TOOL_DESCRIPTION, escapeJsonString(tool.description))
                     .replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, parametersJson)
+
+                // Now inject "required" array at the same level as "properties"
+                toolDefJson = injectRequiredArray(toolDefJson, requiredArray, json)
+
+                toolDefJson
             }
             val path = messageFields.toolDefinitionField.path
             try {
@@ -700,5 +707,56 @@ object TemplateExpander {
         ).joinToString(" ")
 
         return BodyTemplatePlaceholders.ALL.filter { allTemplates.contains(it) }.toSet()
+    }
+
+    /**
+     * Injects the "required" array at the same level as "properties" in a tool definition JSON.
+     * This finds all objects containing a "properties" key and adds/replaces "required" there.
+     *
+     * @param toolDefJson The tool definition JSON string after placeholder expansion
+     * @param requiredArray The required array from the tool's parameters schema (may be null)
+     * @param json The Json instance for parsing
+     * @return The modified JSON string with "required" injected
+     */
+    private fun injectRequiredArray(
+        toolDefJson: String,
+        requiredArray: JsonElement?,
+        json: Json
+    ): String {
+        return try {
+            val element = json.parseToJsonElement(toolDefJson)
+            val modified = injectRequiredInElement(element, requiredArray ?: JsonArray(emptyList()))
+            json.encodeToString(JsonElement.serializer(), modified)
+        } catch (e: Exception) {
+            // If parsing fails, return original
+            toolDefJson
+        }
+    }
+
+    /**
+     * Recursively processes a JsonElement to inject "required" array next to "properties".
+     */
+    private fun injectRequiredInElement(element: JsonElement, requiredArray: JsonElement): JsonElement {
+        return when (element) {
+            is JsonObject -> {
+                val mutableMap = element.toMutableMap()
+
+                // If this object has a "properties" key, add/replace "required" here
+                if (mutableMap.containsKey("properties")) {
+                    mutableMap["required"] = requiredArray
+                }
+
+                // Recursively process all values
+                for ((key, value) in mutableMap.toMap()) {
+                    mutableMap[key] = injectRequiredInElement(value, requiredArray)
+                }
+
+                JsonObject(mutableMap)
+            }
+            is JsonArray -> {
+                JsonArray(element.map { injectRequiredInElement(it, requiredArray) })
+            }
+            else -> element
+        }
     }
 }
