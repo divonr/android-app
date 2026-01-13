@@ -41,13 +41,9 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
         return buildJsonObject {
             put("type", "object")
             // Extract properties from the parameters schema
-            toolSpec.parameters?.get("properties")?.let { props ->
-                put("properties", props)
-            } ?: put("properties", buildJsonObject {})
+            put("properties", toolSpec.parameters?.get("properties") ?: buildJsonObject {})
             // Extract required array from the parameters schema
-            toolSpec.parameters?.get("required")?.let { req ->
-                put("required", req)
-            } ?: put("required", buildJsonArray {})
+            put("required", toolSpec.parameters?.get("required") ?: buildJsonArray {})
         }
     }
 
