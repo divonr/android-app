@@ -40,8 +40,14 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
     protected open fun formatToolParameters(toolSpec: ToolSpecification): JsonElement {
         return buildJsonObject {
             put("type", "object")
-            put("properties", toolSpec.parameters ?: buildJsonObject {})
-            put("required", buildJsonArray {})
+            // Extract properties from the parameters schema
+            toolSpec.parameters?.get("properties")?.let { props ->
+                put("properties", props)
+            } ?: put("properties", buildJsonObject {})
+            // Extract required array from the parameters schema
+            toolSpec.parameters?.get("required")?.let { req ->
+                put("required", req)
+            } ?: put("required", buildJsonArray {})
         }
     }
 

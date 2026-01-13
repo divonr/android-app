@@ -629,10 +629,14 @@ class AnthropicProvider(context: Context) : BaseProvider(context) {
                     put("description", tool.description)
                     put("input_schema", buildJsonObject {
                         put("type", "object")
-                        tool.parameters?.let { params ->
-                            put("properties", params)
+                        // Extract properties from the parameters schema
+                        tool.parameters?.get("properties")?.let { props ->
+                            put("properties", props)
                         } ?: put("properties", buildJsonObject {})
-                        put("required", buildJsonArray {})
+                        // Extract required array from the parameters schema
+                        tool.parameters?.get("required")?.let { req ->
+                            put("required", req)
+                        } ?: put("required", buildJsonArray {})
                     })
                 })
             }
