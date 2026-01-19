@@ -2,9 +2,7 @@ package com.example.ApI.ui.components.dialogs
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -115,19 +113,12 @@ fun MessageFieldsEditor(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
-                        Text(
-                            text = "הזרקת הודעות דינמית",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "הגדר נתיבים ותבניות נפרדות לכל סוג הודעה",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = OnSurface.copy(alpha = 0.6f)
-                        )
-                    }
+                    Text(
+                        text = "מבנה גוף הבקשה - חלק דינמי",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null,
@@ -137,44 +128,7 @@ fun MessageFieldsEditor(
             }
 
             if (isExpanded) {
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Info box
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Primary.copy(alpha = 0.1f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "הסבר:",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "• נתיב: היכן להזריק בגוף הבקשה (לדוגמה: messages או system.parts)\n" +
-                                    "• תבנית: JSON של הודעה בודדת עם placeholder מתאים\n" +
-                                    "• נתיב עם נקודות (a.b) יוזרק בעומק (body.a.b)\n" +
-                                    "• השאר נתיב ריק אם לא נדרש",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = OnSurface.copy(alpha = 0.7f)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Section: Message Fields
-                Text(
-                    text = "שדות הודעות",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = OnSurface,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // System Message Field
                 MessageFieldEditor(
@@ -219,27 +173,7 @@ fun MessageFieldsEditor(
                     isValid = assistantPath.isBlank() || assistantTemplate.contains(BodyTemplatePlaceholders.ASSISTANT)
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Divider
-                HorizontalDivider(color = OnSurface.copy(alpha = 0.2f))
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Section: Tool Fields (Optional)
-                Text(
-                    text = "שדות כלים (אופציונלי)",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = OnSurface,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "הגדר רק אם הספק תומך בכלים",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OnSurface.copy(alpha = 0.5f)
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Tool Definition Field
                 MessageFieldEditor(
@@ -351,21 +285,6 @@ private fun MessageFieldEditor(
                         color = OnSurface,
                         fontWeight = FontWeight.Medium
                     )
-                    // Show required placeholder
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = Primary.copy(alpha = 0.2f)
-                    ) {
-                        Text(
-                            text = placeholder,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 10.sp
-                            ),
-                            color = Primary,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
                 }
                 Icon(
                     imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,

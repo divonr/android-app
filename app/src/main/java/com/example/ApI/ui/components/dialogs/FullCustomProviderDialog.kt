@@ -19,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -65,6 +64,8 @@ fun FullCustomProviderDialog(
     var messageFields by remember { mutableStateOf(existingConfig?.messageFields) }
     var streamingConfirmed by remember { mutableStateOf(existingConfig != null) }
     var showAdvancedHeaders by remember { mutableStateOf(false) }
+    var showBodySection by remember { mutableStateOf(false) }
+    var isBodyTemplateValidJson by remember { mutableStateOf(true) }
 
     // Streaming tab state
     var parserType by remember { mutableStateOf(existingConfig?.parserType ?: StreamParserType.DATA_ONLY) }
@@ -111,7 +112,8 @@ fun FullCustomProviderDialog(
             baseUrl.isNotBlank() &&
             defaultModel.isNotBlank() &&
             allRequiredPlaceholdersPresent &&
-            streamingConfirmed
+            streamingConfirmed &&
+            isBodyTemplateValidJson
 
     Dialog(onDismissRequest = onDismiss) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -219,13 +221,15 @@ fun FullCustomProviderDialog(
                                 onExtraHeadersChange = { extraHeaders = it },
                                 showAdvancedHeaders = showAdvancedHeaders,
                                 onShowAdvancedHeadersChange = { showAdvancedHeaders = it },
+                                showBodySection = showBodySection,
+                                onShowBodySectionChange = { showBodySection = it },
                                 bodyTemplate = bodyTemplate,
                                 onBodyTemplateChange = { bodyTemplate = it },
+                                onBodyTemplateValidityChange = { isBodyTemplateValidJson = it },
                                 messageFields = messageFields,
                                 onMessageFieldsChange = { messageFields = it },
                                 streamingConfirmed = streamingConfirmed,
-                                onStreamingConfirmedChange = { streamingConfirmed = it },
-                                presentPlaceholders = presentPlaceholders
+                                onStreamingConfirmedChange = { streamingConfirmed = it }
                             )
                             1 -> StreamingTabContent(
                                 parserType = parserType,
@@ -314,13 +318,15 @@ private fun RequestTabContent(
     onExtraHeadersChange: (List<Pair<String, String>>) -> Unit,
     showAdvancedHeaders: Boolean,
     onShowAdvancedHeadersChange: (Boolean) -> Unit,
+    showBodySection: Boolean,
+    onShowBodySectionChange: (Boolean) -> Unit,
     bodyTemplate: String,
     onBodyTemplateChange: (String) -> Unit,
+    onBodyTemplateValidityChange: (Boolean) -> Unit,
     messageFields: MessageFieldsConfig?,
     onMessageFieldsChange: (MessageFieldsConfig?) -> Unit,
     streamingConfirmed: Boolean,
-    onStreamingConfirmedChange: (Boolean) -> Unit,
-    presentPlaceholders: Set<String>
+    onStreamingConfirmedChange: (Boolean) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -353,7 +359,7 @@ private fun RequestTabContent(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Advanced Settings Toggle (Auth Headers)
+        // Headers Section (collapsible)
         Surface(
             shape = RoundedCornerShape(8.dp),
             color = SurfaceVariant.copy(alpha = 0.5f),
@@ -482,54 +488,95 @@ private fun RequestTabContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Body Template Editor
-        BodyTemplateEditor(
-            template = bodyTemplate,
-            onTemplateChange = onBodyTemplateChange,
-            presentPlaceholders = presentPlaceholders
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Dynamic Message Fields Editor
-        MessageFieldsEditor(
-            messageFields = messageFields,
-            onMessageFieldsChange = onMessageFieldsChange
-        )
-
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Streaming Configuration Confirmation Checkbox
-        Row(
+        // Body Section (collapsible, collapsed by default)
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = SurfaceVariant.copy(alpha = 0.5f),
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onStreamingConfirmedChange(!streamingConfirmed) }
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                .clickable { onShowBodySectionChange(!showBodySection) }
         ) {
-            Checkbox(
-                checked = streamingConfirmed,
-                onCheckedChange = onStreamingConfirmedChange,
-                colors = CheckboxDefaults.colors(
-                    checkedColor = Primary,
-                    uncheckedColor = OnSurface.copy(alpha = 0.6f)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = if (showBodySection) "הסתר הגדרות Body" else "הצג הגדרות Body",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Primary
                 )
-            )
-            Text(
-                text = "אישור הגדרות Streaming",
-                style = MaterialTheme.typography.bodyMedium,
-                color = OnSurface
-            )
+                Icon(
+                    imageVector = if (showBodySection) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = Primary
+                )
+            }
         }
 
-        if (!streamingConfirmed) {
+        if (showBodySection) {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Explanation text
             Text(
-                text = "יש להגדיר את הגדרות ה-Streaming בלשונית המתאימה ולאשר",
+                text = "יש לחלק את הבקשה לחלק הקבוע, שיוכנס במלואו לכל בקשה, ולחלקים הדינמיים, שיוזרקו לתוך החלק הקבוע לפי הצורך",
                 style = MaterialTheme.typography.bodySmall,
-                color = AccentYellow.copy(alpha = 0.8f)
+                color = OnSurface.copy(alpha = 0.7f)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Part 1: Body Template Editor (static part)
+            BodyTemplateEditor(
+                template = bodyTemplate,
+                onTemplateChange = onBodyTemplateChange,
+                onJsonValidityChange = onBodyTemplateValidityChange
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Streaming Configuration Confirmation Checkbox (moved here)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onStreamingConfirmedChange(!streamingConfirmed) }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Checkbox(
+                    checked = streamingConfirmed,
+                    onCheckedChange = onStreamingConfirmedChange,
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Primary,
+                        uncheckedColor = OnSurface.copy(alpha = 0.6f)
+                    )
+                )
+                Text(
+                    text = "יש לאשר שהבקשה מוגדרת במצב סטרימינג מופעל",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = OnSurface
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Part 2: Dynamic Message Fields Editor
+            MessageFieldsEditor(
+                messageFields = messageFields,
+                onMessageFieldsChange = onMessageFieldsChange
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Full Request Preview
+            FullRequestPreview(
+                bodyTemplate = bodyTemplate,
+                messageFields = messageFields
             )
         }
     }
