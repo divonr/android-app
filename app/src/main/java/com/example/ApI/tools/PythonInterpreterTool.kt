@@ -10,6 +10,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import com.example.ApI.util.AppLogger
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Base64
 import java.util.UUID
@@ -99,30 +101,32 @@ Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
         AppLogger.i("[PythonTool] Request body size: ${bodyString.length} chars")
         AppLogger.i("[PythonTool] Sending POST to: $CLOUD_FUNCTION_URL")
 
-        return try {
-            val request = Request.Builder()
-                .url(CLOUD_FUNCTION_URL)
-                .post(bodyString.toRequestBody("application/json".toMediaType()))
-                .build()
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url(CLOUD_FUNCTION_URL)
+                    .post(bodyString.toRequestBody("application/json".toMediaType()))
+                    .build()
 
-            AppLogger.i("[PythonTool] Executing HTTP request...")
-            val response = client.newCall(request).execute()
-            AppLogger.i("[PythonTool] Response code: ${response.code}")
-            AppLogger.i("[PythonTool] Response message: ${response.message}")
+                AppLogger.i("[PythonTool] Executing HTTP request...")
+                val response = client.newCall(request).execute()
+                AppLogger.i("[PythonTool] Response code: ${response.code}")
+                AppLogger.i("[PythonTool] Response message: ${response.message}")
 
-            val responseBody = response.body?.string()
-            if (responseBody == null) {
-                AppLogger.e("[PythonTool] Response body is null")
-                return ToolExecutionResult.Error("Empty response from Python executor")
+                val responseBody = response.body?.string()
+                if (responseBody == null) {
+                    AppLogger.e("[PythonTool] Response body is null")
+                    return@withContext ToolExecutionResult.Error("Empty response from Python executor")
+                }
+                AppLogger.i("[PythonTool] Response body length: ${responseBody.length} chars")
+                AppLogger.i("[PythonTool] Response body preview: ${responseBody.take(1000)}")
+
+                parseResponse(responseBody)
+            } catch (e: Exception) {
+                AppLogger.e("[PythonTool] Exception: ${e::class.java.simpleName}: ${e.message}")
+                AppLogger.e("[PythonTool] Stack trace: ${e.stackTraceToString().take(1000)}")
+                ToolExecutionResult.Error("Failed to execute Python code: ${e::class.java.simpleName}: ${e.message ?: "no message"}")
             }
-            AppLogger.i("[PythonTool] Response body length: ${responseBody.length} chars")
-            AppLogger.i("[PythonTool] Response body preview: ${responseBody.take(1000)}")
-
-            parseResponse(responseBody)
-        } catch (e: Exception) {
-            AppLogger.e("[PythonTool] Exception: ${e::class.java.simpleName}: ${e.message}")
-            AppLogger.e("[PythonTool] Stack trace: ${e.stackTraceToString().take(1000)}")
-            ToolExecutionResult.Error("Failed to execute Python code: ${e::class.java.simpleName}: ${e.message ?: "no message"}")
         }
     }
 
