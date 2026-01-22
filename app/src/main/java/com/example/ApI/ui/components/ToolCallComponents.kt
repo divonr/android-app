@@ -1,5 +1,6 @@
 package com.example.ApI.ui.components
 
+import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -13,24 +14,36 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
 import com.example.ApI.data.model.ExecutingToolInfo
 import com.example.ApI.data.model.Message
 import com.example.ApI.data.model.ThoughtsStatus
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.theme.*
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -145,6 +158,7 @@ fun ToolCallBubble(
 ) {
     // Collect UI state for accessing current chat
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
 
     // Handle both tool_call messages (with toolCall field) and tool_response messages
     val toolCallInfo = message.toolCall
@@ -514,6 +528,91 @@ fun ToolCallBubble(
                                             modifier = Modifier.padding(12.dp)
                                         )
                                     }
+                                }
+                            }
+                        }
+
+                        // Check for output files from Python interpreter
+                        val outputFiles = (toolCallInfo.result as? ToolExecutionResult.Success)?.details
+                            ?.get("output_files")?.jsonArray
+
+                        if (!outputFiles.isNullOrEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "Generated Files:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = OnSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold
+                            )
+
+                            outputFiles.forEach { fileJson ->
+                                val fileObj = fileJson.jsonObject
+                                val fileName = fileObj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@forEach
+                                val localPath = fileObj["local_file_path"]?.jsonPrimitive?.contentOrNull
+                                val mimeType = fileObj["mime_type"]?.jsonPrimitive?.contentOrNull ?: ""
+
+                                // File chip with click to open
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = SurfaceVariant,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .clickable {
+                                            localPath?.let { path ->
+                                                try {
+                                                    val file = File(path)
+                                                    val uri = FileProvider.getUriForFile(
+                                                        context,
+                                                        context.packageName + ".fileprovider",
+                                                        file
+                                                    )
+                                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                        setDataAndType(uri, mimeType)
+                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                    }
+                                                    context.startActivity(intent)
+                                                } catch (e: Exception) {
+                                                    // Handle error silently
+                                                }
+                                            }
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = when {
+                                                mimeType.startsWith("image/") -> Icons.Default.Image
+                                                else -> Icons.Default.InsertDriveFile
+                                            },
+                                            contentDescription = null,
+                                            tint = Primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = fileName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = OnSurface
+                                        )
+                                    }
+                                }
+
+                                // Image preview if applicable
+                                if (mimeType.startsWith("image/") && localPath != null) {
+                                    AsyncImage(
+                                        model = File(localPath),
+                                        contentDescription = fileName,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 200.dp)
+                                            .padding(vertical = 4.dp)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                        contentScale = ContentScale.Fit
+                                    )
                                 }
                             }
                         }
