@@ -187,6 +187,20 @@ fun IntegrationsScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
+                        // Python Interpreter Tool
+                        PythonInterpreterToolItem(
+                            isEnabled = appSettings.enabledTools.contains(ToolRegistry.PYTHON_INTERPRETER),
+                            onToggle = { enabled ->
+                                if (enabled) {
+                                    viewModel.enableTool(ToolRegistry.PYTHON_INTERPRETER)
+                                } else {
+                                    viewModel.disableTool(ToolRegistry.PYTHON_INTERPRETER)
+                                }
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
                         // GitHub Integration
                         GitHubIntegrationItem(
                             viewModel = viewModel,
@@ -311,6 +325,52 @@ private fun GroupConversationsToolItem(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "אפשר למודל לראות שיחות אחרות באותה הקבוצה",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface.copy(alpha = 0.7f),
+                    lineHeight = 16.sp
+                )
+            }
+
+            Switch(
+                checked = isEnabled,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Primary,
+                    checkedTrackColor = Primary.copy(alpha = 0.5f)
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun PythonInterpreterToolItem(
+    isEnabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = SurfaceVariant.copy(alpha = 0.3f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "מפרש Python",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = OnSurface,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "הרצת קוד Python עם pandas, numpy, matplotlib לניתוח נתונים",
                     style = MaterialTheme.typography.bodySmall,
                     color = OnSurface.copy(alpha = 0.7f),
                     lineHeight = 16.sp
