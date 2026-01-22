@@ -1,7 +1,10 @@
 package com.example.ApI.ui.components
 
 import android.content.Intent
+import android.graphics.BitmapFactory
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -24,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -624,6 +628,50 @@ fun ToolCallBubble(
                             color = OnSurfaceVariant.copy(alpha = 0.7f),
                             modifier = Modifier.align(Alignment.End)
                         )
+                    }
+                }
+
+                // Always-visible image previews for output files
+                val details = (toolCallInfo.result as? ToolExecutionResult.Success)?.details
+                Log.d("ToolCallImage", "details=$details")
+                val outputImages = details
+                    ?.get("output_files")?.jsonArray
+                    ?.filter { fileJson ->
+                        val mimeType = fileJson.jsonObject["mime_type"]?.jsonPrimitive?.contentOrNull ?: ""
+                        mimeType.startsWith("image/")
+                    }
+                Log.d("ToolCallImage", "outputImages count=${outputImages?.size ?: 0}")
+
+                if (!outputImages.isNullOrEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    outputImages.forEach { fileJson ->
+                        val fileObj = fileJson.jsonObject
+                        val fileName = fileObj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@forEach
+                        val localPath = fileObj["local_file_path"]?.jsonPrimitive?.contentOrNull ?: return@forEach
+                        val file = File(localPath)
+                        Log.d("ToolCallImage", "file=$localPath exists=${file.exists()} size=${if (file.exists()) file.length() else -1}")
+
+                        if (file.exists()) {
+                            val bitmap = remember(localPath) {
+                                BitmapFactory.decodeFile(localPath)
+                            }
+                            if (bitmap != null) {
+                                Log.d("ToolCallImage", "Bitmap decoded: ${bitmap.width}x${bitmap.height}")
+                                Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = fileName,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 300.dp)
+                                        .clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Fit
+                                )
+                            } else {
+                                Log.e("ToolCallImage", "Failed to decode bitmap from $localPath")
+                            }
+                        } else {
+                            Log.e("ToolCallImage", "File does not exist: $localPath")
+                        }
                     }
                 }
             }
