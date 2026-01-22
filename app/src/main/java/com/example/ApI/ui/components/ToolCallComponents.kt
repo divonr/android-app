@@ -42,7 +42,6 @@ import com.example.ApI.data.model.ThoughtsStatus
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.theme.*
-import com.example.ApI.util.AppLogger
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -342,14 +341,12 @@ fun ToolCallBubble(
                         it.role == "tool_call" && it.toolCallId == message.toolResponseCallId
                     }
                     val responseDetails = (correspondingToolCallMsg?.toolCall?.result as? ToolExecutionResult.Success)?.details
-                    AppLogger.d("ToolCallImage", "[tool_response] correspondingToolCall found=${correspondingToolCallMsg != null}, details=$responseDetails")
                     val responseOutputImages = responseDetails
                         ?.get("output_files")?.jsonArray
                         ?.filter { fileJson ->
                             val mimeType = fileJson.jsonObject["mime_type"]?.jsonPrimitive?.contentOrNull ?: ""
                             mimeType.startsWith("image/")
                         }
-                    AppLogger.d("ToolCallImage", "[tool_response] outputImages count=${responseOutputImages?.size ?: 0}")
 
                     if (!responseOutputImages.isNullOrEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -358,14 +355,12 @@ fun ToolCallBubble(
                             val fileName = fileObj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@forEach
                             val localPath = fileObj["local_file_path"]?.jsonPrimitive?.contentOrNull ?: return@forEach
                             val file = File(localPath)
-                            AppLogger.d("ToolCallImage", "[tool_response] file=$localPath exists=${file.exists()} size=${if (file.exists()) file.length() else -1}")
 
                             if (file.exists()) {
                                 val bitmap = remember(localPath) {
                                     BitmapFactory.decodeFile(localPath)
                                 }
                                 if (bitmap != null) {
-                                    AppLogger.d("ToolCallImage", "[tool_response] Bitmap decoded: ${bitmap.width}x${bitmap.height}")
                                     Image(
                                         bitmap = bitmap.asImageBitmap(),
                                         contentDescription = fileName,
@@ -375,11 +370,7 @@ fun ToolCallBubble(
                                             .clip(RoundedCornerShape(8.dp)),
                                         contentScale = ContentScale.Fit
                                     )
-                                } else {
-                                    AppLogger.e("ToolCallImage", "[tool_response] Failed to decode bitmap from $localPath")
                                 }
-                            } else {
-                                AppLogger.e("ToolCallImage", "[tool_response] File does not exist: $localPath")
                             }
                         }
                     }
@@ -681,14 +672,12 @@ fun ToolCallBubble(
 
                 // Always-visible image previews for output files
                 val details = (toolCallInfo.result as? ToolExecutionResult.Success)?.details
-                AppLogger.d("ToolCallImage", "details=$details")
                 val outputImages = details
                     ?.get("output_files")?.jsonArray
                     ?.filter { fileJson ->
                         val mimeType = fileJson.jsonObject["mime_type"]?.jsonPrimitive?.contentOrNull ?: ""
                         mimeType.startsWith("image/")
                     }
-                AppLogger.d("ToolCallImage", "outputImages count=${outputImages?.size ?: 0}")
 
                 if (!outputImages.isNullOrEmpty()) {
                     Spacer(modifier = Modifier.height(8.dp))
@@ -697,14 +686,12 @@ fun ToolCallBubble(
                         val fileName = fileObj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@forEach
                         val localPath = fileObj["local_file_path"]?.jsonPrimitive?.contentOrNull ?: return@forEach
                         val file = File(localPath)
-                        AppLogger.d("ToolCallImage", "file=$localPath exists=${file.exists()} size=${if (file.exists()) file.length() else -1}")
 
                         if (file.exists()) {
                             val bitmap = remember(localPath) {
                                 BitmapFactory.decodeFile(localPath)
                             }
                             if (bitmap != null) {
-                                AppLogger.d("ToolCallImage", "Bitmap decoded: ${bitmap.width}x${bitmap.height}")
                                 Image(
                                     bitmap = bitmap.asImageBitmap(),
                                     contentDescription = fileName,
@@ -714,11 +701,7 @@ fun ToolCallBubble(
                                         .clip(RoundedCornerShape(8.dp)),
                                     contentScale = ContentScale.Fit
                                 )
-                            } else {
-                                AppLogger.e("ToolCallImage", "Failed to decode bitmap from $localPath")
                             }
-                        } else {
-                            AppLogger.e("ToolCallImage", "File does not exist: $localPath")
                         }
                     }
                 }
