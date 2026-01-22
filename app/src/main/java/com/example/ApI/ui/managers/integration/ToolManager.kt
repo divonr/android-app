@@ -6,6 +6,7 @@ import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
 import com.example.ApI.tools.GroupConversationsTool
+import com.example.ApI.tools.PythonInterpreterTool
 import com.example.ApI.ui.managers.ManagerDependencies
 
 /**
@@ -73,6 +74,20 @@ class ToolManager(
             }
         }
 
+        if (enabledToolIds.contains(ToolRegistry.PYTHON_INTERPRETER)) {
+            val currentChat = deps.uiState.value.currentChat
+            val currentGroup = currentChat?.group?.let { groupId ->
+                deps.uiState.value.groups.find { it.group_id == groupId }
+            }
+
+            val pythonTool = PythonInterpreterTool(
+                context = deps.context,
+                currentChat = currentChat,
+                currentGroup = currentGroup
+            )
+            specifications.add(pythonTool.getSpecification(currentProvider))
+        }
+
         return specifications
     }
 
@@ -106,6 +121,20 @@ class ToolManager(
             } ?: ToolExecutionResult.Error(
                 "Group conversations tool can only be used in a group chat"
             )
+        }
+
+        if (toolCall.toolId == ToolRegistry.PYTHON_INTERPRETER) {
+            val currentChat = deps.uiState.value.currentChat
+            val currentGroup = currentChat?.group?.let { groupId ->
+                deps.uiState.value.groups.find { it.group_id == groupId }
+            }
+
+            val pythonTool = PythonInterpreterTool(
+                context = deps.context,
+                currentChat = currentChat,
+                currentGroup = currentGroup
+            )
+            return pythonTool.execute(toolCall.parameters)
         }
 
         val enabledToolIds = getEnabledToolSpecifications().map { it.name }

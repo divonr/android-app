@@ -49,6 +49,9 @@ class ToolRegistry {
         const val DRIVE_UPLOAD_FILE = "drive_upload_file"
         const val DRIVE_CREATE_FOLDER = "drive_create_folder"
         const val DRIVE_DELETE_FILE = "drive_delete_file"
+
+        // Python Interpreter tool ID
+        const val PYTHON_INTERPRETER = "python_interpreter"
     }
 
     private val tools = mutableMapOf<String, Tool>()
