@@ -9,6 +9,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import com.example.ApI.util.AppLogger
 import java.io.File
 import java.util.Base64
 import java.util.UUID
@@ -62,15 +63,23 @@ Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
         .build()
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
+        AppLogger.i("[PythonTool] execute() called with parameters: ${parameters.toString().take(500)}")
+
         val code = parameters["code"]?.jsonPrimitive?.contentOrNull
-            ?: return ToolExecutionResult.Error("Parameter 'code' is required")
+        if (code == null) {
+            AppLogger.e("[PythonTool] 'code' parameter is missing or null")
+            return ToolExecutionResult.Error("Parameter 'code' is required")
+        }
+        AppLogger.i("[PythonTool] Code length: ${code.length} chars")
 
         val filesToInclude = parameters["files_to_include"]?.jsonArray
             ?.mapNotNull { it.jsonPrimitive.contentOrNull }
             ?: emptyList()
+        AppLogger.i("[PythonTool] Files to include: $filesToInclude")
 
         // Resolve and encode files
         val filesPayload = resolveAndEncodeFiles(filesToInclude)
+        AppLogger.i("[PythonTool] Resolved ${filesPayload.size} files for upload")
 
         // Build request
         val requestBody = buildJsonObject {
@@ -86,19 +95,34 @@ Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
             })
         }
 
+        val bodyString = requestBody.toString()
+        AppLogger.i("[PythonTool] Request body size: ${bodyString.length} chars")
+        AppLogger.i("[PythonTool] Sending POST to: $CLOUD_FUNCTION_URL")
+
         return try {
             val request = Request.Builder()
                 .url(CLOUD_FUNCTION_URL)
-                .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
+                .post(bodyString.toRequestBody("application/json".toMediaType()))
                 .build()
 
+            AppLogger.i("[PythonTool] Executing HTTP request...")
             val response = client.newCall(request).execute()
+            AppLogger.i("[PythonTool] Response code: ${response.code}")
+            AppLogger.i("[PythonTool] Response message: ${response.message}")
+
             val responseBody = response.body?.string()
-                ?: return ToolExecutionResult.Error("Empty response from Python executor")
+            if (responseBody == null) {
+                AppLogger.e("[PythonTool] Response body is null")
+                return ToolExecutionResult.Error("Empty response from Python executor")
+            }
+            AppLogger.i("[PythonTool] Response body length: ${responseBody.length} chars")
+            AppLogger.i("[PythonTool] Response body preview: ${responseBody.take(1000)}")
 
             parseResponse(responseBody)
         } catch (e: Exception) {
-            ToolExecutionResult.Error("Failed to execute Python code: ${e.message}")
+            AppLogger.e("[PythonTool] Exception: ${e::class.java.simpleName}: ${e.message}")
+            AppLogger.e("[PythonTool] Stack trace: ${e.stackTraceToString().take(1000)}")
+            ToolExecutionResult.Error("Failed to execute Python code: ${e::class.java.simpleName}: ${e.message ?: "no message"}")
         }
     }
 
