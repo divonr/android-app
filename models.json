@@ -696,5 +696,112 @@
         "1k_output_price": 0.0003
       }
     ]
+  },
+  {
+    "provider": "llm-stats",
+    "models": [
+      {
+        "name": "gemini-3-pro-preview",
+        "release_order": 8,
+        "1k_input_price": 0.002,
+        "1k_output_price": 0.012
+      },
+      {
+        "name": "gpt-5.2-2025-12-11",
+        "release_order": 12,
+        "1k_input_price": 0.00175,
+        "1k_output_price": 0.014
+      },
+      {
+        "name": "claude-sonnet-4-5-20250929",
+        "release_order": 6,
+        "1k_input_price": 0.003,
+        "1k_output_price": 0.015
+      },
+      {
+        "name": "gemini-3-flash-preview",
+        "release_order": 10,
+        "1k_input_price": 0.0005,
+        "1k_output_price": 0.003
+      },
+      {
+        "name": "glm-4.7",
+        "release_order": 14,
+        "1k_input_price": 0.0006,
+        "1k_output_price": 0.0022
+      },
+      {
+        "name": "grok-4",
+        "release_order": 4,
+        "1k_input_price": 0.003,
+        "1k_output_price": 0.015
+      },
+      {
+        "name": "claude-opus-4-5-20251101",
+        "release_order": 9,
+        "1k_input_price": 0.005,
+        "1k_output_price": 0.025
+      },
+      {
+        "name": "gpt-5-high-2025-08-07",
+        "release_order": 5,
+        "1k_input_price": 0.00125,
+        "1k_output_price": 0.010
+      },
+      {
+        "name": "gemini-2.5-pro",
+        "release_order": 2,
+        "1k_input_price": 0.00125,
+        "1k_output_price": 0.010
+      },
+      {
+        "name": "grok-4-1-fast-reasoning",
+        "release_order": 7,
+        "1k_input_price": 0.0002,
+        "1k_output_price": 0.0005
+      },
+      {
+        "name": "minimax-m2.1",
+        "release_order": 15,
+        "1k_input_price": 0.0003,
+        "1k_output_price": 0.0012
+      },
+      {
+        "name": "gpt-5.2-codex",
+        "release_order": 16,
+        "1k_input_price": 0.00175,
+        "1k_output_price": 0.014
+      },
+      {
+        "name": "deepseek-v3.2-speciale",
+        "release_order": 11,
+        "1k_input_price": 0.00028,
+        "1k_output_price": 0.00042
+      },
+      {
+        "name": "gemini-2.5-flash",
+        "release_order": 3,
+        "1k_input_price": 0.0003,
+        "1k_output_price": 0.0025
+      },
+      {
+        "name": "gpt-4.1-2025-04-14",
+        "release_order": 1,
+        "1k_input_price": 0.002,
+        "1k_output_price": 0.008
+      },
+      {
+        "name": "glm-4.7-flash",
+        "release_order": 17,
+        "1k_input_price": 0.00007,
+        "1k_output_price": 0.0004
+      },
+      {
+        "name": "qwen3-max",
+        "release_order": 13,
+        "1k_input_price": 0.0005,
+        "1k_output_price": 0.005
+      }
+    ]
   }
 ]

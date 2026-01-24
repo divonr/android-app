@@ -31,6 +31,11 @@ grok-4.1-fast-reasoning:	17/11/2025
 grok-4.1:				17/11/2025
 gemini-3-pro:			18/11/2025
 claude-opus-4.5:		24/11/2025
-gemini-4-flash:		17/11/2025
+gemini-3-flash:		17/11/2025
+deepseek-v3.2-speciale:	01/12/2025
 gpt-5.2:				11/12/2025
-glm-4.7:				12/2025
+qwen3-max:			15/12/2025
+glm-4.7:				22/12/2025
+minimax-m2.1:			23/12/2025
+gpt-5.2-codex:			14/01/2026
+glm-4.7-flash:			19/01/2026
