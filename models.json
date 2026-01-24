@@ -698,7 +698,7 @@
     ]
   },
   {
-    "provider": "llm-stats",
+    "provider": "llmstats",
     "models": [
       {
         "name": "gemini-3-pro-preview",
