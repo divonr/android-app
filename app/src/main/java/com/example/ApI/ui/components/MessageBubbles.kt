@@ -246,20 +246,30 @@ fun MessageBubble(
         ) {
             // Model avatar (only for assistant messages)
             if (!isUser && message.model != null) {
+                val logoPath = ModelLogoUtils.getModelLogoPath(message.model)
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = Primary.copy(alpha = 0.15f),
+                    color = if (logoPath != null) Color.White else Primary.copy(alpha = 0.15f),
                     modifier = Modifier
                         .size(32.dp)
                         .padding(end = 8.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = message.model.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                            color = Primary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
+                        if (logoPath != null) {
+                            AsyncImage(
+                                model = logoPath,
+                                contentDescription = "Model Logo",
+                                modifier = Modifier.fillMaxSize().padding(4.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                        } else {
+                            Text(
+                                text = message.model.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                color = Primary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
                     }
                 }
             }

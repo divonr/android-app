@@ -15,12 +15,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import coil.compose.AsyncImage
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -86,24 +89,36 @@ fun ChatHistoryItem(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Model initial circle
+            // Model initial circle or logo
             val lastAssistantMessage = chat.messages.lastOrNull { it.role == "assistant" }
             val modelName = lastAssistantMessage?.model ?: chat.model
+            val logoPath = ModelLogoUtils.getModelLogoPath(modelName)
             val initial = getModelInitial(modelName)
 
             Box(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(Primary.copy(alpha = 0.1f)),
+                    .background(
+                         if (logoPath != null) Color.White else Primary.copy(alpha = 0.1f)
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = initial,
-                    color = Primary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
+                if (logoPath != null) {
+                   AsyncImage(
+                        model = logoPath,
+                        contentDescription = "Model Logo",
+                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                        contentScale = ContentScale.Fit
+                   )
+                } else {
+                    Text(
+                        text = initial,
+                        color = Primary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -362,24 +377,36 @@ fun SearchResultItem(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Model initial circle
+            // Model initial circle or logo
             val lastAssistantMessage = searchResult.chat.messages.lastOrNull { it.role == "assistant" }
             val modelName = lastAssistantMessage?.model ?: searchResult.chat.model
+            val logoPath = ModelLogoUtils.getModelLogoPath(modelName)
             val initial = getModelInitial(modelName)
 
             Box(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(Primary.copy(alpha = 0.1f)),
+                    .background(
+                        if (logoPath != null) Color.White else Primary.copy(alpha = 0.1f)
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = initial,
-                    color = Primary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
+                if (logoPath != null) {
+                    AsyncImage(
+                        model = logoPath,
+                        contentDescription = "Model Logo",
+                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    Text(
+                        text = initial,
+                        color = Primary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
