@@ -99,17 +99,15 @@ fun ChatHistoryItem(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(
-                         if (logoPath != null) Color.White else Primary.copy(alpha = 0.1f)
-                    ),
+                    .background(Primary.copy(alpha = 0.1f)),
                 contentAlignment = Alignment.Center
             ) {
                 if (logoPath != null) {
                    AsyncImage(
                         model = logoPath,
                         contentDescription = "Model Logo",
-                        modifier = Modifier.fillMaxSize().padding(8.dp),
-                        contentScale = ContentScale.Fit
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
                    )
                 } else {
                     Text(
@@ -387,17 +385,15 @@ fun SearchResultItem(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(
-                        if (logoPath != null) Color.White else Primary.copy(alpha = 0.1f)
-                    ),
+                    .background(Primary.copy(alpha = 0.1f)),
                 contentAlignment = Alignment.Center
             ) {
                 if (logoPath != null) {
                     AsyncImage(
                         model = logoPath,
                         contentDescription = "Model Logo",
-                        modifier = Modifier.fillMaxSize().padding(8.dp),
-                        contentScale = ContentScale.Fit
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
                     )
                 } else {
                     Text(

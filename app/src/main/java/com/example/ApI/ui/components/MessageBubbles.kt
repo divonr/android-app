@@ -249,7 +249,7 @@ fun MessageBubble(
                 val logoPath = ModelLogoUtils.getModelLogoPath(message.model)
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = if (logoPath != null) Color.White else Primary.copy(alpha = 0.15f),
+                    color = Primary.copy(alpha = 0.15f),
                     modifier = Modifier
                         .size(32.dp)
                         .padding(end = 8.dp)
@@ -259,8 +259,8 @@ fun MessageBubble(
                             AsyncImage(
                                 model = logoPath,
                                 contentDescription = "Model Logo",
-                                modifier = Modifier.fillMaxSize().padding(4.dp),
-                                contentScale = ContentScale.Fit
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
                             )
                         } else {
                             Text(
