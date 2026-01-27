@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -248,11 +249,9 @@ fun MessageBubble(
             if (!isUser && message.model != null) {
                 val logoPath = ModelLogoUtils.getModelLogoPath(message.model)
                 Surface(
-                    shape = RoundedCornerShape(50),
+                    shape = CircleShape,
                     color = Primary.copy(alpha = 0.15f),
-                    modifier = Modifier
-                        .size(32.dp)
-                        .padding(end = 8.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         if (logoPath != null) {
@@ -272,6 +271,7 @@ fun MessageBubble(
                         }
                     }
                 }
+                Spacer(modifier = Modifier.width(8.dp))
             }
 
             // Message bubble with modern design
