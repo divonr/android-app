@@ -1,7 +1,6 @@
 package com.example.ApI.ui.components.markdown
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -12,17 +11,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.example.ApI.data.model.TextDirectionMode
 import com.example.ApI.ui.utils.TextDirectionUtils
 import org.commonmark.ext.gfm.tables.*
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 @Composable
 internal fun RenderTable(
@@ -34,7 +37,7 @@ internal fun RenderTable(
     onLongPress: () -> Unit = {}
 ) {
     // 1. Parse table into a grid
-    val rows = remember(table) {
+    val (tableRows, isHeaderRow) = remember(table) {
         val extractedRows = mutableListOf<List<TableCell>>()
         val headerFlags = mutableListOf<Boolean>()
 
@@ -63,114 +66,182 @@ internal fun RenderTable(
         Pair(extractedRows, headerFlags)
     }
 
-    val tableRows = rows.first
-    val isHeaderRow = rows.second
-    
     if (tableRows.isEmpty()) return
 
     val maxCols = tableRows.maxOfOrNull { it.size } ?: 0
     val uriHandler = LocalUriHandler.current
-
     val scrollState = rememberScrollState()
 
-    // 2. Render container
+    // 2. Render container with horizontal scroll
     Box(
         modifier = Modifier
             .padding(vertical = 8.dp)
-            // Use a defined background or border if desired, but user just wants row colors
+            .horizontalScroll(scrollState)
     ) {
-        Row(
-            modifier = Modifier
-                .horizontalScroll(scrollState)
-        ) {
-            // 3. Render by Column to ensure correct width alignment
-            for (colIndex in 0 until maxCols) {
-                Column(
-                    modifier = Modifier.width(IntrinsicSize.Max)
+        FixedGridTable(
+            rows = tableRows,
+            columns = maxCols,
+            isHeaderRow = isHeaderRow,
+            style = style,
+            layoutDirection = layoutDirection,
+            textDirectionMode = textDirectionMode,
+            enableInlineLatex = enableInlineLatex,
+            onLongPress = onLongPress,
+            uriHandler = uriHandler
+        )
+    }
+}
+
+@Composable
+private fun FixedGridTable(
+    rows: List<List<TableCell>>,
+    columns: Int,
+    isHeaderRow: List<Boolean>,
+    style: TextStyle,
+    layoutDirection: LayoutDirection,
+    textDirectionMode: TextDirectionMode,
+    enableInlineLatex: Boolean,
+    onLongPress: () -> Unit,
+    uriHandler:androidx.compose.ui.platform.UriHandler
+) {
+    Layout(
+        content = {
+            // 1. Emit Row Backgrounds
+            rows.forEachIndexed { index, _ ->
+                val isHeader = isHeaderRow.getOrElse(index) { false }
+                val color = when {
+                    isHeader -> style.color.copy(alpha = 0.12f)
+                    index % 2 != 0 -> style.color.copy(alpha = 0.04f)
+                    else -> Color.Transparent
+                }
+                Box(
+                    modifier = Modifier.background(color)
                 ) {
-                    for (rowIndex in tableRows.indices) {
-                        val rowCells = tableRows[rowIndex]
-                        val cell = rowCells.getOrNull(colIndex)
-                        val isHeader = isHeaderRow.getOrElse(rowIndex) { false }
-
-                        // Styling
-                        val backgroundColor = when {
-                            isHeader -> style.color.copy(alpha = 0.15f) // Slightly darker for header
-                            rowIndex % 2 != 0 -> style.color.copy(alpha = 0.05f) // Alternating grey
-                            else -> Color.Transparent
-                        }
-
-                        // Border for header
-                        val bottomBorderModifier = if (isHeader) {
-                             Modifier.border(
-                                 width = 1.dp,
-                                 color = style.color.copy(alpha = 0.2f),
-                                 shape = RectangleShape // Bottom border via box modifier is tricky, use simple delimiter
-                             )
-                             // Actually, simple border surrounds the box. We can just use the background.
-                             Modifier
-                        } else {
-                            Modifier
-                        }
-
-                        // Render Cell
+                    if (isHeader) {
+                        // Bottom border for header
                         Box(
                             modifier = Modifier
+                                .align(Alignment.BottomStart)
                                 .fillMaxWidth()
-                                .background(backgroundColor)
-                                .then(bottomBorderModifier)
-                                .padding(8.dp)
-                        ) {
-                             if (cell != null) {
-                                 val cellStyle = if (isHeader) {
-                                     style.copy(fontWeight = FontWeight.Bold)
-                                 } else {
-                                     style
-                                 }
-
-                                 val inlineLatexContent = remember(cell) { mutableMapOf<String, String>() }
-                                 val cellText = buildAnnotatedString {
-                                     appendInlineContent(cell, cellStyle, enableInlineLatex, inlineLatexContent)
-                                 }
-
-                                 val cellDirection = when (textDirectionMode) {
-                                     TextDirectionMode.AUTO -> TextDirectionUtils.inferTextDirection(cellText.text)
-                                     TextDirectionMode.RTL -> LayoutDirection.Rtl
-                                     TextDirectionMode.LTR -> LayoutDirection.Ltr
-                                 }
-
-                                 CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
-                                    RenderTextWithInlineLatex(
-                                        text = cellText,
-                                        style = cellStyle,
-                                        layoutDirection = cellDirection,
-                                        inlineLatexContent = inlineLatexContent,
-                                        modifier = Modifier,
-                                        uriHandler = uriHandler,
-                                        onLongPress = onLongPress
-                                    )
-                                 }
-                             } else {
-                                 // Empty cell placeholder
-                                 Spacer(modifier = Modifier.height(20.dp)) // Min height
-                             }
-                        }
-                        
-                        // Add a thin divider line at the bottom of the header row if desired, 
-                        // or for all rows. 
-                        // To perfectly mimic the previous table look (divider lines), we can separate logic.
-                        // But alternating colors usually suffice. 
-                        // Let's add a Divider if it's the specific header row for better separation.
-                        if (isHeader) {
-                            HorizontalDivider(color = style.color.copy(alpha = 0.3f), thickness = 1.dp)
-                        } else {
-                             // Optional: lighter divider for other rows
-                             // HorizontalDivider(color = style.color.copy(alpha = 0.1f), thickness = 0.5.dp)
-                        }
+                                .height(1.dp)
+                                .background(style.color.copy(alpha = 0.2f))
+                        )
                     }
                 }
             }
+
+            // 2. Emit Cells
+            rows.forEachIndexed { rowIndex, rowCells ->
+                val isHeader = isHeaderRow.getOrElse(rowIndex) { false }
+                for (colIndex in 0 until columns) {
+                    val cell = rowCells.getOrNull(colIndex)
+                    if (cell != null) {
+                        // Wrap cell content
+                        Box(modifier = Modifier.padding(8.dp)) {
+                            val cellStyle = if (isHeader) style.copy(fontWeight = FontWeight.Bold) else style
+                            val inlineLatexContent = remember(cell) { mutableMapOf<String, String>() }
+                            val cellText = buildAnnotatedString {
+                                appendInlineContent(cell, cellStyle, enableInlineLatex, inlineLatexContent)
+                            }
+                            
+                            val cellDirection = when (textDirectionMode) {
+                                TextDirectionMode.AUTO -> TextDirectionUtils.inferTextDirection(cellText.text)
+                                TextDirectionMode.RTL -> LayoutDirection.Rtl
+                                TextDirectionMode.LTR -> LayoutDirection.Ltr
+                            }
+
+                            CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+                                RenderTextWithInlineLatex(
+                                    text = cellText,
+                                    style = cellStyle,
+                                    layoutDirection = cellDirection,
+                                    inlineLatexContent = inlineLatexContent,
+                                    modifier = Modifier,
+                                    uriHandler = uriHandler,
+                                    onLongPress = onLongPress
+                                )
+                            }
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.padding(8.dp))
+                    }
+                }
+            }
+        },
+        measurePolicy = { measurables, constraints ->
+            val rowCount = rows.size
+            
+            // Split measurables
+            val backgroundMeasurables = measurables.take(rowCount)
+            val cellMeasurables = measurables.drop(rowCount)
+
+            // 1. Measure Cells to determine grid dimensions
+            // Use infinite max width to allow cells to claim what they need
+            val cellPlaceables = cellMeasurables.map { 
+                it.measure(constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity, minHeight = 0)) 
+            }
+
+            val colWidths = IntArray(columns) { 0 }
+            val rowHeights = IntArray(rowCount) { 0 }
+
+            for (r in 0 until rowCount) {
+                for (c in 0 until columns) {
+                    val index = r * columns + c
+                    if (index < cellPlaceables.size) {
+                        val placeable = cellPlaceables[index]
+                        colWidths[c] = max(colWidths[c], placeable.width)
+                        rowHeights[r] = max(rowHeights[r], placeable.height)
+                    }
+                }
+            }
+
+            val totalWidth = colWidths.sum()
+            val totalHeight = rowHeights.sum()
+
+            // 2. Measure Backgrounds using calculated dimensions
+            val backgroundPlaceables = backgroundMeasurables.mapIndexed { index, measurable ->
+                val height = rowHeights.getOrElse(index) { 0 }
+                if (totalWidth > 0 && height > 0) {
+                     measurable.measure(
+                        Constraints.fixed(width = totalWidth, height = height)
+                    )
+                } else {
+                    measurable.measure(Constraints.fixed(0, 0))
+                }
+            }
+
+            // 3. Layout
+            layout(totalWidth, totalHeight) {
+                // Place Backgrounds (Z-index 0 implicitly by order)
+                var yOffset = 0
+                backgroundPlaceables.forEach { bg ->
+                    bg.place(0, yOffset)
+                    yOffset += bg.height
+                }
+
+                // Place Cells (Z-index 1)
+                yOffset = 0 // Reset for cells
+                for (r in 0 until rowCount) {
+                    val rowHeight = rowHeights[r]
+                    var xOffset = 0
+                    for (c in 0 until columns) {
+                        val colWidth = colWidths[c]
+                        val index = r * columns + c
+                        if (index < cellPlaceables.size) {
+                            val placeable = cellPlaceables[index]
+                            // Align content: Center vertically in the row? Top align usually for text.
+                            // Let's stick to top align which is standard for tables with varying text.
+                            // But we might want vert-center if single lines. Markdwon usually top.
+                            placeable.place(x = xOffset, y = yOffset)
+                        }
+                        xOffset += colWidth
+                    }
+                    yOffset += rowHeight
+                }
+            }
         }
-    }
+    )
 }
+
+
 
