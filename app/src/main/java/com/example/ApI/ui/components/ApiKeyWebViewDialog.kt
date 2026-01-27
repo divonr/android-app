@@ -84,6 +84,13 @@ object ProviderApiKeyConfigs {
             apiKeyUrl = "https://openrouter.ai/settings/keys",
             keyPattern = Regex("^.{10,}$"),
             keyDescription = "OpenRouter API key"
+        ),
+        "llmstats" to ProviderApiKeyConfig(
+            providerId = "llmstats",
+            displayName = "LLM Stats",
+            apiKeyUrl = "https://llm-stats.com/settings?section=api-keys",
+            keyPattern = Regex("^.{10,}$"),
+            keyDescription = "LLM Stats API key"
         )
     )
 

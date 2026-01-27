@@ -85,11 +85,17 @@ private val providerDisplayInfoMap = mapOf(
         displayName = "OpenRouter",
         logoFileName = "openrouter.png",
         backgroundColor = Color(0xFFFFFFFF)
+    ),
+    "llmstats" to ProviderDisplayInfo(
+        id = "llmstats",
+        displayName = "LLM Stats",
+        logoFileName = "llmstats.png",
+        backgroundColor = Color(0xFF13131C)
     )
 )
 
 // First group - free trial providers (in order: Google, Poe, Cohere)
-private val freeTrialProviders = listOf("google", "poe", "cohere")
+private val freeTrialProviders = listOf("google", "poe", "cohere", "llmstats")
 
 // Second group - paid providers (others)
 private val paidProviders = listOf("openai", "anthropic", "openrouter")
