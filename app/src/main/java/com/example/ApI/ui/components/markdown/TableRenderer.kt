@@ -72,23 +72,25 @@ internal fun RenderTable(
     val uriHandler = LocalUriHandler.current
     val scrollState = rememberScrollState()
 
-    // 2. Render container with horizontal scroll
-    Box(
-        modifier = Modifier
-            .padding(vertical = 8.dp)
-            .horizontalScroll(scrollState)
-    ) {
-        FixedGridTable(
-            rows = tableRows,
-            columns = maxCols,
-            isHeaderRow = isHeaderRow,
-            style = style,
-            layoutDirection = layoutDirection,
-            textDirectionMode = textDirectionMode,
-            enableInlineLatex = enableInlineLatex,
-            onLongPress = onLongPress,
-            uriHandler = uriHandler
-        )
+    // 2. Render container with horizontal scroll, applying the requested layout direction
+    CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+        Box(
+            modifier = Modifier
+                .padding(vertical = 8.dp)
+                .horizontalScroll(scrollState)
+        ) {
+            FixedGridTable(
+                rows = tableRows,
+                columns = maxCols,
+                isHeaderRow = isHeaderRow,
+                style = style,
+                layoutDirection = layoutDirection,
+                textDirectionMode = textDirectionMode,
+                enableInlineLatex = enableInlineLatex,
+                onLongPress = onLongPress,
+                uriHandler = uriHandler
+            )
+        }
     }
 }
 
@@ -102,7 +104,7 @@ private fun FixedGridTable(
     textDirectionMode: TextDirectionMode,
     enableInlineLatex: Boolean,
     onLongPress: () -> Unit,
-    uriHandler:androidx.compose.ui.platform.UriHandler
+    uriHandler: androidx.compose.ui.platform.UriHandler
 ) {
     Layout(
         content = {
@@ -150,7 +152,7 @@ private fun FixedGridTable(
                                 TextDirectionMode.LTR -> LayoutDirection.Ltr
                             }
 
-                            CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+                            CompositionLocalProvider(LocalLayoutDirection provides cellDirection) {
                                 RenderTextWithInlineLatex(
                                     text = cellText,
                                     style = cellStyle,
@@ -210,12 +212,12 @@ private fun FixedGridTable(
                 }
             }
 
-            // 3. Layout
+            // 3. Layout with support for RTL using placeRelative
             layout(totalWidth, totalHeight) {
                 // Place Backgrounds (Z-index 0 implicitly by order)
                 var yOffset = 0
                 backgroundPlaceables.forEach { bg ->
-                    bg.place(0, yOffset)
+                    bg.placeRelative(0, yOffset)
                     yOffset += bg.height
                 }
 
@@ -230,9 +232,8 @@ private fun FixedGridTable(
                         if (index < cellPlaceables.size) {
                             val placeable = cellPlaceables[index]
                             // Align content: Center vertically in the row? Top align usually for text.
-                            // Let's stick to top align which is standard for tables with varying text.
-                            // But we might want vert-center if single lines. Markdwon usually top.
-                            placeable.place(x = xOffset, y = yOffset)
+                            // placeRelative handles RTL mirroring automatically (x=0 starts from right in RTL)
+                            placeable.placeRelative(x = xOffset, y = yOffset)
                         }
                         xOffset += colWidth
                     }
