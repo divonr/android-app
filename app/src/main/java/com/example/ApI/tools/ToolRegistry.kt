@@ -5,10 +5,12 @@ import com.example.ApI.data.network.GitHubApiService
 import com.example.ApI.data.network.GmailApiService
 import com.example.ApI.data.network.GoogleCalendarApiService
 import com.example.ApI.data.network.GoogleDriveApiService
+import com.example.ApI.data.repository.SkillsStorageManager
 import com.example.ApI.tools.github.*
 import com.example.ApI.tools.google.gmail.*
 import com.example.ApI.tools.google.calendar.*
 import com.example.ApI.tools.google.drive.*
+import com.example.ApI.tools.skills.*
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
 
@@ -52,11 +54,18 @@ class ToolRegistry {
 
         // Python Interpreter tool ID
         const val PYTHON_INTERPRETER = "python_interpreter"
+
+        // Skills tool IDs
+        const val SKILL_READ = "read_skill"
+        const val SKILL_READ_FILE = "read_skill_file"
+        const val SKILL_WRITE_FILE = "write_skill_file"
+        const val SKILL_EDIT_FILE = "edit_skill_file"
     }
 
     private val tools = mutableMapOf<String, Tool>()
     private var githubToolsRegistered = false
     private var googleWorkspaceToolsRegistered = false
+    private var skillToolsRegistered = false
 
     init {
         // Register all available tools
@@ -236,7 +245,50 @@ class ToolRegistry {
      */
     fun getGoogleWorkspaceToolIds(): List<String> =
         getGmailToolIds() + getCalendarToolIds() + getDriveToolIds()
-    
+
+    // ============ Skills Tools ============
+
+    /**
+     * Register Skills tools with the given storage manager.
+     * Should be called once when the repository is initialized.
+     */
+    fun registerSkillTools(skillsManager: SkillsStorageManager) {
+        unregisterSkillTools()
+
+        registerTool(ReadSkillTool(skillsManager))
+        registerTool(ReadSkillFileTool(skillsManager))
+        registerTool(WriteSkillFileTool(skillsManager))
+        registerTool(EditSkillFileTool(skillsManager))
+
+        skillToolsRegistered = true
+    }
+
+    /**
+     * Unregister all Skills tools
+     */
+    fun unregisterSkillTools() {
+        tools.remove(SKILL_READ)
+        tools.remove(SKILL_READ_FILE)
+        tools.remove(SKILL_WRITE_FILE)
+        tools.remove(SKILL_EDIT_FILE)
+        skillToolsRegistered = false
+    }
+
+    /**
+     * Check if Skills tools are currently registered
+     */
+    fun areSkillToolsRegistered(): Boolean = skillToolsRegistered
+
+    /**
+     * Get all Skills tool IDs
+     */
+    fun getSkillToolIds(): List<String> = listOf(
+        SKILL_READ,
+        SKILL_READ_FILE,
+        SKILL_WRITE_FILE,
+        SKILL_EDIT_FILE
+    )
+
     /**
      * Register a tool with the registry
      */

@@ -533,6 +533,37 @@ class ChatViewModel(
             // Initialize integration tools if connected
             initializeGitHubToolsIfConnected()
             initializeGoogleWorkspaceToolsIfConnected()
+
+            // Initialize Skills tools
+            initializeSkillTools()
+        }
+    }
+
+    /**
+     * Register skill tools and auto-enable them if there are installed skills.
+     */
+    private fun initializeSkillTools() {
+        val toolRegistry = com.example.ApI.tools.ToolRegistry.getInstance()
+        toolRegistry.registerSkillTools(repository.skillsStorageManager)
+
+        // Auto-enable skill tools if there are any installed skills
+        val hasSkills = repository.getInstalledSkills().any { it.isEnabled }
+        if (hasSkills) {
+            val settings = _appSettings.value
+            val skillToolIds = toolRegistry.getSkillToolIds()
+            val currentEnabled = settings.enabledTools.toMutableList()
+            var changed = false
+            for (toolId in skillToolIds) {
+                if (toolId !in currentEnabled) {
+                    currentEnabled.add(toolId)
+                    changed = true
+                }
+            }
+            if (changed) {
+                val updatedSettings = settings.copy(enabledTools = currentEnabled)
+                repository.saveAppSettings(updatedSettings)
+                _appSettings.value = updatedSettings
+            }
         }
     }
 
@@ -926,6 +957,59 @@ class ChatViewModel(
     // ==================== Tool Management (delegated to ToolManager) ====================
     fun enableTool(toolId: String) = toolManager.enableTool(toolId)
     fun disableTool(toolId: String) = toolManager.disableTool(toolId)
+
+    // ==================== Skills Management ====================
+    fun getInstalledSkills() = repository.getInstalledSkills()
+    fun createSkill(name: String, description: String, body: String = "") = repository.createSkill(name, description, body)
+    fun deleteSkill(skillName: String): Boolean {
+        val result = repository.deleteSkill(skillName)
+        // Disable skill tools if no more skills
+        if (result && repository.getInstalledSkills().none { it.isEnabled }) {
+            val toolRegistry = com.example.ApI.tools.ToolRegistry.getInstance()
+            for (toolId in toolRegistry.getSkillToolIds()) {
+                toolManager.disableTool(toolId)
+            }
+        }
+        return result
+    }
+    fun setSkillEnabled(skillName: String, enabled: Boolean) {
+        repository.setSkillEnabled(skillName, enabled)
+        // Ensure skill tools are enabled if any skills are active
+        val hasEnabledSkills = repository.getInstalledSkills().any { it.isEnabled }
+        val toolRegistry = com.example.ApI.tools.ToolRegistry.getInstance()
+        if (hasEnabledSkills) {
+            for (toolId in toolRegistry.getSkillToolIds()) {
+                toolManager.enableTool(toolId)
+            }
+        } else {
+            for (toolId in toolRegistry.getSkillToolIds()) {
+                toolManager.disableTool(toolId)
+            }
+        }
+    }
+    fun getSkillMdContent(skillName: String) = repository.getSkillMdContent(skillName)
+    fun importSkillFromText(content: String): com.example.ApI.data.model.InstalledSkill? {
+        val skill = repository.importSkillFromText(content)
+        if (skill != null) {
+            // Auto-enable skill tools
+            val toolRegistry = com.example.ApI.tools.ToolRegistry.getInstance()
+            for (toolId in toolRegistry.getSkillToolIds()) {
+                toolManager.enableTool(toolId)
+            }
+        }
+        return skill
+    }
+    fun importSkillFromZip(inputStream: java.util.zip.ZipInputStream): com.example.ApI.data.model.InstalledSkill? {
+        val skill = repository.skillsStorageManager.importFromZip(inputStream)
+        if (skill != null) {
+            val toolRegistry = com.example.ApI.tools.ToolRegistry.getInstance()
+            for (toolId in toolRegistry.getSkillToolIds()) {
+                toolManager.enableTool(toolId)
+            }
+        }
+        return skill
+    }
+    fun getSkillsStorageManager() = repository.skillsStorageManager
 
     // ==================== Export/Import Methods (delegated to ExportImportManager) ====================
     fun openChatExportDialog() = exportImportManager.openChatExportDialog()

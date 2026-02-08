@@ -1,11 +1,13 @@
 package com.example.ApI.ui.managers.chat
 
 import com.example.ApI.data.model.ChatGroup
+import com.example.ApI.data.model.SkillMetadata
 import com.example.ApI.ui.managers.ManagerDependencies
 
 /**
  * Manages system prompt functionality for chats and projects.
- * Handles system prompt updates, overrides, and project prompt merging.
+ * Handles system prompt updates, overrides, project prompt merging,
+ * and skills catalog injection.
  * Extracted from ChatViewModel to reduce complexity.
  */
 class SystemPromptManager(
@@ -106,13 +108,14 @@ class SystemPromptManager(
 
     /**
      * Get the effective system prompt for the current chat.
-     * Merges project system prompt with chat system prompt if applicable.
+     * Merges project system prompt with chat system prompt if applicable,
+     * then appends the skills catalog (Level 1 metadata) if any skills are enabled.
      */
     fun getEffectiveSystemPrompt(): String {
-        val currentChat = deps.uiState.value.currentChat ?: return ""
+        val currentChat = deps.uiState.value.currentChat ?: return buildSkillsCatalog("")
         val projectGroup = getCurrentChatProjectGroup()
 
-        return when {
+        val userPrompt = when {
             projectGroup != null -> {
                 val projectPrompt = projectGroup.system_prompt ?: ""
                 val chatPrompt = currentChat.systemPrompt
@@ -124,6 +127,36 @@ class SystemPromptManager(
                 }
             }
             else -> currentChat.systemPrompt
+        }
+
+        return buildSkillsCatalog(userPrompt)
+    }
+
+    /**
+     * Build the skills catalog section and append it to the user's system prompt.
+     * The catalog lists all enabled skills with their name and description (Level 1).
+     * The LLM uses read_skill / read_skill_file / write_skill_file / edit_skill_file
+     * tools to interact with skill content.
+     */
+    private fun buildSkillsCatalog(userPrompt: String): String {
+        val enabledSkills = deps.repository.getEnabledSkillsMetadata()
+        if (enabledSkills.isEmpty()) return userPrompt
+
+        val catalog = buildString {
+            appendLine("\n\n## Skills")
+            appendLine("You have ${enabledSkills.size} skill(s) available. When a skill is relevant, call `read_skill` with its name to load full instructions.")
+            appendLine("You can also read additional skill files with `read_skill_file`, update files with `write_skill_file`, or apply targeted edits with `edit_skill_file`.")
+            appendLine("If you notice improvements while using a skill, edit it so future conversations benefit.")
+            appendLine()
+            for ((dirName, metadata) in enabledSkills) {
+                appendLine("- **${metadata.name}**: ${metadata.description}")
+            }
+        }
+
+        return if (userPrompt.isBlank()) {
+            catalog.trimStart()
+        } else {
+            userPrompt + catalog
         }
     }
 }

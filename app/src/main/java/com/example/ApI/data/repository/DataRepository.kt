@@ -24,6 +24,7 @@ class DataRepository(private val context: Context) {
     private val messageBranchingManager = MessageBranchingManager(chatHistoryManager)
     private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager)
     private val fileUploadManager = FileUploadManager(JsonConfig.prettyPrint) { username -> localStorageManager.loadApiKeys(username) }
+    val skillsStorageManager = SkillsStorageManager(internalDir, JsonConfig.prettyPrint)
     private val chatSearchService = ChatSearchService { username -> loadChatHistory(username) }
     private val titleGenerationService by lazy {
         TitleGenerationService(
@@ -310,6 +311,16 @@ class DataRepository(private val context: Context) {
     fun addUserMessageAsNewNode(username: String, chatId: String, userMessage: Message): Chat? = messageBranchingManager.addUserMessageAsNewNode(username, chatId, userMessage)
     fun findNodeForMessage(chat: Chat, message: Message): String? = messageBranchingManager.findNodeForMessage(chat, message)
     fun deleteMessageFromBranch(username: String, chatId: String, messageId: String): DeleteMessageResult = messageBranchingManager.deleteMessageFromBranch(username, chatId, messageId)
+
+    // ============ Skills (delegated to SkillsStorageManager) ============
+
+    fun getInstalledSkills() = skillsStorageManager.getInstalledSkills()
+    fun getEnabledSkillsMetadata() = skillsStorageManager.getEnabledSkillsMetadata()
+    fun createSkill(name: String, description: String, body: String = "") = skillsStorageManager.createSkill(name, description, body)
+    fun deleteSkill(skillName: String) = skillsStorageManager.deleteSkill(skillName)
+    fun setSkillEnabled(skillName: String, enabled: Boolean) = skillsStorageManager.setSkillEnabled(skillName, enabled)
+    fun getSkillMdContent(skillName: String) = skillsStorageManager.getSkillMdContent(skillName)
+    fun importSkillFromText(content: String) = skillsStorageManager.importFromText(content)
 }
 
 

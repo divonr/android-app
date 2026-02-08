@@ -129,6 +129,14 @@ fun UserSettingsScreen(
                     }
                 )
 
+                // Skills Management
+                SkillsNavigationItem(
+                    skillCount = viewModel.getInstalledSkills().size,
+                    onClick = {
+                        viewModel.navigateToScreen(Screen.Skills)
+                    }
+                )
+
                 // 2. AI Title Generation Section
                 TitleGenerationSettingsSection(
                     settings = appSettings.titleGenerationSettings,

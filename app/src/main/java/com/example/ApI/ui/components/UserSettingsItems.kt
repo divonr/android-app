@@ -46,3 +46,49 @@ fun IntegrationsNavigationItem(
         }
     }
 }
+
+@Composable
+fun SkillsNavigationItem(
+    skillCount: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = Surface,
+        shadowElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onClick() }
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "סקילים (Skills)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = OnSurface,
+                    fontWeight = FontWeight.Medium
+                )
+                if (skillCount > 0) {
+                    Text(
+                        text = "$skillCount סקילים מותקנים",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Primary.copy(alpha = 0.7f)
+                    )
+                }
+            }
+
+            Text(
+                text = ">",
+                style = MaterialTheme.typography.bodyLarge,
+                color = OnSurface.copy(alpha = 0.7f),
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}

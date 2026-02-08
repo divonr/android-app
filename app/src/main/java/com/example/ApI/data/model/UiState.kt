@@ -193,7 +193,9 @@ sealed class Screen {
     object ChildLock : Screen()
     object Integrations : Screen()
     object Logs : Screen()
+    object Skills : Screen()
     data class Group(val groupId: String) : Screen()
+    data class SkillEditor(val skillDirectoryName: String) : Screen()
 }
 
 

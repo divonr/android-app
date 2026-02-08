@@ -27,6 +27,8 @@ import com.example.ApI.ui.screen.ChildLockScreen
 import com.example.ApI.ui.screen.IntegrationsScreen
 import com.example.ApI.ui.screen.WelcomeScreen
 import com.example.ApI.ui.screen.LogsScreen
+import com.example.ApI.ui.screen.SkillsScreen
+import com.example.ApI.ui.screen.SkillEditorScreen
 import com.example.ApI.ui.theme.ApITheme
 import com.example.ApI.ui.theme.Background
 
@@ -134,6 +136,14 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
                 // Go back to UserSettings from Logs
                 viewModel.navigateToScreen(Screen.UserSettings)
             }
+            effectiveScreen is Screen.Skills -> {
+                // Go back to UserSettings from Skills
+                viewModel.navigateToScreen(Screen.UserSettings)
+            }
+            effectiveScreen is Screen.SkillEditor -> {
+                // Go back to Skills from Skill Editor
+                viewModel.navigateToScreen(Screen.Skills)
+            }
             effectiveScreen !is Screen.ChatHistory -> {
                 viewModel.navigateToScreen(Screen.ChatHistory)
             }
@@ -204,6 +214,20 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
         is Screen.Logs -> {
             LogsScreen(
                 onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) }
+            )
+        }
+        is Screen.Skills -> {
+            SkillsScreen(
+                viewModel = viewModel,
+                onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) },
+                onEditSkill = { dirName -> viewModel.navigateToScreen(Screen.SkillEditor(dirName)) }
+            )
+        }
+        is Screen.SkillEditor -> {
+            SkillEditorScreen(
+                viewModel = viewModel,
+                skillDirectoryName = (effectiveScreen as Screen.SkillEditor).skillDirectoryName,
+                onBackClick = { viewModel.navigateToScreen(Screen.Skills) }
             )
         }
     }
