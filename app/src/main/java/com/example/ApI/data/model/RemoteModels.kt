@@ -38,7 +38,9 @@ data class RemoteModel(
     // Thinking budget configuration
     val thinking: RemoteThinkingConfig? = null,
     // Temperature configuration
-    val temperature: RemoteTemperatureConfig? = null
+    val temperature: RemoteTemperatureConfig? = null,
+    // Web search capability (unsupported, optional, required)
+    val web_search: String? = null
 )
 
 /**

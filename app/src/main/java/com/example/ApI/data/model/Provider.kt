@@ -73,6 +73,7 @@ sealed class Model {
     abstract val thinkingConfig: ThinkingBudgetType?
     abstract val temperatureConfig: TemperatureConfig?
     abstract val releaseOrder: Int?
+    abstract val webSearch: String? // "optional", "required", "unsupported", or null
 
     @Serializable
     data class SimpleModel(
@@ -84,7 +85,9 @@ sealed class Model {
         @kotlinx.serialization.Transient
         override val temperatureConfig: TemperatureConfig? = null,
         @kotlinx.serialization.Transient
-        override val releaseOrder: Int? = null
+        override val releaseOrder: Int? = null,
+        @kotlinx.serialization.Transient
+        override val webSearch: String? = null
     ) : Model()
 
     @Serializable
@@ -98,7 +101,9 @@ sealed class Model {
         @kotlinx.serialization.Transient
         override val temperatureConfig: TemperatureConfig? = null,
         @kotlinx.serialization.Transient
-        override val releaseOrder: Int? = null
+        override val releaseOrder: Int? = null,
+        @kotlinx.serialization.Transient
+        override val webSearch: String? = null
     ) : Model()
 
     override fun toString(): String = name ?: "Unknown Model"

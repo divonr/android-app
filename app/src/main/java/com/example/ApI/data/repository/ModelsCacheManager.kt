@@ -305,7 +305,10 @@ class ModelsCacheManager(
     /**
      * Converts remote models to internal Model format
      */
-    private fun remoteModelsToModels(remoteModels: List<RemoteModel>): List<Model> {
+    /**
+     * Converts remote models to internal Model format
+     */
+    private fun remoteModelsToModels(providerName: String, remoteModels: List<RemoteModel>): List<Model> {
         return remoteModels.map { remote ->
             // Check if any pricing info is available (Poe points or USD)
             val hasPricing = remote.min_points != null || remote.points != null ||
@@ -316,6 +319,9 @@ class ModelsCacheManager(
             val thinkingConfig = convertThinkingConfig(remote.thinking)
             // Convert temperature config
             val temperatureConfig = convertTemperatureConfig(remote.temperature)
+
+            // Override web search for Poe to be optional if not specified or unsupported
+            val webSearch = if (providerName == "poe") "optional" else remote.web_search
 
             if (hasPricing) {
                 val pricing = ModelPricing(
@@ -332,14 +338,16 @@ class ModelsCacheManager(
                     pricing = pricing,
                     thinkingConfig = thinkingConfig,
                     temperatureConfig = temperatureConfig,
-                    releaseOrder = remote.release_order
+                    releaseOrder = remote.release_order,
+                    webSearch = webSearch
                 )
             } else {
                 Model.SimpleModel(
                     name = remote.name,
                     thinkingConfig = thinkingConfig,
                     temperatureConfig = temperatureConfig,
-                    releaseOrder = remote.release_order
+                    releaseOrder = remote.release_order,
+                    webSearch = webSearch
                 )
             }
         }
@@ -354,7 +362,7 @@ class ModelsCacheManager(
 
         return if (providerModels != null && providerModels.models.isNotEmpty()) {
             android.util.Log.d("ModelsCacheManager", "Using cached models for $providerName: ${providerModels.models.size} models")
-            remoteModelsToModels(providerModels.models)
+            remoteModelsToModels(providerName, providerModels.models)
         } else {
             android.util.Log.d("ModelsCacheManager", "Using default models for $providerName: ${defaultModels.size} models")
             defaultModels
@@ -379,8 +387,8 @@ class ModelsCacheManager(
     )
 
     val defaultPoeModels = listOf(
-        Model.ComplexModel(name = "GPT-4o", min_points = 250, pricing = PoePricing(min_points = 250)),
-        Model.ComplexModel(name = "Claude-Sonnet-3.5", min_points = 270, pricing = PoePricing(min_points = 270))
+        Model.ComplexModel(name = "GPT-4o", min_points = 250, pricing = PoePricing(min_points = 250), webSearch = "optional"),
+        Model.ComplexModel(name = "Claude-Sonnet-3.5", min_points = 270, pricing = PoePricing(min_points = 270), webSearch = "optional")
     )
 
     val defaultCohereModels = listOf(

@@ -41,7 +41,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         try {
             val streamingResponse = makeStreamingRequest(
                 provider, modelName, messages, systemPrompt, apiKey,
-                webSearchEnabled, enabledTools, callback
+                webSearchEnabled, enabledTools, thinkingBudget, callback
             )
 
             when (streamingResponse) {
@@ -113,7 +113,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             } else {
                 makeStreamingRequest(
                     provider, modelName, currentMessages, systemPrompt, apiKey,
-                    webSearchEnabled, enabledTools, callback
+                    webSearchEnabled, enabledTools, ThinkingBudgetValue.None, callback
                 )
             }
 
@@ -179,6 +179,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         apiKey: String,
         webSearchEnabled: Boolean,
         enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue,
         callback: StreamingCallback,
         maxToolDepth: Int = MAX_TOOL_DEPTH,
         currentDepth: Int = 0
@@ -194,7 +195,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             connection.setRequestProperty("Accept", "application/json")
             connection.doOutput = true
 
-            val conversationMessages = buildMessages(messages, systemPrompt)
+            val conversationMessages = buildMessages(messages, systemPrompt, webSearchEnabled, thinkingBudget)
             val requestBody = buildRequestBody(conversationMessages, enabledTools)
             val requestBodyString = json.encodeToString(requestBody)
 
@@ -255,7 +256,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             connection.setRequestProperty("Accept", "application/json")
             connection.doOutput = true
 
-            val conversationMessages = buildMessages(messages, systemPrompt, skipToolMessages = true)
+            val conversationMessages = buildMessages(messages, systemPrompt, webSearchEnabled, ThinkingBudgetValue.None, skipToolMessages = true)
             val requestBody = buildRequestBodyWithToolResults(conversationMessages, enabledTools, toolCall, toolResult)
             val requestBodyString = json.encodeToString(requestBody)
 
@@ -654,6 +655,8 @@ class PoeProvider(context: Context) : BaseProvider(context) {
     private fun buildMessages(
         messages: List<Message>,
         systemPrompt: String,
+        webSearchEnabled: Boolean,
+        thinkingBudget: ThinkingBudgetValue,
         skipToolMessages: Boolean = false
     ): List<JsonObject> {
         val conversationMessages = mutableListOf<JsonObject>()
@@ -666,13 +669,29 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             })
         }
 
-        messages.forEach { message ->
+        val lastUserMessageIndex = messages.indexOfLast { it.role == "user" }
+
+        messages.forEachIndexed { index, message ->
             when (message.role) {
                 "user" -> {
                     val messageObj = buildJsonObject {
                         put("role", "user")
                         put("content", message.text)
                         put("content_type", "text/markdown")
+
+                        if (webSearchEnabled && index == lastUserMessageIndex) {
+                            put("parameters", buildJsonObject {
+                                put("web_search", true)
+                                if (thinkingBudget is ThinkingBudgetValue.Effort && thinkingBudget.level.lowercase() != "none") {
+                                    put("thinking_level", thinkingBudget.level)
+                                }
+                            })
+                        } else if (thinkingBudget is ThinkingBudgetValue.Effort && thinkingBudget.level.lowercase() != "none" && index == lastUserMessageIndex) {
+                            // Case where web search is disabled but thinking is enabled
+                            put("parameters", buildJsonObject {
+                                put("thinking_level", thinkingBudget.level)
+                            })
+                        }
 
                         if (message.attachments.isNotEmpty()) {
                             put("attachments", buildJsonArray {

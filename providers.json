@@ -164,77 +164,77 @@
             {
                 "name": "GPT-5",
                 "min_points": 250,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "GPT-4.1",
                 "min_points": 206,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "o3",
                 "min_points": 401,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "o4-mini",
                 "min_points": 243,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "Claude-Sonnet-4-Search",
                 "min_points": 870,
-                "web_search": "required"
+                "web_search": "optional"
             },
             {
                 "name": "Claude-Sonnet-4-Reasoning",
                 "min_points": 1628,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "Claude-Sonnet-3.5",
                 "min_points": 270,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "GLM-4.5",
                 "min_points": 180,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "Gemini-2.5-Pro",
                 "min_points": 335,
-                "web_search": "required"
+                "web_search": "optional"
             },
             {
                 "name": "Grok-3",
                 "min_points": 856,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "Grok-4",
                 "min_points": 773,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "GPT-OSS-120B-T",
                 "min_points": 50,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "DeepSeek-V3-FW",
                 "min_points": 300,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "DeepSeek-R1",
                 "min_points": 600,
-                "web_search": "unsupported"
+                "web_search": "optional"
             },
             {
                 "name": "Kimi-K2",
                 "min_points": 200,
-                "web_search": "unsupported"
+                "web_search": "optional"
             }
         ],
         "request": {

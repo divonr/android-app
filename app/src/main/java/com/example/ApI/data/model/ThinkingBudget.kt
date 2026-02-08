@@ -100,7 +100,30 @@ object ThinkingBudgetConfig {
             "openai" -> getOpenAIThinkingBudget(model)
             "anthropic" -> getAnthropicThinkingBudget(model)
             "google" -> getGoogleThinkingBudget(model)
+            "google" -> getGoogleThinkingBudget(model)
             "openrouter" -> getOpenRouterThinkingBudget(model)
+            "poe" -> getPoeThinkingBudget(model)
+            else -> ThinkingBudgetType.InDevelopment
+        }
+    }
+
+    /**
+     * Poe thinking budget configuration.
+     * Experimental support for specific models.
+     */
+    private fun getPoeThinkingBudget(model: String): ThinkingBudgetType {
+        val modelLower = model.lowercase()
+
+        return when {
+            // Gemini 3 Pro - Hardcoded temporary unlock
+            modelLower.contains("gemini-3-pro") -> {
+                ThinkingBudgetType.Discrete(
+                    options = listOf("low", "high"),
+                    default = "high",
+                    displayNames = hebrewDisplayNames
+                )
+            }
+            // Other Poe models
             else -> ThinkingBudgetType.InDevelopment
         }
     }

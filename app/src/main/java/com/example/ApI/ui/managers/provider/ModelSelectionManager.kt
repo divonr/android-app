@@ -286,6 +286,22 @@ class ModelSelectionManager(
      * Based on providers.json specifications.
      */
     fun getWebSearchSupport(providerName: String, modelName: String): WebSearchSupport {
+        // Try to find the model object to check its configuration
+        val providers = deps.uiState.value.availableProviders
+        val provider = providers.find { it.provider.equals(providerName, ignoreCase = true) }
+        val model = provider?.models?.find { it.name == modelName }
+
+        // If model has explicit web search configuration, use it
+        if (model?.webSearch != null) {
+            return when (model.webSearch!!.lowercase()) {
+                "required" -> WebSearchSupport.REQUIRED
+                "optional" -> WebSearchSupport.OPTIONAL
+                "unsupported" -> WebSearchSupport.UNSUPPORTED
+                else -> WebSearchSupport.UNSUPPORTED
+            }
+        }
+
+        // Fallback to hardcoded logic if not specified in model
         return when (providerName.lowercase()) {
             "openai" -> {
                 when (modelName) {
@@ -296,11 +312,8 @@ class ModelSelectionManager(
                 }
             }
             "poe" -> {
-                when (modelName) {
-                    "Claude-Sonnet-4-Search" -> WebSearchSupport.REQUIRED
-                    "Gemini-2.5-Pro" -> WebSearchSupport.REQUIRED
-                    else -> WebSearchSupport.UNSUPPORTED
-                }
+                // All Poe models now support optional web search
+                WebSearchSupport.OPTIONAL
             }
             "google" -> {
                 when (modelName) {
