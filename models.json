@@ -168,7 +168,7 @@
     "models": [
       {
         "name": "claude-sonnet-4-5",
-        "release_order": 3,
+        "release_order": 4,
         "temperature": {
           "min": 0,
           "max": 1,
@@ -188,8 +188,8 @@
         "1k_output_price": 0.015
       },
       {
-        "name": "claude-opus-4-5",
-        "release_order": 5,
+        "name": "claude-opus-4-6",
+        "release_order": 7,
         "temperature": {
           "min": 0,
           "max": 1,
@@ -210,7 +210,7 @@
       },
       {
         "name": "claude-haiku-4-5",
-        "release_order": 4,
+        "release_order": 5,
         "temperature": {
           "min": 0,
           "max": 1,
@@ -230,8 +230,29 @@
         "1k_output_price": 0.005
       },
       {
+        "name": "claude-opus-4-5-20251101",
+        "release_order": 6,
+        "temperature": {
+          "min": 0,
+          "max": 1,
+          "default": 1.0,
+          "step": 0.1
+        },
+        "thinking": {
+          "continuous": {
+            "min": 1024,
+            "max": 120000,
+            "default": 10000,
+            "step": 1024,
+            "supports_off": true
+          }
+        },
+        "1k_input_price": 0.005,
+        "1k_output_price": 0.025
+      },
+      {
         "name": "claude-sonnet-4-0",
-        "release_order": 2,
+        "release_order": 3,
         "temperature": {
           "min": 0,
           "max": 1,
@@ -252,7 +273,7 @@
       },
       {
         "name": "claude-3-7-sonnet-latest",
-        "release_order": 1,
+        "release_order": 2,
         "temperature": {
           "min": 0,
           "max": 1,
@@ -270,6 +291,27 @@
         },
         "1k_input_price": 0.003,
         "1k_output_price": 0.015
+      },
+      {
+        "name": "claude-3-haiku-20240307",
+        "release_order": 1,
+        "temperature": {
+          "min": 0,
+          "max": 1,
+          "default": 1.0,
+          "step": 0.1
+        },
+        "thinking": {
+          "continuous": {
+            "min": 1024,
+            "max": 120000,
+            "default": 10000,
+            "step": 1024,
+            "supports_off": true
+          }
+        },
+        "1k_input_price": 0.00025,
+        "1k_output_price": 0.00125
       }
     ]
   },
@@ -708,7 +750,7 @@
       },
       {
         "name": "gpt-5.2-2025-12-11",
-        "release_order": 12,
+        "release_order": 11,
         "1k_input_price": 0.00175,
         "1k_output_price": 0.014
       },
@@ -720,13 +762,13 @@
       },
       {
         "name": "gemini-3-flash-preview",
-        "release_order": 10,
+        "release_order": 9,
         "1k_input_price": 0.0005,
         "1k_output_price": 0.003
       },
       {
         "name": "glm-4.7",
-        "release_order": 14,
+        "release_order": 13,
         "1k_input_price": 0.0006,
         "1k_output_price": 0.0022
       },
@@ -737,8 +779,8 @@
         "1k_output_price": 0.015
       },
       {
-        "name": "claude-opus-4-5-20251101",
-        "release_order": 9,
+        "name": "claude-opus-4-6",
+        "release_order": 17,
         "1k_input_price": 0.005,
         "1k_output_price": 0.025
       },
@@ -762,19 +804,19 @@
       },
       {
         "name": "minimax-m2.1",
-        "release_order": 15,
+        "release_order": 14,
         "1k_input_price": 0.0003,
         "1k_output_price": 0.0012
       },
       {
         "name": "gpt-5.2-codex",
-        "release_order": 16,
+        "release_order": 15,
         "1k_input_price": 0.00175,
         "1k_output_price": 0.014
       },
       {
         "name": "deepseek-v3.2-speciale",
-        "release_order": 11,
+        "release_order": 10,
         "1k_input_price": 0.00028,
         "1k_output_price": 0.00042
       },
@@ -792,13 +834,13 @@
       },
       {
         "name": "glm-4.7-flash",
-        "release_order": 17,
+        "release_order": 16,
         "1k_input_price": 0.00007,
         "1k_output_price": 0.0004
       },
       {
         "name": "qwen3-max",
-        "release_order": 13,
+        "release_order": 12,
         "1k_input_price": 0.0005,
         "1k_output_price": 0.005
       }
