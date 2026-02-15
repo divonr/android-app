@@ -72,6 +72,7 @@ class DataRepository(private val context: Context) {
     fun createNewChat(username: String, previewName: String, systemPrompt: String = ""): Chat = chatHistoryManager.createNewChat(username, previewName, systemPrompt)
     fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat = chatHistoryManager.createNewChatInGroup(username, previewName, groupId, systemPrompt)
     fun updateChatSystemPrompt(username: String, chatId: String, systemPrompt: String): Chat? = chatHistoryManager.updateChatSystemPrompt(username, chatId, systemPrompt)
+    fun updateChatShareLink(username: String, chatId: String, shareLink: String, shareId: String): Chat? = chatHistoryManager.updateChatShareLink(username, chatId, shareLink, shareId)
 
     /**
      * Clean up empty chats (chats with no messages) from the chat history.

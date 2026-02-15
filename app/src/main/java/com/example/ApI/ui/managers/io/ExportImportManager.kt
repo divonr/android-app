@@ -1,6 +1,9 @@
 package com.example.ApI.ui.managers.io
 
 import android.app.PendingIntent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -17,8 +20,17 @@ import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
+import java.security.SecureRandom
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Manages chat export and import functionality.
@@ -46,11 +58,17 @@ class ExportImportManager(
                 deps.repository.getChatJson(currentUser, currentChat.chat_id)
             }.orEmpty()
 
+            // Check if this chat already has a share link
+            val hasShareLink = currentChat.shareLink.isNotEmpty() && currentChat.shareId.isNotEmpty()
+
             deps.updateUiState(
                 deps.uiState.value.copy(
                     showChatExportDialog = true,
                     chatExportJson = chatJson,
-                    isChatExportEditable = false
+                    isChatExportEditable = false,
+                    isShareLinkActive = hasShareLink,
+                    isShareLinkLoading = false,
+                    showShareLinkMenu = false
                 )
             )
 
@@ -71,7 +89,274 @@ class ExportImportManager(
         deps.updateUiState(
             deps.uiState.value.copy(
                 showChatExportDialog = false,
-                isChatExportEditable = false
+                isChatExportEditable = false,
+                isShareLinkActive = false,
+                isShareLinkLoading = false,
+                showShareLinkMenu = false
+            )
+        )
+    }
+
+    // ==================== Share Link ====================
+
+    private val httpClient = OkHttpClient()
+    private val SHARE_API_BASE = "https://api-divonr.xyz/share"
+
+    /**
+     * Generate a random 32-character hex key for AES encryption.
+     */
+    private fun generateEncryptionKey(): String {
+        val bytes = ByteArray(16) // 16 bytes = 32 hex chars
+        SecureRandom().nextBytes(bytes)
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Encrypt a string using AES/CBC/PKCS5Padding with the given hex key.
+     * Returns the IV (16 bytes) prepended to the ciphertext, all Base64-encoded.
+     */
+    private fun encryptAES(plaintext: String, hexKey: String): String {
+        val keyBytes = hexKey.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val iv = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), IvParameterSpec(iv))
+        val encrypted = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        // Prepend IV to ciphertext
+        val combined = iv + encrypted
+        return android.util.Base64.encodeToString(combined, android.util.Base64.NO_WRAP)
+    }
+
+    /**
+     * Copy text to clipboard.
+     */
+    private fun copyToClipboard(text: String) {
+        val clipboard = deps.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("Share Link", text)
+        clipboard.setPrimaryClip(clip)
+    }
+
+    /**
+     * Create a new share link for the current chat.
+     * Encrypts the chat JSON with AES, uploads to server, saves link info locally.
+     */
+    fun createShareLink() {
+        val currentChat = deps.uiState.value.currentChat ?: return
+        val content = deps.uiState.value.chatExportJson
+        val currentUser = deps.appSettings.value.current_user
+
+        if (content.isBlank()) {
+            deps.updateUiState(
+                deps.uiState.value.copy(
+                    snackbarMessage = deps.context.getString(R.string.no_content_to_export)
+                )
+            )
+            return
+        }
+
+        // Show loading state
+        deps.updateUiState(deps.uiState.value.copy(isShareLinkLoading = true))
+
+        deps.scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    // Generate encryption key
+                    val key = generateEncryptionKey()
+
+                    // Encrypt the chat JSON
+                    val encryptedContent = encryptAES(content, key)
+
+                    // Upload to server
+                    val requestBody = encryptedContent.toRequestBody("text/plain".toMediaType())
+                    val request = Request.Builder()
+                        .url(SHARE_API_BASE)
+                        .post(requestBody)
+                        .build()
+
+                    val response = httpClient.newCall(request).execute()
+                    if (!response.isSuccessful) {
+                        throw Exception("Server error: ${response.code}")
+                    }
+
+                    val responseBody = response.body?.string() ?: throw Exception("Empty response")
+                    val jsonResponse = JSONObject(responseBody)
+                    val uuid = jsonResponse.getString("id")
+
+                    // Build the full link
+                    val fullLink = "https://api-divonr.xyz/viewer/?id=$uuid#key=$key"
+
+                    // Save share link info to chat locally
+                    deps.repository.updateChatShareLink(currentUser, currentChat.chat_id, fullLink, uuid)
+
+                    fullLink
+                }
+
+                // Copy link to clipboard
+                copyToClipboard(result)
+
+                // Refresh current chat to get updated share link fields
+                val updatedHistory = withContext(Dispatchers.IO) {
+                    deps.repository.loadChatHistory(currentUser)
+                }
+                val updatedChat = updatedHistory.chat_history.find { it.chat_id == currentChat.chat_id }
+
+                // Update UI state
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        isShareLinkLoading = false,
+                        isShareLinkActive = true,
+                        showShareLinkMenu = true,
+                        currentChat = updatedChat ?: currentChat,
+                        chatHistory = updatedHistory.chat_history,
+                        snackbarMessage = "הקישור נוצר והועתק ללוח"
+                    )
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("ShareLink", "Failed to create share link", e)
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        isShareLinkLoading = false,
+                        snackbarMessage = "שגיאה ביצירת קישור: ${e.message}"
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Delete the existing share link for the current chat.
+     */
+    fun deleteShareLink() {
+        val currentChat = deps.uiState.value.currentChat ?: return
+        val shareId = currentChat.shareId
+        val currentUser = deps.appSettings.value.current_user
+
+        if (shareId.isEmpty()) return
+
+        deps.scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    // Delete from server
+                    val request = Request.Builder()
+                        .url("$SHARE_API_BASE/$shareId")
+                        .delete()
+                        .build()
+                    httpClient.newCall(request).execute()
+
+                    // Clear locally
+                    deps.repository.updateChatShareLink(currentUser, currentChat.chat_id, "", "")
+                }
+
+                // Refresh current chat
+                val updatedHistory = withContext(Dispatchers.IO) {
+                    deps.repository.loadChatHistory(currentUser)
+                }
+                val updatedChat = updatedHistory.chat_history.find { it.chat_id == currentChat.chat_id }
+
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        isShareLinkActive = false,
+                        showShareLinkMenu = false,
+                        currentChat = updatedChat ?: currentChat,
+                        chatHistory = updatedHistory.chat_history,
+                        snackbarMessage = "הקישור הוסר בהצלחה"
+                    )
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("ShareLink", "Failed to delete share link", e)
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        snackbarMessage = "שגיאה במחיקת קישור: ${e.message}"
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Update the share link: delete existing, then create new.
+     */
+    fun updateShareLink() {
+        val currentChat = deps.uiState.value.currentChat ?: return
+        val shareId = currentChat.shareId
+        val currentUser = deps.appSettings.value.current_user
+
+        if (shareId.isEmpty()) {
+            createShareLink()
+            return
+        }
+
+        // Show loading state
+        deps.updateUiState(deps.uiState.value.copy(
+            isShareLinkLoading = true,
+            showShareLinkMenu = false
+        ))
+
+        deps.scope.launch {
+            try {
+                // Delete old link from server
+                withContext(Dispatchers.IO) {
+                    val request = Request.Builder()
+                        .url("$SHARE_API_BASE/$shareId")
+                        .delete()
+                        .build()
+                    httpClient.newCall(request).execute()
+                    deps.repository.updateChatShareLink(currentUser, currentChat.chat_id, "", "")
+                }
+
+                // Reset loading state temporarily (createShareLink will set it again)
+                deps.updateUiState(deps.uiState.value.copy(
+                    isShareLinkActive = false,
+                    isShareLinkLoading = false
+                ))
+
+                // Create new link
+                createShareLink()
+            } catch (e: Exception) {
+                android.util.Log.e("ShareLink", "Failed to update share link", e)
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        isShareLinkLoading = false,
+                        snackbarMessage = "שגיאה בעדכון קישור: ${e.message}"
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Copy the existing share link to clipboard.
+     */
+    fun copyShareLink() {
+        val currentChat = deps.uiState.value.currentChat ?: return
+        val link = currentChat.shareLink
+        if (link.isNotEmpty()) {
+            copyToClipboard(link)
+            deps.updateUiState(
+                deps.uiState.value.copy(
+                    snackbarMessage = "הקישור הועתק ללוח"
+                )
+            )
+        }
+    }
+
+    /**
+     * Toggle the share link floating menu visibility.
+     */
+    fun toggleShareLinkMenu() {
+        deps.updateUiState(
+            deps.uiState.value.copy(
+                showShareLinkMenu = !deps.uiState.value.showShareLinkMenu
+            )
+        )
+    }
+
+    /**
+     * Dismiss the share link floating menu.
+     */
+    fun dismissShareLinkMenu() {
+        deps.updateUiState(
+            deps.uiState.value.copy(
+                showShareLinkMenu = false
             )
         )
     }

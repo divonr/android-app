@@ -33,6 +33,9 @@ data class ChatUiState(
     val showChatExportDialog: Boolean = false,
     val chatExportJson: String = "",
     val isChatExportEditable: Boolean = false,
+    val isShareLinkLoading: Boolean = false,     // Loading state for link generation
+    val isShareLinkActive: Boolean = false,       // Whether a share link exists for current chat
+    val showShareLinkMenu: Boolean = false,       // Whether the link floating menu is visible
     val selectedFiles: List<SelectedFile> = emptyList(),
     val currentChat: Chat? = null,
     val availableProviders: List<Provider> = emptyList(),

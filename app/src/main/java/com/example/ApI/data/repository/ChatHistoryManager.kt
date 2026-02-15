@@ -292,4 +292,22 @@ class ChatHistoryManager(
             null
         }
     }
+
+    /**
+     * Update the share link fields for a specific chat.
+     * Pass empty strings to clear the link.
+     */
+    fun updateChatShareLink(username: String, chatId: String, shareLink: String, shareId: String): Chat? {
+        val chatHistory = loadChatHistory(username)
+        val updatedChats = chatHistory.chat_history.map { chat ->
+            if (chat.chat_id == chatId) {
+                chat.copy(shareLink = shareLink, shareId = shareId)
+            } else {
+                chat
+            }
+        }
+        val updatedHistory = chatHistory.copy(chat_history = updatedChats)
+        saveChatHistory(updatedHistory)
+        return updatedChats.find { it.chat_id == chatId }
+    }
 }

@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -110,6 +111,17 @@ fun ChatExportDialog(
     onDismiss: () -> Unit
 ) {
     var isEditing by remember { mutableStateOf(false) }
+
+    // Dark button colors (black bg, purple icon) — for Edit, Share, Link (inactive)
+    val darkButtonColors = ButtonDefaults.buttonColors(
+        containerColor = Color(0xFF1A1A1A),
+        contentColor = Primary
+    )
+    // Active link button colors (purple bg, white icon)
+    val activeLinkButtonColors = ButtonDefaults.buttonColors(
+        containerColor = Primary,
+        contentColor = Color.White
+    )
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -242,19 +254,17 @@ fun ChatExportDialog(
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Edit/Save button - toggles between edit and save modes
-                        OutlinedButton(
+                        // Edit/Save button — dark style (black bg, purple icon)
+                        Button(
                             onClick = {
                                 if (isEditing) {
-                                    // Save changes and exit edit mode
                                     isEditing = false
-                                    // Note: The actual content is already updated via onValueChange
                                 } else {
-                                    // Enter edit mode
                                     isEditing = true
                                 }
                             },
                             modifier = Modifier.width(48.dp),
+                            colors = darkButtonColors,
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
                         ) {
                             Icon(
@@ -264,10 +274,11 @@ fun ChatExportDialog(
                             )
                         }
 
-                        // Share button - fixed width for icon only
+                        // Share button — dark style (black bg, purple icon)
                         Button(
                             onClick = { viewModel.shareChatExportContent() },
                             modifier = Modifier.width(48.dp),
+                            colors = darkButtonColors,
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
                         ) {
                             Icon(
@@ -277,7 +288,90 @@ fun ChatExportDialog(
                             )
                         }
 
-                        // Save button - takes remaining space for text
+                        // Link button — with floating menu
+                        Box {
+                            Button(
+                                onClick = {
+                                    if (uiState.isShareLinkActive) {
+                                        // Toggle floating menu
+                                        viewModel.toggleShareLinkMenu()
+                                    } else {
+                                        // Create new link
+                                        viewModel.createShareLink()
+                                    }
+                                },
+                                modifier = Modifier.width(48.dp),
+                                colors = if (uiState.isShareLinkActive) activeLinkButtonColors else darkButtonColors,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                                enabled = !uiState.isShareLinkLoading
+                            ) {
+                                if (uiState.isShareLinkLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = if (uiState.isShareLinkActive) Color.White else Primary,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.Link,
+                                        contentDescription = "Link",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            // Floating menu for link actions
+                            DropdownMenu(
+                                expanded = uiState.showShareLinkMenu,
+                                onDismissRequest = { viewModel.dismissShareLinkMenu() }
+                            ) {
+                                // Copy
+                                DropdownMenuItem(
+                                    text = { Text("העתקה") },
+                                    onClick = {
+                                        viewModel.copyShareLink()
+                                        viewModel.dismissShareLinkMenu()
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.ContentCopy,
+                                            contentDescription = "Copy link",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                )
+                                // Update
+                                DropdownMenuItem(
+                                    text = { Text("עדכון") },
+                                    onClick = {
+                                        viewModel.updateShareLink()
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Refresh,
+                                            contentDescription = "Update link",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                )
+                                // Delete
+                                DropdownMenuItem(
+                                    text = { Text("מחיקה") },
+                                    onClick = {
+                                        viewModel.deleteShareLink()
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Delete link",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        // Save to Downloads button — takes remaining space
                         Button(
                             onClick = { viewModel.saveChatExportToDownloads() },
                             modifier = Modifier.weight(1f)
@@ -288,7 +382,7 @@ fun ChatExportDialog(
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text("שמירה להורדות")
+                            Text("להורדות")
                         }
                     }
                 }

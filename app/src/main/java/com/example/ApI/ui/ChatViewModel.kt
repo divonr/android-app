@@ -1021,6 +1021,13 @@ class ChatViewModel(
     fun importPendingChatJson() = exportImportManager.importPendingChatJson()
     fun attachPendingJsonAsFile() = exportImportManager.attachPendingJsonAsFile()
     fun dismissChatImportDialog() = exportImportManager.dismissChatImportDialog()
+    // Share Link
+    fun createShareLink() = exportImportManager.createShareLink()
+    fun deleteShareLink() = exportImportManager.deleteShareLink()
+    fun updateShareLink() = exportImportManager.updateShareLink()
+    fun copyShareLink() = exportImportManager.copyShareLink()
+    fun toggleShareLinkMenu() = exportImportManager.toggleShareLinkMenu()
+    fun dismissShareLinkMenu() = exportImportManager.dismissShareLinkMenu()
 
     // ==================== Branching System (delegated to BranchingManager) ====================
     fun getBranchInfoForMessage(message: Message): BranchInfo? = branchingManager.getBranchInfoForMessage(message)

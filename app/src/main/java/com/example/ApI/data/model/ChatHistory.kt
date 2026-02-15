@@ -20,7 +20,9 @@ data class Chat(
     val group: String? = null,
     // New branching structure
     val messageNodes: List<MessageNode> = emptyList(),  // All nodes in the conversation tree
-    val currentVariantPath: List<String> = emptyList()  // List of variantIds representing current path
+    val currentVariantPath: List<String> = emptyList(),  // List of variantIds representing current path
+    val shareLink: String = "",  // Full share link URL (including #key=...)
+    val shareId: String = ""  // Share UUID on the server
 ) {
     // Convenience properties
     val title: String get() = preview_name
