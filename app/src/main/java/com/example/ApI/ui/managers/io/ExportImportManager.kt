@@ -145,11 +145,7 @@ class ExportImportManager(
         val currentUser = deps.appSettings.value.current_user
 
         if (content.isBlank()) {
-            deps.updateUiState(
-                deps.uiState.value.copy(
-                    snackbarMessage = deps.context.getString(R.string.no_content_to_export)
-                )
-            )
+            Toast.makeText(deps.context, deps.context.getString(R.string.no_content_to_export), Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -206,18 +202,18 @@ class ExportImportManager(
                         isShareLinkActive = true,
                         showShareLinkMenu = true,
                         currentChat = updatedChat ?: currentChat,
-                        chatHistory = updatedHistory.chat_history,
-                        snackbarMessage = "הקישור נוצר והועתק ללוח"
+                        chatHistory = updatedHistory.chat_history
                     )
                 )
+                Toast.makeText(deps.context, "הקישור נוצר והועתק ללוח", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 android.util.Log.e("ShareLink", "Failed to create share link", e)
                 deps.updateUiState(
                     deps.uiState.value.copy(
-                        isShareLinkLoading = false,
-                        snackbarMessage = "שגיאה ביצירת קישור: ${e.message}"
+                        isShareLinkLoading = false
                     )
                 )
+                Toast.makeText(deps.context, "שגיאה ביצירת קישור: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -257,31 +253,51 @@ class ExportImportManager(
                         isShareLinkActive = false,
                         showShareLinkMenu = false,
                         currentChat = updatedChat ?: currentChat,
-                        chatHistory = updatedHistory.chat_history,
-                        snackbarMessage = "הקישור הוסר בהצלחה"
+                        chatHistory = updatedHistory.chat_history
                     )
                 )
+                Toast.makeText(deps.context, "הקישור הוסר בהצלחה", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 android.util.Log.e("ShareLink", "Failed to delete share link", e)
-                deps.updateUiState(
-                    deps.uiState.value.copy(
-                        snackbarMessage = "שגיאה במחיקת קישור: ${e.message}"
-                    )
-                )
+                Toast.makeText(deps.context, "שגיאה במחיקת קישור: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     /**
-     * Update the share link: delete existing, then create new.
+     * Extract the encryption key from a full share link URL.
+     * Link format: https://api-divonr.xyz/viewer/?id={UUID}#key={KEY}
+     */
+    private fun extractKeyFromShareLink(link: String): String? {
+        val hashIndex = link.indexOf("#key=")
+        return if (hashIndex != -1) link.substring(hashIndex + 5) else null
+    }
+
+    /**
+     * Update the share link in-place: re-encrypt with the same key, PUT to existing UUID.
+     * The link URL stays the same.
      */
     fun updateShareLink() {
         val currentChat = deps.uiState.value.currentChat ?: return
         val shareId = currentChat.shareId
+        val existingLink = currentChat.shareLink
+        val content = deps.uiState.value.chatExportJson
         val currentUser = deps.appSettings.value.current_user
 
         if (shareId.isEmpty()) {
             createShareLink()
+            return
+        }
+
+        val existingKey = extractKeyFromShareLink(existingLink)
+        if (existingKey == null) {
+            // Fallback: if we can't extract the key, create a new link
+            createShareLink()
+            return
+        }
+
+        if (content.isBlank()) {
+            Toast.makeText(deps.context, deps.context.getString(R.string.no_content_to_export), Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -293,32 +309,41 @@ class ExportImportManager(
 
         deps.scope.launch {
             try {
-                // Delete old link from server
                 withContext(Dispatchers.IO) {
+                    // Re-encrypt with the same key
+                    val encryptedContent = encryptAES(content, existingKey)
+
+                    // PUT to update existing UUID
+                    val requestBody = encryptedContent.toRequestBody("text/plain".toMediaType())
                     val request = Request.Builder()
                         .url("$SHARE_API_BASE/$shareId")
-                        .delete()
+                        .put(requestBody)
                         .build()
-                    httpClient.newCall(request).execute()
-                    deps.repository.updateChatShareLink(currentUser, currentChat.chat_id, "", "")
+
+                    val response = httpClient.newCall(request).execute()
+                    if (!response.isSuccessful) {
+                        throw Exception("Server error: ${response.code}")
+                    }
                 }
 
-                // Reset loading state temporarily (createShareLink will set it again)
-                deps.updateUiState(deps.uiState.value.copy(
-                    isShareLinkActive = false,
-                    isShareLinkLoading = false
-                ))
+                // Copy the (unchanged) link to clipboard
+                copyToClipboard(existingLink)
 
-                // Create new link
-                createShareLink()
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        isShareLinkLoading = false,
+                        showShareLinkMenu = true
+                    )
+                )
+                Toast.makeText(deps.context, "הקישור עודכן והועתק ללוח", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 android.util.Log.e("ShareLink", "Failed to update share link", e)
                 deps.updateUiState(
                     deps.uiState.value.copy(
-                        isShareLinkLoading = false,
-                        snackbarMessage = "שגיאה בעדכון קישור: ${e.message}"
+                        isShareLinkLoading = false
                     )
                 )
+                Toast.makeText(deps.context, "שגיאה בעדכון קישור: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -331,11 +356,7 @@ class ExportImportManager(
         val link = currentChat.shareLink
         if (link.isNotEmpty()) {
             copyToClipboard(link)
-            deps.updateUiState(
-                deps.uiState.value.copy(
-                    snackbarMessage = "הקישור הועתק ללוח"
-                )
-            )
+            Toast.makeText(deps.context, "הקישור הועתק ללוח", Toast.LENGTH_SHORT).show()
         }
     }
 
