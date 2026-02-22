@@ -300,18 +300,18 @@ fun NormalModeTopBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // System Prompt icon
+            // Download/Share Button
             Surface(
                 shape = MaterialTheme.shapes.medium,
                 color = SurfaceVariant,
                 modifier = Modifier
                     .size(36.dp)
-                    .clickable { viewModel.showSystemPromptDialog() }
+                    .clickable { viewModel.openChatExportDialog() }
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        imageVector = Icons.Default.Build,
-                        contentDescription = "System Prompt",
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Download and Share Chat",
                         tint = OnSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
@@ -399,18 +399,18 @@ fun QuickSettingsBar(
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // Download/Export Button
+                // System Prompt icon
                 Surface(
                     shape = MaterialTheme.shapes.medium,
                     color = SurfaceVariant,
                     modifier = Modifier
                         .size(36.dp)
-                        .clickable { viewModel.openChatExportDialog() }
+                        .clickable { viewModel.showSystemPromptDialog() }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Default.Download,
-                            contentDescription = "Download chat",
+                            imageVector = Icons.Default.Build,
+                            contentDescription = "System Prompt",
                             tint = OnSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
