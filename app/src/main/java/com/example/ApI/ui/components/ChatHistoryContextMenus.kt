@@ -154,6 +154,7 @@ fun ChatContextMenu(
     onDismiss: () -> Unit,
     onRename: (Chat) -> Unit,
     onAIRename: (Chat) -> Unit,
+    onShare: (Chat) -> Unit,
     onDelete: (Chat) -> Unit,
     groups: List<ChatGroup>,
     onAddToGroup: (String) -> Unit,
@@ -211,6 +212,27 @@ fun ChatContextMenu(
                     Icons.Default.Build,
                     contentDescription = null,
                     tint = AccentBlue,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        )
+
+        DropdownMenuItem(
+            text = {
+                Text(
+                    "שיתוף שיחה...",
+                    color = OnSurface,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            onClick = {
+                onShare(chat)
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Share,
+                    contentDescription = null,
+                    tint = Primary,
                     modifier = Modifier.size(18.dp)
                 )
             }

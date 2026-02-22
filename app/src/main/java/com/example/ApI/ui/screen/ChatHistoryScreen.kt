@@ -58,6 +58,7 @@ import com.example.ApI.ui.components.RenameChatDialog
 import com.example.ApI.ui.components.CreateGroupDialog
 import com.example.ApI.ui.components.RenameGroupDialog
 import com.example.ApI.ui.components.DeleteGroupConfirmationDialog
+import com.example.ApI.ui.components.dialogs.ChatExportDialog
 import com.example.ApI.ui.theme.*
 import com.example.ApI.ui.screen.createHighlightedText
 import com.example.ApI.ui.screen.getModelInitial
@@ -465,6 +466,10 @@ fun ChatHistoryScreen(
                     onAIRename = {
                         viewModel.renameChatWithAI(it)
                     },
+                    onShare = {
+                        viewModel.hideChatContextMenu()
+                        viewModel.selectAndExportChat(it)
+                    },
                     onDelete = {
                         viewModel.showDeleteConfirmation(it)
                     },
@@ -553,6 +558,15 @@ fun ChatHistoryScreen(
                     onLoadAsChat = { viewModel.importPendingChatJson() },
                     onAttachAsFile = { viewModel.attachPendingJsonAsFile() },
                     onDismiss = { viewModel.dismissChatImportDialog() }
+                )
+            }
+
+            // Chat Export Dialog
+            if (uiState.showChatExportDialog) {
+                ChatExportDialog(
+                    viewModel = viewModel,
+                    uiState = uiState,
+                    onDismiss = { viewModel.closeChatExportDialog() }
                 )
             }
         }

@@ -332,6 +332,10 @@ fun GroupScreen(
                     onAIRename = {
                         viewModel.renameChatWithAI(it)
                     },
+                    onShare = {
+                        viewModel.hideChatContextMenu()
+                        viewModel.selectAndExportChat(it)
+                    },
                     onDelete = {
                         viewModel.showDeleteConfirmation(it)
                     },
@@ -491,6 +495,15 @@ fun GroupScreen(
                     onConfirm = { viewModel.updateGroupSystemPrompt(it) },
                     onDismiss = { viewModel.hideSystemPromptDialog() },
                     title = "הוראות"
+                )
+            }
+
+            // Chat Export Dialog
+            if (uiState.showChatExportDialog) {
+                com.example.ApI.ui.components.dialogs.ChatExportDialog(
+                    viewModel = viewModel,
+                    uiState = uiState,
+                    onDismiss = { viewModel.closeChatExportDialog() }
                 )
             }
             }

@@ -755,6 +755,17 @@ class ChatViewModel(
     fun exportChatHistory() = exportImportManager.exportChatHistory()
     fun importChatHistoryFromUri(uri: Uri) = exportImportManager.importChatHistoryFromUri(uri)
 
+    // ==================== Single Chat Export ====================
+    fun selectAndExportChat(chat: Chat) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                currentChat = chat,
+                systemPrompt = chat.systemPrompt
+            )
+            exportImportManager.openChatExportDialog()
+        }
+    }
+
     // Text direction settings (delegated to TopBarManager)
     fun toggleTextDirection() = topBarManager.toggleTextDirection()
     fun setTextDirectionMode(mode: TextDirectionMode) = topBarManager.setTextDirectionMode(mode)
