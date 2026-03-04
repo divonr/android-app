@@ -51,7 +51,13 @@ fun ToolToggleDropdown(
             } else if (toolId == "get_current_group_conversations") {
                 ToolItem(
                     id = toolId,
-                    name = "Other conversations in group", // Or localize if possible
+                    name = "Other conversations in group",
+                    integrationTitle = getIntegrationTitle(toolId)
+                )
+            } else if (toolId == ToolRegistry.PYTHON_INTERPRETER) {
+                ToolItem(
+                    id = toolId,
+                    name = "Python Code Interpreter",
                     integrationTitle = getIntegrationTitle(toolId)
                 )
             } else {
@@ -223,6 +229,7 @@ private fun getIntegrationTitle(toolId: String): String {
         toolId.startsWith("drive_") -> "Drive"
         toolId == "get_date_time" -> "Built-in Tools"
         toolId == "get_current_group_conversations" -> "Built-in Tools"
+        toolId == ToolRegistry.PYTHON_INTERPRETER -> "Built-in Tools"
         else -> "Other"
     }
 }
