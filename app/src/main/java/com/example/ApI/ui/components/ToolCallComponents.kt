@@ -335,45 +335,7 @@ fun ToolCallBubble(
                         }
                     }
 
-                    // Always-visible image preview for tool_response messages
-                    val currentChat = uiState.currentChat
-                    val correspondingToolCallMsg = currentChat?.messages?.find {
-                        it.role == "tool_call" && it.toolCallId == message.toolResponseCallId
-                    }
-                    val responseDetails = (correspondingToolCallMsg?.toolCall?.result as? ToolExecutionResult.Success)?.details
-                    val responseOutputImages = responseDetails
-                        ?.get("output_files")?.jsonArray
-                        ?.filter { fileJson ->
-                            val mimeType = fileJson.jsonObject["mime_type"]?.jsonPrimitive?.contentOrNull ?: ""
-                            mimeType.startsWith("image/")
-                        }
 
-                    if (!responseOutputImages.isNullOrEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        responseOutputImages.forEach { fileJson ->
-                            val fileObj = fileJson.jsonObject
-                            val fileName = fileObj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@forEach
-                            val localPath = fileObj["local_file_path"]?.jsonPrimitive?.contentOrNull ?: return@forEach
-                            val file = File(localPath)
-
-                            if (file.exists()) {
-                                val bitmap = remember(localPath) {
-                                    BitmapFactory.decodeFile(localPath)
-                                }
-                                if (bitmap != null) {
-                                    Image(
-                                        bitmap = bitmap.asImageBitmap(),
-                                        contentDescription = fileName,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(max = 300.dp)
-                                            .clip(RoundedCornerShape(8.dp)),
-                                        contentScale = ContentScale.Fit
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -670,41 +632,7 @@ fun ToolCallBubble(
                     }
                 }
 
-                // Always-visible image previews for output files
-                val details = (toolCallInfo.result as? ToolExecutionResult.Success)?.details
-                val outputImages = details
-                    ?.get("output_files")?.jsonArray
-                    ?.filter { fileJson ->
-                        val mimeType = fileJson.jsonObject["mime_type"]?.jsonPrimitive?.contentOrNull ?: ""
-                        mimeType.startsWith("image/")
-                    }
 
-                if (!outputImages.isNullOrEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    outputImages.forEach { fileJson ->
-                        val fileObj = fileJson.jsonObject
-                        val fileName = fileObj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@forEach
-                        val localPath = fileObj["local_file_path"]?.jsonPrimitive?.contentOrNull ?: return@forEach
-                        val file = File(localPath)
-
-                        if (file.exists()) {
-                            val bitmap = remember(localPath) {
-                                BitmapFactory.decodeFile(localPath)
-                            }
-                            if (bitmap != null) {
-                                Image(
-                                    bitmap = bitmap.asImageBitmap(),
-                                    contentDescription = fileName,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 300.dp)
-                                        .clip(RoundedCornerShape(8.dp)),
-                                    contentScale = ContentScale.Fit
-                                )
-                            }
-                        }
-                    }
-                }
             }
         }
     }

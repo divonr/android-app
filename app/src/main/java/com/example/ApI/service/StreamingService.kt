@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.*
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -342,6 +343,7 @@ class StreamingService : Service() {
         val callback = object : StreamingCallback {
             private val accumulatedText = StringBuilder()
             private var thoughtsData: Triple<String?, Float?, ThoughtsStatus>? = null
+            private val pendingToolOutputAttachments = mutableListOf<Attachment>()
 
             override fun onPartialResponse(text: String) {
                 accumulatedText.append(text)
@@ -366,7 +368,7 @@ class StreamingService : Service() {
                         val assistantMessage = Message(
                             role = "assistant",
                             text = fullText,
-                            attachments = emptyList(),
+                            attachments = pendingToolOutputAttachments.toList(),
                             model = modelName,
                             datetime = Instant.now().toString(),
                             thoughts = thoughtsData?.first,
@@ -374,6 +376,10 @@ class StreamingService : Service() {
                             thoughtsStatus = thoughtsData?.third ?: ThoughtsStatus.NONE
                         )
                         repository.addResponseToCurrentVariant(username, chatId, assistantMessage)
+                        if (pendingToolOutputAttachments.isNotEmpty()) {
+                            Log.d(TAG, "Attached ${pendingToolOutputAttachments.size} output files to final message")
+                            pendingToolOutputAttachments.clear()
+                        }
 
                         // Broadcast completion
                         _streamingEvents.emit(StreamingEvent.Complete(requestId, chatId, fullText, modelName))
@@ -449,6 +455,34 @@ class StreamingService : Service() {
                     }
                     repository.addResponseToCurrentVariant(username, chatId, toolCallMessage)
                     repository.addResponseToCurrentVariant(username, chatId, toolResponseMessage)
+
+                    // Extract output files from tool result and store as pending attachments
+                    // They will be attached to the model's next streaming response message
+                    val toolResult = toolCallMessage.toolCall?.result
+                    if (toolResult is ToolExecutionResult.Success || toolResult is ToolExecutionResult.Error) {
+                        val details = when (toolResult) {
+                            is ToolExecutionResult.Success -> toolResult.details
+                            is ToolExecutionResult.Error -> toolResult.details
+                            else -> null
+                        }
+                        val outputFiles = details?.get("output_files")?.jsonArray
+                        if (!outputFiles.isNullOrEmpty()) {
+                            val attachments = outputFiles.mapNotNull { fileJson ->
+                                try {
+                                    val fileObj = fileJson.jsonObject
+                                    val fileName = fileObj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                                    val mimeType = fileObj["mime_type"]?.jsonPrimitive?.contentOrNull ?: "application/octet-stream"
+                                    val localPath = fileObj["local_file_path"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                                    Attachment(local_file_path = localPath, file_name = fileName, mime_type = mimeType)
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to parse output file: ${e.message}")
+                                    null
+                                }
+                            }
+                            pendingToolOutputAttachments.addAll(attachments)
+                            Log.d(TAG, "Stored ${attachments.size} output files as pending attachments")
+                        }
+                    }
 
                     // Notify ViewModel to reload chat history and clear streaming text
                     // This ensures saved messages appear separately from new streaming content

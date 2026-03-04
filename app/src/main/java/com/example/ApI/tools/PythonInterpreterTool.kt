@@ -1,11 +1,13 @@
 package com.example.ApI.tools
 
 import android.content.Context
+import android.webkit.MimeTypeMap
 import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.Chat
 import com.example.ApI.data.model.ChatGroup
 import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -37,31 +39,29 @@ class PythonInterpreterTool(
         }
 
         return """
-Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
+Consider using this tool for data processing, analysis, or when generating files (Word, PowerPoint, Excel, PDF, images, etc.) would benefit the user's request.
 
-**File Access:**
-- Specify files in 'files_to_include' parameter (list of filenames)
-- Access files at /data/{filename}: `pd.read_csv('/data/sales.csv')`
-- $filesList
+Packages: pandas, numpy, matplotlib, scipy, seaborn, openpyxl, python-pptx, python-docx, Pillow, fpdf, networkx. Internet access available — pip install additional packages if needed.
 
-**Output:**
-- Use print() for text output
-- Use plt.savefig('chart.png') to generate images
-- Generated files are returned as attachments
+Input files: specify filenames in 'files_to_include', read from data/{file_name}.
+$filesList
 
-**Limits:** 60 second timeout, 256MB memory, no network access.
+Output: print() for text. Save files to working directory (e.g., plt.savefig('chart.png')). Generated files are displayed to the user as message attachments.
+
+Limits: 5 min timeout, 2GB RAM.
         """.trimIndent()
     }
 
     companion object {
-        const val CLOUD_FUNCTION_URL = "https://python-executor-926212364522.us-central1.run.app/"
+        const val SERVER_URL = "https://api-divonr.xyz/execute"
+        const val API_KEY = "Ato01g?4:elop-ef,kq32"
         const val MAX_FILE_SIZE = 10 * 1024 * 1024L // 10MB
     }
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(90, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(330, TimeUnit.SECONDS) // 5.5 min to allow for 5 min server timeout
+        .writeTimeout(60, TimeUnit.SECONDS) // allow time to upload files
         .build()
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
@@ -79,39 +79,45 @@ Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
             ?: emptyList()
         AppLogger.i("[PythonTool] Files to include: $filesToInclude")
 
-        // Resolve and encode files
-        val filesPayload = resolveAndEncodeFiles(filesToInclude)
-        AppLogger.i("[PythonTool] Resolved ${filesPayload.size} files for upload")
+        // Resolve files for upload
+        val resolvedFiles = resolveFiles(filesToInclude)
+        AppLogger.i("[PythonTool] Resolved ${resolvedFiles.size} files for upload")
 
-        // Build request
-        val requestBody = buildJsonObject {
-            put("code", code)
-            put("files", buildJsonArray {
-                filesPayload.forEach { file ->
-                    add(buildJsonObject {
-                        put("name", file.name)
-                        put("content", file.base64Content)
-                        put("mime_type", file.mimeType)
-                    })
-                }
-            })
+        // Build multipart form-data request
+        val multipartBuilder = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("code", code)
+
+        resolvedFiles.forEach { file ->
+            val mediaType = file.mimeType.toMediaType()
+            multipartBuilder.addFormDataPart(
+                "files",
+                file.name,
+                file.bytes.toRequestBody(mediaType)
+            )
         }
 
-        val bodyString = requestBody.toString()
-        AppLogger.i("[PythonTool] Request body size: ${bodyString.length} chars")
-        AppLogger.i("[PythonTool] Sending POST to: $CLOUD_FUNCTION_URL")
+        val requestBody = multipartBuilder.build()
+        AppLogger.i("[PythonTool] Sending POST to: $SERVER_URL")
 
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
-                    .url(CLOUD_FUNCTION_URL)
-                    .post(bodyString.toRequestBody("application/json".toMediaType()))
+                    .url(SERVER_URL)
+                    .header("X-Api-Key", API_KEY)
+                    .post(requestBody)
                     .build()
 
                 AppLogger.i("[PythonTool] Executing HTTP request...")
                 val response = client.newCall(request).execute()
                 AppLogger.i("[PythonTool] Response code: ${response.code}")
                 AppLogger.i("[PythonTool] Response message: ${response.message}")
+
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string() ?: "No response body"
+                    AppLogger.e("[PythonTool] HTTP error ${response.code}: $errorBody")
+                    return@withContext ToolExecutionResult.Error("Server error ${response.code}: ${errorBody.take(500)}")
+                }
 
                 val responseBody = response.body?.string()
                 if (responseBody == null) {
@@ -133,69 +139,67 @@ Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
     private fun parseResponse(responseBody: String): ToolExecutionResult {
         val json = Json.parseToJsonElement(responseBody).jsonObject
 
-        return if (json["success"]?.jsonPrimitive?.booleanOrNull == true) {
-            val stdout = json["stdout"]?.jsonPrimitive?.contentOrNull ?: ""
-            val stderr = json["stderr"]?.jsonPrimitive?.contentOrNull ?: ""
-            val outputFilesJson = json["output_files"]?.jsonArray ?: JsonArray(emptyList())
+        val status = json["status"]?.jsonPrimitive?.contentOrNull ?: "error"
 
-            // Save output files
-            val savedAttachments = saveOutputFiles(outputFilesJson)
+        if (status == "timeout") {
+            return ToolExecutionResult.Error("Python execution timed out (5 minute limit exceeded)")
+        }
 
-            // Build result text
-            val resultText = buildString {
-                if (stdout.isNotBlank()) {
-                    appendLine("**Output:**")
-                    appendLine("```")
-                    appendLine(stdout.trim())
-                    appendLine("```")
-                }
-                if (stderr.isNotBlank()) {
-                    appendLine("\n**Stderr:**")
-                    appendLine("```")
-                    appendLine(stderr.trim())
-                    appendLine("```")
-                }
-                if (savedAttachments.isNotEmpty()) {
-                    appendLine("\n**Generated Files:**")
-                    savedAttachments.forEach { appendLine("- ${it.file_name}") }
-                }
+        if (status == "error") {
+            val message = json["message"]?.jsonPrimitive?.contentOrNull ?: "Unknown server error"
+            return ToolExecutionResult.Error("Server error: $message")
+        }
+
+        // status == "success"
+        val logs = json["logs"]?.jsonPrimitive?.contentOrNull ?: ""
+        val exitCodeObj = json["exit_code"]?.jsonObject
+        val exitCode = exitCodeObj?.get("StatusCode")?.jsonPrimitive?.intOrNull ?: 0
+        val artifactsJson = json["artifacts"]?.jsonArray ?: JsonArray(emptyList())
+
+        // Save output files (artifacts)
+        val savedAttachments = saveOutputFiles(artifactsJson)
+
+        // Build result text
+        val resultText = buildString {
+            if (logs.isNotBlank()) {
+                appendLine("**Output:**")
+                appendLine("```")
+                appendLine(logs.trim())
+                appendLine("```")
             }
-
-            // Build details with output files info for UI
-            val details = buildJsonObject {
-                put("stdout", stdout)
-                put("stderr", stderr)
-                put("output_files", buildJsonArray {
-                    savedAttachments.forEach { att ->
-                        add(buildJsonObject {
-                            put("file_name", att.file_name)
-                            put("mime_type", att.mime_type)
-                            put("local_file_path", att.local_file_path)
-                        })
-                    }
-                })
+            if (exitCode != 0) {
+                appendLine("\n**Exit code:** $exitCode")
             }
+            if (savedAttachments.isNotEmpty()) {
+                appendLine("\n**Generated Files:**")
+                savedAttachments.forEach { appendLine("- ${it.file_name}") }
+            }
+        }
 
+        // Build details with output files info for UI and downstream consumers
+        val details = buildJsonObject {
+            put("stdout", logs)
+            put("stderr", "")
+            put("exit_code", exitCode)
+            put("output_files", buildJsonArray {
+                savedAttachments.forEach { att ->
+                    add(buildJsonObject {
+                        put("file_name", att.file_name)
+                        put("mime_type", att.mime_type)
+                        put("local_file_path", att.local_file_path)
+                    })
+                }
+            })
+        }
+
+        return if (exitCode != 0 && logs.isNotBlank()) {
+            // Non-zero exit code but we have logs - treat as error with output
+            ToolExecutionResult.Error(resultText.ifBlank { "Code execution failed with exit code $exitCode" }, details)
+        } else {
             ToolExecutionResult.Success(
                 resultText.ifBlank { "Code executed successfully (no output)" },
                 details
             )
-        } else {
-            val error = json["error"]?.jsonPrimitive?.contentOrNull ?: "Unknown error"
-            val traceback = json["traceback"]?.jsonPrimitive?.contentOrNull
-
-            val errorText = buildString {
-                appendLine("**Python Error:**")
-                appendLine("```")
-                appendLine(error)
-                if (!traceback.isNullOrBlank()) {
-                    appendLine()
-                    appendLine(traceback)
-                }
-                appendLine("```")
-            }
-
-            ToolExecutionResult.Error(errorText)
         }
     }
 
@@ -215,7 +219,7 @@ Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
         return files.distinctBy { it.file_name }
     }
 
-    private fun resolveAndEncodeFiles(fileNames: List<String>): List<EncodedFile> {
+    private fun resolveFiles(fileNames: List<String>): List<ResolvedFile> {
         val availableFiles = getAvailableFiles()
         return fileNames.mapNotNull { fileName ->
             availableFiles.find { it.file_name.equals(fileName, ignoreCase = true) }
@@ -223,9 +227,9 @@ Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
                     try {
                         val file = File(attachment.local_file_path!!)
                         if (file.exists() && file.length() <= MAX_FILE_SIZE) {
-                            EncodedFile(
+                            ResolvedFile(
                                 name = attachment.file_name,
-                                base64Content = Base64.getEncoder().encodeToString(file.readBytes()),
+                                bytes = file.readBytes(),
                                 mimeType = attachment.mime_type
                             )
                         } else null
@@ -234,27 +238,65 @@ Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
         }
     }
 
-    private fun saveOutputFiles(outputFiles: JsonArray): List<Attachment> {
+    private fun saveOutputFiles(artifactsJson: JsonArray): List<Attachment> {
         val attachmentsDir = File(context.filesDir, "attachments")
         if (!attachmentsDir.exists()) attachmentsDir.mkdirs()
 
-        return outputFiles.mapNotNull { fileJson ->
+        return artifactsJson.mapNotNull { fileJson ->
             try {
                 val obj = fileJson.jsonObject
                 val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                val content = obj["content"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                val mimeType = obj["mime_type"]?.jsonPrimitive?.contentOrNull ?: "application/octet-stream"
+                val contentBase64 = obj["content_base64"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
 
-                val bytes = Base64.getDecoder().decode(content)
+                // Detect MIME type from file extension
+                val extension = name.substringAfterLast('.', "").lowercase()
+                val mimeType = getMimeTypeFromExtension(extension)
+
+                val bytes = Base64.getDecoder().decode(contentBase64)
                 val localFile = File(attachmentsDir, "${UUID.randomUUID()}_$name")
                 localFile.writeBytes(bytes)
+
+                AppLogger.i("[PythonTool] Saved output file: $name (${bytes.size} bytes, $mimeType)")
 
                 Attachment(
                     local_file_path = localFile.absolutePath,
                     file_name = name,
                     mime_type = mimeType
                 )
-            } catch (e: Exception) { null }
+            } catch (e: Exception) {
+                AppLogger.e("[PythonTool] Failed to save output file: ${e.message}")
+                null
+            }
+        }
+    }
+
+    private fun getMimeTypeFromExtension(extension: String): String {
+        // Try Android's built-in MIME type map first
+        MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)?.let { return it }
+
+        // Fallback for common types not always in MimeTypeMap
+        return when (extension) {
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "gif" -> "image/gif"
+            "svg" -> "image/svg+xml"
+            "pdf" -> "application/pdf"
+            "csv" -> "text/csv"
+            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "xls" -> "application/vnd.ms-excel"
+            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            "doc" -> "application/msword"
+            "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            "ppt" -> "application/vnd.ms-powerpoint"
+            "json" -> "application/json"
+            "txt" -> "text/plain"
+            "html", "htm" -> "text/html"
+            "xml" -> "application/xml"
+            "zip" -> "application/zip"
+            "mp4" -> "video/mp4"
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            else -> "application/octet-stream"
         }
     }
 
@@ -284,7 +326,7 @@ Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
                         put("description", "Filenames from conversation to include (available at /data/)")
                     })
                 })
-                put("required", buildJsonArray { add("code") })
+                put("required", buildJsonArray { add("code"); add("files_to_include") })
             }
         )
     }
@@ -355,9 +397,9 @@ Execute Python code with pandas, numpy, matplotlib, scipy, seaborn.
         )
     }
 
-    private data class EncodedFile(
+    private data class ResolvedFile(
         val name: String,
-        val base64Content: String,
+        val bytes: ByteArray,
         val mimeType: String
     )
 }
