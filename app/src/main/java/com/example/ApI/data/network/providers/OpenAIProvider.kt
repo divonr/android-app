@@ -592,7 +592,24 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                     if (toolSpec.parameters != null) {
                         val newParametersObject = buildJsonObject {
                             toolSpec.parameters.forEach { (key, value) ->
-                                put(key, value)
+                                if (key == "required") {
+                                    // For strict mode: override "required" to include ALL property keys
+                                    val properties = toolSpec.parameters["properties"]?.jsonObject
+                                    if (properties != null) {
+                                        put("required", JsonArray(properties.keys.map { JsonPrimitive(it) }))
+                                    } else {
+                                        put(key, value)
+                                    }
+                                } else {
+                                    put(key, value)
+                                }
+                            }
+                            // If "required" wasn't in the original spec, add it with all property keys
+                            if (!toolSpec.parameters.containsKey("required")) {
+                                val properties = toolSpec.parameters["properties"]?.jsonObject
+                                if (properties != null) {
+                                    put("required", JsonArray(properties.keys.map { JsonPrimitive(it) }))
+                                }
                             }
                             put("additionalProperties", false)
                         }
