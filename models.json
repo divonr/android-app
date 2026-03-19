@@ -665,6 +665,12 @@
     "provider": "openrouter",
     "models": [
       {
+        "name": "stepfun/step-3.5-flash:free",
+        "release_order": 6,
+        "1k_input_price": 0,
+        "1k_output_price": 0
+      },
+      {
         "name": "x-ai/grok-code-fast-1",
         "release_order": 5,
         "temperature": {
