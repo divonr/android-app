@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -60,6 +61,7 @@ import com.example.ApI.ui.components.RenameGroupDialog
 import com.example.ApI.ui.components.DeleteGroupConfirmationDialog
 import com.example.ApI.ui.components.dialogs.ChatExportDialog
 import com.example.ApI.ui.theme.*
+import com.example.ApI.util.AppLogger
 import com.example.ApI.ui.screen.createHighlightedText
 import com.example.ApI.ui.screen.getModelInitial
 import com.example.ApI.ui.screen.formatTimestamp
@@ -210,7 +212,8 @@ fun ChatHistoryScreen(
                                     fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
                                     modifier = Modifier.padding(start = 42.dp)
                                 )
-                                Row {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    PersonalWakeSwitch()
                                     IconButton(onClick = { viewModel.enterSearchMode() }) {
                                         Icon(
                                             Icons.Default.Search,
@@ -570,5 +573,68 @@ fun ChatHistoryScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PersonalWakeSwitch() {
+    var isChecked by remember { mutableStateOf(false) }
+    var secondsElapsed by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(isChecked) {
+        if (isChecked) {
+            val startTime = System.currentTimeMillis()
+            while (true) {
+                secondsElapsed = (System.currentTimeMillis() - startTime) / 1000
+                kotlinx.coroutines.delay(1000L)
+            }
+        } else {
+            secondsElapsed = 0
+        }
+    }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (isChecked) {
+            val hours = secondsElapsed / 3600
+            val minutes = (secondsElapsed % 3600) / 60
+            val secs = secondsElapsed % 60
+            Text(
+                text = String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, secs),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 8.dp)
+            )
+        }
+        Switch(
+            checked = isChecked,
+            onCheckedChange = { checked ->
+                isChecked = checked
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    try {
+                        val urlStr = if (checked) "http://100.90.227.8:8082/v1/cloud/wake" else "http://100.90.227.8:8082/v1/cloud/idle"
+                        AppLogger.i("[PersonalWakeSwitch] Sending GET to: $urlStr")
+                        val url = java.net.URL(urlStr)
+                        val connection = url.openConnection() as java.net.HttpURLConnection
+                        connection.connectTimeout = 3000
+                        connection.readTimeout = 3000
+                        connection.requestMethod = "GET"
+                        connection.setRequestProperty("Authorization", "Bearer abc123")
+                        
+                        val responseCode = connection.responseCode
+                        val responseBody = try {
+                            connection.inputStream.bufferedReader().use { it.readText() }
+                        } catch (e: Exception) {
+                            connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "No body"
+                        }
+                        
+                        AppLogger.i("[PersonalWakeSwitch] Response code: $responseCode")
+                        AppLogger.i("[PersonalWakeSwitch] Response body: $responseBody")
+                    } catch (e: Exception) {
+                        AppLogger.e("[PersonalWakeSwitch] Exception: ${e.message}")
+                        e.printStackTrace()
+                    }
+                }
+            },
+            modifier = Modifier.padding(end = 8.dp)
+        )
     }
 }
