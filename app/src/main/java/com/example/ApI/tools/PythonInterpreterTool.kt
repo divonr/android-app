@@ -43,7 +43,7 @@ Consider using this tool for data processing, analysis, or when generating files
 
 Packages: pandas, numpy, matplotlib, scipy, seaborn, openpyxl, python-pptx, python-docx, Pillow, fpdf, networkx. Internet access available — pip install additional packages if needed.
 
-Input files: specify filenames in 'files_to_include', read from data/{file_name}.
+Input files: specify EXACT filenames (without paths) in 'files_to_include', read from ./data/{file_name}.
 $filesList
 
 Output: print() for text. Save files to working directory (e.g., plt.savefig('chart.png')). Generated files are displayed to the user as message attachments.
@@ -206,34 +206,59 @@ Limits: 5 min timeout, 2GB RAM.
     private fun getAvailableFiles(): List<Attachment> {
         val files = mutableListOf<Attachment>()
 
+        AppLogger.i("[PythonTool] Fetching available files. currentChat messages count: ${currentChat?.messages?.size ?: 0}")
+
         // Files from current chat messages
         currentChat?.messages?.forEach { message ->
-            message.attachments.filter { it.local_file_path != null }.forEach { files.add(it) }
+            message.attachments.filter { it.local_file_path != null }.forEach { 
+                AppLogger.i("[PythonTool] Found chat attachment: ${it.file_name} at ${it.local_file_path}")
+                files.add(it) 
+            }
         }
 
         // Files from group/project
         currentGroup?.group_attachments?.filter { it.local_file_path != null }?.forEach {
+            AppLogger.i("[PythonTool] Found group attachment: ${it.file_name} at ${it.local_file_path}")
             files.add(it)
         }
 
-        return files.distinctBy { it.file_name }
+        val distinct = files.distinctBy { it.file_name }
+        AppLogger.i("[PythonTool] Total distinct available files: ${distinct.size}. Names: ${distinct.map { it.file_name }}")
+        return distinct
     }
 
     private fun resolveFiles(fileNames: List<String>): List<ResolvedFile> {
         val availableFiles = getAvailableFiles()
         return fileNames.mapNotNull { fileName ->
-            availableFiles.find { it.file_name.equals(fileName, ignoreCase = true) }
+            val cleanFileName = fileName.substringAfterLast("/")
+            AppLogger.i("[PythonTool] Trying to resolve requested file: '$fileName' (Cleaned: '$cleanFileName')")
+            availableFiles.find { it.file_name.equals(cleanFileName, ignoreCase = true) }
                 ?.let { attachment ->
+                    AppLogger.i("[PythonTool] Found match in availableFiles for '$cleanFileName'. local_path: ${attachment.local_file_path}")
                     try {
                         val file = File(attachment.local_file_path!!)
-                        if (file.exists() && file.length() <= MAX_FILE_SIZE) {
-                            ResolvedFile(
-                                name = attachment.file_name,
-                                bytes = file.readBytes(),
-                                mimeType = attachment.mime_type
-                            )
-                        } else null
-                    } catch (e: Exception) { null }
+                        if (!file.exists()) {
+                            AppLogger.e("[PythonTool] File DOES NOT EXIST at path: ${file.absolutePath}")
+                            return@let null
+                        }
+                        if (file.length() > MAX_FILE_SIZE) {
+                            AppLogger.e("[PythonTool] File too large: ${file.length()} bytes > MAX($MAX_FILE_SIZE)")
+                            return@let null
+                        }
+                        
+                        AppLogger.i("[PythonTool] Successfully resolved and read file: '$cleanFileName' (${file.length()} bytes)")
+                        ResolvedFile(
+                            name = attachment.file_name,
+                            bytes = file.readBytes(),
+                            mimeType = attachment.mime_type
+                        )
+                    } catch (e: Exception) { 
+                        AppLogger.e("[PythonTool] Exception while reading file '$cleanFileName': ${e.message}")
+                        null 
+                    }
+                } ?: run {
+                    AppLogger.e("[PythonTool] Could NOT find match for '$cleanFileName' in availableFiles.")
+                    null
                 }
         }
     }
@@ -323,7 +348,7 @@ Limits: 5 min timeout, 2GB RAM.
                     put("files_to_include", buildJsonObject {
                         put("type", "array")
                         put("items", buildJsonObject { put("type", "string") })
-                        put("description", "Filenames from conversation to include (available at /data/)")
+                        put("description", "Exact filenames from conversation to include. They will be placed in the ./data/ directory.")
                     })
                 })
                 put("required", buildJsonArray { add("code"); add("files_to_include") })
@@ -345,7 +370,7 @@ Limits: 5 min timeout, 2GB RAM.
                     put("files_to_include", buildJsonObject {
                         put("type", "array")
                         put("items", buildJsonObject { put("type", "string") })
-                        put("description", "Filenames from conversation to include (available at /data/)")
+                        put("description", "Exact filenames from conversation to include. They will be placed in the ./data/ directory.")
                     })
                 })
                 put("required", buildJsonArray { add("code") })
@@ -367,7 +392,7 @@ Limits: 5 min timeout, 2GB RAM.
                     put("files_to_include", buildJsonObject {
                         put("type", "ARRAY")
                         put("items", buildJsonObject { put("type", "STRING") })
-                        put("description", "Filenames from conversation to include (available at /data/)")
+                        put("description", "Exact filenames from conversation to include. They will be placed in the ./data/ directory.")
                     })
                 })
                 put("required", buildJsonArray { add("code") })
@@ -389,7 +414,7 @@ Limits: 5 min timeout, 2GB RAM.
                     put("files_to_include", buildJsonObject {
                         put("type", "array")
                         put("items", buildJsonObject { put("type", "string") })
-                        put("description", "Filenames from conversation to include (available at /data/)")
+                        put("description", "Exact filenames from conversation to include. They will be placed in the ./data/ directory.")
                     })
                 })
                 put("required", buildJsonArray { add("code") })
