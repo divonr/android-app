@@ -343,6 +343,7 @@ class StreamingService : Service() {
         val callback = object : StreamingCallback {
             private val accumulatedText = StringBuilder()
             private var thoughtsData: Triple<String?, Float?, ThoughtsStatus>? = null
+            private val pendingToolOutputAttachments = mutableListOf<Attachment>()
 
             override fun onPartialResponse(text: String) {
                 accumulatedText.append(text)
@@ -366,8 +367,8 @@ class StreamingService : Service() {
                         // Save response to repository directly (survives ViewModel death)
                         val assistantMessage = Message(
                             role = "assistant",
-                            text = fullText,
-                            attachments = emptyList(),
+                            text = fullText.ifBlank { if (pendingToolOutputAttachments.isNotEmpty()) "[קובץ מצורף]" else "" },
+                            attachments = pendingToolOutputAttachments.toList(),
                             model = modelName,
                             datetime = Instant.now().toString(),
                             thoughts = thoughtsData?.first,
@@ -375,6 +376,9 @@ class StreamingService : Service() {
                             thoughtsStatus = thoughtsData?.third ?: ThoughtsStatus.NONE
                         )
                         repository.addResponseToCurrentVariant(username, chatId, assistantMessage)
+                        if (pendingToolOutputAttachments.isNotEmpty()) {
+                            pendingToolOutputAttachments.clear()
+                        }
 
                         // Broadcast completion
                         _streamingEvents.emit(StreamingEvent.Complete(requestId, chatId, fullText, modelName))
@@ -432,12 +436,14 @@ class StreamingService : Service() {
             override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message, precedingText: String) {
                 // Save tool messages to chat history
                 try {
-                    // Save preceding text AND thoughts as assistant message if either exists
-                    if (precedingText.isNotBlank() || thoughtsData != null) {
+                    // Save preceding text AND thoughts as assistant message if either exists OR if there are pending attachments
+                    val hasPrecedingText = precedingText.isNotBlank() || thoughtsData != null
+                    if (hasPrecedingText || pendingToolOutputAttachments.isNotEmpty()) {
+                        val displayPrecedingText = precedingText.ifBlank { if (pendingToolOutputAttachments.isNotEmpty()) "[קובץ מצורף]" else "" }
                         val precedingMessage = Message(
                             role = "assistant",
-                            text = precedingText,
-                            attachments = emptyList(),
+                            text = displayPrecedingText,
+                            attachments = pendingToolOutputAttachments.toList(),
                             model = modelName,
                             datetime = Instant.now().toString(),
                             thoughts = thoughtsData?.first,
@@ -447,11 +453,14 @@ class StreamingService : Service() {
                         repository.addResponseToCurrentVariant(username, chatId, precedingMessage)
                         // Clear thoughts after using - they belong to this message, not the final response
                         thoughtsData = null
+                        if (pendingToolOutputAttachments.isNotEmpty()) {
+                            pendingToolOutputAttachments.clear()
+                        }
                     }
                     repository.addResponseToCurrentVariant(username, chatId, toolCallMessage)
                     repository.addResponseToCurrentVariant(username, chatId, toolResponseMessage)
 
-                    // Extract output files from tool result and save them as a separate assistant message immediately
+                    // Extract output files from tool result and queue them for the NEXT text message
                     val toolResult = toolCallMessage.toolCall?.result
                     if (toolResult is ToolExecutionResult.Success || toolResult is ToolExecutionResult.Error) {
                         val details = when (toolResult) {
@@ -474,16 +483,8 @@ class StreamingService : Service() {
                                 }
                             }
                             if (attachments.isNotEmpty()) {
-                                val fileMessage = Message(
-                                    role = "assistant",
-                                    text = "[קובץ מצורף]",
-                                    attachments = attachments,
-                                    model = modelName,
-                                    datetime = Instant.now().toString(),
-                                    thoughtsStatus = ThoughtsStatus.NONE
-                                )
-                                repository.addResponseToCurrentVariant(username, chatId, fileMessage)
-                                Log.d(TAG, "Saved ${attachments.size} output files as an immediate assistant message")
+                                pendingToolOutputAttachments.addAll(attachments)
+                                Log.d(TAG, "Queued ${attachments.size} output files for the next assistant message")
                             }
                         }
                     }
