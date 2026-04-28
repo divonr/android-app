@@ -343,7 +343,6 @@ class StreamingService : Service() {
         val callback = object : StreamingCallback {
             private val accumulatedText = StringBuilder()
             private var thoughtsData: Triple<String?, Float?, ThoughtsStatus>? = null
-            private val pendingToolOutputAttachments = mutableListOf<Attachment>()
 
             override fun onPartialResponse(text: String) {
                 accumulatedText.append(text)
@@ -368,7 +367,7 @@ class StreamingService : Service() {
                         val assistantMessage = Message(
                             role = "assistant",
                             text = fullText,
-                            attachments = pendingToolOutputAttachments.toList(),
+                            attachments = emptyList(),
                             model = modelName,
                             datetime = Instant.now().toString(),
                             thoughts = thoughtsData?.first,
@@ -376,10 +375,6 @@ class StreamingService : Service() {
                             thoughtsStatus = thoughtsData?.third ?: ThoughtsStatus.NONE
                         )
                         repository.addResponseToCurrentVariant(username, chatId, assistantMessage)
-                        if (pendingToolOutputAttachments.isNotEmpty()) {
-                            Log.d(TAG, "Attached ${pendingToolOutputAttachments.size} output files to final message")
-                            pendingToolOutputAttachments.clear()
-                        }
 
                         // Broadcast completion
                         _streamingEvents.emit(StreamingEvent.Complete(requestId, chatId, fullText, modelName))
@@ -456,8 +451,7 @@ class StreamingService : Service() {
                     repository.addResponseToCurrentVariant(username, chatId, toolCallMessage)
                     repository.addResponseToCurrentVariant(username, chatId, toolResponseMessage)
 
-                    // Extract output files from tool result and store as pending attachments
-                    // They will be attached to the model's next streaming response message
+                    // Extract output files from tool result and save them as a separate assistant message immediately
                     val toolResult = toolCallMessage.toolCall?.result
                     if (toolResult is ToolExecutionResult.Success || toolResult is ToolExecutionResult.Error) {
                         val details = when (toolResult) {
@@ -479,8 +473,18 @@ class StreamingService : Service() {
                                     null
                                 }
                             }
-                            pendingToolOutputAttachments.addAll(attachments)
-                            Log.d(TAG, "Stored ${attachments.size} output files as pending attachments")
+                            if (attachments.isNotEmpty()) {
+                                val fileMessage = Message(
+                                    role = "assistant",
+                                    text = "[קובץ מצורף]",
+                                    attachments = attachments,
+                                    model = modelName,
+                                    datetime = Instant.now().toString(),
+                                    thoughtsStatus = ThoughtsStatus.NONE
+                                )
+                                repository.addResponseToCurrentVariant(username, chatId, fileMessage)
+                                Log.d(TAG, "Saved ${attachments.size} output files as an immediate assistant message")
+                            }
                         }
                     }
 
