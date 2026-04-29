@@ -578,18 +578,27 @@ fun ChatHistoryScreen(
 
 @Composable
 private fun PersonalWakeSwitch() {
-    var isChecked by remember { mutableStateOf(false) }
-    var secondsElapsed by remember { mutableStateOf(0L) }
-
+    val context = LocalContext.current
+    val sharedPrefs = remember { context.getSharedPreferences("wake_switch_prefs", android.content.Context.MODE_PRIVATE) }
+    
     val models = listOf("gemma", "qwen", "deepseek")
     var expanded by remember { mutableStateOf(false) }
     var selectedModel by remember { mutableStateOf(models[0]) }
 
-    LaunchedEffect(isChecked) {
-        if (isChecked) {
-            val startTime = System.currentTimeMillis()
+    var isChecked by remember { mutableStateOf(false) }
+    var startTime by remember { mutableStateOf(0L) }
+    var secondsElapsed by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(selectedModel) {
+        isChecked = sharedPrefs.getBoolean("is_awake_$selectedModel", false)
+        startTime = sharedPrefs.getLong("wake_start_time_$selectedModel", 0L)
+    }
+
+    LaunchedEffect(isChecked, startTime) {
+        if (isChecked && startTime > 0) {
             while (true) {
                 secondsElapsed = (System.currentTimeMillis() - startTime) / 1000
+                if (secondsElapsed < 0) secondsElapsed = 0
                 kotlinx.coroutines.delay(1000L)
             }
         } else {
@@ -640,6 +649,22 @@ private fun PersonalWakeSwitch() {
             onCheckedChange = { checked ->
                 isChecked = checked
                 val modelToUse = selectedModel
+                
+                if (checked) {
+                    val currentStartTime = System.currentTimeMillis()
+                    startTime = currentStartTime
+                    sharedPrefs.edit()
+                        .putBoolean("is_awake_$modelToUse", true)
+                        .putLong("wake_start_time_$modelToUse", currentStartTime)
+                        .apply()
+                } else {
+                    startTime = 0L
+                    sharedPrefs.edit()
+                        .putBoolean("is_awake_$modelToUse", false)
+                        .putLong("wake_start_time_$modelToUse", 0L)
+                        .apply()
+                }
+
                 kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                     try {
                         val action = if (checked) "wake" else "idle"
