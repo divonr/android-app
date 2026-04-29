@@ -44,7 +44,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDirection
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -585,17 +589,19 @@ private fun PersonalWakeSwitch() {
     var expanded by remember { mutableStateOf(false) }
     var selectedModel by remember { mutableStateOf(models[0]) }
 
-    var isChecked by remember { mutableStateOf(false) }
+    var containerState by remember { mutableStateOf("off") }
     var startTime by remember { mutableStateOf(0L) }
     var secondsElapsed by remember { mutableStateOf(0L) }
 
     LaunchedEffect(selectedModel) {
-        isChecked = sharedPrefs.getBoolean("is_awake_$selectedModel", false)
+        val oldAwake = sharedPrefs.getBoolean("is_awake_$selectedModel", false)
+        val defaultState = if (oldAwake) "ready" else "off"
+        containerState = sharedPrefs.getString("container_state_$selectedModel", defaultState) ?: defaultState
         startTime = sharedPrefs.getLong("wake_start_time_$selectedModel", 0L)
     }
 
-    LaunchedEffect(isChecked, startTime) {
-        if (isChecked && startTime > 0) {
+    LaunchedEffect(containerState, startTime) {
+        if ((containerState == "starting" || containerState == "ready") && startTime > 0) {
             while (true) {
                 secondsElapsed = (System.currentTimeMillis() - startTime) / 1000
                 if (secondsElapsed < 0) secondsElapsed = 0
@@ -605,6 +611,45 @@ private fun PersonalWakeSwitch() {
             secondsElapsed = 0
         }
     }
+
+    LaunchedEffect(containerState, selectedModel) {
+        if (containerState == "starting") {
+            while (true) {
+                kotlinx.coroutines.delay(5000L)
+                try {
+                    val url = java.net.URL("http://100.90.227.8:8082/v1/cloud/$selectedModel/status")
+                    val connection = url.openConnection() as java.net.HttpURLConnection
+                    connection.connectTimeout = 3000
+                    connection.readTimeout = 3000
+                    connection.requestMethod = "GET"
+                    connection.setRequestProperty("Authorization", "Bearer abc123")
+                    
+                    if (connection.responseCode == 200) {
+                        val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+                        if (responseBody.contains("\"ready\"")) {
+                            containerState = "ready"
+                            sharedPrefs.edit()
+                                .putString("container_state_$selectedModel", "ready")
+                                .apply()
+                            break
+                        }
+                    }
+                } catch (e: Exception) {
+                    AppLogger.e("[Polling] Status check failed: ${e.message}")
+                }
+            }
+        }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition()
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700),
+            repeatMode = RepeatMode.Reverse
+        )
+    )
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box {
@@ -633,7 +678,7 @@ private fun PersonalWakeSwitch() {
             }
         }
 
-        if (isChecked) {
+        if (containerState != "off") {
             val hours = secondsElapsed / 3600
             val minutes = (secondsElapsed % 3600) / 60
             val secs = secondsElapsed % 60
@@ -644,55 +689,72 @@ private fun PersonalWakeSwitch() {
                 modifier = Modifier.padding(end = 8.dp)
             )
         }
-        Switch(
-            checked = isChecked,
-            onCheckedChange = { checked ->
-                isChecked = checked
-                val modelToUse = selectedModel
-                
-                if (checked) {
-                    val currentStartTime = System.currentTimeMillis()
-                    startTime = currentStartTime
-                    sharedPrefs.edit()
-                        .putBoolean("is_awake_$modelToUse", true)
-                        .putLong("wake_start_time_$modelToUse", currentStartTime)
-                        .apply()
-                } else {
-                    startTime = 0L
-                    sharedPrefs.edit()
-                        .putBoolean("is_awake_$modelToUse", false)
-                        .putLong("wake_start_time_$modelToUse", 0L)
-                        .apply()
-                }
+        
+        val dotColor = when (containerState) {
+            "ready" -> Color(0xFF4CAF50)
+            "starting" -> Color(0xFFFF9800)
+            else -> Color(0xFFF44336)
+        }
+        val currentAlpha = if (containerState == "starting") alpha else 1f
 
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    try {
-                        val action = if (checked) "wake" else "idle"
-                        val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/$action"
-                        AppLogger.i("[PersonalWakeSwitch] Sending GET to: $urlStr")
-                        val url = java.net.URL(urlStr)
-                        val connection = url.openConnection() as java.net.HttpURLConnection
-                        connection.connectTimeout = 3000
-                        connection.readTimeout = 3000
-                        connection.requestMethod = "GET"
-                        connection.setRequestProperty("Authorization", "Bearer abc123")
-                        
-                        val responseCode = connection.responseCode
-                        val responseBody = try {
-                            connection.inputStream.bufferedReader().use { it.readText() }
-                        } catch (e: Exception) {
-                            connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "No body"
+        Box(
+            modifier = Modifier
+                .padding(end = 8.dp)
+                .size(16.dp)
+                .clip(CircleShape)
+                .background(dotColor.copy(alpha = currentAlpha))
+                .clickable {
+                    val modelToUse = selectedModel
+                    if (containerState == "off") {
+                        val currentStartTime = System.currentTimeMillis()
+                        containerState = "starting"
+                        startTime = currentStartTime
+                        sharedPrefs.edit()
+                            .putString("container_state_$modelToUse", "starting")
+                            .putLong("wake_start_time_$modelToUse", currentStartTime)
+                            .putBoolean("is_awake_$modelToUse", true)
+                            .apply()
+                            
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            try {
+                                val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/wake"
+                                val url = java.net.URL(urlStr)
+                                val connection = url.openConnection() as java.net.HttpURLConnection
+                                connection.connectTimeout = 3000
+                                connection.readTimeout = 3000
+                                connection.requestMethod = "GET"
+                                connection.setRequestProperty("Authorization", "Bearer abc123")
+                                connection.responseCode
+                            } catch (e: Exception) {
+                                AppLogger.e("Wake failed: ${e.message}")
+                            }
                         }
-                        
-                        AppLogger.i("[PersonalWakeSwitch] Response code: $responseCode")
-                        AppLogger.i("[PersonalWakeSwitch] Response body: $responseBody")
-                    } catch (e: Exception) {
-                        AppLogger.e("[PersonalWakeSwitch] Exception: ${e.message}")
-                        e.printStackTrace()
+                    } else {
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            try {
+                                val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/idle"
+                                val url = java.net.URL(urlStr)
+                                val connection = url.openConnection() as java.net.HttpURLConnection
+                                connection.connectTimeout = 3000
+                                connection.readTimeout = 3000
+                                connection.requestMethod = "GET"
+                                connection.setRequestProperty("Authorization", "Bearer abc123")
+                                
+                                if (connection.responseCode == 200) {
+                                    containerState = "off"
+                                    startTime = 0L
+                                    sharedPrefs.edit()
+                                        .putString("container_state_$modelToUse", "off")
+                                        .putLong("wake_start_time_$modelToUse", 0L)
+                                        .putBoolean("is_awake_$modelToUse", false)
+                                        .apply()
+                                }
+                            } catch (e: Exception) {
+                                AppLogger.e("Idle failed: ${e.message}")
+                            }
+                        }
                     }
                 }
-            },
-            modifier = Modifier.padding(end = 8.dp)
         )
     }
 }
