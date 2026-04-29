@@ -617,15 +617,18 @@ private fun PersonalWakeSwitch() {
             while (true) {
                 kotlinx.coroutines.delay(5000L)
                 try {
-                    val url = java.net.URL("http://100.90.227.8:8082/v1/cloud/$selectedModel/status")
+                    val urlStr = "http://100.90.227.8:8082/v1/cloud/$selectedModel/status"
+                    val url = java.net.URL(urlStr)
                     val connection = url.openConnection() as java.net.HttpURLConnection
                     connection.connectTimeout = 3000
                     connection.readTimeout = 3000
                     connection.requestMethod = "GET"
                     connection.setRequestProperty("Authorization", "Bearer abc123")
                     
-                    if (connection.responseCode == 200) {
+                    val responseCode = connection.responseCode
+                    if (responseCode == 200) {
                         val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+                        AppLogger.i("[Polling] $urlStr -> 200 OK: $responseBody")
                         if (responseBody.contains("\"ready\"")) {
                             containerState = "ready"
                             sharedPrefs.edit()
@@ -633,6 +636,8 @@ private fun PersonalWakeSwitch() {
                                 .apply()
                             break
                         }
+                    } else {
+                        AppLogger.e("[Polling] $urlStr -> failed with code $responseCode")
                     }
                 } catch (e: Exception) {
                     AppLogger.e("[Polling] Status check failed: ${e.message}")
@@ -718,21 +723,7 @@ private fun PersonalWakeSwitch() {
                         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                             try {
                                 val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/wake"
-                                val url = java.net.URL(urlStr)
-                                val connection = url.openConnection() as java.net.HttpURLConnection
-                                connection.connectTimeout = 3000
-                                connection.readTimeout = 3000
-                                connection.requestMethod = "GET"
-                                connection.setRequestProperty("Authorization", "Bearer abc123")
-                                connection.responseCode
-                            } catch (e: Exception) {
-                                AppLogger.e("Wake failed: ${e.message}")
-                            }
-                        }
-                    } else {
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            try {
-                                val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/idle"
+                                AppLogger.i("[Wake] Sending request to $urlStr")
                                 val url = java.net.URL(urlStr)
                                 val connection = url.openConnection() as java.net.HttpURLConnection
                                 connection.connectTimeout = 3000
@@ -740,7 +731,38 @@ private fun PersonalWakeSwitch() {
                                 connection.requestMethod = "GET"
                                 connection.setRequestProperty("Authorization", "Bearer abc123")
                                 
-                                if (connection.responseCode == 200) {
+                                val responseCode = connection.responseCode
+                                val responseBody = if (responseCode == 200) {
+                                    connection.inputStream.bufferedReader().use { it.readText() }
+                                } else {
+                                    connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                                }
+                                AppLogger.i("[Wake] Response $responseCode: $responseBody")
+                            } catch (e: Exception) {
+                                AppLogger.e("[Wake] failed: ${e.message}")
+                            }
+                        }
+                    } else {
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            try {
+                                val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/idle"
+                                AppLogger.i("[Idle] Sending request to $urlStr")
+                                val url = java.net.URL(urlStr)
+                                val connection = url.openConnection() as java.net.HttpURLConnection
+                                connection.connectTimeout = 3000
+                                connection.readTimeout = 3000
+                                connection.requestMethod = "GET"
+                                connection.setRequestProperty("Authorization", "Bearer abc123")
+                                
+                                val responseCode = connection.responseCode
+                                val responseBody = if (responseCode == 200) {
+                                    connection.inputStream.bufferedReader().use { it.readText() }
+                                } else {
+                                    connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                                }
+                                AppLogger.i("[Idle] Response $responseCode: $responseBody")
+                                
+                                if (responseCode == 200) {
                                     containerState = "off"
                                     startTime = 0L
                                     sharedPrefs.edit()
@@ -750,7 +772,7 @@ private fun PersonalWakeSwitch() {
                                         .apply()
                                 }
                             } catch (e: Exception) {
-                                AppLogger.e("Idle failed: ${e.message}")
+                                AppLogger.e("[Idle] failed: ${e.message}")
                             }
                         }
                     }
