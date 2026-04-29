@@ -581,6 +581,10 @@ private fun PersonalWakeSwitch() {
     var isChecked by remember { mutableStateOf(false) }
     var secondsElapsed by remember { mutableStateOf(0L) }
 
+    val models = listOf("gemma", "qwen", "deepseek")
+    var expanded by remember { mutableStateOf(false) }
+    var selectedModel by remember { mutableStateOf(models[0]) }
+
     LaunchedEffect(isChecked) {
         if (isChecked) {
             val startTime = System.currentTimeMillis()
@@ -594,6 +598,32 @@ private fun PersonalWakeSwitch() {
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
+        Box {
+            Text(
+                text = selectedModel,
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .clickable { expanded = true }
+                    .padding(4.dp)
+            )
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                models.forEach { model ->
+                    DropdownMenuItem(
+                        text = { Text(model) },
+                        onClick = {
+                            selectedModel = model
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+
         if (isChecked) {
             val hours = secondsElapsed / 3600
             val minutes = (secondsElapsed % 3600) / 60
@@ -601,6 +631,7 @@ private fun PersonalWakeSwitch() {
             Text(
                 text = String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, secs),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
                 modifier = Modifier.padding(end = 8.dp)
             )
         }
@@ -608,9 +639,11 @@ private fun PersonalWakeSwitch() {
             checked = isChecked,
             onCheckedChange = { checked ->
                 isChecked = checked
+                val modelToUse = selectedModel
                 kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                     try {
-                        val urlStr = if (checked) "http://100.90.227.8:8082/v1/cloud/wake" else "http://100.90.227.8:8082/v1/cloud/idle"
+                        val action = if (checked) "wake" else "idle"
+                        val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/$action"
                         AppLogger.i("[PersonalWakeSwitch] Sending GET to: $urlStr")
                         val url = java.net.URL(urlStr)
                         val connection = url.openConnection() as java.net.HttpURLConnection
