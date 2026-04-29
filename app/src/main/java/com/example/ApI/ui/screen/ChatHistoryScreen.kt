@@ -616,32 +616,38 @@ private fun PersonalWakeSwitch() {
         if (containerState == "starting") {
             while (true) {
                 kotlinx.coroutines.delay(5000L)
-                try {
-                    val urlStr = "http://100.90.227.8:8082/v1/cloud/$selectedModel/status"
-                    val url = java.net.URL(urlStr)
-                    val connection = url.openConnection() as java.net.HttpURLConnection
-                    connection.connectTimeout = 3000
-                    connection.readTimeout = 3000
-                    connection.requestMethod = "GET"
-                    connection.setRequestProperty("Authorization", "Bearer abc123")
-                    
-                    val responseCode = connection.responseCode
-                    if (responseCode == 200) {
-                        val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
-                        AppLogger.i("[Polling] $urlStr -> 200 OK: $responseBody")
-                        if (responseBody.contains("\"ready\"")) {
-                            containerState = "ready"
-                            sharedPrefs.edit()
-                                .putString("container_state_$selectedModel", "ready")
-                                .apply()
-                            break
+                var shouldBreak = false
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        val urlStr = "http://100.90.227.8:8082/v1/cloud/$selectedModel/status"
+                        val url = java.net.URL(urlStr)
+                        val connection = url.openConnection() as java.net.HttpURLConnection
+                        connection.connectTimeout = 3000
+                        connection.readTimeout = 3000
+                        connection.requestMethod = "GET"
+                        connection.setRequestProperty("Authorization", "Bearer abc123")
+                        
+                        val responseCode = connection.responseCode
+                        if (responseCode == 200) {
+                            val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+                            AppLogger.i("[Polling] $urlStr -> 200 OK: $responseBody")
+                            if (responseBody.contains("\"ready\"")) {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    containerState = "ready"
+                                    sharedPrefs.edit()
+                                        .putString("container_state_$selectedModel", "ready")
+                                        .apply()
+                                    shouldBreak = true
+                                }
+                            }
+                        } else {
+                            AppLogger.e("[Polling] $urlStr -> failed with code $responseCode")
                         }
-                    } else {
-                        AppLogger.e("[Polling] $urlStr -> failed with code $responseCode")
+                    } catch (e: Exception) {
+                        AppLogger.e("[Polling] Status check failed: ${e.message}")
                     }
-                } catch (e: Exception) {
-                    AppLogger.e("[Polling] Status check failed: ${e.message}")
                 }
+                if (shouldBreak) break
             }
         }
     }
