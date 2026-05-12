@@ -585,9 +585,13 @@ private fun PersonalWakeSwitch() {
     val context = LocalContext.current
     val sharedPrefs = remember { context.getSharedPreferences("wake_switch_prefs", android.content.Context.MODE_PRIVATE) }
     
-    val models = listOf("gemma", "qwen", "deepseek")
+    val models = listOf("gemma", "qwen", "deepseek", "hebatron")
     var expanded by remember { mutableStateOf(false) }
-    var selectedModel by remember { mutableStateOf(models[0]) }
+    var selectedModel by remember {
+        // Default to the first model that is currently in keep-alive/awake state
+        val awakeModel = models.firstOrNull { sharedPrefs.getBoolean("is_awake_$it", false) }
+        mutableStateOf(awakeModel ?: models[0])
+    }
 
     var containerState by remember { mutableStateOf("off") }
     var startTime by remember { mutableStateOf(0L) }
