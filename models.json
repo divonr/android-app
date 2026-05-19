@@ -62,7 +62,7 @@
         "1k_output_price": 0.014
       },
       {
-        "name": "gpt-5.4",
+        "name": "gpt-5.5",
         "release_order": 10,
         "temperature": {
           "min": 0,
@@ -366,7 +366,7 @@
     "provider": "google",
     "models": [
       {
-        "name": "gemini-3-flash-preview",
+        "name": "gemini-3.5-flash",
         "release_order": 5,
         "temperature": {
           "min": 0,
