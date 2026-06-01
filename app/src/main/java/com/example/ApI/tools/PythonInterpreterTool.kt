@@ -77,16 +77,27 @@ Limits: 5 min timeout, 2GB RAM.
         val filesToInclude = parameters["files_to_include"]?.jsonArray
             ?.mapNotNull { it.jsonPrimitive.contentOrNull }
             ?: emptyList()
-        AppLogger.i("[PythonTool] Files to include: $filesToInclude")
 
         // Resolve files for upload
         val resolvedFiles = resolveFiles(filesToInclude)
-        AppLogger.i("[PythonTool] Resolved ${resolvedFiles.size} files for upload")
+
+        val sharedPrefs = context.getSharedPreferences("python_sessions", Context.MODE_PRIVATE)
+        val chatKey = currentChat?.id ?: "default_session"
+        val savedSessionId = sharedPrefs.getString(chatKey, null)
+        AppLogger.i("[PythonTool] Loaded session_id from SharedPreferences for chat $chatKey: $savedSessionId")
 
         // Build multipart form-data request
         val multipartBuilder = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("code", code)
+            .addFormDataPart("kill_session", "false")
+        
+        AppLogger.i("[PythonTool] Appended kill_session=false to request")
+
+        if (savedSessionId != null) {
+            multipartBuilder.addFormDataPart("session_id", savedSessionId)
+            AppLogger.i("[PythonTool] Appended existing session_id=$savedSessionId to request")
+        }
 
         resolvedFiles.forEach { file ->
             val mediaType = file.mimeType.toMediaType()
@@ -124,8 +135,8 @@ Limits: 5 min timeout, 2GB RAM.
                     AppLogger.e("[PythonTool] Response body is null")
                     return@withContext ToolExecutionResult.Error("Empty response from Python executor")
                 }
-                AppLogger.i("[PythonTool] Response body length: ${responseBody.length} chars")
-                AppLogger.i("[PythonTool] Response body preview: ${responseBody.take(1000)}")
+                
+                AppLogger.i("[PythonTool] Server Response: $responseBody")
 
                 parseResponse(responseBody)
             } catch (e: Exception) {
@@ -138,6 +149,14 @@ Limits: 5 min timeout, 2GB RAM.
 
     private fun parseResponse(responseBody: String): ToolExecutionResult {
         val json = Json.parseToJsonElement(responseBody).jsonObject
+
+        val returnedSessionId = json["session_id"]?.jsonPrimitive?.contentOrNull
+        if (returnedSessionId != null) {
+            val sharedPrefs = context.getSharedPreferences("python_sessions", Context.MODE_PRIVATE)
+            val chatKey = currentChat?.id ?: "default_session"
+            sharedPrefs.edit().putString(chatKey, returnedSessionId).apply()
+            AppLogger.i("[PythonTool] Saved new session_id: $returnedSessionId")
+        }
 
         val status = json["status"]?.jsonPrimitive?.contentOrNull ?: "error"
 
@@ -206,59 +225,44 @@ Limits: 5 min timeout, 2GB RAM.
     private fun getAvailableFiles(): List<Attachment> {
         val files = mutableListOf<Attachment>()
 
-        AppLogger.i("[PythonTool] Fetching available files. currentChat messages count: ${currentChat?.messages?.size ?: 0}")
-
         // Files from current chat messages
         currentChat?.messages?.forEach { message ->
             message.attachments.filter { it.local_file_path != null }.forEach { 
-                AppLogger.i("[PythonTool] Found chat attachment: ${it.file_name} at ${it.local_file_path}")
                 files.add(it) 
             }
         }
 
         // Files from group/project
         currentGroup?.group_attachments?.filter { it.local_file_path != null }?.forEach {
-            AppLogger.i("[PythonTool] Found group attachment: ${it.file_name} at ${it.local_file_path}")
             files.add(it)
         }
 
-        val distinct = files.distinctBy { it.file_name }
-        AppLogger.i("[PythonTool] Total distinct available files: ${distinct.size}. Names: ${distinct.map { it.file_name }}")
-        return distinct
+        return files.distinctBy { it.file_name }
     }
 
     private fun resolveFiles(fileNames: List<String>): List<ResolvedFile> {
         val availableFiles = getAvailableFiles()
         return fileNames.mapNotNull { fileName ->
             val cleanFileName = fileName.substringAfterLast("/")
-            AppLogger.i("[PythonTool] Trying to resolve requested file: '$fileName' (Cleaned: '$cleanFileName')")
             availableFiles.find { it.file_name.equals(cleanFileName, ignoreCase = true) }
                 ?.let { attachment ->
-                    AppLogger.i("[PythonTool] Found match in availableFiles for '$cleanFileName'. local_path: ${attachment.local_file_path}")
                     try {
                         val file = File(attachment.local_file_path!!)
                         if (!file.exists()) {
-                            AppLogger.e("[PythonTool] File DOES NOT EXIST at path: ${file.absolutePath}")
                             return@let null
                         }
                         if (file.length() > MAX_FILE_SIZE) {
-                            AppLogger.e("[PythonTool] File too large: ${file.length()} bytes > MAX($MAX_FILE_SIZE)")
                             return@let null
                         }
                         
-                        AppLogger.i("[PythonTool] Successfully resolved and read file: '$cleanFileName' (${file.length()} bytes)")
                         ResolvedFile(
                             name = attachment.file_name,
                             bytes = file.readBytes(),
                             mimeType = attachment.mime_type
                         )
                     } catch (e: Exception) { 
-                        AppLogger.e("[PythonTool] Exception while reading file '$cleanFileName': ${e.message}")
                         null 
                     }
-                } ?: run {
-                    AppLogger.e("[PythonTool] Could NOT find match for '$cleanFileName' in availableFiles.")
-                    null
                 }
         }
     }

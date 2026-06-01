@@ -367,7 +367,7 @@ class StreamingService : Service() {
                         // Save response to repository directly (survives ViewModel death)
                         val assistantMessage = Message(
                             role = "assistant",
-                            text = fullText,
+                            text = fullText.ifBlank { if (pendingToolOutputAttachments.isNotEmpty()) "[קובץ מצורף]" else "" },
                             attachments = pendingToolOutputAttachments.toList(),
                             model = modelName,
                             datetime = Instant.now().toString(),
@@ -377,7 +377,6 @@ class StreamingService : Service() {
                         )
                         repository.addResponseToCurrentVariant(username, chatId, assistantMessage)
                         if (pendingToolOutputAttachments.isNotEmpty()) {
-                            Log.d(TAG, "Attached ${pendingToolOutputAttachments.size} output files to final message")
                             pendingToolOutputAttachments.clear()
                         }
 
@@ -437,12 +436,14 @@ class StreamingService : Service() {
             override suspend fun onSaveToolMessages(toolCallMessage: Message, toolResponseMessage: Message, precedingText: String) {
                 // Save tool messages to chat history
                 try {
-                    // Save preceding text AND thoughts as assistant message if either exists
-                    if (precedingText.isNotBlank() || thoughtsData != null) {
+                    // Save preceding text AND thoughts as assistant message if either exists OR if there are pending attachments
+                    val hasPrecedingText = precedingText.isNotBlank() || thoughtsData != null
+                    if (hasPrecedingText || pendingToolOutputAttachments.isNotEmpty()) {
+                        val displayPrecedingText = precedingText.ifBlank { if (pendingToolOutputAttachments.isNotEmpty()) "[קובץ מצורף]" else "" }
                         val precedingMessage = Message(
                             role = "assistant",
-                            text = precedingText,
-                            attachments = emptyList(),
+                            text = displayPrecedingText,
+                            attachments = pendingToolOutputAttachments.toList(),
                             model = modelName,
                             datetime = Instant.now().toString(),
                             thoughts = thoughtsData?.first,
@@ -452,12 +453,14 @@ class StreamingService : Service() {
                         repository.addResponseToCurrentVariant(username, chatId, precedingMessage)
                         // Clear thoughts after using - they belong to this message, not the final response
                         thoughtsData = null
+                        if (pendingToolOutputAttachments.isNotEmpty()) {
+                            pendingToolOutputAttachments.clear()
+                        }
                     }
                     repository.addResponseToCurrentVariant(username, chatId, toolCallMessage)
                     repository.addResponseToCurrentVariant(username, chatId, toolResponseMessage)
 
-                    // Extract output files from tool result and store as pending attachments
-                    // They will be attached to the model's next streaming response message
+                    // Extract output files from tool result and queue them for the NEXT text message
                     val toolResult = toolCallMessage.toolCall?.result
                     if (toolResult is ToolExecutionResult.Success || toolResult is ToolExecutionResult.Error) {
                         val details = when (toolResult) {
@@ -479,8 +482,10 @@ class StreamingService : Service() {
                                     null
                                 }
                             }
-                            pendingToolOutputAttachments.addAll(attachments)
-                            Log.d(TAG, "Stored ${attachments.size} output files as pending attachments")
+                            if (attachments.isNotEmpty()) {
+                                pendingToolOutputAttachments.addAll(attachments)
+                                Log.d(TAG, "Queued ${attachments.size} output files for the next assistant message")
+                            }
                         }
                     }
 
