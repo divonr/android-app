@@ -1,0 +1,504 @@
+﻿package com.example.ApI.ui.screen
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.*
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.focus.FocusRequester
+import com.example.ApI.stringResource
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import com.example.ApI.R
+import com.example.ApI.data.model.*
+import com.example.ApI.ui.ChatViewModel
+import com.example.ApI.ui.components.*
+import com.example.ApI.ui.components.dialogs.*
+import com.example.ApI.ui.theme.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatScreen(
+    viewModel: ChatViewModel,
+    uiState: ChatUiState,
+    modifier: Modifier = Modifier
+) {
+    val snackbarHostState = remember { SnackbarHostState() }
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val searchFocusRequester = remember { FocusRequester() }
+    val appSettings by viewModel.appSettings.collectAsState()
+    
+    LaunchedEffect(uiState.snackbarMessage) {
+        uiState.snackbarMessage?.let {
+            snackbarHostState.showSnackbar(
+                message = it,
+                duration = SnackbarDuration.Short
+            )
+            viewModel.clearSnackbar()
+        }
+    }
+
+    // Auto-focus search field when entering search mode
+    LaunchedEffect(uiState.searchMode) {
+        if (uiState.searchMode) {
+            kotlinx.coroutines.delay(100) // Small delay to ensure UI is ready
+            searchFocusRequester.requestFocus()
+        }
+    }
+    
+    // Handle search context - scroll to found message
+    LaunchedEffect(uiState.searchContext, uiState.currentChat?.messages?.size) {
+        val searchContext = uiState.searchContext
+        val currentChat = uiState.currentChat
+        
+        if (searchContext != null && 
+            currentChat != null && 
+            searchContext.matchType == SearchMatchType.CONTENT && 
+            searchContext.messageIndex >= 0 &&
+            searchContext.messageIndex < currentChat.messages.size) {
+            
+            // Calculate the reversed index since messages are displayed in reverse order
+            val reversedIndex = currentChat.messages.size - 1 - searchContext.messageIndex
+            
+            // Wait longer for the UI to fully settle and load
+            kotlinx.coroutines.delay(500)
+            
+            // First try to scroll to the item
+            try {
+                // Account for streaming bubble (1) + reply button (1) if present
+                val chatIdForSearch = uiState.currentChat?.chat_id
+                val hasThinkingForSearch = chatIdForSearch?.let {
+                    uiState.isThinking(it) || uiState.getStreamingThoughts(it).isNotBlank()
+                } ?: false
+                val adjustedIndex = reversedIndex +
+                    (if (uiState.isStreaming && (uiState.streamingText.isNotEmpty() || hasThinkingForSearch)) 1 else 0) +
+                    (if (uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading) 1 else 0)
+
+                // Try to scroll to the item
+                if (adjustedIndex >= 0 && adjustedIndex < (currentChat.messages.size + 2)) {
+                    listState.animateScrollToItem(adjustedIndex)
+                } else {
+                    // Fallback: just scroll to the original reversed index
+                    listState.animateScrollToItem(reversedIndex)
+                }
+                
+                // Keep highlighting for longer so user can see it
+                kotlinx.coroutines.delay(8000) // Keep highlighting for 8 seconds
+                viewModel.clearSearchContext()
+            } catch (e: Exception) {
+                // If scrolling fails, still clear context after delay
+                kotlinx.coroutines.delay(3000)
+                viewModel.clearSearchContext()
+            }
+        }
+    }
+    
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(Background)
+        ) {
+    // Back cancels edit mode if active
+    BackHandler(enabled = uiState.isEditMode) {
+        viewModel.cancelEditingMessage()
+    }
+
+    // Back exits search mode if active
+    BackHandler(enabled = uiState.searchMode) {
+        viewModel.exitSearchMode()
+    }
+            // Semi-transparent overlay for edit mode
+            if (uiState.isEditMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.3f))
+                        .clickable { viewModel.cancelEditingMessage() }
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .systemBarsPadding()
+                    .padding(end = 0.dp)
+            ) {
+                // Top bars container with floating arrow
+                ChatTopBarContainer(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    searchFocusRequester = searchFocusRequester
+                )
+
+                // Chat Messages - Hybrid Fix (Visual + Physical)
+                Box(modifier = Modifier.weight(1f)) {
+                                        // ׳׳©׳×׳ ׳” ׳׳×׳™׳§׳•׳ ׳•׳™׳–׳•׳׳׳™ (Shift)
+                    var listTranslationY by remember { mutableFloatStateOf(0f) }
+
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp)
+                            // ׳©׳׳‘ 1: ׳”-Modifier ׳”׳–׳” ׳׳–׳™׳– ׳׳× ׳”׳¨׳©׳™׳׳” ׳•׳™׳–׳•׳׳׳™׳×
+                            // ׳‘׳”׳×׳׳ ׳׳¢׳¨׳ ׳©׳—׳™׳©׳‘׳ ׳•, ׳¢׳•׳“ ׳׳₪׳ ׳™ ׳©׳”׳’׳׳™׳׳” ׳”׳׳׳™׳×׳™׳× ׳§׳•׳¨׳™׳×
+                            .graphicsLayer { 
+                                translationY = listTranslationY 
+                            },
+                        reverseLayout = true
+                    ) {
+                        // Streaming Message Bubble (show during thinking phase even if streamingText is empty)
+                        val currentChatIdForStreaming = uiState.currentChat?.chat_id
+                        val hasThinkingContent = currentChatIdForStreaming?.let {
+                            uiState.isThinking(it) || uiState.getStreamingThoughts(it).isNotBlank()
+                        } ?: false
+                        if (uiState.isStreaming && (uiState.streamingText.isNotEmpty() || hasThinkingContent)) {
+                            item {
+                                var previousHeight by remember { mutableIntStateOf(0) }
+
+                                val currentChatId = currentChatIdForStreaming
+                                StreamingMessageBubble(
+                                    text = uiState.streamingText,
+                                    textDirectionMode = uiState.textDirectionMode,
+                                    isThinking = currentChatId?.let { uiState.isThinking(it) } ?: false,
+                                    streamingThoughts = currentChatId?.let { uiState.getStreamingThoughts(it) } ?: "",
+                                    thinkingStartTime = currentChatId?.let { uiState.getThinkingStartTime(it) },
+                                    completedThinkingDuration = currentChatId?.let { uiState.getCompletedThinkingDuration(it) },
+                                    modifier = Modifier
+                                        .padding(vertical = 4.dp)
+                                        .onSizeChanged { size ->
+                                            val currentHeight = size.height
+                                            
+                                            // ׳‘׳“׳™׳§׳” ׳׳ ׳”׳™׳” ׳©׳™׳ ׳•׳™ ׳’׳•׳‘׳” ׳—׳™׳•׳‘׳™ (׳’׳“׳™׳׳”)
+                                            if (previousHeight > 0 && currentHeight > previousHeight) {
+                                                val diff = (currentHeight - previousHeight).toFloat()
+                                                
+                                                // ׳”׳׳ ׳”׳׳©׳×׳׳© ׳§׳•׳¨׳ ׳”׳™׳¡׳˜׳•׳¨׳™׳”?
+                                                val isAtBottom = listState.firstVisibleItemIndex == 0 && 
+                                                               listState.firstVisibleItemScrollOffset == 0
+                                                
+                                                if (!isAtBottom) {
+                                                    // ׳©׳׳‘ 2: ׳¢׳“׳›׳•׳ ׳׳™׳™׳“׳™ ׳©׳ ׳”׳×׳™׳§׳•׳ ׳”׳•׳™׳–׳•׳׳׳™.
+                                                    // ׳–׳” ׳™׳’׳¨׳•׳ ׳׳¨׳©׳™׳׳” ׳׳”׳™׳•׳× ׳׳¦׳•׳™׳¨׳× ׳ ׳׳•׳ ׳™׳•׳×׳¨ ׳‘׳₪׳¨׳™׳™׳ ׳”׳ ׳•׳›׳—׳™,
+                                                    // ׳•׳™׳‘׳˜׳ ׳׳× ׳”׳§׳₪׳™׳¦׳” ׳׳׳¢׳׳” ׳©׳ ׳•׳¦׳¨׳” ׳׳”׳’׳“׳™׳׳”.
+                                                    listTranslationY += diff
+                                                    
+                                                    // ׳©׳׳‘ 3: ׳×׳–׳׳•׳ ׳”׳×׳™׳§׳•׳ ׳”׳₪׳™׳–׳™׳§׳׳™ ׳׳¨׳’׳¢ ׳”׳‘׳˜׳•׳— ׳”׳‘׳
+                                                    
+                                                        // ׳‘׳™׳¦׳•׳¢ ׳”׳’׳׳™׳׳” ׳”׳׳׳™׳×׳™׳×
+                                                        listState.dispatchRawDelta(diff)
+                                                        
+                                                        // ׳‘׳™׳˜׳•׳ ׳”׳×׳™׳§׳•׳ ׳”׳•׳™׳–׳•׳׳׳™ (׳›׳™ ׳”׳’׳׳™׳׳” ׳”׳׳׳™׳×׳™׳× ׳”׳—׳׳™׳₪׳” ׳׳•׳×׳•)
+                                                        // ׳׳ ׳—׳ ׳• ׳׳—׳¡׳¨׳™׳ ׳׳× ׳׳” ׳©׳”׳•׳¡׳₪׳ ׳•
+                                                        listTranslationY -= diff
+                                                    
+                                                }
+                                            }
+                                            previousHeight = currentHeight
+                                        }
+                                )
+                            }
+                        }
+
+                        // ... (׳©׳׳¨ ׳”׳§׳•׳“ ׳©׳ ׳”׳›׳₪׳×׳•׳¨׳™׳ ׳•׳”׳”׳•׳“׳¢׳•׳× ׳ ׳©׳׳¨ ׳–׳”׳” ׳׳—׳׳•׳˜׳™׳) ...
+                        
+                        // Show temporary reply button bubble when multi-message mode is active
+                        if (uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading) {
+                            item {
+                                ReplyPromptBubble(
+                                    onClick = { viewModel.sendBufferedBatch() },
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                            }
+                        }
+                        
+                        // Show tool execution loading indicator if a tool is executing
+                        uiState.executingToolCall?.let { toolInfo ->
+                            item {
+                                ToolExecutionLoadingBubble(
+                                    toolInfo = toolInfo,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                                )
+                            }
+                        }
+                        
+                        uiState.currentChat?.messages?.let { messages ->
+                            val reversedMessages = messages.reversed()
+                            itemsIndexed(reversedMessages) { index, message ->
+                                if (message.role == "tool_call") return@itemsIndexed
+                                
+                                val isFirstMessage = index == 0
+                                val previousMessage = if (index > 0) {
+                                    var prevIndex = index - 1
+                                    while (prevIndex >= 0 && reversedMessages[prevIndex].role == "tool_call") {
+                                        prevIndex--
+                                    }
+                                    if (prevIndex >= 0) reversedMessages[prevIndex] else null
+                                } else null
+                                val isSameSpeaker = previousMessage?.role == message.role
+
+                                val topPadding = if (isFirstMessage || !isSameSpeaker) 4.dp else 0.dp
+                                val bottomPadding = if (!isSameSpeaker) 4.dp else 0.dp
+                                val originalIndex = messages.size - 1 - index
+                                
+                                val searchHighlight = if (uiState.searchMode && uiState.searchResults.isNotEmpty()) {
+                                    uiState.searchResults.find { result ->
+                                        result.matchType == SearchMatchType.CONTENT && 
+                                        result.messageIndex == originalIndex
+                                    }
+                                } else null
+
+                                MessageBubble(
+                                    message = message,
+                                    viewModel = viewModel,
+                                    modifier = Modifier.padding(top = topPadding, bottom = bottomPadding),
+                                    isEditMode = uiState.isEditMode,
+                                    isBeingEdited = uiState.editingMessage == message,
+                                    searchHighlight = searchHighlight
+                                )
+                            }
+                        }
+                    }
+
+                    // Floating Scroll Buttons Logic
+                    var showScrollButton by remember { mutableStateOf(false) }
+                    var hideButtonJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+                    
+                    LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
+                        val isAtBottom = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                        
+                        if (!isAtBottom && !showScrollButton) {
+                            showScrollButton = true
+                            hideButtonJob?.cancel()
+                            hideButtonJob = launch {
+                                kotlinx.coroutines.delay(3000)
+                                showScrollButton = false
+                            }
+                        } else if (isAtBottom) {
+                            hideButtonJob?.cancel()
+                            showScrollButton = false
+                        }
+                    }
+
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showScrollButton,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        ) {
+                            FloatingActionButton(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        scrollToPreviousMessage(
+                                            listState,
+                                            uiState.currentChat?.messages,
+                                            uiState.isStreaming && uiState.streamingText.isNotEmpty(),
+                                            uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading
+                                        )
+                                    }
+                                    hideButtonJob?.cancel()
+                                },
+                                shape = CircleShape,
+                                containerColor = Primary,
+                                contentColor = Color.White,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowUp,
+                                    contentDescription = "Previous",
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            FloatingActionButton(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        listState.animateScrollToItem(0)
+                                    }
+                                    hideButtonJob?.cancel()
+                                    showScrollButton = false
+                                },
+                                shape = CircleShape,
+                                containerColor = Primary,
+                                contentColor = Color.White,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Bottom",
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Selected Files Preview
+                SelectedFilesPreview(
+                    selectedFiles = uiState.selectedFiles,
+                    onRemoveFile = { viewModel.removeSelectedFile(it) }
+                )
+
+                // Modern Message Input Area
+                ChatInputArea(
+                    currentMessage = uiState.currentMessage,
+                    onMessageChange = { viewModel.updateMessage(it) },
+                    selectedFiles = uiState.selectedFiles,
+                    isEditMode = uiState.isEditMode,
+                    isLoading = uiState.isLoading,
+                    isStreaming = uiState.isStreaming,
+                    webSearchSupport = uiState.webSearchSupport,
+                    webSearchEnabled = uiState.webSearchEnabled,
+                    onToggleWebSearch = { viewModel.toggleWebSearch() },
+                    onSendMessage = { viewModel.sendMessage() },
+                    onStopStreaming = { viewModel.stopStreamingAndSave() },
+                    onFinishEditing = { viewModel.finishEditingMessage() },
+                    onConfirmEditAndResend = { viewModel.confirmEditAndResend() },
+                    onFileSelected = { uri, name, mime -> viewModel.addFileFromUri(uri, name, mime) },
+                    onMultipleFilesSelected = { filesList -> viewModel.addMultipleFilesFromUris(filesList) }
+                )
+            }
+
+            // System Prompt Dialog
+            if (uiState.showSystemPromptDialog) {
+                val projectGroup = viewModel.getCurrentChatProjectGroup()
+
+                SystemPromptDialog(
+                    currentPrompt = uiState.systemPrompt,
+                    onConfirm = { viewModel.updateSystemPrompt(it) },
+                    onDismiss = { viewModel.hideSystemPromptDialog() },
+                    projectPrompt = projectGroup?.system_prompt,
+                    projectName = projectGroup?.group_name,
+                    initialOverrideEnabled = uiState.systemPromptOverrideEnabled,
+                    onOverrideToggle = { enabled ->
+                        viewModel.setSystemPromptOverride(enabled)
+                    }
+                )
+            }
+
+            // Model Selector with provider tabs and favorites
+            if (uiState.showModelSelector) {
+                ModelSelectorDialog(
+                    availableProviders = uiState.availableProviders,
+                    currentProvider = uiState.currentProvider,
+                    starredModels = appSettings.starredModels,
+                    onModelSelected = { provider, modelName ->
+                        viewModel.selectModelWithProvider(provider, modelName)
+                    },
+                    onToggleStar = { providerKey, modelName ->
+                        viewModel.toggleStarredModel(providerKey, modelName)
+                    },
+                    onDismiss = { viewModel.hideModelSelector() },
+                    onRefresh = { viewModel.refreshModels() }
+                )
+            }
+
+            // Delete Chat Confirmation Dialog
+            uiState.showDeleteChatConfirmation?.let { chat ->
+                AlertDialog(
+                    onDismissRequest = { viewModel.hideDeleteChatConfirmation() },
+                    title = {
+                        Text(
+                            stringResource(R.string.delete_confirmation_title),
+                            color = OnSurface
+                        )
+                    },
+                    text = {
+                        Text(
+                            stringResource(R.string.delete_confirmation_message),
+                            color = OnSurfaceVariant
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.deleteCurrentChat()
+                                viewModel.hideDeleteChatConfirmation()
+                            }
+                        ) {
+                            Text(stringResource(R.string.delete), color = Color.Red)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { viewModel.hideDeleteChatConfirmation() }) {
+                            Text(stringResource(R.string.cancel), color = OnSurfaceVariant)
+                        }
+                    },
+                    containerColor = Surface,
+                    tonalElevation = 0.dp
+                )
+            }
+
+            // File Selection Dialog
+            if (uiState.showFileSelection) {
+                FileSelectionDialog(
+                    onFileSelected = { uri, fileName, mimeType ->
+                        viewModel.addFileFromUri(uri, fileName, mimeType)
+                    },
+                    onMultipleFilesSelected = { filesList ->
+                        viewModel.addMultipleFilesFromUris(filesList)
+                    },
+                    onDismiss = { viewModel.hideFileSelection() }
+                )
+            }
+
+            // Chat Export Dialog
+            if (uiState.showChatExportDialog) {
+                ChatExportDialog(
+                    viewModel = viewModel,
+                    uiState = uiState,
+                    onDismiss = { viewModel.closeChatExportDialog() }
+                )
+            }
+
+            // Chat Import Choice Dialog
+            uiState.pendingChatImport?.let { pending ->
+                ChatImportChoiceDialog(
+                    fileName = pending.fileName,
+                    onLoadAsChat = { viewModel.importPendingChatJson() },
+                    onAttachAsFile = { viewModel.attachPendingJsonAsFile() },
+                    onDismiss = { viewModel.dismissChatImportDialog() }
+                )
+            }
+
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 80.dp) // Position above the input area
+            )
+        }
+    }
+}
+
+
+
+
+
+
+
