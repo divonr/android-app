@@ -1,6 +1,8 @@
 [versions]
 agp = "8.9.0"
 kotlin = "2.0.21"
+composeMultiplatform = "1.7.3"
+coroutines = "1.9.0"
 coreKtx = "1.16.0"
 junit = "4.13.2"
 junitVersion = "1.2.1"
@@ -42,6 +44,8 @@ retrofit-kotlinx-serialization = { group = "com.jakewharton.retrofit", name = "r
 
 # JSON & Serialization
 kotlinx-serialization = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-swing = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-swing", version.ref = "coroutines" }
 
 # Image Loading
 coil = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
@@ -67,6 +71,8 @@ androidx-security-crypto = { group = "androidx.security", name = "security-crypt
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
 
