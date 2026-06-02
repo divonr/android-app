@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 rootProject.name = "LLM api"
 include(":app")
 include(":desktop")
+include(":shared")

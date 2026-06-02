@@ -10,6 +10,9 @@ kotlin {
 }
 
 dependencies {
+    // Shared logic module
+    implementation(project(":shared"))
+
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
