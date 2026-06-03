@@ -579,3 +579,214 @@ fun ChatHistoryScreen(
         }
     }
 }
+
+@Composable
+private fun PersonalWakeSwitch() {
+    val context = LocalContext.current
+    val sharedPrefs = remember { context.getSharedPreferences("wake_switch_prefs", android.content.Context.MODE_PRIVATE) }
+    
+    val models = listOf("gemma", "qwen", "deepseek", "hebatron")
+    var expanded by remember { mutableStateOf(false) }
+    var selectedModel by remember {
+        // Default to the first model that is currently in keep-alive/awake state
+        val awakeModel = models.firstOrNull { sharedPrefs.getBoolean("is_awake_$it", false) }
+        mutableStateOf(awakeModel ?: models[0])
+    }
+
+    var containerState by remember { mutableStateOf("off") }
+    var startTime by remember { mutableStateOf(0L) }
+    var secondsElapsed by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(selectedModel) {
+        val oldAwake = sharedPrefs.getBoolean("is_awake_$selectedModel", false)
+        val defaultState = if (oldAwake) "ready" else "off"
+        containerState = sharedPrefs.getString("container_state_$selectedModel", defaultState) ?: defaultState
+        startTime = sharedPrefs.getLong("wake_start_time_$selectedModel", 0L)
+    }
+
+    LaunchedEffect(containerState, startTime) {
+        if ((containerState == "starting" || containerState == "ready") && startTime > 0) {
+            while (true) {
+                secondsElapsed = (System.currentTimeMillis() - startTime) / 1000
+                if (secondsElapsed < 0) secondsElapsed = 0
+                kotlinx.coroutines.delay(1000L)
+            }
+        } else {
+            secondsElapsed = 0
+        }
+    }
+
+    LaunchedEffect(containerState, selectedModel) {
+        if (containerState == "starting") {
+            while (true) {
+                kotlinx.coroutines.delay(5000L)
+                var shouldBreak = false
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        val urlStr = "http://100.90.227.8:8082/v1/cloud/$selectedModel/status"
+                        val url = java.net.URL(urlStr)
+                        val connection = url.openConnection() as java.net.HttpURLConnection
+                        connection.connectTimeout = 3000
+                        connection.readTimeout = 3000
+                        connection.requestMethod = "GET"
+                        connection.setRequestProperty("Authorization", "Bearer abc123")
+                        
+                        val responseCode = connection.responseCode
+                        if (responseCode == 200) {
+                            val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+                            AppLogger.i("[Polling] $urlStr -> 200 OK: $responseBody")
+                            if (responseBody.contains("\"ready\"")) {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    containerState = "ready"
+                                    sharedPrefs.edit()
+                                        .putString("container_state_$selectedModel", "ready")
+                                        .apply()
+                                    shouldBreak = true
+                                }
+                            }
+                        } else {
+                            AppLogger.e("[Polling] $urlStr -> failed with code $responseCode")
+                        }
+                    } catch (e: Exception) {
+                        AppLogger.e("[Polling] Status check failed: ${e.message}")
+                    }
+                }
+                if (shouldBreak) break
+            }
+        }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition()
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700),
+            repeatMode = RepeatMode.Reverse
+        )
+    )
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box {
+            Text(
+                text = selectedModel,
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .clickable { expanded = true }
+                    .padding(4.dp)
+            )
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                models.forEach { model ->
+                    DropdownMenuItem(
+                        text = { Text(model) },
+                        onClick = {
+                            selectedModel = model
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        if (containerState != "off") {
+            val hours = secondsElapsed / 3600
+            val minutes = (secondsElapsed % 3600) / 60
+            val secs = secondsElapsed % 60
+            Text(
+                text = String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, secs),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(end = 8.dp)
+            )
+        }
+        
+        val dotColor = when (containerState) {
+            "ready" -> Color(0xFF4CAF50)
+            "starting" -> Color(0xFFFF9800)
+            else -> Color(0xFFF44336)
+        }
+        val currentAlpha = if (containerState == "starting") alpha else 1f
+
+        Box(
+            modifier = Modifier
+                .padding(end = 8.dp)
+                .size(16.dp)
+                .clip(CircleShape)
+                .background(dotColor.copy(alpha = currentAlpha))
+                .clickable {
+                    val modelToUse = selectedModel
+                    if (containerState == "off") {
+                        val currentStartTime = System.currentTimeMillis()
+                        containerState = "starting"
+                        startTime = currentStartTime
+                        sharedPrefs.edit()
+                            .putString("container_state_$modelToUse", "starting")
+                            .putLong("wake_start_time_$modelToUse", currentStartTime)
+                            .putBoolean("is_awake_$modelToUse", true)
+                            .apply()
+                            
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            try {
+                                val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/wake"
+                                AppLogger.i("[Wake] Sending request to $urlStr")
+                                val url = java.net.URL(urlStr)
+                                val connection = url.openConnection() as java.net.HttpURLConnection
+                                connection.connectTimeout = 3000
+                                connection.readTimeout = 3000
+                                connection.requestMethod = "GET"
+                                connection.setRequestProperty("Authorization", "Bearer abc123")
+                                
+                                val responseCode = connection.responseCode
+                                val responseBody = if (responseCode == 200) {
+                                    connection.inputStream.bufferedReader().use { it.readText() }
+                                } else {
+                                    connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                                }
+                                AppLogger.i("[Wake] Response $responseCode: $responseBody")
+                            } catch (e: Exception) {
+                                AppLogger.e("[Wake] failed: ${e.message}")
+                            }
+                        }
+                    } else {
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            try {
+                                val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/idle"
+                                AppLogger.i("[Idle] Sending request to $urlStr")
+                                val url = java.net.URL(urlStr)
+                                val connection = url.openConnection() as java.net.HttpURLConnection
+                                connection.connectTimeout = 3000
+                                connection.readTimeout = 3000
+                                connection.requestMethod = "GET"
+                                connection.setRequestProperty("Authorization", "Bearer abc123")
+                                
+                                val responseCode = connection.responseCode
+                                val responseBody = if (responseCode == 200) {
+                                    connection.inputStream.bufferedReader().use { it.readText() }
+                                } else {
+                                    connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                                }
+                                AppLogger.i("[Idle] Response $responseCode: $responseBody")
+                                
+                                if (responseCode == 200) {
+                                    containerState = "off"
+                                    startTime = 0L
+                                    sharedPrefs.edit()
+                                        .putString("container_state_$modelToUse", "off")
+                                        .putLong("wake_start_time_$modelToUse", 0L)
+                                        .putBoolean("is_awake_$modelToUse", false)
+                                        .apply()
+                                }
+                            } catch (e: Exception) {
+                                AppLogger.e("[Idle] failed: ${e.message}")
+                            }
+                        }
+                    }
+                }
+        )
+    }
+}
