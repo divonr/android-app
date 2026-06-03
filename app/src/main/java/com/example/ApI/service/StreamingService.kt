@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.ApI.MainActivity
+import com.example.ApI.data.AndroidPlatformStorage
 import com.example.ApI.data.model.*
 import com.example.ApI.data.network.LLMApiService
 import com.example.ApI.data.repository.DataRepository
@@ -108,7 +109,7 @@ class StreamingService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "StreamingService created")
-        repository = DataRepository(applicationContext)
+        repository = DataRepository(AndroidPlatformStorage(applicationContext))
         apiService = LLMApiService()
         createNotificationChannel()
     }

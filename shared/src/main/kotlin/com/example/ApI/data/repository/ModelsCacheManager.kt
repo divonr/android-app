@@ -1,8 +1,9 @@
-package com.example.ApI.data.repository
+﻿package com.example.ApI.data.repository
 
 import com.example.ApI.data.model.*
 import com.example.ApI.data.model.CustomProviderConfig
 import com.example.ApI.data.model.FullCustomProviderConfig
+import com.example.ApI.util.AppLogger
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.coroutines.withContext
@@ -39,7 +40,7 @@ class ModelsCacheManager(
             try {
                 json.decodeFromString<ModelsCacheMetadata>(file.readText())
             } catch (e: Exception) {
-                android.util.Log.e("ModelsCacheManager", "Failed to load models cache metadata", e)
+                AppLogger.e("[ModelsCacheManager] Failed to load models cache metadata", e)
                 null
             }
         } else {
@@ -58,7 +59,7 @@ class ModelsCacheManager(
             )
             file.writeText(json.encodeToString(metadata))
         } catch (e: Exception) {
-            android.util.Log.e("ModelsCacheManager", "Failed to save models cache metadata", e)
+            AppLogger.e("[ModelsCacheManager] Failed to save models cache metadata", e)
         }
     }
 
@@ -73,7 +74,7 @@ class ModelsCacheManager(
             try {
                 json.decodeFromString<List<RemoteProviderModels>>(file.readText())
             } catch (e: Exception) {
-                android.util.Log.e("ModelsCacheManager", "Failed to load cached models", e)
+                AppLogger.e("[ModelsCacheManager] Failed to load cached models", e)
                 null
             }
         } else {
@@ -89,7 +90,7 @@ class ModelsCacheManager(
         try {
             file.writeText(json.encodeToString(models))
         } catch (e: Exception) {
-            android.util.Log.e("ModelsCacheManager", "Failed to save cached models", e)
+            AppLogger.e("[ModelsCacheManager] Failed to save cached models", e)
         }
     }
 
@@ -134,14 +135,14 @@ class ModelsCacheManager(
                 reader.close()
 
                 val models = json.decodeFromString<List<RemoteProviderModels>>(response.toString())
-                android.util.Log.i("ModelsCacheManager", "Successfully fetched ${models.size} providers from remote")
+                AppLogger.i("[ModelsCacheManager] " + "Successfully fetched ${models.size} providers from remote")
                 models
             } else {
-                android.util.Log.e("ModelsCacheManager", "Failed to fetch models: HTTP $responseCode")
+                AppLogger.e("[ModelsCacheManager] " + "Failed to fetch models: HTTP $responseCode")
                 null
             }
         } catch (e: Exception) {
-            android.util.Log.e("ModelsCacheManager", "Failed to fetch models from remote", e)
+            AppLogger.e("[ModelsCacheManager] " + "Failed to fetch models from remote", e)
             null
         }
     }
@@ -153,21 +154,21 @@ class ModelsCacheManager(
      */
     suspend fun refreshModelsIfNeeded(): Boolean = withContext(Dispatchers.IO) {
         if (isCacheValid()) {
-            android.util.Log.i("ModelsCacheManager", "Models cache is still valid, skipping refresh")
+            AppLogger.i("[ModelsCacheManager] " + "Models cache is still valid, skipping refresh")
             return@withContext false
         }
 
-        android.util.Log.i("ModelsCacheManager", "Models cache expired or missing, fetching from remote...")
+        AppLogger.i("[ModelsCacheManager] " + "Models cache expired or missing, fetching from remote...")
         val remoteModels = fetchModelsFromRemote()
 
         if (remoteModels != null) {
             saveCachedModels(remoteModels)
             saveModelsCacheMetadata()
-            android.util.Log.i("ModelsCacheManager", "Models cache updated successfully")
+            AppLogger.i("[ModelsCacheManager] " + "Models cache updated successfully")
             return@withContext true
         }
 
-        android.util.Log.w("ModelsCacheManager", "Failed to refresh models, will use existing cache or defaults")
+        AppLogger.w("[ModelsCacheManager] " + "Failed to refresh models, will use existing cache or defaults")
         return@withContext false
     }
 
@@ -176,11 +177,11 @@ class ModelsCacheManager(
      * Returns a Pair of (success: Boolean, errorMessage: String?)
      */
     suspend fun forceRefreshModels(): Pair<Boolean, String?> = withContext(Dispatchers.IO) {
-        android.util.Log.i("ModelsCacheManager", "Force refreshing models from remote...")
+        AppLogger.i("[ModelsCacheManager] " + "Force refreshing models from remote...")
 
         try {
             val url = URL(MODELS_JSON_URL)
-            android.util.Log.d("ModelsCacheManager", "Fetching from URL: $url")
+            AppLogger.d("[ModelsCacheManager] " + "Fetching from URL: $url")
 
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -188,7 +189,7 @@ class ModelsCacheManager(
             connection.readTimeout = 15000
 
             val responseCode = connection.responseCode
-            android.util.Log.d("ModelsCacheManager", "Response code: $responseCode")
+            AppLogger.d("[ModelsCacheManager] " + "Response code: $responseCode")
 
             if (responseCode == HttpURLConnection.HTTP_OK) {
                 val reader = BufferedReader(InputStreamReader(connection.inputStream, "UTF-8"))
@@ -200,14 +201,14 @@ class ModelsCacheManager(
                 reader.close()
 
                 val jsonString = response.toString().trim()
-                android.util.Log.d("ModelsCacheManager", "Response length: ${jsonString.length}")
-                android.util.Log.d("ModelsCacheManager", "First 200 chars: ${jsonString.take(200)}")
-                android.util.Log.d("ModelsCacheManager", "Last 200 chars: ${jsonString.takeLast(200)}")
+                AppLogger.d("[ModelsCacheManager] " + "Response length: ${jsonString.length}")
+                AppLogger.d("[ModelsCacheManager] " + "First 200 chars: ${jsonString.take(200)}")
+                AppLogger.d("[ModelsCacheManager] " + "Last 200 chars: ${jsonString.takeLast(200)}")
 
                 // Check if response is HTML instead of JSON
                 if (jsonString.startsWith("<") || jsonString.contains("<!DOCTYPE") || jsonString.contains("<html")) {
                     val errorMsg = "Received HTML instead of JSON. Check URL and network access."
-                    android.util.Log.e("ModelsCacheManager", errorMsg)
+                    AppLogger.e("[ModelsCacheManager] " + errorMsg)
                     return@withContext Pair(false, errorMsg)
                 }
 
@@ -215,28 +216,28 @@ class ModelsCacheManager(
                     json.decodeFromString<List<RemoteProviderModels>>(jsonString)
                 } catch (e: Exception) {
                     val errorMsg = "JSON parsing failed: ${e.message}"
-                    android.util.Log.e("ModelsCacheManager", errorMsg)
-                    android.util.Log.e("ModelsCacheManager", "JSON stacktrace:", e)
+                    AppLogger.e("[ModelsCacheManager] " + errorMsg)
+                    AppLogger.e("[ModelsCacheManager] " + "JSON stacktrace:", e)
                     // Log first part of JSON to see what's wrong
-                    android.util.Log.e("ModelsCacheManager", "JSON preview (first 500 chars):\n${jsonString.take(500)}")
+                    AppLogger.e("[ModelsCacheManager] " + "JSON preview (first 500 chars):\n${jsonString.take(500)}")
                     return@withContext Pair(false, errorMsg)
                 }
 
-                android.util.Log.i("ModelsCacheManager", "Successfully parsed ${remoteModels.size} providers from remote")
+                AppLogger.i("[ModelsCacheManager] " + "Successfully parsed ${remoteModels.size} providers from remote")
 
                 saveCachedModels(remoteModels)
                 saveModelsCacheMetadata()
-                android.util.Log.i("ModelsCacheManager", "Models force refreshed successfully")
+                AppLogger.i("[ModelsCacheManager] " + "Models force refreshed successfully")
 
                 return@withContext Pair(true, null)
             } else {
                 val errorMsg = "HTTP $responseCode"
-                android.util.Log.e("ModelsCacheManager", "Failed to fetch models: $errorMsg")
+                AppLogger.e("[ModelsCacheManager] " + "Failed to fetch models: $errorMsg")
                 return@withContext Pair(false, errorMsg)
             }
         } catch (e: Exception) {
             val errorMsg = e.message ?: e.javaClass.simpleName
-            android.util.Log.e("ModelsCacheManager", "Failed to fetch models from remote: $errorMsg", e)
+            AppLogger.e("[ModelsCacheManager] " + "Failed to fetch models from remote: $errorMsg", e)
             return@withContext Pair(false, errorMsg)
         }
     }
@@ -268,12 +269,12 @@ class ModelsCacheManager(
                 options = discrete.options,
                 default = discrete.default,
                 displayNames = mapOf(
-                    "none" to "ללא",
-                    "minimal" to "מינימלי",
-                    "low" to "נמוך",
-                    "medium" to "בינוני",
-                    "high" to "גבוה",
-                    "xhigh" to "גבוה מאוד"
+                    "none" to "׳׳׳",
+                    "minimal" to "׳׳™׳ ׳™׳׳׳™",
+                    "low" to "׳ ׳׳•׳",
+                    "medium" to "׳‘׳™׳ ׳•׳ ׳™",
+                    "high" to "׳’׳‘׳•׳”",
+                    "xhigh" to "׳’׳‘׳•׳” ׳׳׳•׳“"
                 )
             )
         }
@@ -361,10 +362,10 @@ class ModelsCacheManager(
         val providerModels = cachedModels?.find { it.provider == providerName }
 
         return if (providerModels != null && providerModels.models.isNotEmpty()) {
-            android.util.Log.d("ModelsCacheManager", "Using cached models for $providerName: ${providerModels.models.size} models")
+            AppLogger.d("[ModelsCacheManager] " + "Using cached models for $providerName: ${providerModels.models.size} models")
             remoteModelsToModels(providerName, providerModels.models)
         } else {
-            android.util.Log.d("ModelsCacheManager", "Using default models for $providerName: ${defaultModels.size} models")
+            AppLogger.d("[ModelsCacheManager] " + "Using default models for $providerName: ${defaultModels.size} models")
             defaultModels
         }
     }

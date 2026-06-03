@@ -1,6 +1,6 @@
 package com.example.ApI.data.repository
 
-import android.content.Context
+import com.example.ApI.data.PlatformStorage
 import com.example.ApI.data.model.*
 import com.example.ApI.data.model.FullCustomProviderConfig
 import com.example.ApI.data.model.StreamingCallback
@@ -10,16 +10,16 @@ import com.example.ApI.util.JsonConfig
 import kotlinx.serialization.json.*
 import java.io.File
 
-class DataRepository(private val context: Context) {
+class DataRepository(private val platformStorage: PlatformStorage) {
 
     private val apiService = LLMApiService()
 
-    private val internalDir = File(context.filesDir, "llm_data")
+    private val internalDir = File(platformStorage.filesDir, "llm_data")
 
     // Managers
     private val modelsCacheManager = ModelsCacheManager(internalDir, JsonConfig.prettyPrint)
     private val localStorageManager = LocalStorageManager(internalDir, JsonConfig.prettyPrint)
-    private val chatHistoryManager = ChatHistoryManager(internalDir, JsonConfig.prettyPrint)
+    private val chatHistoryManager = ChatHistoryManager(internalDir, JsonConfig.prettyPrint, platformStorage.downloadsDir)
     private val groupProjectManager = GroupProjectManager(chatHistoryManager)
     private val messageBranchingManager = MessageBranchingManager(chatHistoryManager)
     private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager)
@@ -106,7 +106,7 @@ class DataRepository(private val context: Context) {
     fun updateGroupProjectStatus(username: String, groupId: String, isProject: Boolean): Boolean = groupProjectManager.updateGroupProjectStatus(username, groupId, isProject)
     fun addAttachmentToGroup(username: String, groupId: String, attachment: Attachment): Boolean = groupProjectManager.addAttachmentToGroup(username, groupId, attachment)
     fun removeAttachmentFromGroup(username: String, groupId: String, attachmentIndex: Int): Boolean = groupProjectManager.removeAttachmentFromGroup(username, groupId, attachmentIndex)
-    
+
     // ============ Local Storage (delegated to LocalStorageManager) ============
 
     fun loadApiKeys(username: String): List<ApiKey> = localStorageManager.loadApiKeys(username)
@@ -197,7 +197,7 @@ class DataRepository(private val context: Context) {
 
     fun replaceMessageInChat(username: String, chatId: String, oldMessage: Message, newMessage: Message): Chat? = chatHistoryManager.replaceMessageInChat(username, chatId, oldMessage, newMessage)
     fun deleteMessagesFromPoint(username: String, chatId: String, fromMessage: Message): Chat? = chatHistoryManager.deleteMessagesFromPoint(username, chatId, fromMessage)
-    
+
     // API Communication
     suspend fun sendMessage(
         provider: Provider,
@@ -257,13 +257,13 @@ class DataRepository(private val context: Context) {
         messages: List<Message>,
         username: String
     ): Pair<List<Message>, Boolean> = fileUploadManager.ensureFilesUploadedForProvider(provider, messages, username)
-    
+
     fun updateChatWithNewAttachments(username: String, chatId: String, updatedMessages: List<Message>) = chatHistoryManager.updateChatWithNewAttachments(username, chatId, updatedMessages)
     fun exportChatHistory(username: String): String? = chatHistoryManager.exportChatHistory(username)
     fun importChatHistoryJson(raw: ByteArray, targetUsername: String) = chatHistoryManager.importChatHistoryJson(raw, targetUsername)
     fun validateChatJson(jsonContent: String): Boolean = chatHistoryManager.validateChatJson(jsonContent)
     fun importSingleChat(jsonContent: String, targetUsername: String): String? = chatHistoryManager.importSingleChat(jsonContent, targetUsername)
-    
+
     suspend fun uploadFile(
         provider: Provider,
         filePath: String,
@@ -271,7 +271,7 @@ class DataRepository(private val context: Context) {
         mimeType: String,
         username: String
     ): Attachment? = fileUploadManager.uploadFile(provider, filePath, fileName, mimeType, username)
-    
+
     // ============ Title Generation & Search (delegated) ============
 
     suspend fun generateConversationTitle(
@@ -323,5 +323,3 @@ class DataRepository(private val context: Context) {
     fun getSkillMdContent(skillName: String) = skillsStorageManager.getSkillMdContent(skillName)
     fun importSkillFromText(content: String) = skillsStorageManager.importFromText(content)
 }
-
-

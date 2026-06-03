@@ -15,6 +15,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ApI.data.AndroidPlatformStorage
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.ui.ChatViewModel
@@ -74,7 +75,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null, intentTrigger: Int = 0) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val repository = remember { DataRepository(context) }
+    val repository = remember { DataRepository(AndroidPlatformStorage(context)) }
     val viewModel: ChatViewModel = viewModel { ChatViewModel(repository, context, sharedIntent) }
 
     val currentScreen by viewModel.currentScreen.collectAsState()

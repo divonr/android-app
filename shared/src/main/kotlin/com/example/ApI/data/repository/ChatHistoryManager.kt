@@ -1,8 +1,7 @@
 package com.example.ApI.data.repository
 
-import android.os.Environment
-import android.util.Log
 import com.example.ApI.data.model.*
+import com.example.ApI.util.AppLogger
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import java.io.File
@@ -15,7 +14,8 @@ import java.util.UUID
  */
 class ChatHistoryManager(
     private val internalDir: File,
-    private val json: Json
+    private val json: Json,
+    private val downloadsDir: File? = null
 ) {
     companion object {
         private const val TAG = "ChatHistoryManager"
@@ -28,11 +28,11 @@ class ChatHistoryManager(
                 val content = file.readText()
                 json.decodeFromString<UserChatHistory>(content)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load chat history", e)
+                AppLogger.e("[$TAG] Failed to load chat history", e)
                 UserChatHistory(username, emptyList(), emptyList())
             }
         } else {
-            Log.e(TAG, "Failed to load chat history, file doesn't exist")
+            AppLogger.e("[$TAG] Failed to load chat history, file doesn't exist")
             UserChatHistory(username, emptyList(), emptyList())
         }
     }
@@ -56,12 +56,12 @@ class ChatHistoryManager(
     }
 
     fun saveChatJsonToDownloads(chatId: String, content: String): String? {
+        val dir = downloadsDir ?: return null
         return try {
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadsDir.exists()) {
-                downloadsDir.mkdirs()
+            if (!dir.exists()) {
+                dir.mkdirs()
             }
-            val exportFile = File(downloadsDir, "${chatId}.json")
+            val exportFile = File(dir, "${chatId}.json")
             exportFile.writeText(content)
             exportFile.absolutePath
         } catch (e: Exception) {
@@ -195,14 +195,14 @@ class ChatHistoryManager(
             val updatedHistory = chatHistory.copy(chat_history = updatedChats)
             saveChatHistory(updatedHistory)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to update chat with new file IDs", e)
+            AppLogger.e("[$TAG] Failed to update chat with new file IDs", e)
         }
     }
 
     fun exportChatHistory(username: String): String? {
         val chatHistory = loadChatHistory(username)
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val exportFile = File(downloadsDir, "chat_history_${username}_${System.currentTimeMillis()}.json")
+        val dir = downloadsDir ?: return null
+        val exportFile = File(dir, "chat_history_${username}_${System.currentTimeMillis()}.json")
 
         return try {
             exportFile.writeText(json.encodeToString(chatHistory))
@@ -288,7 +288,7 @@ class ChatHistoryManager(
             saveChatHistory(updatedHistory)
             sanitizedChat.chat_id
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to import chat", e)
+            AppLogger.e("[$TAG] Failed to import chat", e)
             null
         }
     }
