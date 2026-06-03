@@ -108,11 +108,12 @@ class FileUploadManager(
             else -> false
         }
 
-        if (needsUpload && attachment.local_file_path != null) {
+        val localFilePath = attachment.local_file_path
+        if (needsUpload && localFilePath != null) {
             // Need to upload file for current provider
             val uploadedAttachment = uploadFile(
                 provider = provider,
-                filePath = attachment.local_file_path,
+                filePath = localFilePath,
                 fileName = attachment.file_name,
                 mimeType = attachment.mime_type,
                 username = username

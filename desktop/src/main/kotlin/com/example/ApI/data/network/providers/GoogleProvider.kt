@@ -503,8 +503,9 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                                 add(buildJsonObject {
                                     put("name", toolSpec.name)
                                     put("description", toolSpec.description)
-                                    if (toolSpec.parameters != null) {
-                                        put("parameters", toolSpec.parameters)
+                                    val toolSpecParameters = toolSpec.parameters
+                                if (toolSpecParameters != null) {
+                                        put("parameters", toolSpecParameters)
                                     } else {
                                         put("parameters", buildJsonObject {})
                                     }

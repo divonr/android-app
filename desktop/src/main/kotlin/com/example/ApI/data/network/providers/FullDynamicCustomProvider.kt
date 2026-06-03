@@ -146,10 +146,11 @@ class FullDynamicCustomProvider(
 
             // Build request body using template expander
             // Use messageFields if configured, otherwise fall back to auto-detection
-            val requestBody = if (config.messageFields != null && config.messageFields.hasAnyFields()) {
+            val messageFields = config.messageFields
+            val requestBody = if (messageFields != null && messageFields.hasAnyFields()) {
                 TemplateExpander.expandTemplateWithMessageFields(
                     template = config.bodyTemplate,
-                    messageFields = config.messageFields,
+                    messageFields = messageFields,
                     apiKey = apiKey,
                     model = modelName,
                     messages = messages,

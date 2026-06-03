@@ -1,5 +1,7 @@
 package com.example.ApI.data.model
 
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 
@@ -75,10 +77,11 @@ data class GitHubContent(
     /**
      * Decode the base64 content to string
      */
+    @OptIn(ExperimentalEncodingApi::class)
     fun getDecodedContent(): String? {
         if (content == null || encoding != "base64") return null
         return try {
-            String(android.util.Base64.decode(content.replace("\n", ""), android.util.Base64.DEFAULT))
+            String(Base64.decode(content.replace("\n", "")))
         } catch (e: Exception) {
             null
         }

@@ -243,8 +243,9 @@ fun MessageBubble(
             modifier = Modifier.fillMaxWidth()
         ) {
             // Model avatar (only for assistant messages)
-            if (!isUser && message.model != null) {
-                val logoPath = ModelLogoUtils.getModelLogoPath(message.model)
+            val messageModel = message.model
+            if (!isUser && messageModel != null) {
+                val logoPath = ModelLogoUtils.getModelLogoPath(messageModel)
                 Surface(
                     shape = CircleShape,
                     color = Primary.copy(alpha = 0.15f),
@@ -260,7 +261,7 @@ fun MessageBubble(
                             )
                         } else {
                             Text(
-                                text = message.model.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                text = messageModel.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
                                 color = Primary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp
@@ -307,9 +308,9 @@ fun MessageBubble(
         ) {
             Column {
                 // Show model name for assistant messages (like WhatsApp group sender name)
-                if (!isUser && message.model != null) {
+                if (!isUser && messageModel != null) {
                     Text(
-                        text = message.model,
+                        text = messageModel,
                         color = Primary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -319,7 +320,7 @@ fun MessageBubble(
                                 interactionSource = remember { MutableInteractionSource() }
                             ) {
                                 // Select this model when clicked
-                                viewModel.selectModelByName(message.model)
+                                viewModel.selectModelByName(messageModel)
                             }
                             .padding(
                                 start = 16.dp,

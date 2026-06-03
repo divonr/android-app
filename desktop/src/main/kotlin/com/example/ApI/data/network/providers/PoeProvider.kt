@@ -747,8 +747,9 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                             put("function", buildJsonObject {
                                 put("name", toolSpec.name)
                                 put("description", toolSpec.description)
-                                if (toolSpec.parameters != null) {
-                                    put("parameters", toolSpec.parameters)
+                                val toolSpecParameters = toolSpec.parameters
+                                if (toolSpecParameters != null) {
+                                    put("parameters", toolSpecParameters)
                                 } else {
                                     put("parameters", buildJsonObject {})
                                 }
@@ -782,8 +783,9 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                             put("function", buildJsonObject {
                                 put("name", toolSpec.name)
                                 put("description", toolSpec.description)
-                                if (toolSpec.parameters != null) {
-                                    put("parameters", toolSpec.parameters)
+                                val toolSpecParameters = toolSpec.parameters
+                                if (toolSpecParameters != null) {
+                                    put("parameters", toolSpecParameters)
                                 } else {
                                     put("parameters", buildJsonObject {})
                                 }

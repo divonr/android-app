@@ -3,18 +3,6 @@ package com.example.ApI.data.model
 import android.net.Uri
 import androidx.compose.ui.unit.DpOffset
 
-enum class WebSearchSupport {
-    UNSUPPORTED,
-    OPTIONAL,
-    REQUIRED
-}
-
-enum class TextDirectionMode {
-    AUTO,
-    RTL,
-    LTR
-}
-
 data class ChatUiState(
     val currentMessage: String = "",
     val loadingChatIds: Set<String> = emptySet(),
@@ -118,26 +106,6 @@ data class SelectedFile(
     val localPath: String? = null
 )
 
-data class SearchResult(
-    val chat: Chat,
-    val searchQuery: String,
-    val matchType: SearchMatchType,
-    val messageIndex: Int = -1,
-    val highlightRanges: List<IntRange> = emptyList()
-)
-
-enum class SearchMatchType {
-    TITLE,
-    CONTENT,
-    FILE_NAME
-}
-
-data class ExecutingToolInfo(
-    val toolId: String,
-    val toolName: String,
-    val startTime: String
-)
-
 /** Desktop: uri is nullable since we use file paths, not Android content URIs. */
 data class PendingChatImport(
     val uri: Uri?,
@@ -145,17 +113,6 @@ data class PendingChatImport(
     val mimeType: String,
     val jsonContent: String
 )
-
-data class BranchInfo(
-    val nodeId: String,
-    val currentVariantIndex: Int,
-    val totalVariants: Int,
-    val currentVariantId: String
-) {
-    val hasPrevious: Boolean get() = currentVariantIndex > 0
-    val hasNext: Boolean get() = currentVariantIndex < totalVariants - 1
-    val displayText: String get() = "${currentVariantIndex + 1}/$totalVariants"
-}
 
 data class ApiKeysUiState(
     val apiKeys: List<ApiKey> = emptyList(),

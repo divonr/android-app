@@ -412,64 +412,72 @@ object TemplateExpander {
         val messagesByPath = mutableMapOf<String, MutableList<String>>()
 
         // Add system message if configured and system prompt is not empty
-        if (messageFields.systemField != null && systemPrompt.isNotBlank()) {
-            val systemJson = messageFields.systemField.template.replace(
+        val systemField = messageFields.systemField
+        if (systemField != null && systemPrompt.isNotBlank()) {
+            val systemJson = systemField.template.replace(
                 BodyTemplatePlaceholders.SYSTEM,
                 escapeJsonString(systemPrompt)
             )
-            val path = messageFields.systemField.path
+            val path = systemField.path
             messagesByPath.getOrPut(path) { mutableListOf() }.add(systemJson)
         }
+
+        // Cache local refs to nullable fields to enable smart casts in the loop
+        val userField = messageFields.userField
+        val toolCallField = messageFields.toolCallField
+        val toolResponseField = messageFields.toolResponseField
+        val assistantField = messageFields.assistantField
 
         // Add conversation messages (including tool calls and responses)
         for (message in messages) {
             when (message.role) {
                 "user" -> {
-                    if (messageFields.userField != null) {
-                        val userJson = messageFields.userField.template.replace(
+                    if (userField != null) {
+                        val userJson = userField.template.replace(
                             BodyTemplatePlaceholders.PROMPT,
                             escapeJsonString(message.content)
                         )
-                        val path = messageFields.userField.path
+                        val path = userField.path
                         messagesByPath.getOrPut(path) { mutableListOf() }.add(userJson)
                     }
                 }
                 "tool_call" -> {
                     // Handle tool call messages from assistant
-                    if (messageFields.toolCallField != null && message.toolCall != null) {
+                    val toolCall = message.toolCall
+                    if (toolCallField != null && toolCall != null) {
                         // Use toolId (internal name like "get_date_time") for {tool_name}
-                        val toolInternalName = message.toolCall.toolId
-                        val toolArgs = message.toolCall.parameters.toString()
+                        val toolInternalName = toolCall.toolId
+                        val toolArgs = toolCall.parameters.toString()
                         // Use toolCallId (unique call ID like "call_abc123") for {tool_id}
                         val callId = message.toolCallId ?: ""
-                        val toolCallJson = messageFields.toolCallField.template
+                        val toolCallJson = toolCallField.template
                             .replace(BodyTemplatePlaceholders.TOOL_NAME, escapeJsonString(toolInternalName))
                             .replace(BodyTemplatePlaceholders.TOOL_ID, escapeJsonString(callId))
                             .replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, toolArgs)
-                        val path = messageFields.toolCallField.path
+                        val path = toolCallField.path
                         messagesByPath.getOrPut(path) { mutableListOf() }.add(toolCallJson)
                     }
                 }
                 "tool_result", "tool_response", "tool" -> {
                     // Handle tool response messages
-                    if (messageFields.toolResponseField != null) {
+                    if (toolResponseField != null) {
                         val responseContent = message.toolResponseOutput ?: message.content
                         // Use toolResponseCallId for {tool_id} - links response back to tool call
                         val callId = message.toolResponseCallId ?: ""
-                        val toolResponseJson = messageFields.toolResponseField.template
+                        val toolResponseJson = toolResponseField.template
                             .replace(BodyTemplatePlaceholders.TOOL_RESPONSE, escapeJsonString(responseContent))
                             .replace(BodyTemplatePlaceholders.TOOL_ID, escapeJsonString(callId))
-                        val path = messageFields.toolResponseField.path
+                        val path = toolResponseField.path
                         messagesByPath.getOrPut(path) { mutableListOf() }.add(toolResponseJson)
                     }
                 }
                 else -> { // assistant
-                    if (messageFields.assistantField != null) {
-                        val assistantJson = messageFields.assistantField.template.replace(
+                    if (assistantField != null) {
+                        val assistantJson = assistantField.template.replace(
                             BodyTemplatePlaceholders.ASSISTANT,
                             escapeJsonString(message.content)
                         )
-                        val path = messageFields.assistantField.path
+                        val path = assistantField.path
                         messagesByPath.getOrPut(path) { mutableListOf() }.add(assistantJson)
                     }
                 }
@@ -484,7 +492,8 @@ object TemplateExpander {
         }
 
         // Inject tool definitions if configured and tools are provided
-        if (messageFields.toolDefinitionField != null && tools.isNotEmpty()) {
+        val toolDefinitionField = messageFields.toolDefinitionField
+        if (toolDefinitionField != null && tools.isNotEmpty()) {
             val toolDefinitions = tools.map { tool ->
                 // Extract properties and required from the parameters schema
                 val parametersJson = tool.parameters?.get("properties")?.toString()
@@ -493,7 +502,7 @@ object TemplateExpander {
                 val requiredArray = tool.parameters?.get("required")
 
                 // First do basic placeholder replacement
-                var toolDefJson = messageFields.toolDefinitionField.template
+                var toolDefJson = toolDefinitionField.template
                     .replace(BodyTemplatePlaceholders.TOOL_NAME, escapeJsonString(tool.name))
                     .replace(BodyTemplatePlaceholders.TOOL_DESCRIPTION, escapeJsonString(tool.description))
                     .replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, parametersJson)
@@ -503,7 +512,7 @@ object TemplateExpander {
 
                 toolDefJson
             }
-            val path = messageFields.toolDefinitionField.path
+            val path = toolDefinitionField.path
             try {
                 val toolsArrayJson = "[" + toolDefinitions.joinToString(",") + "]"
                 val toolsElement = json.parseToJsonElement(toolsArrayJson)
