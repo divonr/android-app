@@ -35,13 +35,14 @@
 - [x] B7: Build all three green
 - [x] B8: Commit
 
-## Step C — Network layer ⏳
+## Step C — Network layer ✅
 **Goal:** Move providers + streaming + LLMApiService + Google/GitHub API services to :shared
 
-- [ ] C1: Move network files (refactor Context→PlatformStorage, Log→Logger, Base64)
-- [ ] C2: Delete duplicates from both apps
-- [ ] C3: Build all three green
-- [ ] C4: Commit
+- [x] C1: Move AppLogger to :shared (commit 1f283a9)
+- [x] C2: Move streaming parsers and ProviderResult to :shared (commit 7226405)
+- [x] C3: Move providers and LLMApiService to :shared; remove Context from constructors (commit 6679de7)
+- [x] C4: Move Google/GitHub API services to :shared (commit 6679de7)
+- [x] All three builds GREEN
 
 ## Step D — Repository + util + tools ⏳
 **Goal:** Move DataRepository, util, tools to :shared
