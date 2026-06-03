@@ -44,12 +44,12 @@
 - [x] C4: Move Google/GitHub API services to :shared (commit 6679de7)
 - [x] All three builds GREEN
 
-## Step D — Repository + util + tools ⏳
+## Step D — Repository + util + tools ✅
 **Goal:** Move DataRepository, util, tools to :shared
 
-- [ ] D1: Move repository (build+commit)
-- [ ] D2: Move util (build+commit)
-- [ ] D3: Move tools (build+commit)
+- [x] D1: Move repository (build+commit)
+- [x] D2: Move util (build+commit)
+- [x] D3: Move tools (build+commit)
 
 ## Step E — Cleanup ⏳
 **Goal:** Delete obsolete android shims; verify no duplicates remain
