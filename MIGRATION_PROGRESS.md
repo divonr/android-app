@@ -23,17 +23,17 @@
 - [x] A5: Build :shared, :app:compileDebugKotlin, :desktop:compileKotlin — ALL GREEN
 - [x] A6: Commit "Phase 2: move data models to :shared; remove desktop duplicates; stop tracking shared/build"
 
-## Step B — Platform abstractions ⏳
+## Step B — Platform abstractions ✅
 **Goal:** Logger + PlatformStorage interfaces in :shared; Android impl in :app; desktop impl in :desktop
 
-- [ ] B1: Add Logger interface + AppLogger bridge in :shared
-- [ ] B2: Add Android Logger impl in :app
-- [ ] B3: Add Desktop Logger impl in :desktop
-- [ ] B4: Add PlatformStorage interface in :shared
-- [ ] B5: Add Android PlatformStorage impl in :app
-- [ ] B6: Add Desktop PlatformStorage impl in :desktop
-- [ ] B7: Build all three green
-- [ ] B8: Commit
+- [x] B1: Add Logger interface + AppLogger bridge in :shared
+- [x] B2: Add Android Logger impl in :app
+- [x] B3: Add Desktop Logger impl in :desktop
+- [x] B4: Add PlatformStorage interface in :shared
+- [x] B5: Add Android PlatformStorage impl in :app
+- [x] B6: Add Desktop PlatformStorage impl in :desktop
+- [x] B7: Build all three green
+- [x] B8: Commit
 
 ## Step C — Network layer ⏳
 **Goal:** Move providers + streaming + LLMApiService + Google/GitHub API services to :shared
