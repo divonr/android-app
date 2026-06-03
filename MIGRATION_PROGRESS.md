@@ -13,15 +13,15 @@
 
 ---
 
-## Step A — Stabilize in-flight Phase 2 state 🔄
+## Step A — Stabilize in-flight Phase 2 state ✅
 **Goal:** untrack build dir, delete desktop duplicates, reduce DesktopUiModels.kt, build green, commit
 
-- [ ] A1: `git rm -r --cached shared/build` + `git add shared/.gitignore`
-- [ ] A2: Delete `shared/src/.../Placeholder.kt`
-- [ ] A3: Delete 17 model duplicates from `desktop/src/.../data/model/` + `tools/Tool.kt`
-- [ ] A4: Reduce `DesktopUiModels.kt` — remove classes now in SharedModels.kt
-- [ ] A5: Build :shared, :app:compileDebugKotlin, :desktop:compileKotlin — ALL GREEN
-- [ ] A6: Commit "Phase 2: move data models to :shared; remove desktop duplicates; stop tracking shared/build"
+- [x] A1: `git rm -r --cached shared/build` + `git add shared/.gitignore`
+- [x] A2: Delete `shared/src/.../Placeholder.kt`
+- [x] A3: Delete 17 model duplicates from `desktop/src/.../data/model/` + `tools/Tool.kt`
+- [x] A4: Reduce `DesktopUiModels.kt` — remove classes now in SharedModels.kt
+- [x] A5: Build :shared, :app:compileDebugKotlin, :desktop:compileKotlin — ALL GREEN
+- [x] A6: Commit "Phase 2: move data models to :shared; remove desktop duplicates; stop tracking shared/build"
 
 ## Step B — Platform abstractions ⏳
 **Goal:** Logger + PlatformStorage interfaces in :shared; Android impl in :app; desktop impl in :desktop
