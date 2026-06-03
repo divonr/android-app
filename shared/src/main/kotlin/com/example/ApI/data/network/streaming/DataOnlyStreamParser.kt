@@ -1,6 +1,6 @@
 package com.example.ApI.data.network.streaming
 
-import android.util.Log
+import com.example.ApI.util.AppLogger
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -62,7 +62,7 @@ class DataOnlyStreamParser(
                         is StreamAction.Error -> return StreamResult.Error(action.message)
                     }
                 } catch (e: Exception) {
-                    Log.w(logTag, "Parse error on line: $dataContent", e)
+                    AppLogger.w("[$logTag] Parse error on line: $dataContent")
                     handler.onParseError(dataContent, e)
                 }
             }
