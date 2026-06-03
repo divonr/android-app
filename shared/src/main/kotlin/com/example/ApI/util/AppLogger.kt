@@ -1,6 +1,5 @@
 package com.example.ApI.util
 
-import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,7 +23,7 @@ enum class LogLevel {
 /**
  * Central logging utility for the application.
  * Stores logs in memory for display in the LogsScreen.
- * Also forwards logs to Android's standard Log system for debugging.
+ * Platform implementations can forward logs via platformDelegate.
  */
 object AppLogger {
     private const val TAG = "AppLogger"
@@ -37,11 +36,17 @@ object AppLogger {
         .withZone(ZoneId.systemDefault())
 
     /**
+     * Optional platform delegate for forwarding logs to native log systems (e.g. Logcat).
+     * Leave null to use only the in-memory log store.
+     */
+    var platformDelegate: ((LogLevel, String, Throwable?) -> Unit)? = null
+
+    /**
      * Log a debug message.
      */
     fun d(message: String) {
         log(message, LogLevel.DEBUG)
-        Log.d(TAG, message)
+        platformDelegate?.invoke(LogLevel.DEBUG, message, null)
     }
 
     /**
@@ -49,7 +54,7 @@ object AppLogger {
      */
     fun i(message: String) {
         log(message, LogLevel.INFO)
-        Log.i(TAG, message)
+        platformDelegate?.invoke(LogLevel.INFO, message, null)
     }
 
     /**
@@ -57,7 +62,7 @@ object AppLogger {
      */
     fun w(message: String) {
         log(message, LogLevel.WARNING)
-        Log.w(TAG, message)
+        platformDelegate?.invoke(LogLevel.WARNING, message, null)
     }
 
     /**
@@ -65,7 +70,7 @@ object AppLogger {
      */
     fun e(message: String) {
         log(message, LogLevel.ERROR)
-        Log.e(TAG, message)
+        platformDelegate?.invoke(LogLevel.ERROR, message, null)
     }
 
     /**
@@ -73,7 +78,7 @@ object AppLogger {
      */
     fun e(message: String, throwable: Throwable) {
         log("$message: ${throwable.message}", LogLevel.ERROR)
-        Log.e(TAG, message, throwable)
+        platformDelegate?.invoke(LogLevel.ERROR, message, throwable)
     }
 
     /**
