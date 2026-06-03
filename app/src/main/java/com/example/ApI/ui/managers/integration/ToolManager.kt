@@ -1,5 +1,6 @@
 package com.example.ApI.ui.managers.integration
 
+import com.example.ApI.data.AndroidPlatformStorage
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
@@ -62,7 +63,7 @@ class ToolManager(
             currentChat?.group?.let { groupId ->
                 groups.find { it.group_id == groupId }?.let { group ->
                     val groupConversationsTool = GroupConversationsTool(
-                        repository = deps.repository,
+                        loadChatHistory = { username -> deps.repository.loadChatHistory(username) },
                         username = currentUser,
                         currentChatId = currentChat.chat_id,
                         groupId = groupId,
@@ -81,7 +82,7 @@ class ToolManager(
             }
 
             val pythonTool = PythonInterpreterTool(
-                context = deps.context,
+                platformStorage = AndroidPlatformStorage(deps.context),
                 currentChat = currentChat,
                 currentGroup = currentGroup
             )
@@ -104,7 +105,7 @@ class ToolManager(
             return currentChat?.group?.let { groupId ->
                 groups.find { it.group_id == groupId }?.let { group ->
                     val groupConversationsTool = GroupConversationsTool(
-                        repository = deps.repository,
+                        loadChatHistory = { username -> deps.repository.loadChatHistory(username) },
                         username = currentUser,
                         currentChatId = currentChat.chat_id,
                         groupId = groupId,
@@ -130,7 +131,7 @@ class ToolManager(
             }
 
             val pythonTool = PythonInterpreterTool(
-                context = deps.context,
+                platformStorage = AndroidPlatformStorage(deps.context),
                 currentChat = currentChat,
                 currentGroup = currentGroup
             )

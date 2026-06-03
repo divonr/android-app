@@ -1,12 +1,14 @@
+@file:OptIn(ExperimentalEncodingApi::class)
 package com.example.ApI.tools.github
 
-import android.util.Base64
 import com.example.ApI.data.model.GitHubContent
 import com.example.ApI.data.model.GitHubCreateUpdateFileRequest
 import com.example.ApI.data.network.GitHubApiService
 import com.example.ApI.tools.Tool
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolSpecification
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlinx.serialization.json.*
 
 /**
@@ -51,7 +53,7 @@ class GitHubWriteFileTool(
             )
 
             // Encode content to base64
-            val encodedContent = Base64.encodeToString(content.toByteArray(), Base64.NO_WRAP)
+            val encodedContent = Base64.encode(content.toByteArray())
 
             // Create request
             val request = GitHubCreateUpdateFileRequest(

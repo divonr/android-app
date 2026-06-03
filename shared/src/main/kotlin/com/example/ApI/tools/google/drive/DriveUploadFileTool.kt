@@ -1,10 +1,12 @@
+@file:OptIn(ExperimentalEncodingApi::class)
 package com.example.ApI.tools.google.drive
 
-import android.util.Base64
 import com.example.ApI.data.network.GoogleDriveApiService
 import com.example.ApI.tools.Tool
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolSpecification
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlinx.serialization.json.*
 
 class DriveUploadFileTool(
@@ -27,7 +29,7 @@ class DriveUploadFileTool(
             val isBase64 = parameters["isBase64"]?.jsonPrimitive?.booleanOrNull ?: false
 
             val contentBytes = if (isBase64) {
-                Base64.decode(content, Base64.DEFAULT)
+                Base64.decode(content)
             } else {
                 content.toByteArray()
             }

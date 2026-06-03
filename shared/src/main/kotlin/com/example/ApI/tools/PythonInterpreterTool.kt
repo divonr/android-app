@@ -1,6 +1,6 @@
 package com.example.ApI.tools
 
-import android.content.Context
+import com.example.ApI.data.PlatformStorage
 import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.Chat
 import com.example.ApI.data.model.ChatGroup
@@ -17,14 +17,13 @@ import java.io.File
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import java.util.prefs.Preferences
 
 /**
- * Python Interpreter tool - desktop adaptation.
- * Uses Java Preferences for session persistence instead of Android SharedPreferences.
+ * Python Interpreter tool - shared implementation.
+ * Uses file-based session persistence via PlatformStorage.
  */
 class PythonInterpreterTool(
-    private val context: Context,
+    private val platformStorage: PlatformStorage,
     private val currentChat: Chat?,
     private val currentGroup: ChatGroup?
 ) : Tool {
@@ -63,8 +62,25 @@ Limits: 5 min timeout, 2GB RAM.
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    // Desktop: use Java Preferences instead of Android SharedPreferences
-    private val prefs = Preferences.userNodeForPackage(PythonInterpreterTool::class.java)
+    // File-based session persistence
+    private val sessionPrefsFile = File(platformStorage.filesDir, "python_sessions.json")
+
+    private fun loadSessionMap(): MutableMap<String, String> {
+        if (!sessionPrefsFile.exists()) return mutableMapOf()
+        return try {
+            val obj = Json.parseToJsonElement(sessionPrefsFile.readText()).jsonObject
+            obj.entries.associate { it.key to it.value.jsonPrimitive.content }.toMutableMap()
+        } catch (e: Exception) { mutableMapOf() }
+    }
+
+    private fun loadSessionId(chatKey: String): String? = loadSessionMap()[chatKey]
+
+    private fun saveSessionId(chatKey: String, sessionId: String) {
+        val map = loadSessionMap()
+        map[chatKey] = sessionId
+        val jsonObj = buildJsonObject { map.forEach { (k, v) -> put(k, v) } }
+        sessionPrefsFile.writeText(jsonObj.toString())
+    }
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         AppLogger.i("[PythonTool] execute() called")
@@ -76,7 +92,7 @@ Limits: 5 min timeout, 2GB RAM.
         val resolvedFiles = resolveFiles(filesToInclude)
 
         val chatKey = currentChat?.id ?: "default_session"
-        val savedSessionId = prefs.get("python_session_$chatKey", null)
+        val savedSessionId = loadSessionId("python_session_$chatKey")
 
         val multipartBuilder = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("code", code)
@@ -110,7 +126,7 @@ Limits: 5 min timeout, 2GB RAM.
     private fun parseResponse(responseBody: String, chatKey: String): ToolExecutionResult {
         val json = Json.parseToJsonElement(responseBody).jsonObject
         json["session_id"]?.jsonPrimitive?.contentOrNull?.let { sessionId ->
-            prefs.put("python_session_$chatKey", sessionId)
+            saveSessionId("python_session_$chatKey", sessionId)
         }
         val status = json["status"]?.jsonPrimitive?.contentOrNull ?: "error"
         if (status == "timeout") return ToolExecutionResult.Error("Python execution timed out (5 minute limit exceeded)")
@@ -159,7 +175,7 @@ Limits: 5 min timeout, 2GB RAM.
     }
 
     private fun saveOutputFiles(artifactsJson: JsonArray): List<Attachment> {
-        val attachmentsDir = File(context.filesDir, "attachments").apply { mkdirs() }
+        val attachmentsDir = File(platformStorage.filesDir, "attachments").apply { mkdirs() }
         return artifactsJson.mapNotNull { fileJson ->
             try {
                 val obj = fileJson.jsonObject

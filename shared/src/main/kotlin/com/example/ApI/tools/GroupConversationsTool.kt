@@ -1,21 +1,21 @@
 package com.example.ApI.tools
 
 import com.example.ApI.data.model.Chat
-import com.example.ApI.data.repository.DataRepository
+import com.example.ApI.data.model.UserChatHistory
 import kotlinx.serialization.json.*
 
 /**
  * Tool that provides access to other conversations in the same group.
  * This tool is dynamically created when a conversation is part of a group.
  *
- * @param repository The data repository to fetch chat history
+ * @param loadChatHistory Lambda to load chat history for the given username
  * @param username The current username
  * @param currentChatId The ID of the current chat (to exclude it from results)
  * @param groupId The ID of the group (for filtering chats)
  * @param groupName The name of the group (for description)
  */
 class GroupConversationsTool(
-    private val repository: DataRepository,
+    private val loadChatHistory: (String) -> UserChatHistory,
     private val username: String,
     private val currentChatId: String,
     private val groupId: String,
@@ -29,7 +29,7 @@ class GroupConversationsTool(
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         return try {
             // Get current user's chat history
-            val chatHistory = repository.loadChatHistory(username)
+            val chatHistory = loadChatHistory(username)
 
             // Find all chats in the same group, excluding the current chat
             val groupChats = chatHistory.chat_history.filter { chat ->

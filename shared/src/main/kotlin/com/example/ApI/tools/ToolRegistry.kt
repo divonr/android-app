@@ -326,6 +326,17 @@ class ToolRegistry {
             tools[toolId]?.getSpecification(provider)
         }
     }
+
+    /**
+     * Get specifications for all registered tools for the given provider, excluding the specified tool IDs.
+     * @param provider The provider name
+     * @param excludedToolIds Tool IDs to exclude from the result
+     */
+    fun getToolSpecifications(provider: String, excludedToolIds: List<String> = emptyList()): List<ToolSpecification> {
+        return tools.values
+            .filter { it.id !in excludedToolIds }
+            .map { it.getSpecification(provider) }
+    }
     
     /**
      * Execute a tool call
