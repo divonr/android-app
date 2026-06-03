@@ -1,7 +1,5 @@
 package com.example.ApI.data.network.providers
 
-import android.content.Context
-import android.util.Log
 import com.example.ApI.data.model.*
 import com.example.ApI.data.network.streaming.DataOnlyStreamParser
 import com.example.ApI.data.network.streaming.EventDataStreamParser
@@ -11,6 +9,7 @@ import com.example.ApI.data.network.streaming.StreamEventHandler
 import com.example.ApI.data.network.streaming.StreamResult
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.AppLogger
 import com.example.ApI.util.TemplateExpander
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -31,9 +30,8 @@ import java.net.URL
  * requiring code changes.
  */
 class FullDynamicCustomProvider(
-    context: Context,
     private val config: FullCustomProviderConfig
-) : BaseProvider(context) {
+) : BaseProvider() {
 
     private val logTag = "FullCustomProvider[${config.name}]"
 
@@ -68,7 +66,7 @@ class FullDynamicCustomProvider(
                 is ProviderStreamingResult.ToolCallDetected -> {
                     // Handle tool call using the base provider's tool chain handler
                     if (config.toolCallConfig.isConfigured()) {
-                        Log.d(logTag, "Tool call detected: ${result.toolCall.toolId}")
+                        AppLogger.d("[$logTag] Tool call detected: ${result.toolCall.toolId}")
                         val finalText = handleToolCallChain(
                             initialToolCall = result.toolCall,
                             initialPrecedingText = result.precedingText,
@@ -100,7 +98,7 @@ class FullDynamicCustomProvider(
                 }
             }
         } catch (e: Exception) {
-            Log.e(logTag, "Error sending message", e)
+            AppLogger.e("[$logTag] Error sending message", e)
             callback.onError("Failed to send message: ${e.message}")
         }
     }
@@ -194,7 +192,7 @@ class FullDynamicCustomProvider(
                 body = requestBody
             )
 
-            connection.outputStream.write(requestBody.toByteArray())
+            connection.outputStream.write(requestBody.toByteArray(Charsets.UTF_8))
             connection.outputStream.flush()
 
             val responseCode = connection.responseCode
@@ -212,7 +210,7 @@ class FullDynamicCustomProvider(
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
             parseStreamingResponse(reader, connection, callback)
         } catch (e: Exception) {
-            Log.e(logTag, "Error making streaming request", e)
+            AppLogger.e("[$logTag] Error making streaming request", e)
             callback.onError("Failed to make streaming request: ${e.message}")
             ProviderStreamingResult.Error("Failed to make streaming request: ${e.message}")
         }
@@ -327,7 +325,7 @@ class FullDynamicCustomProvider(
         var errorMessage: String? = null
 
         override fun onEvent(eventType: String?, data: JsonObject): StreamAction {
-            Log.d(logTag, "Event received: type=$eventType, data=$data")
+            AppLogger.d("[$logTag] Event received: type=$eventType, data=$data")
 
             // First, check for tool calls if configured
             if (config.toolCallConfig.isConfigured()) {
@@ -385,12 +383,12 @@ class FullDynamicCustomProvider(
                 val toolName = TemplateExpander.extractByPath(data, toolConfig.toolNamePath)
                 if (toolName != null) {
                     detectedToolName = toolName
-                    Log.d(logTag, "Tool call detected: toolName=$toolName")
+                    AppLogger.d("[$logTag] Tool call detected: toolName=$toolName")
 
                     // Extract call ID if configured (for {tool_id} placeholder)
                     if (toolConfig.toolIdPath.isNotBlank()) {
                         detectedCallId = TemplateExpander.extractByPath(data, toolConfig.toolIdPath)
-                        Log.d(logTag, "Tool call ID: $detectedCallId")
+                        AppLogger.d("[$logTag] Tool call ID: $detectedCallId")
                     }
 
                     // If parameters come in the same event, extract them
@@ -413,7 +411,7 @@ class FullDynamicCustomProvider(
                     val paramsChunk = TemplateExpander.extractByPath(data, toolConfig.parametersPath)
                     if (paramsChunk != null) {
                         toolParametersBuilder.append(paramsChunk)
-                        Log.d(logTag, "Tool parameters chunk: $paramsChunk")
+                        AppLogger.d("[$logTag] Tool parameters chunk: $paramsChunk")
                     }
                     return StreamAction.Continue
                 }
@@ -478,7 +476,7 @@ class FullDynamicCustomProvider(
         }
 
         override fun onParseError(line: String, error: Exception) {
-            Log.w(logTag, "Parse error on line: $line", error)
+            AppLogger.w("[$logTag] Parse error on line: $line: ${error.message}")
             // Continue processing - one bad line shouldn't stop the stream
         }
 
@@ -512,7 +510,7 @@ class FullDynamicCustomProvider(
                         JsonObject(emptyMap())
                     }
                 } catch (e: Exception) {
-                    Log.w(logTag, "Failed to parse tool parameters as JSON: ${e.message}")
+                    AppLogger.w("[$logTag] Failed to parse tool parameters as JSON: ${e.message}")
                     JsonObject(emptyMap())
                 }
 
@@ -523,7 +521,7 @@ class FullDynamicCustomProvider(
                     provider = config.providerKey
                 )
 
-                Log.d(logTag, "Returning ToolCallDetected: toolName=${toolCall.toolId}, callId=${toolCall.id}, params=$paramsJson")
+                AppLogger.d("[$logTag] Returning ToolCallDetected: toolName=${toolCall.toolId}, callId=${toolCall.id}, params=$paramsJson")
 
                 return ProviderStreamingResult.ToolCallDetected(
                     toolCall = toolCall,

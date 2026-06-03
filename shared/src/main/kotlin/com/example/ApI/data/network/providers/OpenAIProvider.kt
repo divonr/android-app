@@ -1,7 +1,5 @@
 package com.example.ApI.data.network.providers
 
-import android.content.Context
-import android.util.Log
 import com.example.ApI.data.model.*
 import com.example.ApI.data.network.streaming.DataOnlyStreamParser
 import com.example.ApI.data.network.streaming.StreamAction
@@ -9,6 +7,7 @@ import com.example.ApI.data.network.streaming.StreamEventHandler
 import com.example.ApI.data.network.streaming.StreamResult
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -23,7 +22,7 @@ import java.net.URL
  * OpenAI API provider implementation.
  * Handles streaming responses, tool calling, and thinking/reasoning support.
  */
-class OpenAIProvider(context: Context) : BaseProvider(context) {
+class OpenAIProvider() : BaseProvider() {
 
     override suspend fun sendMessage(
         provider: Provider,
@@ -46,7 +45,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
 
             when (streamingResponse) {
                 is ProviderStreamingResult.TextComplete -> {
-                    Log.d("TOOL_CALL_DEBUG", "Streaming: Text response complete")
+                    AppLogger.d("[TOOL_CALL_DEBUG] Streaming: Text response complete")
                     callback.onComplete(streamingResponse.fullText)
                 }
                 is ProviderStreamingResult.ToolCallDetected -> {
@@ -81,7 +80,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
         initialResponse: ProviderStreamingResult.ToolCallDetected,
         callback: StreamingCallback
     ) {
-        Log.d("TOOL_CALL_DEBUG", "OpenAI Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
+        AppLogger.d("[TOOL_CALL_DEBUG] OpenAI Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
 
         val finalText = handleToolCallChain(
             initialToolCall = initialResponse.toolCall,
@@ -171,7 +170,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                 if (responseCode == 400) {
                     // Check if this is the reasoning.summary error
                     if (requestReasoningSummary && errorBody.contains("reasoning.summary")) {
-                        Log.d("OPENAI_REASONING", "Reasoning summary not available for this account, retrying without it")
+                        AppLogger.d("[OPENAI_REASONING] Reasoning summary not available for this account, retrying without it")
                         return@withContext makeStreamingRequest(
                             provider, modelName, messages, systemPrompt, apiKey,
                             webSearchEnabled, enabledTools, thinkingBudget, callback,
@@ -231,7 +230,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                 isInReasoningPhase = true
                 reasoningStartTime = System.currentTimeMillis()
                 callback.onThinkingStarted()
-                Log.d("OPENAI_REASONING", "Reasoning phase started (summaries unavailable, timing from request)")
+                AppLogger.d("[OPENAI_REASONING] Reasoning phase started (summaries unavailable, timing from request)")
             }
         }
 
@@ -245,7 +244,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                             isInReasoningPhase = true
                             reasoningStartTime = System.currentTimeMillis()
                             callback.onThinkingStarted()
-                            Log.d("OPENAI_REASONING", "Reasoning phase started")
+                            AppLogger.d("[OPENAI_REASONING] Reasoning phase started")
                         }
                     }
                 }
@@ -317,7 +316,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
         }
 
         override fun onParseError(line: String, error: Exception) {
-            Log.e("TOOL_CALL_DEBUG", "Error parsing streaming chunk: ${error.message}")
+            AppLogger.e("[TOOL_CALL_DEBUG] Error parsing streaming chunk: ${error.message}")
         }
 
         /**
@@ -401,7 +400,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
 
             if (name != null && callId != null && arguments != null) {
                 val paramsJson = json.parseToJsonElement(arguments).jsonObject
-                Log.d("TOOL_CALL_DEBUG", "Streaming: Detected tool call in output_item.done")
+                AppLogger.d("[TOOL_CALL_DEBUG] Streaming: Detected tool call in output_item.done")
                 return ToolCall(
                     id = callId,
                     toolId = name,
@@ -428,7 +427,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
 
                     if (name != null && callId != null && arguments != null) {
                         val paramsJson = json.parseToJsonElement(arguments).jsonObject
-                        Log.d("TOOL_CALL_DEBUG", "Streaming: Detected tool call in response.completed")
+                        AppLogger.d("[TOOL_CALL_DEBUG] Streaming: Detected tool call in response.completed")
                         return ToolCall(
                             id = callId,
                             toolId = name,
@@ -647,10 +646,10 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
                     callback.onComplete(response.text)
                 }
                 is NonStreamingResponse.ToolCallResponse -> {
-                    Log.d("TOOL_CALL_DEBUG", "Non-streaming: Tool call detected - ${response.toolCall.toolId}")
+                    AppLogger.d("[TOOL_CALL_DEBUG] Non-streaming: Tool call detected - ${response.toolCall.toolId}")
 
                     val toolResult = callback.onToolCall(response.toolCall)
-                    Log.d("TOOL_CALL_DEBUG", "Non-streaming: Tool executed with result: $toolResult")
+                    AppLogger.d("[TOOL_CALL_DEBUG] Non-streaming: Tool executed with result: $toolResult")
 
                     val toolCallMessage = createToolCallMessage(response.toolCall, toolResult)
                     val toolResponseMessage = createToolResponseMessage(response.toolCall, toolResult)
@@ -659,7 +658,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
 
                     val messagesWithToolResult = messages + listOf(toolCallMessage, toolResponseMessage)
 
-                    Log.d("TOOL_CALL_DEBUG", "Non-streaming: Sending follow-up request with tool result")
+                    AppLogger.d("[TOOL_CALL_DEBUG] Non-streaming: Sending follow-up request with tool result")
 
                     val followUpResponse = makeNonStreamingRequest(
                         provider, modelName, messagesWithToolResult, systemPrompt, apiKey,
@@ -668,7 +667,7 @@ class OpenAIProvider(context: Context) : BaseProvider(context) {
 
                     when (followUpResponse) {
                         is NonStreamingResponse.TextResponse -> {
-                            Log.d("TOOL_CALL_DEBUG", "Non-streaming: Got final text response")
+                            AppLogger.d("[TOOL_CALL_DEBUG] Non-streaming: Got final text response")
                             callback.onComplete(followUpResponse.text)
                         }
                         is NonStreamingResponse.ToolCallResponse -> {

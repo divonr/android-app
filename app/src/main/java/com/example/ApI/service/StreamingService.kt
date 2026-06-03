@@ -109,7 +109,7 @@ class StreamingService : Service() {
         super.onCreate()
         Log.d(TAG, "StreamingService created")
         repository = DataRepository(applicationContext)
-        apiService = LLMApiService(applicationContext)
+        apiService = LLMApiService()
         createNotificationChannel()
     }
 

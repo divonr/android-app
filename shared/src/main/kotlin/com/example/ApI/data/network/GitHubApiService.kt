@@ -1,7 +1,7 @@
 package com.example.ApI.data.network
 
-import android.util.Log
 import com.example.ApI.data.model.*
+import com.example.ApI.util.AppLogger
 import com.example.ApI.util.JsonConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -42,8 +42,8 @@ class GitHubApiService {
      */
     suspend fun listRepositories(
         accessToken: String,
-        visibility: String = "all", // "all", "public", "private"
-        sort: String = "updated", // "created", "updated", "pushed", "full_name"
+        visibility: String = "all",
+        sort: String = "updated",
         perPage: Int = 30,
         page: Int = 1
     ): Result<List<GitHubRepository>> = withContext(Dispatchers.IO) {
@@ -83,7 +83,7 @@ class GitHubApiService {
         owner: String,
         repo: String,
         path: String,
-        ref: String? = null // Branch, tag, or commit SHA
+        ref: String? = null
     ): Result<Any> = withContext(Dispatchers.IO) {
         val params = ref?.let { mapOf("ref" to it) } ?: emptyMap()
 
@@ -98,16 +98,13 @@ class GitHubApiService {
                 connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
             }
 
-            Log.d(TAG, "getContents response: $responseCode")
+            AppLogger.d("[$TAG] getContents response: $responseCode")
 
             if (responseCode in 200..299) {
-                // Response can be a single file or array of files
                 return@withContext try {
-                    // Try parsing as single file first
                     val content = JsonConfig.standard.decodeFromString<GitHubContent>(responseBody)
                     Result.success(content)
                 } catch (e: Exception) {
-                    // Try parsing as array of files (directory)
                     try {
                         val contents = JsonConfig.standard.decodeFromString<List<GitHubContent>>(responseBody)
                         Result.success(contents)
@@ -124,7 +121,7 @@ class GitHubApiService {
                 Result.failure(Exception(error.message))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "getContents error: ${e.message}", e)
+            AppLogger.e("[$TAG] getContents error: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -236,7 +233,7 @@ class GitHubApiService {
         accessToken: String,
         owner: String,
         repo: String,
-        sha: String? = null, // Branch or commit SHA
+        sha: String? = null,
         path: String? = null,
         perPage: Int = 30,
         page: Int = 1
@@ -295,7 +292,7 @@ class GitHubApiService {
         accessToken: String,
         owner: String,
         repo: String,
-        state: String = "open", // "open", "closed", "all"
+        state: String = "open",
         perPage: Int = 30,
         page: Int = 1
     ): Result<List<GitHubPullRequest>> = withContext(Dispatchers.IO) {
@@ -372,7 +369,7 @@ class GitHubApiService {
      */
     suspend fun searchCode(
         accessToken: String,
-        query: String, // e.g., "addClass in:file language:js repo:jquery/jquery"
+        query: String,
         perPage: Int = 30,
         page: Int = 1
     ): Result<GitHubCodeSearchResult> = withContext(Dispatchers.IO) {
@@ -432,7 +429,7 @@ class GitHubApiService {
                 connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
             }
 
-            Log.d(TAG, "GET $endpoint: $responseCode")
+            AppLogger.d("[$TAG] GET $endpoint: $responseCode")
 
             if (responseCode in 200..299) {
                 val result = JsonConfig.standard.decodeFromString<T>(responseBody)
@@ -446,7 +443,7 @@ class GitHubApiService {
                 Result.failure(Exception(error.message))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "GET $endpoint error: ${e.message}", e)
+            AppLogger.e("[$TAG] GET $endpoint error: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -467,7 +464,7 @@ class GitHubApiService {
                 connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
             }
 
-            Log.d(TAG, "GET $endpoint: $responseCode")
+            AppLogger.d("[$TAG] GET $endpoint: $responseCode")
 
             if (responseCode in 200..299) {
                 val result = JsonConfig.standard.decodeFromString<List<T>>(responseBody)
@@ -481,7 +478,7 @@ class GitHubApiService {
                 Result.failure(Exception(error.message))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "GET $endpoint error: ${e.message}", e)
+            AppLogger.e("[$TAG] GET $endpoint error: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -499,7 +496,7 @@ class GitHubApiService {
             connection.setRequestProperty("Content-Type", "application/json")
 
             val requestBody = JsonConfig.standard.encodeToString(body)
-            Log.d(TAG, "POST $endpoint: $requestBody")
+            AppLogger.d("[$TAG] POST $endpoint: $requestBody")
 
             OutputStreamWriter(connection.outputStream).use { writer ->
                 writer.write(requestBody)
@@ -513,7 +510,7 @@ class GitHubApiService {
                 connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
             }
 
-            Log.d(TAG, "POST $endpoint response: $responseCode")
+            AppLogger.d("[$TAG] POST $endpoint response: $responseCode")
 
             if (responseCode in 200..299) {
                 val result = JsonConfig.standard.decodeFromString<R>(responseBody)
@@ -527,7 +524,7 @@ class GitHubApiService {
                 Result.failure(Exception(error.message))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "POST $endpoint error: ${e.message}", e)
+            AppLogger.e("[$TAG] POST $endpoint error: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -545,7 +542,7 @@ class GitHubApiService {
             connection.setRequestProperty("Content-Type", "application/json")
 
             val requestBody = JsonConfig.standard.encodeToString(body)
-            Log.d(TAG, "PUT $endpoint: $requestBody")
+            AppLogger.d("[$TAG] PUT $endpoint: $requestBody")
 
             OutputStreamWriter(connection.outputStream).use { writer ->
                 writer.write(requestBody)
@@ -559,7 +556,7 @@ class GitHubApiService {
                 connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
             }
 
-            Log.d(TAG, "PUT $endpoint response: $responseCode")
+            AppLogger.d("[$TAG] PUT $endpoint response: $responseCode")
 
             if (responseCode in 200..299) {
                 val result = JsonConfig.standard.decodeFromString<R>(responseBody)
@@ -573,7 +570,7 @@ class GitHubApiService {
                 Result.failure(Exception(error.message))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "PUT $endpoint error: ${e.message}", e)
+            AppLogger.e("[$TAG] PUT $endpoint error: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -602,7 +599,7 @@ class GitHubApiService {
                 connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
             }
 
-            Log.d(TAG, "DELETE $endpoint response: $responseCode")
+            AppLogger.d("[$TAG] DELETE $endpoint response: $responseCode")
 
             if (responseCode in 200..299) {
                 val result = JsonConfig.standard.decodeFromString<R>(responseBody)
@@ -616,7 +613,7 @@ class GitHubApiService {
                 Result.failure(Exception(error.message))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "DELETE $endpoint error: ${e.message}", e)
+            AppLogger.e("[$TAG] DELETE $endpoint error: ${e.message}", e)
             Result.failure(e)
         }
     }

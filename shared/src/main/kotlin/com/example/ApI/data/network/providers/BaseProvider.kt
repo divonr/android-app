@@ -1,22 +1,22 @@
+@file:OptIn(ExperimentalEncodingApi::class)
 package com.example.ApI.data.network.providers
 
-import android.content.Context
-import android.util.Log
 import com.example.ApI.data.model.*
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.util.AppLogger
 import com.example.ApI.tools.ToolCallInfo
 import com.example.ApI.tools.ToolExecutionResult
-import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
 import com.example.ApI.util.JsonConfig
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlinx.serialization.json.*
 
 /**
  * Base class for all LLM providers.
  * Contains common utilities and defines the interface for provider implementations.
  */
-abstract class BaseProvider(protected val context: Context) {
+abstract class BaseProvider() {
 
     protected val json = JsonConfig.prettyPrint
 
@@ -45,7 +45,7 @@ abstract class BaseProvider(protected val context: Context) {
         toolCall: ToolCall,
         toolResult: ToolExecutionResult
     ): Message {
-        val toolDisplayName = ToolRegistry.getInstance().getToolDisplayName(toolCall.toolId)
+        val toolDisplayName = toolCall.toolId
 
         return Message(
             role = "tool_call",
@@ -109,7 +109,7 @@ abstract class BaseProvider(protected val context: Context) {
         return try {
             val file = java.io.File(filePath)
             if (file.exists()) {
-                java.util.Base64.getEncoder().encodeToString(file.readBytes())
+                Base64.encode(file.readBytes())
             } else null
         } catch (e: Exception) {
             null
@@ -219,7 +219,7 @@ abstract class BaseProvider(protected val context: Context) {
 
         // Loop to handle sequential tool calls
         while (currentResponse is ProviderStreamingResult.ToolCallDetected && toolDepth < MAX_TOOL_DEPTH) {
-            Log.d("TOOL_CALL_DEBUG", "BaseProvider: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
+            AppLogger.d("[TOOL_CALL_DEBUG] BaseProvider: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
 
             val chainedToolResult = callback.onToolCall(
                 toolCall = currentResponse.toolCall,

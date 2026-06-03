@@ -1,6 +1,5 @@
 package com.example.ApI.data.network.providers
 
-import android.content.Context
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
@@ -13,7 +12,7 @@ import kotlinx.serialization.json.buildJsonObject
  * - Reasoning/thinking with effort levels (xhigh, high, medium, low, minimal)
  * - Tool/function calling with OpenAI-compatible format
  */
-class LLMStatsProvider(context: Context) : OpenAICompatibleProvider(context) {
+class LLMStatsProvider() : OpenAICompatibleProvider() {
 
     override val providerName: String = "llmstats"
     override val logTag: String = "LLMStatsProvider"

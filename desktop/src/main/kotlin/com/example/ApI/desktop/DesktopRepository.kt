@@ -14,7 +14,7 @@ import java.io.File
 class DesktopRepository(private val appDir: File) {
     private val context = DesktopContext(File(appDir, "files").apply { mkdirs() })
     private val internalDir = File(context.filesDir, "llm_data").apply { mkdirs() }
-    private val apiService = LLMApiService(context)
+    private val apiService = LLMApiService()
 
     private val modelsCacheManager = ModelsCacheManager(internalDir, JsonConfig.prettyPrint)
     private val localStorageManager = LocalStorageManager(internalDir, JsonConfig.prettyPrint)

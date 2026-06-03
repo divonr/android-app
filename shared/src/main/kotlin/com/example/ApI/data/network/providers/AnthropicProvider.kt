@@ -1,6 +1,5 @@
 package com.example.ApI.data.network.providers
 
-import android.content.Context
 import com.example.ApI.data.model.*
 import com.example.ApI.data.network.streaming.EventDataStreamParser
 import com.example.ApI.data.network.streaming.StreamAction
@@ -20,7 +19,7 @@ import java.net.URL
  * Anthropic Claude API provider implementation.
  * Handles streaming responses, tool calling, and thinking support.
  */
-class AnthropicProvider(context: Context) : BaseProvider(context) {
+class AnthropicProvider() : BaseProvider() {
 
     override suspend fun sendMessage(
         provider: Provider,

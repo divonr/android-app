@@ -1,7 +1,5 @@
 package com.example.ApI.data.network.providers
 
-import android.content.Context
-import android.util.Log
 import com.example.ApI.data.model.*
 import com.example.ApI.data.network.streaming.DataOnlyStreamParser
 import com.example.ApI.data.network.streaming.StreamAction
@@ -9,6 +7,7 @@ import com.example.ApI.data.network.streaming.StreamEventHandler
 import com.example.ApI.data.network.streaming.StreamResult
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
@@ -21,10 +20,10 @@ import java.net.URL
  * Generic provider for OpenAI-compatible APIs.
  * Base class for OpenRouter, LLM Stats, etc.
  */
-abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context) {
+abstract class OpenAICompatibleProvider() : BaseProvider() {
 
     abstract val providerName: String
-    
+
     protected open val logTag: String
         get() = "${providerName.replaceFirstChar { it.uppercase() }}Provider"
 
@@ -122,7 +121,7 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
         initialResponse: ProviderStreamingResult.ToolCallDetected,
         callback: StreamingCallback
     ) {
-        Log.d(logTag, "Tool call detected - ${initialResponse.toolCall.toolId}")
+        AppLogger.d("[$logTag] Tool call detected - ${initialResponse.toolCall.toolId}")
 
         val finalText = handleToolCallChain(
             initialToolCall = initialResponse.toolCall,
@@ -162,10 +161,10 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
             connection.requestMethod = provider.request.request_type
             applyAuthorizationHeader(connection, apiKey)
             connection.setRequestProperty("Content-Type", "application/json")
-            
+
             // Add provider-specific headers
             addCustomHeaders(connection)
-            
+
             connection.doOutput = true
 
             val apiMessages = buildMessages(messages, systemPrompt)
@@ -262,7 +261,7 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
                             isInReasoningPhase = true
                             reasoningStartTime = System.currentTimeMillis()
                             callback.onThinkingStarted()
-                            Log.d(logTag, "Reasoning phase started")
+                            AppLogger.d("[$logTag] Reasoning phase started")
                         }
 
                         reasoningDetails.forEach { detail ->
@@ -337,7 +336,7 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
 
                 // Check finish_reason
                 if (finishReason == "tool_calls") {
-                    Log.d(logTag, "Finish reason: tool_calls")
+                    AppLogger.d("[$logTag] Finish reason: tool_calls")
                     // Build the first complete tool call
                     val firstBuilder = toolCallsBuilder[0]
                     if (firstBuilder != null && firstBuilder.isComplete()) {
@@ -351,13 +350,13 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
                                 parameters = paramsJson,
                                 provider = providerName
                             )
-                            Log.d(logTag, "Tool call built: ${detectedToolCall?.toolId}")
+                            AppLogger.d("[$logTag] Tool call built: ${detectedToolCall?.toolId}")
                         } catch (e: Exception) {
-                            Log.e(logTag, "Error parsing tool call arguments: ${e.message}")
+                            AppLogger.e("[$logTag] Error parsing tool call arguments: ${e.message}")
                         }
                     }
                 } else if (finishReason == "stop" || finishReason == "length") {
-                    Log.d(logTag, "Finish reason: $finishReason")
+                    AppLogger.d("[$logTag] Finish reason: $finishReason")
                 }
             }
 
@@ -365,7 +364,7 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
         }
 
         override fun onStreamEnd() {
-            Log.d(logTag, "Stream complete")
+            AppLogger.d("[$logTag] Stream complete")
             // Complete reasoning if still in progress
             if (isInReasoningPhase) {
                 completeThinkingPhase(callback, reasoningStartTime, reasoningBuilder)
@@ -374,7 +373,7 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
         }
 
         override fun onParseError(line: String, error: Exception) {
-            Log.e(logTag, "Error parsing chunk: ${error.message}")
+            AppLogger.e("[$logTag] Error parsing chunk: ${error.message}")
         }
 
         /**
@@ -580,13 +579,13 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
                 put("reasoning", buildJsonObject {
                     put("effort", thinkingBudget.level)
                 })
-                Log.d(logTag, "Added reasoning effort: ${thinkingBudget.level}")
+                AppLogger.d("[$logTag] Added reasoning effort: ${thinkingBudget.level}")
             }
 
             // Add tools if provided
             if (enabledTools.isNotEmpty()) {
                 put("tools", buildToolsArray(enabledTools))
-                Log.d(logTag, "Added ${enabledTools.size} tools")
+                AppLogger.d("[$logTag] Added ${enabledTools.size} tools")
             }
         }
     }

@@ -12,7 +12,7 @@ import java.io.File
 
 class DataRepository(private val context: Context) {
 
-    private val apiService = LLMApiService(context)
+    private val apiService = LLMApiService()
 
     private val internalDir = File(context.filesDir, "llm_data")
 

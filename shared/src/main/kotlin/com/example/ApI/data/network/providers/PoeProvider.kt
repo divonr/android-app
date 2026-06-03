@@ -1,7 +1,5 @@
 package com.example.ApI.data.network.providers
 
-import android.content.Context
-import android.util.Log
 import com.example.ApI.data.model.*
 import com.example.ApI.data.network.streaming.EventDataStreamParser
 import com.example.ApI.data.network.streaming.StreamAction
@@ -10,6 +8,7 @@ import com.example.ApI.data.network.streaming.StreamResult
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -24,7 +23,7 @@ import java.net.URL
  * Poe API provider implementation.
  * Handles streaming responses and tool calling with Poe-specific format.
  */
-class PoeProvider(context: Context) : BaseProvider(context) {
+class PoeProvider() : BaseProvider() {
 
     override suspend fun sendMessage(
         provider: Provider,
@@ -46,7 +45,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
 
             when (streamingResponse) {
                 is ProviderStreamingResult.TextComplete -> {
-                    Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Text response complete")
+                    AppLogger.d("[TOOL_CALL_DEBUG] Poe Streaming: Text response complete")
                     callback.onComplete(streamingResponse.fullText)
                 }
                 is ProviderStreamingResult.ToolCallDetected -> {
@@ -75,20 +74,20 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         initialResponse: ProviderStreamingResult.ToolCallDetected,
         callback: StreamingCallback
     ) {
-        Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
+        AppLogger.d("[TOOL_CALL_DEBUG] Poe Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
 
         val toolResult = callback.onToolCall(
             toolCall = initialResponse.toolCall,
             precedingText = initialResponse.precedingText
         )
-        Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool executed with result: $toolResult")
+        AppLogger.d("[TOOL_CALL_DEBUG] Poe Streaming: Tool executed with result: $toolResult")
 
         val toolCallMessage = createToolCallMessage(initialResponse.toolCall, toolResult)
         val toolResponseMessage = createToolResponseMessage(initialResponse.toolCall, toolResult)
 
         callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, initialResponse.precedingText)
 
-        Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Sending follow-up request with tool_calls and tool_results")
+        AppLogger.d("[TOOL_CALL_DEBUG] Poe Streaming: Sending follow-up request with tool_calls and tool_results")
 
         // Handle tool chaining
         var currentMessages = messages
@@ -102,7 +101,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         var toolDepth = 1
 
         while (toolDepth < MAX_TOOL_DEPTH) {
-            Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Tool chain depth = $toolDepth")
+            AppLogger.d("[TOOL_CALL_DEBUG] Poe Streaming: Tool chain depth = $toolDepth")
 
             // First iteration uses WithToolResults, subsequent use regular request
             currentResponse = if (toolDepth == 1) {
@@ -119,12 +118,12 @@ class PoeProvider(context: Context) : BaseProvider(context) {
 
             when (currentResponse) {
                 is ProviderStreamingResult.TextComplete -> {
-                    Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Got final text response")
+                    AppLogger.d("[TOOL_CALL_DEBUG] Poe Streaming: Got final text response")
                     callback.onComplete(currentResponse.fullText)
                     return
                 }
                 is ProviderStreamingResult.ToolCallDetected -> {
-                    Log.d("TOOL_CALL_DEBUG", "Poe Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
+                    AppLogger.d("[TOOL_CALL_DEBUG] Poe Streaming: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
 
                     if (currentResponse.precedingText.isNotBlank()) {
                         currentMessages = currentMessages + createAssistantMessage(currentResponse.precedingText, modelName)
@@ -271,7 +270,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                 body = requestBodyString
             )
 
-            Log.d("TOOL_CALL_DEBUG", "Poe: Sending request with tool results: $requestBodyString")
+            AppLogger.d("[TOOL_CALL_DEBUG] Poe: Sending request with tool results: $requestBodyString")
 
             val writer = OutputStreamWriter(connection.outputStream)
             writer.write(requestBodyString)
@@ -289,7 +288,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
             }
 
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
-            Log.d("TOOL_CALL_DEBUG", "Poe: Starting to read follow-up stream...")
+            AppLogger.d("[TOOL_CALL_DEBUG] Poe: Starting to read follow-up stream...")
             // Use the same parser as initial requests - tool calls can happen at any point in the chain
             parseStreamingResponse(reader, connection, callback)
         } catch (e: Exception) {
@@ -349,7 +348,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                                 thinkingInProgress = true
                                 thinkingStartTime = System.currentTimeMillis()
                                 callback.onThinkingStarted()
-                                Log.d("POE_THINKING", "Thinking started")
+                                AppLogger.d("[POE_THINKING] Thinking started")
                             } else {
                                 // No thinking pattern detected, regular response
                                 actualResponseBuilder.append(text)
@@ -381,7 +380,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                                     thinkingInProgress = false
                                     thinkingComplete = true
                                     completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
-                                    Log.d("POE_THINKING", "Thinking complete, duration: ${(System.currentTimeMillis() - thinkingStartTime) / 1000f}s")
+                                    AppLogger.d("[POE_THINKING] Thinking complete, duration: ${(System.currentTimeMillis() - thinkingStartTime) / 1000f}s")
                                 }
 
                                 // Send only new response content (delta)
@@ -477,13 +476,13 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                                     }
                                 }
 
-                                Log.d("TOOL_CALL_DEBUG", "Poe: Accumulated tool call data for index $index: $buffer")
+                                AppLogger.d("[TOOL_CALL_DEBUG] Poe: Accumulated tool call data for index $index: $buffer")
                             }
                         }
 
                         val finishReason = choice["finish_reason"]?.jsonPrimitive?.content
                         if (finishReason == "tool_calls") {
-                            Log.d("TOOL_CALL_DEBUG", "Poe: Finish reason is tool_calls")
+                            AppLogger.d("[TOOL_CALL_DEBUG] Poe: Finish reason is tool_calls")
 
                             toolCallBuffer.values.firstOrNull()?.let { buffer ->
                                 val toolId = buffer["id"] as? String
@@ -499,9 +498,9 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                                             parameters = paramsJson,
                                             provider = "poe"
                                         )
-                                        Log.d("TOOL_CALL_DEBUG", "Poe: Created tool call: $detectedToolCall")
+                                        AppLogger.d("[TOOL_CALL_DEBUG] Poe: Created tool call: $detectedToolCall")
                                     } catch (e: Exception) {
-                                        Log.e("TOOL_CALL_DEBUG", "Poe: Failed to parse tool arguments: ${e.message}")
+                                        AppLogger.e("[TOOL_CALL_DEBUG] Poe: Failed to parse tool arguments: ${e.message}")
                                     }
                                 }
                             }
@@ -521,17 +520,17 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         }
 
         override fun onStreamEnd() {
-            Log.d("TOOL_CALL_DEBUG", "Poe: Stream done")
+            AppLogger.d("[TOOL_CALL_DEBUG] Poe: Stream done")
 
             // Complete thinking phase if still in progress
             if (thinkingInProgress) {
                 completeThinkingPhase(callback, thinkingStartTime, thoughtsBuilder)
-                Log.d("POE_THINKING", "Thinking completed at stream end")
+                AppLogger.d("[POE_THINKING] Thinking completed at stream end")
             }
         }
 
         override fun onParseError(line: String, error: Exception) {
-            Log.e("TOOL_CALL_DEBUG", "Poe: Error parsing event: ${error.message}")
+            AppLogger.e("[TOOL_CALL_DEBUG] Poe: Error parsing event: ${error.message}")
             // Continue processing (matches previous behavior)
         }
 
@@ -630,7 +629,7 @@ class PoeProvider(context: Context) : BaseProvider(context) {
         connection: HttpURLConnection,
         callback: StreamingCallback
     ): ProviderStreamingResult {
-        Log.d("TOOL_CALL_DEBUG", "Poe: Starting to read stream...")
+        AppLogger.d("[TOOL_CALL_DEBUG] Poe: Starting to read stream...")
 
         val parser = EventDataStreamParser(
             json = json,
@@ -747,9 +746,8 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                             put("function", buildJsonObject {
                                 put("name", toolSpec.name)
                                 put("description", toolSpec.description)
-                                val toolSpecParameters = toolSpec.parameters
-                                if (toolSpecParameters != null) {
-                                    put("parameters", toolSpecParameters)
+                                if (toolSpec.parameters != null) {
+                                    put("parameters", toolSpec.parameters)
                                 } else {
                                     put("parameters", buildJsonObject {})
                                 }
@@ -783,9 +781,8 @@ class PoeProvider(context: Context) : BaseProvider(context) {
                             put("function", buildJsonObject {
                                 put("name", toolSpec.name)
                                 put("description", toolSpec.description)
-                                val toolSpecParameters = toolSpec.parameters
-                                if (toolSpecParameters != null) {
-                                    put("parameters", toolSpecParameters)
+                                if (toolSpec.parameters != null) {
+                                    put("parameters", toolSpec.parameters)
                                 } else {
                                     put("parameters", buildJsonObject {})
                                 }

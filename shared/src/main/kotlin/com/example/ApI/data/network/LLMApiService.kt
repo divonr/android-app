@@ -1,6 +1,5 @@
 package com.example.ApI.data.network
 
-import android.content.Context
 import com.example.ApI.data.model.*
 import com.example.ApI.data.model.CustomProviderConfig
 import com.example.ApI.data.model.FullCustomProviderConfig
@@ -27,16 +26,16 @@ import kotlinx.coroutines.withContext
  * - Tool call execution and chaining
  * - Thinking/reasoning support
  */
-class LLMApiService(private val context: Context) {
+class LLMApiService() {
 
     // Lazy-initialized provider instances
-    private val openAIProvider by lazy { OpenAIProvider(context) }
-    private val googleProvider by lazy { GoogleProvider(context) }
-    private val anthropicProvider by lazy { AnthropicProvider(context) }
-    private val poeProvider by lazy { PoeProvider(context) }
-    private val cohereProvider by lazy { CohereProvider(context) }
-    private val openRouterProvider by lazy { OpenRouterProvider(context) }
-    private val llmStatsProvider by lazy { LLMStatsProvider(context) }
+    private val openAIProvider by lazy { OpenAIProvider() }
+    private val googleProvider by lazy { GoogleProvider() }
+    private val anthropicProvider by lazy { AnthropicProvider() }
+    private val poeProvider by lazy { PoeProvider() }
+    private val cohereProvider by lazy { CohereProvider() }
+    private val openRouterProvider by lazy { OpenRouterProvider() }
+    private val llmStatsProvider by lazy { LLMStatsProvider() }
 
     // Cache for dynamic custom providers (by providerKey)
     private val customProviderCache = mutableMapOf<String, DynamicCustomProvider>()
@@ -49,7 +48,7 @@ class LLMApiService(private val context: Context) {
      * Creates a DynamicCustomProvider instance and caches it.
      */
     fun registerCustomProvider(config: CustomProviderConfig) {
-        customProviderCache[config.providerKey] = DynamicCustomProvider(context, config)
+        customProviderCache[config.providerKey] = DynamicCustomProvider(config)
     }
 
     /**
@@ -66,7 +65,7 @@ class LLMApiService(private val context: Context) {
     fun reloadCustomProviders(configs: List<CustomProviderConfig>) {
         customProviderCache.clear()
         configs.forEach { config ->
-            customProviderCache[config.providerKey] = DynamicCustomProvider(context, config)
+            customProviderCache[config.providerKey] = DynamicCustomProvider(config)
         }
     }
 
@@ -75,7 +74,7 @@ class LLMApiService(private val context: Context) {
      * Creates a FullDynamicCustomProvider instance and caches it.
      */
     fun registerFullCustomProvider(config: FullCustomProviderConfig) {
-        fullCustomProviderCache[config.providerKey] = FullDynamicCustomProvider(context, config)
+        fullCustomProviderCache[config.providerKey] = FullDynamicCustomProvider(config)
     }
 
     /**
@@ -92,7 +91,7 @@ class LLMApiService(private val context: Context) {
     fun reloadFullCustomProviders(configs: List<FullCustomProviderConfig>) {
         fullCustomProviderCache.clear()
         configs.filter { it.isEnabled }.forEach { config ->
-            fullCustomProviderCache[config.providerKey] = FullDynamicCustomProvider(context, config)
+            fullCustomProviderCache[config.providerKey] = FullDynamicCustomProvider(config)
         }
     }
 

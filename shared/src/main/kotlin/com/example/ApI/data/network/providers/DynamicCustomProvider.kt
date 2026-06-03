@@ -1,6 +1,5 @@
 package com.example.ApI.data.network.providers
 
-import android.content.Context
 import com.example.ApI.data.model.CustomProviderConfig
 import java.net.HttpURLConnection
 
@@ -10,9 +9,8 @@ import java.net.HttpURLConnection
  * all streaming, tool calling, and reasoning detection logic.
  */
 class DynamicCustomProvider(
-    context: Context,
     private val config: CustomProviderConfig
-) : OpenAICompatibleProvider(context) {
+) : OpenAICompatibleProvider() {
 
     override val providerName: String = config.providerKey
 

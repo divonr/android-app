@@ -1,7 +1,5 @@
 package com.example.ApI.data.network.providers
 
-import android.content.Context
-import android.util.Log
 import com.example.ApI.data.model.*
 import com.example.ApI.data.network.streaming.DataOnlyStreamParser
 import com.example.ApI.data.network.streaming.StreamAction
@@ -9,6 +7,7 @@ import com.example.ApI.data.network.streaming.StreamEventHandler
 import com.example.ApI.data.network.streaming.StreamResult
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -23,7 +22,7 @@ import java.net.URL
  * Google Gemini API provider implementation.
  * Handles streaming responses, tool calling, and thinking support.
  */
-class GoogleProvider(context: Context) : BaseProvider(context) {
+class GoogleProvider() : BaseProvider() {
 
     override suspend fun sendMessage(
         provider: Provider,
@@ -45,7 +44,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
 
             when (streamingResponse) {
                 is ProviderStreamingResult.TextComplete -> {
-                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Text response complete")
+                    AppLogger.d("[TOOL_CALL_DEBUG] Google Streaming: Text response complete")
                     callback.onComplete(streamingResponse.fullText)
                 }
                 is ProviderStreamingResult.ToolCallDetected -> {
@@ -77,7 +76,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         initialResponse: ProviderStreamingResult.ToolCallDetected,
         callback: StreamingCallback
     ) {
-        Log.d("TOOL_CALL_DEBUG", "Google Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
+        AppLogger.d("[TOOL_CALL_DEBUG] Google Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
 
         val finalText = handleToolCallChain(
             initialToolCall = initialResponse.toolCall,
@@ -183,7 +182,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
         var errorMessage: String? = null
 
         init {
-            Log.d("TOOL_CALL_DEBUG", "Starting to read Google stream...")
+            AppLogger.d("[TOOL_CALL_DEBUG] Starting to read Google stream...")
         }
 
         override fun onEvent(eventType: String?, data: JsonObject): StreamAction {
@@ -231,7 +230,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                             }
 
                             functionCall != null -> {
-                                Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found functionCall part: $functionCall")
+                                AppLogger.d("[TOOL_CALL_DEBUG] Google Streaming: Found functionCall part: $functionCall")
                                 val name = functionCall["name"]?.jsonPrimitive?.content
                                 val args = functionCall["args"]?.jsonObject
                                 // Capture thoughtSignature - required for Gemini 3+ function calling
@@ -245,7 +244,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                                         provider = "google",
                                         thoughtSignature = thoughtSignature
                                     )
-                                    Log.d("TOOL_CALL_DEBUG", "Google Streaming: Detected tool call in chunk, thoughtSignature=${thoughtSignature != null}")
+                                    AppLogger.d("[TOOL_CALL_DEBUG] Google Streaming: Detected tool call in chunk, thoughtSignature=${thoughtSignature != null}")
                                 }
                             }
 
@@ -256,7 +255,7 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                                     isInThinkingPhase = false
                                 }
 
-                                Log.d("TOOL_CALL_DEBUG", "Google Streaming: Found text part: '$text'")
+                                AppLogger.d("[TOOL_CALL_DEBUG] Google Streaming: Found text part: '$text'")
                                 fullResponse.append(text)
                                 callback.onPartialResponse(text)
                             }
@@ -503,9 +502,8 @@ class GoogleProvider(context: Context) : BaseProvider(context) {
                                 add(buildJsonObject {
                                     put("name", toolSpec.name)
                                     put("description", toolSpec.description)
-                                    val toolSpecParameters = toolSpec.parameters
-                                if (toolSpecParameters != null) {
-                                        put("parameters", toolSpecParameters)
+                                    if (toolSpec.parameters != null) {
+                                        put("parameters", toolSpec.parameters)
                                     } else {
                                         put("parameters", buildJsonObject {})
                                     }
