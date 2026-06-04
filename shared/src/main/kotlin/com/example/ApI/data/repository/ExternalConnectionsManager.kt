@@ -20,8 +20,15 @@ import java.io.File
 class ExternalConnectionsManager(
     private val internalDir: File,
     private val json: Json,
-    private val localStorageManager: LocalStorageManager
+    private val localStorageManager: LocalStorageManager,
+    private val onFileWritten: (java.io.File) -> Unit = {}
 ) {
+    /** Write [content] to [file] and notify the sync engine. */
+    private fun writeAndNotify(file: File, content: String) {
+        file.writeText(content)
+        onFileWritten(file)
+    }
+
     // ==================== GitHub Integration ====================
 
     /**
@@ -51,7 +58,7 @@ class ExternalConnectionsManager(
         try {
             val file = File(internalDir, "github_auth_${username}.json")
             val jsonString = json.encodeToString(connection)
-            file.writeText(jsonString)
+            writeAndNotify(file, jsonString)
 
             // Update app settings to track connection
             val settings = localStorageManager.loadAppSettings()
@@ -164,7 +171,7 @@ class ExternalConnectionsManager(
         try {
             val file = File(internalDir, "google_workspace_auth_${username}.json")
             val jsonString = json.encodeToString(connection)
-            file.writeText(jsonString)
+            writeAndNotify(file, jsonString)
 
             // Update app settings to track connection
             val settings = localStorageManager.loadAppSettings()

@@ -15,8 +15,15 @@ import java.util.UUID
  */
 class LocalStorageManager(
     private val internalDir: File,
-    private val json: Json
+    private val json: Json,
+    private val onFileWritten: (java.io.File) -> Unit = {}
 ) {
+    /** Write [content] to [file] and notify the sync engine. */
+    private fun writeAndNotify(file: File, content: String) {
+        file.writeText(content)
+        onFileWritten(file)
+    }
+
     // ============ API Keys ============
 
     fun loadApiKeys(username: String): List<ApiKey> {
@@ -36,7 +43,7 @@ class LocalStorageManager(
     fun saveApiKeys(username: String, apiKeys: List<ApiKey>) {
         val file = File(internalDir, "api_keys_$username.json")
         try {
-            file.writeText(json.encodeToString(apiKeys))
+            writeAndNotify(file, json.encodeToString(apiKeys))
         } catch (e: IOException) {
             // Handle error
         }
@@ -126,7 +133,7 @@ class LocalStorageManager(
     fun saveAppSettings(settings: AppSettings) {
         val file = File(internalDir, "app_settings.json")
         try {
-            file.writeText(json.encodeToString(settings))
+            writeAndNotify(file, json.encodeToString(settings))
         } catch (e: IOException) {
             // Handle error
         }
@@ -151,7 +158,7 @@ class LocalStorageManager(
     fun saveCustomProviders(username: String, providers: List<CustomProviderConfig>) {
         val file = File(internalDir, "custom_providers_$username.json")
         try {
-            file.writeText(json.encodeToString(providers))
+            writeAndNotify(file, json.encodeToString(providers))
         } catch (e: IOException) {
             // Handle error
         }
@@ -196,7 +203,7 @@ class LocalStorageManager(
     fun saveFullCustomProviders(username: String, providers: List<FullCustomProviderConfig>) {
         val file = File(internalDir, "full_custom_providers_$username.json")
         try {
-            file.writeText(json.encodeToString(providers))
+            writeAndNotify(file, json.encodeToString(providers))
         } catch (e: IOException) {
             // Handle error
         }

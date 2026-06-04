@@ -2,6 +2,23 @@ package com.example.ApI.data.model
 
 import kotlinx.serialization.Serializable
 
+/**
+ * Remote-sync configuration stored inside [AppSettings].
+ *
+ * The entire object is STRIPPED before uploading `app_settings.json` to the server so that
+ * the user's sync credentials never leave the device.  When pulling, we MERGE the local copy
+ * back in so the remote blob can never clobber sync settings.
+ *
+ * Default values make a fresh install behave identically to the pre-sync codebase.
+ */
+@Serializable
+data class RemoteSyncSettings(
+    val enabled: Boolean = false,
+    val serverBaseUrl: String = "https://api-divonr.xyz",
+    val authToken: String = "",
+    val syncApiKeys: Boolean = false
+)
+
 @Serializable
 data class ApiKey(
     val id: String = java.util.UUID.randomUUID().toString(),
@@ -25,7 +42,8 @@ data class AppSettings(
     val githubConnections: Map<String, GitHubConnectionInfo> = emptyMap(), // GitHub connections per user (username -> connection info)
     val googleWorkspaceConnections: Map<String, GoogleWorkspaceConnectionInfo> = emptyMap(), // Google Workspace connections per user
     val skipWelcomeScreen: Boolean = false, // Whether to skip the welcome/onboarding screen
-    val starredModels: List<StarredModel> = emptyList() // User's favorite models for quick access
+    val starredModels: List<StarredModel> = emptyList(), // User's favorite models for quick access
+    val remoteSync: RemoteSyncSettings = RemoteSyncSettings() // Remote sync configuration (stripped before upload)
 )
 
 /**

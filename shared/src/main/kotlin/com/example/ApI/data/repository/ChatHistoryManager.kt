@@ -15,10 +15,17 @@ import java.util.UUID
 class ChatHistoryManager(
     private val internalDir: File,
     private val json: Json,
-    private val downloadsDir: File? = null
+    private val downloadsDir: File? = null,
+    private val onFileWritten: (java.io.File) -> Unit = {}
 ) {
     companion object {
         private const val TAG = "ChatHistoryManager"
+    }
+
+    /** Write [content] to [file] and notify the sync engine. */
+    private fun writeAndNotify(file: File, content: String) {
+        file.writeText(content)
+        onFileWritten(file)
     }
 
     fun loadChatHistory(username: String): UserChatHistory {
@@ -40,7 +47,7 @@ class ChatHistoryManager(
     fun saveChatHistory(chatHistory: UserChatHistory) {
         val file = File(internalDir, "chat_history_${chatHistory.user_name}.json")
         try {
-            file.writeText(json.encodeToString(chatHistory))
+            writeAndNotify(file, json.encodeToString(chatHistory))
         } catch (e: IOException) {
             // Handle error
         }

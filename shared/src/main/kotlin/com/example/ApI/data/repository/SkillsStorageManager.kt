@@ -28,8 +28,15 @@ import java.util.zip.ZipOutputStream
  */
 class SkillsStorageManager(
     private val internalDir: File,
-    private val json: Json
+    private val json: Json,
+    private val onFileWritten: (java.io.File) -> Unit = {}
 ) {
+    /** Write [content] to [file] and notify the sync engine. */
+    private fun writeAndNotify(file: File, content: String) {
+        file.writeText(content)
+        onFileWritten(file)
+    }
+
     private val skillsDir: File
         get() = File(internalDir, "skills").also { if (!it.exists()) it.mkdirs() }
 
@@ -391,7 +398,7 @@ class SkillsStorageManager(
     private fun saveEnabledState(state: Map<String, Boolean>) {
         val file = File(internalDir, "skills_enabled.json")
         try {
-            file.writeText(json.encodeToString(state))
+            writeAndNotify(file, json.encodeToString(state))
         } catch (e: IOException) {
             // Handle error
         }
@@ -415,7 +422,7 @@ class SkillsStorageManager(
     private fun saveSourceUrls(urls: Map<String, String>) {
         val file = File(internalDir, "skills_sources.json")
         try {
-            file.writeText(json.encodeToString(urls))
+            writeAndNotify(file, json.encodeToString(urls))
         } catch (e: IOException) {
             // Handle error
         }

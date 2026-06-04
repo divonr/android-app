@@ -5,8 +5,10 @@ import com.example.ApI.data.model.*
 import com.example.ApI.data.model.FullCustomProviderConfig
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.network.LLMApiService
+import com.example.ApI.data.sync.SyncEngine
 import com.example.ApI.tools.ToolSpecification
 import com.example.ApI.util.JsonConfig
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.*
 import java.io.File
 
@@ -16,15 +18,28 @@ class DataRepository(private val platformStorage: PlatformStorage) {
 
     private val internalDir = File(platformStorage.filesDir, "llm_data")
 
-    // Managers
+    // ── Sync hook (mutable var so it can be wired after syncEngine is ready) ─
+    // The lambda is a stable reference — managers hold a reference to this wrapper,
+    // which delegates to syncEngine.onFileWritten once syncEngine has been created.
+    private var syncHookImpl: (java.io.File) -> Unit = {}
+    private val syncHook: (java.io.File) -> Unit = { f -> syncHookImpl(f) }
+
+    // ── Managers (use syncHook which is non-null from the start) ─────────────
     private val modelsCacheManager = ModelsCacheManager(internalDir, JsonConfig.prettyPrint)
-    private val localStorageManager = LocalStorageManager(internalDir, JsonConfig.prettyPrint)
-    private val chatHistoryManager = ChatHistoryManager(internalDir, JsonConfig.prettyPrint, platformStorage.downloadsDir)
+    private val localStorageManager = LocalStorageManager(internalDir, JsonConfig.prettyPrint, syncHook)
+    private val chatHistoryManager = ChatHistoryManager(internalDir, JsonConfig.prettyPrint, platformStorage.downloadsDir, syncHook)
     private val groupProjectManager = GroupProjectManager(chatHistoryManager)
     private val messageBranchingManager = MessageBranchingManager(chatHistoryManager)
-    private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager)
+    private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager, syncHook)
     private val fileUploadManager = FileUploadManager(JsonConfig.prettyPrint) { username -> localStorageManager.loadApiKeys(username) }
-    val skillsStorageManager = SkillsStorageManager(internalDir, JsonConfig.prettyPrint)
+    val skillsStorageManager = SkillsStorageManager(internalDir, JsonConfig.prettyPrint, syncHook)
+
+    // ── Sync engine (after managers so localStorageManager is safe to reference) ─
+    val syncEngine = SyncEngine(
+        internalDir = internalDir,
+        json = JsonConfig.prettyPrint,
+        settingsProvider = { localStorageManager.loadAppSettings() }
+    )
     private val chatSearchService = ChatSearchService { username -> loadChatHistory(username) }
     private val titleGenerationService by lazy {
         TitleGenerationService(
@@ -41,6 +56,9 @@ class DataRepository(private val platformStorage: PlatformStorage) {
             internalDir.mkdirs()
         }
 
+        // Wire syncHookImpl now that syncEngine is initialized
+        syncHookImpl = { f -> syncEngine.onFileWritten(f) }
+
         // Wire up custom providers loader for ModelsCacheManager
         modelsCacheManager.setCustomProvidersLoader {
             val username = loadAppSettings().current_user
@@ -53,6 +71,34 @@ class DataRepository(private val platformStorage: PlatformStorage) {
             localStorageManager.loadFullCustomProviders(username)
         }
     }
+
+    // ── Remote Sync API (called by app/desktop) ──────────────────────────────
+
+    /**
+     * Start background sync.  Should be called once on app start.
+     * If sync is disabled in settings this is a safe no-op.
+     */
+    fun startSync() {
+        if (loadAppSettings().remoteSync.enabled) syncEngine.start()
+    }
+
+    /**
+     * Trigger an immediate pull from the server (app resume, "Sync now" button, etc.).
+     * If sync is disabled this is a safe no-op.
+     */
+    fun pullNow() = syncEngine.pullNow()
+
+    /**
+     * Observe this to know when a pull has overwritten local files.
+     * Increment means at least one file was refreshed — ViewModels should reload their data.
+     */
+    val syncChangeTick: StateFlow<Long> get() = syncEngine.changeTick
+
+    /**
+     * Health-check the sync server using the current settings.
+     * Returns true if the server responds with 200 OK.
+     */
+    suspend fun testSyncConnection(): Boolean = syncEngine.testConnection()
 
     // ============ Models Cache (delegated to ModelsCacheManager) ============
 
