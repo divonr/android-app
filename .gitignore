@@ -14,3 +14,6 @@
 .cxx
 local.properties
 .claude/settings.local.json
+
+# Local, environment-specific — not shared
+CLAUDE.md
