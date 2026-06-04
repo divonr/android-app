@@ -237,7 +237,18 @@ fun UserSettingsScreen(
                     deviceId = deviceId
                 )
 
-                // 6. Logs Screen Navigation
+                // 6. Remote Sync Section
+                RemoteSyncSection(
+                    settings = appSettings.remoteSync,
+                    onEnabledChange = { viewModel.updateRemoteSyncEnabled(it) },
+                    onServerUrlChange = { viewModel.updateRemoteSyncServerUrl(it) },
+                    onAuthTokenChange = { viewModel.updateRemoteSyncAuthToken(it) },
+                    onSyncApiKeysChange = { viewModel.updateRemoteSyncApiKeys(it) },
+                    onSyncNow = { viewModel.triggerSyncNow() },
+                    onTestConnection = { viewModel.testSyncConnection() }
+                )
+
+                // 7. Logs Screen Navigation
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()

@@ -290,6 +290,7 @@ class ChatViewModel(
         loadInitialData()
         sharedIntentManager.handleSharedFiles()
         bindToStreamingService()
+        observeSyncChangeTick()
     }
 
     private fun getCurrentDateTimeISO(): String {
@@ -536,6 +537,9 @@ class ChatViewModel(
 
             // Initialize Skills tools
             initializeSkillTools()
+
+            // Start remote sync (no-op if disabled)
+            repository.startSync()
         }
     }
 
@@ -1046,6 +1050,85 @@ class ChatViewModel(
     fun navigateToPreviousVariant(nodeId: String) = branchingManager.navigateToPreviousVariant(nodeId)
     fun navigateToVariant(nodeId: String, variantIndex: Int) = branchingManager.navigateToVariant(nodeId, variantIndex)
     fun ensureBranchingStructure() = branchingManager.ensureBranchingStructure()
+
+    // ==================== Remote Sync ====================
+
+    /**
+     * Observe syncChangeTick from the repository. When it increments, reload the
+     * current chat history so pulled-in changes appear without a manual refresh.
+     */
+    private fun observeSyncChangeTick() {
+        viewModelScope.launch {
+            repository.syncChangeTick.collect { tick ->
+                if (tick > 0L) {
+                    val currentUser = _appSettings.value.current_user
+                    val updatedHistory = repository.loadChatHistory(currentUser)
+                    val currentChatId = _uiState.value.currentChat?.chat_id
+                    val refreshedCurrentChat = if (currentChatId != null) {
+                        updatedHistory.chat_history.find { it.chat_id == currentChatId }
+                    } else null
+                    _uiState.value = _uiState.value.copy(
+                        chatHistory = updatedHistory.chat_history,
+                        groups = updatedHistory.groups,
+                        currentChat = refreshedCurrentChat ?: _uiState.value.currentChat
+                    )
+                    // Also reload app settings in case they were updated by a pull
+                    val updatedSettings = repository.loadAppSettings()
+                    _appSettings.value = updatedSettings
+                }
+            }
+        }
+    }
+
+    /** Called on Activity onResume to pull latest changes from the server. */
+    fun onAppResume() {
+        repository.pullNow()
+    }
+
+    /** Update the "Enable remote sync" toggle. Persists the change and starts sync if turned on. */
+    fun updateRemoteSyncEnabled(enabled: Boolean) {
+        val updatedSettings = _appSettings.value.copy(
+            remoteSync = _appSettings.value.remoteSync.copy(enabled = enabled)
+        )
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+        if (enabled) repository.startSync()
+    }
+
+    /** Update the remote sync server URL. */
+    fun updateRemoteSyncServerUrl(url: String) {
+        val updatedSettings = _appSettings.value.copy(
+            remoteSync = _appSettings.value.remoteSync.copy(serverBaseUrl = url)
+        )
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+    }
+
+    /** Update the remote sync auth token. */
+    fun updateRemoteSyncAuthToken(token: String) {
+        val updatedSettings = _appSettings.value.copy(
+            remoteSync = _appSettings.value.remoteSync.copy(authToken = token)
+        )
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+    }
+
+    /** Update the "Also sync API keys" toggle. */
+    fun updateRemoteSyncApiKeys(syncApiKeys: Boolean) {
+        val updatedSettings = _appSettings.value.copy(
+            remoteSync = _appSettings.value.remoteSync.copy(syncApiKeys = syncApiKeys)
+        )
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+    }
+
+    /** Trigger an immediate pull from the server. */
+    fun triggerSyncNow() {
+        repository.pullNow()
+    }
+
+    /** Test the sync connection. Returns true on success, false on failure. */
+    suspend fun testSyncConnection(): Boolean = repository.testSyncConnection()
 
 }
 

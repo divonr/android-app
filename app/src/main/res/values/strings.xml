@@ -105,6 +105,20 @@
     <string name="chat_title">כותרת השיחה</string>
     <string name="save">שמור</string>
 
+    <!-- Remote Sync Settings -->
+    <string name="remote_sync_title">סנכרון מרחוק (Remote Sync)</string>
+    <string name="remote_sync_status_enabled">סנכרון פעיל</string>
+    <string name="remote_sync_status_off">כבוי</string>
+    <string name="remote_sync_server_url">כתובת שרת</string>
+    <string name="remote_sync_auth_token">טוקן אימות</string>
+    <string name="remote_sync_api_keys">סנכרן גם מפתחות API</string>
+    <string name="remote_sync_api_keys_warning">מפתחות ה-API שלך יועלו לשרת שלך (מוצפנים במנוחה).</string>
+    <string name="remote_sync_now">סנכרן עכשיו</string>
+    <string name="remote_sync_now_done">נשלח!</string>
+    <string name="remote_sync_test">בדוק חיבור</string>
+    <string name="remote_sync_test_ok">תקין ✓</string>
+    <string name="remote_sync_test_fail">נכשל ✗</string>
+
     <!-- Full Custom Provider Feature -->
     <!-- Note: The following UI components use hardcoded Hebrew strings and do not reference string resources:
          - FullCustomProviderDialog.kt: Full custom provider creation/editing dialog with tabs for Request, Streaming, and Model configuration
