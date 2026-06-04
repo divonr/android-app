@@ -149,7 +149,7 @@ fun ChatHistoryScreen(
                                         onValueChange = { viewModel.updateSearchQuery(it) },
                                         placeholder = { 
                                             Text(
-                                                "׳—׳™׳₪׳•׳© ׳‘׳©׳™׳—׳•׳×...", 
+                                                "חיפוש בשיחות...", 
                                                 color = OnSurfaceVariant
                                             ) 
                                         },
@@ -175,9 +175,9 @@ fun ChatHistoryScreen(
                                                         Icons.Default.Search
                                                     },
                                                     contentDescription = if (uiState.searchResults.isNotEmpty() || uiState.searchQuery.isNotEmpty()) {
-                                                        "׳¡׳’׳•׳¨ ׳—׳™׳₪׳•׳©"
+                                                        "סגור חיפוש"
                                                     } else {
-                                                        "׳—׳₪׳©"
+                                                        "חפש"
                                                     },
                                                     tint = OnSurfaceVariant
                                                 )
@@ -219,7 +219,7 @@ fun ChatHistoryScreen(
                                     IconButton(onClick = { viewModel.enterSearchMode() }) {
                                         Icon(
                                             Icons.Default.Search,
-                                            contentDescription = "׳—׳™׳₪׳•׳©",
+                                            contentDescription = "חיפוש",
                                             tint = OnSurfaceVariant
                                         )
                                     }
@@ -249,7 +249,7 @@ fun ChatHistoryScreen(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { viewModel.createNewChat("׳©׳™׳—׳” ׳—׳“׳©׳”") },
+                onClick = { viewModel.createNewChat("שיחה חדשה") },
                 containerColor = Primary,
                 contentColor = Color.White,
                 modifier = Modifier.padding(16.dp)
@@ -290,13 +290,13 @@ fun ChatHistoryScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "׳”׳–׳ ׳׳™׳׳•׳× ׳—׳™׳₪׳•׳© ׳׳׳¦׳™׳׳× ׳©׳™׳—׳•׳×",
+                            text = "הזן מילות חיפוש למציאת שיחות",
                             color = OnSurfaceVariant,
                             fontSize = 18.sp
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "׳”׳—׳™׳₪׳•׳© ׳›׳•׳׳ ׳›׳•׳×׳¨׳•׳× ׳©׳™׳—׳•׳×, ׳×׳•׳›׳ ׳”׳•׳“׳¢׳•׳× ׳•׳©׳׳•׳× ׳§׳‘׳¦׳™׳",
+                            text = "החיפוש כולל כותרות שיחות, תוכן הודעות ושמות קבצים",
                             color = OnSurfaceVariant,
                             fontSize = 14.sp
                         )
@@ -318,13 +318,13 @@ fun ChatHistoryScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "׳׳ ׳ ׳׳¦׳׳• ׳×׳•׳¦׳׳•׳×",
+                            text = "לא נמצאו תוצאות",
                             color = OnSurfaceVariant,
                             fontSize = 18.sp
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "׳ ׳¡׳” ׳׳™׳׳•׳× ׳—׳™׳₪׳•׳© ׳׳—׳¨׳•׳×",
+                            text = "נסה מילות חיפוש אחרות",
                             color = OnSurfaceVariant,
                             fontSize = 14.sp
                         )
@@ -372,13 +372,13 @@ fun ChatHistoryScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "׳׳™׳ ׳¢׳“׳™׳™׳ ׳©׳™׳—׳•׳×",
+                            text = "אין עדיין שיחות",
                             color = OnSurfaceVariant,
                             fontSize = 18.sp
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "׳׳—׳¥ ׳¢׳ + ׳›׳“׳™ ׳׳”׳×׳—׳™׳ ׳©׳™׳—׳” ׳—׳“׳©׳”",
+                            text = "לחץ על + כדי להתחיל שיחה חדשה",
                             color = OnSurfaceVariant,
                             fontSize = 14.sp
                         )

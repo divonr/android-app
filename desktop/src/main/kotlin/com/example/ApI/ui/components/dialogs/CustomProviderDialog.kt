@@ -98,7 +98,7 @@ fun CustomProviderDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "׳¡׳₪׳§ ׳×׳•׳׳ ׳₪׳•׳¨׳׳˜ OpenAI",
+                            text = "ספק תומך פורמט OpenAI",
                             style = MaterialTheme.typography.bodyMedium,
                             color = OnSurface
                         )

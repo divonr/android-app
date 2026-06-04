@@ -123,7 +123,7 @@ fun SystemPromptDialog(
                                 .padding(4.dp),
                             placeholder = {
                                 Text(
-                                    text = if (isProjectChat && !overrideEnabled) "׳₪׳¨׳•׳׳₪׳˜ ׳׳¢׳¨׳›׳× ׳׳§׳¨׳™׳׳” ׳‘׳׳‘׳“" else "Enter system prompt...",
+                                    text = if (isProjectChat && !overrideEnabled) "פרומפט מערכת לקריאה בלבד" else "Enter system prompt...",
                                     color = if (isProjectChat && !overrideEnabled) OnSurfaceVariant.copy(alpha = 0.5f) else OnSurfaceVariant,
                                     style = MaterialTheme.typography.bodyLarge
                                 )
@@ -159,7 +159,7 @@ fun SystemPromptDialog(
                             modifier = Modifier.clickable { onDismiss() }
                         ) {
                             Text(
-                                text = if (isProjectChat && !overrideEnabled) "׳¡׳’׳•׳¨" else stringResource(R.string.cancel),
+                                text = if (isProjectChat && !overrideEnabled) "סגור" else stringResource(R.string.cancel),
                                 color = OnSurfaceVariant,
                                 style = MaterialTheme.typography.labelLarge,
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
@@ -193,7 +193,7 @@ fun SystemPromptDialog(
             onDismissRequest = { showOverrideConfirmDialog = false },
             title = {
                 Text(
-                    text = "׳׳™׳©׳•׳¨ ׳”׳•׳¡׳₪׳× ׳₪׳¨׳•׳׳₪׳˜",
+                    text = "אישור הוספת פרומפט",
                     color = OnSurface,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold
@@ -201,7 +201,7 @@ fun SystemPromptDialog(
             },
             text = {
                 Text(
-                    text = "׳©׳™׳׳• ׳׳‘, ׳”׳₪׳¨׳•׳™׳§׳˜ \"$projectName\" ׳׳’׳“׳™׳¨ ׳”׳ ׳—׳™׳™׳× ׳׳¢׳¨׳›׳× (System Prompt) ׳׳©׳™׳—׳” ׳–׳•. ׳”׳₪׳¨׳•׳׳₪׳˜ ׳©׳×׳–׳™׳ ׳• ׳™׳©׳•׳¨׳©׳¨ ׳׳”׳ ׳—׳™׳™׳× ׳”׳׳¢׳¨׳›׳× ׳©׳ ׳”׳₪׳¨׳•׳™׳§׳˜.",
+                    text = "שימו לב, הפרויקט \"$projectName\" מגדיר הנחיית מערכת (System Prompt) לשיחה זו. הפרומפט שתזינו ישורשר להנחיית המערכת של הפרויקט.",
                     color = OnSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -215,7 +215,7 @@ fun SystemPromptDialog(
                     }
                 ) {
                     Text(
-                        text = "׳׳™׳©׳•׳¨",
+                        text = "אישור",
                         color = Primary,
                         fontWeight = FontWeight.Medium
                     )
@@ -224,7 +224,7 @@ fun SystemPromptDialog(
             dismissButton = {
                 TextButton(onClick = { showOverrideConfirmDialog = false }) {
                     Text(
-                        text = "׳‘׳™׳˜׳•׳",
+                        text = "ביטול",
                         color = OnSurfaceVariant
                     )
                 }

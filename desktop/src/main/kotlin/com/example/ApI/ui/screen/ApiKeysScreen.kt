@@ -223,7 +223,7 @@ fun ApiKeysScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "׳§׳‘׳ ׳׳₪׳×׳— API",
+                                text = "קבל מפתח API",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = Color(0xFFB8E6C7),
                                 fontWeight = FontWeight.Medium

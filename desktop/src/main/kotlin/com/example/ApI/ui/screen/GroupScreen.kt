@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import com.example.ApI.ui.utils.onRightClick
 import androidx.compose.ui.layout.onGloballyPositioned
 import android.net.Uri
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -555,6 +556,14 @@ fun GroupChatHistoryItem(
                         },
                         onTap = { onClick() }
                     )
+                }
+                .onRightClick { pressOffset ->
+                    val anchor = with(density) {
+                        val anchorX = (itemTopLeft.x + itemSize.width - 8f).toDp()
+                        val anchorY = (itemTopLeft.y + pressOffset.y).toDp()
+                        DpOffset(anchorX, anchorY)
+                    }
+                    onLongClick(anchor)
                 }
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically

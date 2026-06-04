@@ -1,6 +1,7 @@
 package com.example.ApI.ui.components.markdown
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import com.example.ApI.ui.utils.onRightClick
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -71,6 +72,7 @@ internal fun RenderCodeBlock(
                         onClick = { clipboardManager.setText(AnnotatedString(code)) },
                         onLongClick = onLongPress
                     )
+                    .onRightClick { onLongPress() }
                     .padding(12.dp)
             ) {
                 Text(text = code, style = style.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Color(0xFFE0E0E0)))

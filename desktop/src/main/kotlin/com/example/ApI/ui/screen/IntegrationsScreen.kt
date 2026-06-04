@@ -57,7 +57,7 @@ fun IntegrationsScreen(
                     }
                     is OAuthResult.Error -> {
                         // Show error message
-                        viewModel.showSnackbar("׳©׳’׳™׳׳× ׳”׳×׳—׳‘׳¨׳•׳×: ${result.message}")
+                        viewModel.showSnackbar("שגיאת התחברות: ${result.message}")
                     }
                     is OAuthResult.Cancelled -> {
                         // User cancelled - do nothing
@@ -116,7 +116,7 @@ fun IntegrationsScreen(
                     }
                     
                     Text(
-                        text = "׳›׳׳™׳ ׳—׳™׳¦׳•׳ ׳™׳™׳",
+                        text = "כלים חיצוניים",
                         style = MaterialTheme.typography.headlineSmall,
                         color = OnSurface,
                         fontWeight = FontWeight.SemiBold
@@ -142,7 +142,7 @@ fun IntegrationsScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Text(
-                            text = "׳›׳׳™׳ ׳–׳׳™׳ ׳™׳",
+                            text = "כלים זמינים",
                             style = MaterialTheme.typography.bodyLarge,
                             color = OnSurface,
                             fontWeight = FontWeight.Medium
@@ -259,14 +259,14 @@ private fun DateTimeToolItem(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "׳×׳׳¨׳™׳ ׳•׳©׳¢׳”",
+                    text = "תאריך ושעה",
                     style = MaterialTheme.typography.bodyMedium,
                     color = OnSurface,
                     fontWeight = FontWeight.Medium
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "׳׳׳₪׳©׳¨ ׳׳׳•׳“׳ ׳׳§׳‘׳ ׳׳× ׳”׳×׳׳¨׳™׳ ׳•׳”׳©׳¢׳” ׳”׳ ׳•׳›׳—׳™׳™׳ ׳‘׳׳›׳©׳™׳¨",
+                    text = "מאפשר למודל לקבל את התאריך והשעה הנוכחיים במכשיר",
                     style = MaterialTheme.typography.bodySmall,
                     color = OnSurface.copy(alpha = 0.7f),
                     lineHeight = 16.sp
@@ -305,14 +305,14 @@ private fun GroupConversationsToolItem(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "׳©׳™׳—׳•׳× ׳‘׳§׳‘׳•׳¦׳”",
+                    text = "שיחות בקבוצה",
                     style = MaterialTheme.typography.bodyMedium,
                     color = OnSurface,
                     fontWeight = FontWeight.Medium
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "׳׳₪׳©׳¨ ׳׳׳•׳“׳ ׳׳¨׳׳•׳× ׳©׳™׳—׳•׳× ׳׳—׳¨׳•׳× ׳‘׳׳•׳×׳” ׳”׳§׳‘׳•׳¦׳”",
+                    text = "אפשר למודל לראות שיחות אחרות באותה הקבוצה",
                     style = MaterialTheme.typography.bodySmall,
                     color = OnSurface.copy(alpha = 0.7f),
                     lineHeight = 16.sp
@@ -351,14 +351,14 @@ private fun PythonInterpreterToolItem(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "׳׳₪׳¨׳© Python",
+                    text = "מפרש Python",
                     style = MaterialTheme.typography.bodyMedium,
                     color = OnSurface,
                     fontWeight = FontWeight.Medium
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "׳”׳¨׳¦׳× ׳§׳•׳“ Python ׳¢׳ pandas, numpy, matplotlib ׳׳ ׳™׳×׳•׳— ׳ ׳×׳•׳ ׳™׳",
+                    text = "הרצת קוד Python עם pandas, numpy, matplotlib לניתוח נתונים",
                     style = MaterialTheme.typography.bodySmall,
                     color = OnSurface.copy(alpha = 0.7f),
                     lineHeight = 16.sp
@@ -403,7 +403,7 @@ private fun GitHubIntegrationItem(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "׳—׳™׳‘׳•׳¨ ׳-GitHub",
+                        text = "חיבור ל-GitHub",
                         style = MaterialTheme.typography.bodyMedium,
                         color = OnSurface,
                         fontWeight = FontWeight.Medium
@@ -411,9 +411,9 @@ private fun GitHubIntegrationItem(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = if (isConnected) {
-                            "׳׳—׳•׳‘׳¨ ׳›-${githubConnection?.user?.login ?: "׳׳©׳×׳׳©"}"
+                            "מחובר כ-${githubConnection?.user?.login ?: "משתמש"}"
                         } else {
-                            "׳׳₪׳©׳¨ ׳׳׳•׳“׳ ׳׳¢׳‘׳•׳“ ׳¢׳ ׳§׳•׳“ ׳‘-GitHub"
+                            "אפשר למודל לעבוד עם קוד ב-GitHub"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = OnSurface.copy(alpha = 0.7f),
@@ -442,7 +442,7 @@ private fun GitHubIntegrationItem(
                 )
 
                 Text(
-                    text = "׳›׳׳™ GitHub ׳›׳׳•׳׳™׳:",
+                    text = "כלי GitHub כלולים:",
                     style = MaterialTheme.typography.bodySmall,
                     color = OnSurface.copy(alpha = 0.6f),
                     fontWeight = FontWeight.Medium
@@ -452,14 +452,14 @@ private fun GitHubIntegrationItem(
 
                 // List of GitHub tools
                 val githubTools = listOf(
-                    "׳§׳¨׳™׳׳× ׳§׳‘׳¦׳™׳ ׳-repositories",
-                    "׳›׳×׳™׳‘׳” ׳•׳¢׳“׳›׳•׳ ׳§׳‘׳¦׳™׳",
-                    "׳¨׳©׳™׳׳× ׳×׳•׳›׳ ׳×׳™׳§׳™׳•׳×",
-                    "׳—׳™׳₪׳•׳© ׳§׳•׳“ ׳‘-repositories",
-                    "׳™׳¦׳™׳¨׳× ׳¢׳ ׳₪׳™׳ (branches)",
-                    "׳™׳¦׳™׳¨׳× Pull Requests",
-                    "׳§׳‘׳׳× ׳׳™׳“׳¢ ׳¢׳ repositories",
-                    "׳¨׳©׳™׳׳× repositories ׳©׳ ׳”׳׳©׳×׳׳©"
+                    "קריאת קבצים מ-repositories",
+                    "כתיבה ועדכון קבצים",
+                    "רשימת תוכן תיקיות",
+                    "חיפוש קוד ב-repositories",
+                    "יצירת ענפים (branches)",
+                    "יצירת Pull Requests",
+                    "קבלת מידע על repositories",
+                    "רשימת repositories של המשתמש"
                 )
 
                 Column(
@@ -521,7 +521,7 @@ private fun GoogleWorkspaceIntegrationItem(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "׳—׳™׳‘׳•׳¨ ׳-Google Workspace",
+                        text = "חיבור ל-Google Workspace",
                         style = MaterialTheme.typography.bodyMedium,
                         color = OnSurface,
                         fontWeight = FontWeight.Medium
@@ -529,9 +529,9 @@ private fun GoogleWorkspaceIntegrationItem(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = if (isConnected) {
-                            "׳׳—׳•׳‘׳¨ ׳›-${googleWorkspaceConnection?.user?.email ?: "׳׳©׳×׳׳©"}"
+                            "מחובר כ-${googleWorkspaceConnection?.user?.email ?: "משתמש"}"
                         } else {
-                            "׳’׳™׳©׳” ׳-Gmail, Calendar ׳•-Drive"
+                            "גישה ל-Gmail, Calendar ו-Drive"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = OnSurface.copy(alpha = 0.7f),
@@ -564,7 +564,7 @@ private fun GoogleWorkspaceIntegrationItem(
                 )
 
                 Text(
-                    text = "׳©׳™׳¨׳•׳×׳™׳ ׳׳•׳₪׳¢׳׳™׳:",
+                    text = "שירותים מופעלים:",
                     style = MaterialTheme.typography.bodySmall,
                     color = OnSurface.copy(alpha = 0.6f),
                     fontWeight = FontWeight.Medium
@@ -575,7 +575,7 @@ private fun GoogleWorkspaceIntegrationItem(
                 // Gmail sub-toggle
                 ServiceToggleRow(
                     name = "Gmail",
-                    description = "׳§׳¨׳™׳׳”, ׳©׳׳™׳—׳” ׳•׳—׳™׳₪׳•׳© ׳׳™׳׳™׳™׳׳™׳",
+                    description = "קריאה, שליחה וחיפוש אימיילים",
                     isEnabled = services.gmail,
                     onToggle = { enabled ->
                         onServicesChange(enabled, services.calendar, services.drive)
@@ -587,7 +587,7 @@ private fun GoogleWorkspaceIntegrationItem(
                 // Calendar sub-toggle
                 ServiceToggleRow(
                     name = "Calendar",
-                    description = "׳¨׳©׳™׳׳× ׳׳™׳¨׳•׳¢׳™׳, ׳™׳¦׳™׳¨׳” ׳•׳¦׳₪׳™׳™׳”",
+                    description = "רשימת אירועים, יצירה וצפייה",
                     isEnabled = services.calendar,
                     onToggle = { enabled ->
                         onServicesChange(services.gmail, enabled, services.drive)
@@ -599,7 +599,7 @@ private fun GoogleWorkspaceIntegrationItem(
                 // Drive sub-toggle
                 ServiceToggleRow(
                     name = "Drive",
-                    description = "׳¨׳©׳™׳׳”, ׳§׳¨׳™׳׳”, ׳”׳¢׳׳׳” ׳•׳׳—׳™׳§׳”",
+                    description = "רשימה, קריאה, העלאה ומחיקה",
                     isEnabled = services.drive,
                     onToggle = { enabled ->
                         onServicesChange(services.gmail, services.calendar, enabled)

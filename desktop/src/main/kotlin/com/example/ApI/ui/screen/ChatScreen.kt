@@ -151,7 +151,7 @@ fun ChatScreen(
 
                 // Chat Messages - Hybrid Fix (Visual + Physical)
                 Box(modifier = Modifier.weight(1f)) {
-                                        // ׳׳©׳×׳ ׳” ׳׳×׳™׳§׳•׳ ׳•׳™׳–׳•׳׳׳™ (Shift)
+                                        // משתנה לתיקון ויזואלי (Shift)
                     var listTranslationY by remember { mutableFloatStateOf(0f) }
 
                     LazyColumn(
@@ -159,8 +159,8 @@ fun ChatScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 16.dp)
-                            // ׳©׳׳‘ 1: ׳”-Modifier ׳”׳–׳” ׳׳–׳™׳– ׳׳× ׳”׳¨׳©׳™׳׳” ׳•׳™׳–׳•׳׳׳™׳×
-                            // ׳‘׳”׳×׳׳ ׳׳¢׳¨׳ ׳©׳—׳™׳©׳‘׳ ׳•, ׳¢׳•׳“ ׳׳₪׳ ׳™ ׳©׳”׳’׳׳™׳׳” ׳”׳׳׳™׳×׳™׳× ׳§׳•׳¨׳™׳×
+                            // שלב 1: ה-Modifier הזה מזיז את הרשימה ויזואלית
+                            // בהתאם לערך שחישבנו, עוד לפני שהגלילה האמיתית קורית
                             .graphicsLayer { 
                                 translationY = listTranslationY 
                             },
@@ -188,27 +188,27 @@ fun ChatScreen(
                                         .onSizeChanged { size ->
                                             val currentHeight = size.height
                                             
-                                            // ׳‘׳“׳™׳§׳” ׳׳ ׳”׳™׳” ׳©׳™׳ ׳•׳™ ׳’׳•׳‘׳” ׳—׳™׳•׳‘׳™ (׳’׳“׳™׳׳”)
+                                            // בדיקה אם היה שינוי גובה חיובי (גדילה)
                                             if (previousHeight > 0 && currentHeight > previousHeight) {
                                                 val diff = (currentHeight - previousHeight).toFloat()
                                                 
-                                                // ׳”׳׳ ׳”׳׳©׳×׳׳© ׳§׳•׳¨׳ ׳”׳™׳¡׳˜׳•׳¨׳™׳”?
+                                                // האם המשתמש קורא היסטוריה?
                                                 val isAtBottom = listState.firstVisibleItemIndex == 0 && 
                                                                listState.firstVisibleItemScrollOffset == 0
                                                 
                                                 if (!isAtBottom) {
-                                                    // ׳©׳׳‘ 2: ׳¢׳“׳›׳•׳ ׳׳™׳™׳“׳™ ׳©׳ ׳”׳×׳™׳§׳•׳ ׳”׳•׳™׳–׳•׳׳׳™.
-                                                    // ׳–׳” ׳™׳’׳¨׳•׳ ׳׳¨׳©׳™׳׳” ׳׳”׳™׳•׳× ׳׳¦׳•׳™׳¨׳× ׳ ׳׳•׳ ׳™׳•׳×׳¨ ׳‘׳₪׳¨׳™׳™׳ ׳”׳ ׳•׳›׳—׳™,
-                                                    // ׳•׳™׳‘׳˜׳ ׳׳× ׳”׳§׳₪׳™׳¦׳” ׳׳׳¢׳׳” ׳©׳ ׳•׳¦׳¨׳” ׳׳”׳’׳“׳™׳׳”.
+                                                    // שלב 2: עדכון מיידי של התיקון הויזואלי.
+                                                    // זה יגרום לרשימה להיות מצוירת נמוך יותר בפריים הנוכחי,
+                                                    // ויבטל את הקפיצה למעלה שנוצרה מהגדילה.
                                                     listTranslationY += diff
                                                     
-                                                    // ׳©׳׳‘ 3: ׳×׳–׳׳•׳ ׳”׳×׳™׳§׳•׳ ׳”׳₪׳™׳–׳™׳§׳׳™ ׳׳¨׳’׳¢ ׳”׳‘׳˜׳•׳— ׳”׳‘׳
+                                                    // שלב 3: תזמון התיקון הפיזיקלי לרגע הבטוח הבא
                                                     
-                                                        // ׳‘׳™׳¦׳•׳¢ ׳”׳’׳׳™׳׳” ׳”׳׳׳™׳×׳™׳×
+                                                        // ביצוע הגלילה האמיתית
                                                         listState.dispatchRawDelta(diff)
                                                         
-                                                        // ׳‘׳™׳˜׳•׳ ׳”׳×׳™׳§׳•׳ ׳”׳•׳™׳–׳•׳׳׳™ (׳›׳™ ׳”׳’׳׳™׳׳” ׳”׳׳׳™׳×׳™׳× ׳”׳—׳׳™׳₪׳” ׳׳•׳×׳•)
-                                                        // ׳׳ ׳—׳ ׳• ׳׳—׳¡׳¨׳™׳ ׳׳× ׳׳” ׳©׳”׳•׳¡׳₪׳ ׳•
+                                                        // ביטול התיקון הויזואלי (כי הגלילה האמיתית החליפה אותו)
+                                                        // אנחנו מחסרים את מה שהוספנו
                                                         listTranslationY -= diff
                                                     
                                                 }
@@ -219,7 +219,7 @@ fun ChatScreen(
                             }
                         }
 
-                        // ... (׳©׳׳¨ ׳”׳§׳•׳“ ׳©׳ ׳”׳›׳₪׳×׳•׳¨׳™׳ ׳•׳”׳”׳•׳“׳¢׳•׳× ׳ ׳©׳׳¨ ׳–׳”׳” ׳׳—׳׳•׳˜׳™׳) ...
+                        // ... (שאר הקוד של הכפתורים וההודעות נשאר זהה לחלוטין) ...
                         
                         // Show temporary reply button bubble when multi-message mode is active
                         if (uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading) {

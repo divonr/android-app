@@ -110,7 +110,7 @@ fun ModelSelectorDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "׳‘׳—׳™׳¨׳× ׳׳•׳“׳",
+                            text = "בחירת מודל",
                             style = MaterialTheme.typography.headlineSmall,
                             color = OnSurface,
                             fontWeight = FontWeight.Bold
@@ -149,7 +149,7 @@ fun ModelSelectorDialog(
                                     onDismissRequest = { showSortMenu = false }
                                 ) {
                                     DropdownMenuItem(
-                                        text = { Text("׳׳₪׳™ ׳׳—׳™׳¨") },
+                                        text = { Text("לפי מחיר") },
                                         onClick = {
                                             sortOption = ModelSortOption.BY_PRICE
                                             showSortMenu = false
@@ -161,7 +161,7 @@ fun ModelSelectorDialog(
                                         }
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("׳׳”׳—׳“׳© ׳׳™׳©׳") },
+                                        text = { Text("מהחדש לישן") },
                                         onClick = {
                                             sortOption = ModelSortOption.NEWEST_FIRST
                                             showSortMenu = false
@@ -173,7 +173,7 @@ fun ModelSelectorDialog(
                                         }
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("׳׳•׳׳׳¥") },
+                                        text = { Text("מומלץ") },
                                         onClick = {
                                             sortOption = ModelSortOption.RECOMMENDED
                                             showSortMenu = false
@@ -204,7 +204,7 @@ fun ModelSelectorDialog(
 
                     // Custom model input section
                     Text(
-                        text = "׳׳• ׳”׳›׳ ׳¡ ׳©׳ ׳׳“׳•׳™׳§:",
+                        text = "או הכנס שם מדויק:",
                         style = MaterialTheme.typography.bodyMedium,
                         color = OnSurface,
                         modifier = Modifier.padding(bottom = 8.dp)
@@ -216,7 +216,7 @@ fun ModelSelectorDialog(
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = {
                             Text(
-                                text = "׳”׳›׳ ׳¡ ׳©׳ ׳׳“׳•׳™׳§...",
+                                text = "הכנס שם מדויק...",
                                 color = OnSurface.copy(alpha = 0.7f)
                             )
                         },
@@ -282,7 +282,7 @@ fun ModelSelectorDialog(
                                 icon = {
                                     Icon(
                                         imageVector = if (starredModels.isNotEmpty()) Icons.Default.Star else Icons.Default.StarBorder,
-                                        contentDescription = "׳׳•׳¢׳“׳₪׳™׳",
+                                        contentDescription = "מועדפים",
                                         modifier = Modifier.size(20.dp)
                                     )
                                 },
@@ -349,7 +349,7 @@ fun ModelSelectorDialog(
                     } else {
                         // No providers available
                         Text(
-                            text = "׳׳™׳ ׳¡׳₪׳§׳™׳ ׳–׳׳™׳ ׳™׳. ׳”׳•׳¡׳£ ׳׳₪׳×׳— API ׳‘׳”׳’׳“׳¨׳•׳×.",
+                            text = "אין ספקים זמינים. הוסף מפתח API בהגדרות.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = OnSurface.copy(alpha = 0.7f),
                             modifier = Modifier.padding(vertical = 16.dp)
@@ -383,14 +383,14 @@ private fun StarredModelsPage(
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "׳’׳™׳©׳” ׳׳”׳™׳¨׳”",
+                text = "גישה מהירה",
                 style = MaterialTheme.typography.titleLarge,
                 color = OnSurface,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "׳›׳׳ ׳™׳•׳₪׳™׳¢׳• ׳”׳׳•׳“׳׳™׳ ׳©׳©׳׳¨׳× ׳‘׳›׳•׳›׳‘",
+                text = "כאן יופיעו המודלים ששמרת בכוכב",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurface.copy(alpha = 0.7f)
             )
@@ -456,7 +456,7 @@ private fun StarredModelsPage(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Star,
-                                    contentDescription = "׳”׳¡׳¨ ׳׳׳•׳¢׳“׳₪׳™׳",
+                                    contentDescription = "הסר ממועדפים",
                                     tint = Primary
                                 )
                             }
@@ -599,7 +599,7 @@ private fun ModelListForProvider(
                     ) {
                         Icon(
                             imageVector = if (isStarred) Icons.Default.Star else Icons.Default.StarBorder,
-                            contentDescription = if (isStarred) "׳”׳¡׳¨ ׳׳׳•׳¢׳“׳₪׳™׳" else "׳”׳•׳¡׳£ ׳׳׳•׳¢׳“׳₪׳™׳",
+                            contentDescription = if (isStarred) "הסר ממועדפים" else "הוסף למועדפים",
                             tint = if (isStarred) Primary else OnSurface.copy(alpha = 0.3f)
                         )
                     }

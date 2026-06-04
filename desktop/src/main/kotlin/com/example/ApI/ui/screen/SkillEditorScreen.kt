@@ -39,7 +39,7 @@ fun SkillEditorScreen(
     if (skill == null) {
         // Skill not found - go back
         LaunchedEffect(Unit) {
-            viewModel.showSnackbar("׳”׳¡׳§׳™׳ ׳׳ ׳ ׳׳¦׳")
+            viewModel.showSnackbar("הסקיל לא נמצא")
             onBackClick()
         }
         return
@@ -89,7 +89,7 @@ fun SkillEditorScreen(
                         IconButton(onClick = onBackClick) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "׳—׳–׳¨׳”",
+                                contentDescription = "חזרה",
                                 tint = OnSurface
                             )
                         }
@@ -122,9 +122,9 @@ fun SkillEditorScreen(
                                     isSaving = false
                                     if (success) {
                                         isEdited = false
-                                        viewModel.showSnackbar("׳ ׳©׳׳¨ ג“")
+                                        viewModel.showSnackbar("נשמר ✓")
                                     } else {
-                                        viewModel.showSnackbar("׳©׳’׳™׳׳” ׳‘׳©׳׳™׳¨׳”")
+                                        viewModel.showSnackbar("שגיאה בשמירה")
                                     }
                                 }
                             ) {
@@ -136,7 +136,7 @@ fun SkillEditorScreen(
                                 } else {
                                     Icon(
                                         Icons.Default.Save,
-                                        contentDescription = "׳©׳׳™׳¨׳”",
+                                        contentDescription = "שמירה",
                                         tint = Primary
                                     )
                                 }
@@ -146,7 +146,7 @@ fun SkillEditorScreen(
                         IconButton(onClick = { showAddFileDialog = true }) {
                             Icon(
                                 Icons.Default.NoteAdd,
-                                contentDescription = "׳”׳•׳¡׳₪׳× ׳§׳•׳‘׳¥",
+                                contentDescription = "הוספת קובץ",
                                 tint = OnSurface.copy(alpha = 0.7f)
                             )
                         }
@@ -232,9 +232,9 @@ fun SkillEditorScreen(
                         showAddFileDialog = false
                         // Refresh and select new file
                         selectedFile = fileName
-                        viewModel.showSnackbar("׳§׳•׳‘׳¥ '$fileName' ׳ ׳•׳¦׳¨")
+                        viewModel.showSnackbar("קובץ '$fileName' נוצר")
                     } else {
-                        viewModel.showSnackbar("׳©׳’׳™׳׳” ׳‘׳™׳¦׳™׳¨׳× ׳”׳§׳•׳‘׳¥")
+                        viewModel.showSnackbar("שגיאה ביצירת הקובץ")
                     }
                 }
             )
@@ -251,12 +251,12 @@ fun AddFileDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("׳”׳•׳¡׳₪׳× ׳§׳•׳‘׳¥ ׳—׳“׳©") },
+        title = { Text("הוספת קובץ חדש") },
         text = {
             OutlinedTextField(
                 value = fileName,
                 onValueChange = { fileName = it },
-                label = { Text("׳©׳ ׳§׳•׳‘׳¥") },
+                label = { Text("שם קובץ") },
                 placeholder = { Text("REFERENCE.md") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
@@ -267,11 +267,11 @@ fun AddFileDialog(
                 onClick = { onAdd(fileName) },
                 enabled = fileName.isNotBlank()
             ) {
-                Text("׳¦׳•׳¨")
+                Text("צור")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("׳‘׳™׳˜׳•׳") }
+            TextButton(onClick = onDismiss) { Text("ביטול") }
         }
     )
 }

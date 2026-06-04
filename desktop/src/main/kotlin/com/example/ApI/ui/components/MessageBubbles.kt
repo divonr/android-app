@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import com.example.ApI.ui.utils.onRightClick
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -105,14 +106,14 @@ fun ThoughtsBubble(
                 // Thinking icon
                 Icon(
                     imageVector = Icons.Default.Lightbulb,
-                    contentDescription = "׳׳—׳©׳‘׳•׳×",
+                    contentDescription = "מחשבות",
                     tint = Primary,
                     modifier = Modifier.size(20.dp)
                 )
 
                 // Title with duration
                 Text(
-                    text = "׳׳—׳©׳‘׳•׳×... (${String.format("%.1f", displayDuration)} ׳©׳ ׳™׳•׳×)",
+                    text = "מחשבות... (${String.format("%.1f", displayDuration)} שניות)",
                     style = MaterialTheme.typography.titleSmall,
                     color = Primary,
                     fontWeight = FontWeight.SemiBold
@@ -124,7 +125,7 @@ fun ThoughtsBubble(
                 if (status == ThoughtsStatus.PRESENT && !isStreaming) {
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = if (isExpanded) "׳›׳•׳•׳¥" else "׳”׳¨׳—׳‘",
+                        contentDescription = if (isExpanded) "כווץ" else "הרחב",
                         tint = OnSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
@@ -141,7 +142,7 @@ fun ThoughtsBubble(
                     when {
                         status == ThoughtsStatus.UNAVAILABLE -> {
                             Text(
-                                text = "(׳׳—׳©׳‘׳•׳× ׳׳•׳“׳ ׳–׳” ׳׳ ׳–׳׳™׳ ׳•׳×)",
+                                text = "(מחשבות מודל זה לא זמינות)",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = OnSurfaceVariant.copy(alpha = 0.7f),
                                 fontStyle = FontStyle.Italic
@@ -298,6 +299,7 @@ fun MessageBubble(
                         onLongPress = { showContextMenu = true }
                     )
                 }
+                .onRightClick { showContextMenu = true }
                 .then(
                     if (isEditMode && !isBeingEdited) {
                         Modifier.alpha(0.3f) // Darken other messages during edit mode
@@ -385,7 +387,7 @@ fun MessageBubble(
                 }
 
                 // Text and non-image content with padding
-                val hasText = message.text.isNotEmpty() && message.text != "[׳§׳•׳‘׳¥ ׳׳¦׳•׳¨׳£]"
+                val hasText = message.text.isNotEmpty() && message.text != "[קובץ מצורף]"
                 if (hasText || nonImageAttachments.isNotEmpty() || timeString != null) {
                     Column(
                         modifier = Modifier.padding(

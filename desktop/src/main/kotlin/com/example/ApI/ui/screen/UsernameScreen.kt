@@ -104,7 +104,7 @@ fun UserSettingsScreen(
                     }
                     
                     Text(
-                        text = "׳”׳’׳“׳¨׳•׳× ׳׳×׳§׳“׳׳•׳×",
+                        text = "הגדרות מתקדמות",
                         style = MaterialTheme.typography.headlineSmall,
                         color = OnSurface,
                         fontWeight = FontWeight.SemiBold
@@ -263,7 +263,7 @@ fun UserSettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "׳׳¡׳ ׳׳•׳’׳™׳",
+                            text = "מסך לוגים",
                             style = MaterialTheme.typography.bodyMedium,
                             color = OnSurface,
                             fontWeight = FontWeight.Medium

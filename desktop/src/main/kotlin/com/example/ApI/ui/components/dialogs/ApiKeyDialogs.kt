@@ -436,7 +436,7 @@ fun DeleteApiKeyConfirmationDialog(
                         .fillMaxWidth()
                 ) {
                     Text(
-                        text = "׳׳—׳™׳§׳× ׳׳₪׳×׳— API",
+                        text = "מחיקת מפתח API",
                         style = MaterialTheme.typography.headlineSmall,
                         color = OnSurface,
                         fontWeight = FontWeight.SemiBold
@@ -445,7 +445,7 @@ fun DeleteApiKeyConfirmationDialog(
                     Spacer(modifier = Modifier.height(20.dp))
 
                     Text(
-                        text = "׳₪׳¢׳•׳׳” ׳–׳• ׳×׳׳—׳§ ׳׳× ׳”׳׳₪׳×׳— ׳•׳׳ ׳ ׳™׳×׳ ׳™׳”׳™׳” ׳׳©׳—׳–׳¨ ׳׳•׳×׳•!",
+                        text = "פעולה זו תמחק את המפתח ולא ניתן יהיה לשחזר אותו!",
                         style = MaterialTheme.typography.bodyLarge,
                         color = OnSurface
                     )
@@ -462,7 +462,7 @@ fun DeleteApiKeyConfirmationDialog(
                             modifier = Modifier.clickable { onDismiss() }
                         ) {
                             Text(
-                                text = "׳‘׳™׳˜׳•׳",
+                                text = "ביטול",
                                 color = OnSurfaceVariant,
                                 style = MaterialTheme.typography.labelLarge,
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
@@ -475,7 +475,7 @@ fun DeleteApiKeyConfirmationDialog(
                             modifier = Modifier.clickable { onConfirm() }
                         ) {
                             Text(
-                                text = "׳׳—׳§",
+                                text = "מחק",
                                 color = Color.White,
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Medium,

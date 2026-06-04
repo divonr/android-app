@@ -360,7 +360,7 @@ fun ConfirmEditButton(
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = Icons.Filled.Check,
-                contentDescription = "׳¢׳“׳›׳ ׳”׳•׳“׳¢׳”",
+                contentDescription = "עדכן הודעה",
                 tint = Color.White,
                 modifier = Modifier.size(18.dp)
             )

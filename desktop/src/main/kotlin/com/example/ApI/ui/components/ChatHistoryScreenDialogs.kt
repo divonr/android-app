@@ -141,7 +141,7 @@ fun CreateGroupDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                "׳¦׳•׳¨ ׳§׳‘׳•׳¦׳” ׳—׳“׳©׳”",
+                "צור קבוצה חדשה",
                 color = OnSurface
             )
         },
@@ -149,7 +149,7 @@ fun CreateGroupDialog(
             OutlinedTextField(
                 value = groupName,
                 onValueChange = { groupName = it },
-                label = { Text("׳©׳ ׳”׳§׳‘׳•׳¦׳”", color = OnSurfaceVariant) },
+                label = { Text("שם הקבוצה", color = OnSurfaceVariant) },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = OnSurface,
@@ -170,7 +170,7 @@ fun CreateGroupDialog(
                 },
                 enabled = groupName.isNotBlank()
             ) {
-                Text("׳¦׳•׳¨", color = if (groupName.isNotBlank()) Primary else OnSurfaceVariant)
+                Text("צור", color = if (groupName.isNotBlank()) Primary else OnSurfaceVariant)
             }
         },
         dismissButton = {
@@ -203,7 +203,7 @@ fun RenameGroupDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                "׳©׳ ׳” ׳©׳ ׳§׳‘׳•׳¦׳”",
+                "שנה שם קבוצה",
                 color = OnSurface
             )
         },
@@ -211,7 +211,7 @@ fun RenameGroupDialog(
             OutlinedTextField(
                 value = newGroupName,
                 onValueChange = { newGroupName = it },
-                label = { Text("׳©׳ ׳”׳§׳‘׳•׳¦׳” ׳”׳—׳“׳©", color = OnSurfaceVariant) },
+                label = { Text("שם הקבוצה החדש", color = OnSurfaceVariant) },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = OnSurface,
@@ -232,7 +232,7 @@ fun RenameGroupDialog(
                 },
                 enabled = newGroupName.isNotBlank() && newGroupName != group.group_name
             ) {
-                Text("׳©׳׳•׳¨", color = if (newGroupName.isNotBlank() && newGroupName != group.group_name) Primary else OnSurfaceVariant)
+                Text("שמור", color = if (newGroupName.isNotBlank() && newGroupName != group.group_name) Primary else OnSurfaceVariant)
             }
         },
         dismissButton = {
@@ -258,13 +258,13 @@ fun DeleteGroupConfirmationDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                "׳׳—׳™׳§׳× ׳§׳‘׳•׳¦׳”",
+                "מחיקת קבוצה",
                 color = OnSurface
             )
         },
         text = {
             Text(
-                "׳”׳׳ ׳׳×׳” ׳‘׳˜׳•׳— ׳©׳‘׳¨׳¦׳•׳ ׳ ׳׳׳—׳•׳§ ׳׳× ׳”׳§׳‘׳•׳¦׳” \"${group.group_name}\"? ׳›׳ ׳”׳©׳™׳—׳•׳× ׳‘׳§׳‘׳•׳¦׳” ׳–׳• ׳™׳₪׳•׳–׳¨׳• ׳•׳™׳×׳‘׳˜׳׳• ׳׳”׳§׳‘׳•׳¦׳”.",
+                "האם אתה בטוח שברצונך למחוק את הקבוצה \"${group.group_name}\"? כל השיחות בקבוצה זו יפוזרו ויתבטלו מהקבוצה.",
                 color = OnSurfaceVariant
             )
         },
@@ -274,7 +274,7 @@ fun DeleteGroupConfirmationDialog(
                     onConfirm(group)
                 }
             ) {
-                Text("׳׳—׳§", color = Color.Red)
+                Text("מחק", color = Color.Red)
             }
         },
         dismissButton = {

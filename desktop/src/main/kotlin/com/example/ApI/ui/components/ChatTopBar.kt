@@ -146,7 +146,7 @@ fun SearchModeTopBar(
                 .focusRequester(searchFocusRequester),
             placeholder = {
                 Text(
-                    text = "׳—׳₪׳© ׳‘׳©׳™׳—׳”...",
+                    text = "חפש בשיחה...",
                     color = OnSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium
                 )

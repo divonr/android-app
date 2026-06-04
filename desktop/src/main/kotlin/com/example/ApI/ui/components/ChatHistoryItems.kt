@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import com.example.ApI.ui.utils.onRightClick
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -85,6 +86,14 @@ fun ChatHistoryItem(
                         },
                         onTap = { onClick() }
                     )
+                }
+                .onRightClick { pressOffset ->
+                    val anchor = with(density) {
+                        val anchorX = (itemTopLeft.x + itemSize.width - 8f).toDp()
+                        val anchorY = (itemTopLeft.y + pressOffset.y).toDp()
+                        DpOffset(anchorX, anchorY)
+                    }
+                    onLongClick(anchor)
                 }
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -262,6 +271,14 @@ fun GroupItem(
                         onTap = { onGroupClick() }
                     )
                 }
+                .onRightClick { pressOffset ->
+                    val anchor = with(density) {
+                        val anchorX = (itemTopLeft.x + itemSize.width - 8f).toDp()
+                        val anchorY = (itemTopLeft.y + pressOffset.y).toDp()
+                        DpOffset(anchorX, anchorY)
+                    }
+                    onLongPress(anchor)
+                }
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -301,7 +318,7 @@ fun GroupItem(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "$chatCount ׳©׳™׳—׳•׳×",
+                    text = "$chatCount שיחות",
                     color = OnSurfaceVariant,
                     fontSize = 14.sp
                 )
@@ -312,7 +329,7 @@ fun GroupItem(
             // Expansion arrow (only this toggles expansion)
             Icon(
                 imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = if (isExpanded) "׳›׳•׳•׳¥ ׳§׳‘׳•׳¦׳”" else "׳”׳¨׳—׳‘ ׳§׳‘׳•׳¦׳”",
+                contentDescription = if (isExpanded) "כווץ קבוצה" else "הרחב קבוצה",
                 tint = OnSurfaceVariant,
                 modifier = Modifier
                     .size(24.dp)
@@ -371,6 +388,14 @@ fun SearchResultItem(
                         },
                         onTap = { onClick() }
                     )
+                }
+                .onRightClick { pressOffset ->
+                    val anchor = with(density) {
+                        val anchorX = (itemTopLeft.x + itemSize.width - 8f).toDp()
+                        val anchorY = (itemTopLeft.y + pressOffset.y).toDp()
+                        DpOffset(anchorX, anchorY)
+                    }
+                    onLongClick(anchor)
                 }
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically

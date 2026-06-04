@@ -47,7 +47,7 @@ fun GroupContextMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    "׳©׳ ׳” ׳©׳ ׳§׳‘׳•׳¦׳”",
+                    "שנה שם קבוצה",
                     color = OnSurface,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -70,7 +70,7 @@ fun GroupContextMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    "׳”׳₪׳•׳ ׳׳₪׳¨׳•׳™׳§׳˜",
+                    "הפוך לפרויקט",
                     color = OnSurface,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -98,7 +98,7 @@ fun GroupContextMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    "׳©׳™׳—׳” ׳—׳“׳©׳”",
+                    "שיחה חדשה",
                     color = OnSurface,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -126,7 +126,7 @@ fun GroupContextMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    "׳׳—׳§ ׳§׳‘׳•׳¦׳” ׳•׳₪׳–׳¨ ׳©׳™׳—׳•׳×",
+                    "מחק קבוצה ופזר שיחות",
                     color = AccentRed,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -220,7 +220,7 @@ fun ChatContextMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    "׳©׳™׳×׳•׳£ ׳©׳™׳—׳”...",
+                    "שיתוף שיחה...",
                     color = OnSurface,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -249,7 +249,7 @@ fun ChatContextMenu(
             DropdownMenuItem(
                 text = {
                     Text(
-                        "׳”׳¡׳¨ ׳׳§׳‘׳•׳¦׳”",
+                        "הסר מקבוצה",
                         color = OnSurface,
                         style = MaterialTheme.typography.bodyMedium
                     )
@@ -272,7 +272,7 @@ fun ChatContextMenu(
             DropdownMenuItem(
                 text = {
                     Text(
-                        "׳”׳•׳¡׳£ ׳׳§׳‘׳•׳¦׳”",
+                        "הוסף לקבוצה",
                         color = OnSurface,
                         style = MaterialTheme.typography.bodyMedium
                     )
@@ -328,7 +328,7 @@ fun ChatContextMenu(
 
     // Group submenu
     if (showGroupSubmenu) {
-        // Align submenu to the left of the main menu and vertically align with the "׳”׳•׳¡׳£ ׳׳§׳‘׳•׳¦׳”" row
+        // Align submenu to the left of the main menu and vertically align with the "הוסף לקבוצה" row
         val submenuX = position.x - 200.dp
         val submenuY = position.y + 0.dp
         DropdownMenu(
@@ -378,7 +378,7 @@ fun ChatContextMenu(
             DropdownMenuItem(
                 text = {
                     Text(
-                        "׳¦׳•׳¨ ׳§׳‘׳•׳¦׳” ׳—׳“׳©׳”",
+                        "צור קבוצה חדשה",
                         color = Primary,
                         style = MaterialTheme.typography.bodyMedium
                     )

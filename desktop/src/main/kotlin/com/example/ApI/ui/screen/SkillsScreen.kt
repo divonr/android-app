@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ApI.data.model.InstalledSkill
+import com.example.ApI.ui.utils.onRightClick
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.theme.*
 import java.util.zip.ZipInputStream
@@ -446,7 +447,8 @@ fun SkillCard(
             .combinedClickable(
                 onClick = onTap,
                 onLongClick = onLongPress
-            ),
+            )
+            .onRightClick { onLongPress() },
         shape = RoundedCornerShape(16.dp),
         color = Surface,
         shadowElevation = 2.dp
