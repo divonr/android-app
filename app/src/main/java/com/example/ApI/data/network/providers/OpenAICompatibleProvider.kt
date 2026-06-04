@@ -569,7 +569,7 @@ abstract class OpenAICompatibleProvider(context: Context) : BaseProvider(context
             put("model", modelName)
             put("messages", messages)
             put("stream", true)
-            put("max_tokens", 8192)
+
 
             if (temperature != null) {
                 put("temperature", temperature.toDouble())
