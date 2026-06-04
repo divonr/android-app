@@ -95,6 +95,18 @@ object R {
         const val rename = 84
         const val chat_title = 85
         const val save = 86
+        const val remote_sync_title = 87
+        const val remote_sync_status_enabled = 88
+        const val remote_sync_status_off = 89
+        const val remote_sync_server_url = 90
+        const val remote_sync_auth_token = 91
+        const val remote_sync_api_keys = 92
+        const val remote_sync_api_keys_warning = 93
+        const val remote_sync_now = 94
+        const val remote_sync_now_done = 95
+        const val remote_sync_test = 96
+        const val remote_sync_test_ok = 97
+        const val remote_sync_test_fail = 98
     }
 }
 
@@ -185,7 +197,19 @@ private val stringValues = mapOf(
     R.string.reply_now to "Reply",
     R.string.rename to "Rename",
     R.string.chat_title to "Chat Title",
-    R.string.save to "Save"
+    R.string.save to "Save",
+    R.string.remote_sync_title to "Remote Sync",
+    R.string.remote_sync_status_enabled to "Enabled — syncing in background",
+    R.string.remote_sync_status_off to "Disabled",
+    R.string.remote_sync_server_url to "Server URL",
+    R.string.remote_sync_auth_token to "Auth Token",
+    R.string.remote_sync_api_keys to "Also sync API keys",
+    R.string.remote_sync_api_keys_warning to "Sends your API keys to the sync server. Only enable if you trust and control the server.",
+    R.string.remote_sync_now to "Sync now",
+    R.string.remote_sync_now_done to "Synced!",
+    R.string.remote_sync_test to "Test connection",
+    R.string.remote_sync_test_ok to "OK ✓",
+    R.string.remote_sync_test_fail to "Failed ✗"
 )
 
 /** Desktop replacement for Android's stringResource(). */

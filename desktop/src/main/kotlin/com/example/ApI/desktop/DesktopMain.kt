@@ -14,6 +14,8 @@ import com.example.ApI.data.model.*
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.screen.*
 import com.example.ApI.ui.theme.ApITheme
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import java.io.File
 
 fun main() = application {
@@ -34,6 +36,17 @@ fun main() = application {
         title = "LLM API Desktop",
         state = windowState
     ) {
+        // Pull latest data whenever the window regains focus
+        DisposableEffect(window) {
+            val focusListener = object : WindowAdapter() {
+                override fun windowGainedFocus(e: WindowEvent?) {
+                    viewModel.onWindowFocused()
+                }
+            }
+            window.addWindowFocusListener(focusListener)
+            onDispose { window.removeWindowFocusListener(focusListener) }
+        }
+
         ApITheme {
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 AppContent(viewModel = viewModel, repository = repository)

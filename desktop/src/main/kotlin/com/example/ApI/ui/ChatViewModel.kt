@@ -314,7 +314,12 @@ class ChatViewModel(
             initializeGitHubToolsIfConnected()
             initializeGoogleWorkspaceToolsIfConnected()
             initializeSkillTools()
+
+            // Start remote sync (no-op if disabled in settings)
+            repository.startSync()
         }
+        // Start observing sync change ticks so pulled files cause a UI reload
+        observeSyncChangeTick()
     }
 
     private fun initializeSkillTools() {
@@ -458,6 +463,81 @@ class ChatViewModel(
         repository.saveAppSettings(updatedSettings)
         _appSettings.value = updatedSettings
     }
+
+    // ==================== Remote Sync ====================
+
+    /** Observe syncChangeTick; reload data whenever a pull overwrites local files. */
+    private fun observeSyncChangeTick() {
+        scope.launch {
+            repository.syncChangeTick.collect { tick ->
+                if (tick > 0L) {
+                    val currentUser = _appSettings.value.current_user
+                    val updatedHistory = repository.loadChatHistory(currentUser)
+                    val currentChatId = _uiState.value.currentChat?.chat_id
+                    val refreshedCurrentChat = if (currentChatId != null) {
+                        updatedHistory.chat_history.find { it.chat_id == currentChatId }
+                    } else null
+                    _uiState.value = _uiState.value.copy(
+                        chatHistory = updatedHistory.chat_history,
+                        groups = updatedHistory.groups,
+                        currentChat = refreshedCurrentChat ?: _uiState.value.currentChat
+                    )
+                    val updatedSettings = repository.loadAppSettings()
+                    _appSettings.value = updatedSettings
+                }
+            }
+        }
+    }
+
+    /** Call on window focus to pull latest changes from the server. */
+    fun onWindowFocused() {
+        repository.pullNow()
+    }
+
+    /** Update the "Enable remote sync" toggle. Persists and starts sync if turned on. */
+    fun updateRemoteSyncEnabled(enabled: Boolean) {
+        val updatedSettings = _appSettings.value.copy(
+            remoteSync = _appSettings.value.remoteSync.copy(enabled = enabled)
+        )
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+        if (enabled) repository.startSync()
+    }
+
+    /** Update the remote sync server URL. */
+    fun updateRemoteSyncServerUrl(url: String) {
+        val updatedSettings = _appSettings.value.copy(
+            remoteSync = _appSettings.value.remoteSync.copy(serverBaseUrl = url)
+        )
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+    }
+
+    /** Update the remote sync auth token. */
+    fun updateRemoteSyncAuthToken(token: String) {
+        val updatedSettings = _appSettings.value.copy(
+            remoteSync = _appSettings.value.remoteSync.copy(authToken = token)
+        )
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+    }
+
+    /** Update the "Also sync API keys" toggle. */
+    fun updateRemoteSyncApiKeys(syncApiKeys: Boolean) {
+        val updatedSettings = _appSettings.value.copy(
+            remoteSync = _appSettings.value.remoteSync.copy(syncApiKeys = syncApiKeys)
+        )
+        repository.saveAppSettings(updatedSettings)
+        _appSettings.value = updatedSettings
+    }
+
+    /** Trigger an immediate pull from the server. */
+    fun triggerSyncNow() {
+        repository.pullNow()
+    }
+
+    /** Test the sync connection. Returns true on success, false on failure. */
+    suspend fun testSyncConnection(): Boolean = repository.testSyncConnection()
 
     // ==================== Navigation ====================
     fun navigateToScreen(screen: Screen) {

@@ -7,8 +7,10 @@ import com.example.ApI.data.network.GoogleCalendarApiService
 import com.example.ApI.data.network.GoogleDriveApiService
 import com.example.ApI.data.network.LLMApiService
 import com.example.ApI.data.repository.*
+import com.example.ApI.data.sync.SyncEngine
 import com.example.ApI.tools.ToolSpecification
 import com.example.ApI.util.JsonConfig
+import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
 class DesktopRepository(private val appDir: File) {
@@ -16,17 +18,29 @@ class DesktopRepository(private val appDir: File) {
     private val internalDir = File(context.filesDir, "llm_data").apply { mkdirs() }
     private val apiService = LLMApiService()
 
+    // ── Sync hook (stable lambda that delegates to syncEngine once wired) ─────
+    private var syncHookImpl: (File) -> Unit = {}
+    private val syncHook: (File) -> Unit = { f -> syncHookImpl(f) }
+
     private val modelsCacheManager = ModelsCacheManager(internalDir, JsonConfig.prettyPrint)
-    private val localStorageManager = LocalStorageManager(internalDir, JsonConfig.prettyPrint)
-    private val chatHistoryManager = ChatHistoryManager(internalDir, JsonConfig.prettyPrint)
+    private val localStorageManager = LocalStorageManager(internalDir, JsonConfig.prettyPrint, syncHook)
+    private val chatHistoryManager = ChatHistoryManager(internalDir, JsonConfig.prettyPrint, null, syncHook)
     private val groupProjectManager = GroupProjectManager(chatHistoryManager)
     private val messageBranchingManager = MessageBranchingManager(chatHistoryManager)
     private val chatSearchService = ChatSearchService { username -> chatHistoryManager.loadChatHistory(username) }
     private val fileUploadManager = FileUploadManager(JsonConfig.prettyPrint) { username ->
         localStorageManager.loadApiKeys(username)
     }
-    val skillsStorageManager = SkillsStorageManager(internalDir, JsonConfig.prettyPrint)
-    private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager)
+    val skillsStorageManager = SkillsStorageManager(internalDir, JsonConfig.prettyPrint, syncHook)
+    private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager, syncHook)
+
+    // ── Sync engine ────────────────────────────────────────────────────────────
+    private val syncEngine = SyncEngine(
+        internalDir = internalDir,
+        json = JsonConfig.prettyPrint,
+        settingsProvider = { localStorageManager.loadAppSettings() }
+    )
+
     private val titleGenerationService by lazy {
         TitleGenerationService(
             json = JsonConfig.prettyPrint,
@@ -38,6 +52,9 @@ class DesktopRepository(private val appDir: File) {
     }
 
     init {
+        // Wire syncHookImpl now that syncEngine is initialized
+        syncHookImpl = { f -> syncEngine.onFileWritten(f) }
+
         modelsCacheManager.setCustomProvidersLoader {
             localStorageManager.loadCustomProviders(loadAppSettings().current_user)
         }
@@ -45,6 +62,21 @@ class DesktopRepository(private val appDir: File) {
             localStorageManager.loadFullCustomProviders(loadAppSettings().current_user)
         }
     }
+
+    // ==================== Remote Sync ====================
+    /** Start background sync. No-op if sync is disabled in settings. */
+    fun startSync() {
+        if (loadAppSettings().remoteSync.enabled) syncEngine.start()
+    }
+
+    /** Trigger an immediate pull (app focus, "Sync now" button, etc.). No-op if disabled. */
+    fun pullNow() = syncEngine.pullNow()
+
+    /** Increments whenever a pull overwrites local files; observe and reload visible data. */
+    val syncChangeTick: StateFlow<Long> get() = syncEngine.changeTick
+
+    /** Health-check the sync server with current settings. Returns true on success. */
+    suspend fun testSyncConnection(): Boolean = syncEngine.testConnection()
 
     // ==================== Models ====================
     suspend fun refreshModelsIfNeeded(): Boolean = modelsCacheManager.refreshModelsIfNeeded()
