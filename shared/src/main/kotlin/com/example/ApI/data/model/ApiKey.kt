@@ -14,7 +14,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class RemoteSyncSettings(
     val enabled: Boolean = false,
-    val serverBaseUrl: String = "https://api-divonr.xyz",
+    val serverBaseUrl: String = "https://sync.api-divonr.xyz",
     val authToken: String = "",
     val syncApiKeys: Boolean = false
 )
