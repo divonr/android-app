@@ -25,7 +25,7 @@ Branch: `web-ui`
 
 ## P3 — Streaming send (core)
 - [x] POST /api/chat/send SSE endpoint using `respondTextWriter` + `Channel<String>` bridge. `ChatEngine` interface seam (real: `RepositoryChatEngine` delegates to `DataRepository.sendMessage`; test: `FakeChatEngine` scripts callback directly). Tool execution via `ToolRegistry.executeTool`, tool messages persisted via `addResponseToCurrentVariant`. Title generation mirrors `TitleGenerationManager` (1st or 3rd assistant message). User message persisted before streaming via `addUserMessageAsNewNode`. 8 new tests (35 total), all passing.
-- commit: TBD
+- commit: b06f4a9
 
 ## P4 — Mutation APIs
 - [ ] Chat CRUD, message edit/resend/delete, branching ops, groups CRUD, api key CRUD, settings update, custom providers CRUD, skills CRUD. Tests: route tests with persistence assertions.
