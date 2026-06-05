@@ -13,7 +13,7 @@ Branch: `web-ui`
 
 ## P0 — Scaffold + API contract
 - [x] `:server` Gradle module (Ktor 2.3.12 + Netty, depends `:shared`), `ServerPlatformStorage`, `ServerMain`, `AppModule`, `configureRouting` with `/health`; `server/API_CONTRACT.md` (full REST+SSE spec for all phases); Ktor testApplication health test + DataRepository smoke tests — all passing. Note: `ktor-server-sse` requires Ktor 3.x; SSE for P3 will use `respondTextWriter` on Ktor 2.x.
-- commit: (fill in after commit)
+- commit: 4fe993c
 
 ## P1 — Auth + session
 - [ ] `POST /login` (password from env `WEB_UI_PASSWORD`), Ktor Sessions signed cookie, `authenticate` guard on `/api/**`, `POST /logout`. Tests: 401 without session, login round-trip, logout invalidates.
