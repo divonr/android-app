@@ -1,0 +1,40 @@
+# Web UI — Implementation Progress
+
+Persistent checkpoint file. Survives across sessions so work can resume cleanly
+if interrupted. **Every subagent reads this FIRST, marks its step `[~]` on start
+and `[x]` on finish with a one-line note + commit hash. Never redo an `[x]` step.**
+
+Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
+
+Plan file: `/home/divonr/.claude/plans/cosmic-coalescing-cray.md`
+Branch: `web-ui`
+
+---
+
+## P0 — Scaffold + API contract
+- [x] `:server` Gradle module (Ktor 2.3.12 + Netty, depends `:shared`), `ServerPlatformStorage`, `ServerMain`, `AppModule`, `configureRouting` with `/health`; `server/API_CONTRACT.md` (full REST+SSE spec for all phases); Ktor testApplication health test + DataRepository smoke tests — all passing. Note: `ktor-server-sse` requires Ktor 3.x; SSE for P3 will use `respondTextWriter` on Ktor 2.x.
+- commit: (fill in after commit)
+
+## P1 — Auth + session
+- [ ] `POST /login` (password from env `WEB_UI_PASSWORD`), Ktor Sessions signed cookie, `authenticate` guard on `/api/**`, `POST /logout`. Tests: 401 without session, login round-trip, logout invalidates.
+
+## P2 — Read APIs
+- [ ] providers/models, chat list, single chat, groups, settings, api keys (read), search. Tests: route tests per endpoint against a seeded temp data dir.
+
+## P3 — Streaming send (core)
+- [ ] SSE endpoint + `StreamingCallback`→SSE bridge via `respondTextWriter`, server-side tool execution/persistence, thinking events, title generation. Tests: fake provider → assert SSE event sequence.
+
+## P4 — Mutation APIs
+- [ ] Chat CRUD, message edit/resend/delete, branching ops, groups CRUD, api key CRUD, settings update, custom providers CRUD, skills CRUD. Tests: route tests with persistence assertions.
+
+## P5 — Files + integrations OAuth
+- [ ] Multipart upload → attachment, GitHub OAuth web redirect + callback, Google OAuth. Tests: upload round-trip; OAuth state/callback with mocked token exchange.
+
+## P6 — Frontend scaffold
+- [ ] Vite+React+TS, typed API+SSE clients, login flow, app shell + routing, theme, Vitest. Tests: Vitest unit tests for API/SSE client + auth flow (mocked fetch).
+
+## P7 — Frontend screens (parity)
+- [ ] All screens: streaming chat, markdown/LaTeX, branching, tools/skills, custom providers, integrations, child lock. Tests: Vitest + React Testing Library.
+
+## P8 — E2E + deploy
+- [ ] Playwright E2E, systemd unit `llm-web.service`, vite-build→server-static pipeline, Cloudflare route `api-divonr.xyz`. Off-box smoke test.
