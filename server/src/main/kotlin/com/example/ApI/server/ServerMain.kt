@@ -83,11 +83,17 @@ fun main() {
  */
 fun Application.module(
     storage: ServerPlatformStorage = ServerPlatformStorage(),
-    authConfig: AuthConfig = AuthConfig(password = resolvePassword())
+    authConfig: AuthConfig = AuthConfig(password = resolvePassword()),
+    chatEngineFactory: ((DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null
 ) {
     // ── Dependency wiring ────────────────────────────────────────────────────
     val repository = DataRepository(storage)
-    installAppModule(AppModule(repository))
+    val appModule = if (chatEngineFactory != null) {
+        AppModule(repository, chatEngineFactory(repository))
+    } else {
+        AppModule(repository)
+    }
+    installAppModule(appModule)
 
     // ── Sessions ─────────────────────────────────────────────────────────────
     install(Sessions) {

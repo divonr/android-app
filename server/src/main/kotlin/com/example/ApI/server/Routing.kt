@@ -1,6 +1,7 @@
 package com.example.ApI.server
 
 import com.example.ApI.data.model.ApiKey
+import com.example.ApI.server.streaming.sendRoute
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
@@ -155,6 +156,9 @@ fun ApplicationCall.currentUsername(): String {
 // ── P2 read routes ────────────────────────────────────────────────────────────
 
 fun Route.apiRoutes() {
+
+    // ── P3: Streaming send ────────────────────────────────────────────────────
+    sendRoute()
 
     // ── Providers ────────────────────────────────────────────────────────────
 

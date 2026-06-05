@@ -1,6 +1,8 @@
 package com.example.ApI.server
 
 import com.example.ApI.data.repository.DataRepository
+import com.example.ApI.server.streaming.ChatEngine
+import com.example.ApI.server.streaming.RepositoryChatEngine
 import io.ktor.server.application.*
 
 /**
@@ -9,8 +11,15 @@ import io.ktor.server.application.*
  * A single [DataRepository] is created at startup (with [ServerPlatformStorage])
  * and stored here so all route extensions can access it via
  * `application.appModule.repository`.
+ *
+ * A [ChatEngine] is also stored so that the streaming route can be tested with a
+ * fake engine that drives [StreamingCallback] deterministically without network calls.
+ * In production [chatEngine] is a [RepositoryChatEngine]; tests supply a [FakeChatEngine].
  */
-class AppModule(val repository: DataRepository)
+class AppModule(
+    val repository: DataRepository,
+    val chatEngine: ChatEngine = RepositoryChatEngine(repository)
+)
 
 // Ktor attribute key for AppModule
 private val AppModuleKey = io.ktor.util.AttributeKey<AppModule>("AppModule")
