@@ -160,6 +160,9 @@ fun Route.apiRoutes() {
     // ── P3: Streaming send ────────────────────────────────────────────────────
     sendRoute()
 
+    // ── P4: Mutation APIs ─────────────────────────────────────────────────────
+    mutationRoutes()
+
     // ── Providers ────────────────────────────────────────────────────────────
 
     // GET /api/providers — full list of Provider objects
