@@ -22,3 +22,11 @@ CLAUDE.md
 web/node_modules
 web/dist
 web/.vite
+
+# Playwright E2E test output
+web/test-results
+web/playwright-report
+web/.playwright
+
+# Deployment secrets — never commit real env file
+server/deploy/llm-web.env

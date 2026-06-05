@@ -3,13 +3,17 @@ package com.example.ApI.server
 import com.example.ApI.data.model.ApiKey
 import com.example.ApI.server.streaming.sendRoute
 import io.ktor.http.*
+import io.ktor.http.content.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
+import io.ktor.server.http.content.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.sessions.*
 import kotlinx.serialization.Serializable
+import org.slf4j.LoggerFactory
+import java.io.File
 import java.security.MessageDigest
 
 @Serializable
@@ -81,6 +85,40 @@ private fun passwordsEqual(submitted: String, expected: String): Boolean =
  * [Route.apiRoutes] — that function is the single insertion point that future
  * subagents use.
  */
+private val routingLog = LoggerFactory.getLogger("Routing")
+
+/**
+ * Resolves the directory from which the built React SPA is served.
+ *
+ * Priority order:
+ *   1. Test hook: [StaticDirTestHook.override] (used by unit tests; avoids env-var mutation).
+ *   2. `WEB_STATIC_DIR` environment variable (production + E2E tests).
+ *   3. `web/dist` relative to the current working directory (dev fallback).
+ *
+ * Returns null if the resolved directory does not exist; the server will log a
+ * warning and continue serving only the API (no crash).
+ */
+fun resolveStaticDir(): File? {
+    // Test hook first so unit tests can inject a temp dir without touching env vars.
+    StaticDirTestHook.override?.let { return if (it.isDirectory) it else null }
+    val envVal = System.getenv("WEB_STATIC_DIR")
+    val dir = if (!envVal.isNullOrBlank()) {
+        File(envVal)
+    } else {
+        // Fallback: web/dist relative to the working directory
+        File(System.getProperty("user.dir"), "web/dist")
+    }
+    return if (dir.isDirectory) dir else null
+}
+
+/**
+ * Test-only hook for injecting a static directory without env-var mutation.
+ * Set before starting [testApplication], clear in a finally block.
+ */
+object StaticDirTestHook {
+    @Volatile var override: File? = null
+}
+
 fun Application.configureRouting(authConfig: AuthConfig = AuthConfig(password = resolvePassword())) {
     routing {
         // ── Public ───────────────────────────────────────────────────────────
@@ -118,6 +156,44 @@ fun Application.configureRouting(authConfig: AuthConfig = AuthConfig(password = 
                 // P2+: call apiRoutes() here to add more authenticated endpoints.
                 apiRoutes()
             }
+        }
+
+        // ── P8: Static SPA serving ───────────────────────────────────────────
+        // Serve the built React app from WEB_STATIC_DIR (or web/dist by default).
+        // API and auth routes declared above always take precedence because Ktor
+        // evaluates routes in declaration order and these are declared last.
+        //
+        // Strategy: a single tailcard GET handler that
+        //   - Serves real asset files (JS/CSS/images/favicon) from disk when they exist.
+        //   - Falls back to index.html for any unknown path (client-side SPA routes).
+        //   - Never swallows /api paths (defensive guard — those are matched before this).
+        val staticDir = resolveStaticDir()
+        if (staticDir != null) {
+            routingLog.info("Serving SPA from ${staticDir.absolutePath}")
+            val indexFile = File(staticDir, "index.html")
+            // Tailcard `{...}` matches zero or more remaining path segments — this is
+            // the last-resort handler for all GET requests not matched by specific routes.
+            get("{...}") {
+                val rawPath = call.request.uri.substringBefore('?') // strip query string
+                // Defensive guard: /api paths must not reach this handler.
+                if (rawPath.startsWith("/api/") || rawPath == "/api") {
+                    call.respond(HttpStatusCode.NotFound, mapOf("error" to "Not found"))
+                    return@get
+                }
+                // Try to serve the requested file from the static dir.
+                val candidate = File(staticDir, rawPath.trimStart('/'))
+                if (candidate.isFile && candidate.canonicalPath.startsWith(staticDir.canonicalPath)) {
+                    call.respondFile(candidate)
+                } else {
+                    // SPA fallback: return index.html so the React router handles the path.
+                    call.respondFile(indexFile)
+                }
+            }
+        } else {
+            routingLog.warn(
+                "WEB_STATIC_DIR is not set or does not exist — serving API only (no SPA). " +
+                "Set WEB_STATIC_DIR=<path-to-web/dist> to serve the frontend."
+            )
         }
     }
 }

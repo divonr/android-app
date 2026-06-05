@@ -1,0 +1,14 @@
+[Unit]
+Description=LLM API Web Server
+After=network.target
+
+[Service]
+User=divonr
+WorkingDirectory=/home/divonr/ApI/android-app
+EnvironmentFile=/home/divonr/ApI/android-app/server/deploy/llm-web.env
+ExecStart=/home/divonr/ApI/android-app/server/build/install/server/bin/server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

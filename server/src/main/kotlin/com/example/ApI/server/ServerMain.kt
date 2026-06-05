@@ -73,7 +73,8 @@ fun resolvePassword(): String {
 }
 
 fun main() {
-    embeddedServer(Netty, port = 8091, module = Application::module).start(wait = true)
+    val port = System.getenv("KTOR_PORT")?.toIntOrNull() ?: 8091
+    embeddedServer(Netty, port = port, module = Application::module).start(wait = true)
 }
 
 /**
