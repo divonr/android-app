@@ -17,7 +17,7 @@ Branch: `web-ui`
 
 ## P1 — Auth + session
 - [x] `POST /login` (password from env `WEB_UI_PASSWORD`), Ktor Sessions signed-cookie (`llm_web_session`), `authenticate("session")` guard on all `/api/**` routes via `Route.apiRoutes()` extension, `POST /logout`. `AuthConfig` data class lets tests inject password + secret without env vars. Tests: 401 without session, login round-trip (200 + Set-Cookie), logout invalidates, /health still public, 401 JSON body — all 10 tests pass.
-- commit: TBD
+- commit: a8abeaf
 
 ## P2 — Read APIs
 - [ ] providers/models, chat list, single chat, groups, settings, api keys (read), search. Tests: route tests per endpoint against a seeded temp data dir.
