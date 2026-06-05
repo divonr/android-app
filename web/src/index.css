@@ -1,0 +1,105 @@
+/* =========================================================
+   Global design tokens — dark theme matching desktop palette
+   (Color.kt values: Background=#0D0E14, Surface=#1A1B26, etc.)
+   ========================================================= */
+
+:root {
+  /* Background / Surface */
+  --color-bg:               #0d0e14;   /* Background */
+  --color-surface:          #1a1b26;   /* Surface */
+  --color-surface-variant:  #20212c;   /* SurfaceVariant */
+  --color-code-bg:          #16171f;
+
+  /* Primary accent */
+  --color-primary:          #6c7ce7;   /* Primary */
+  --color-primary-light:    #9c88ff;   /* Tertiary */
+  --color-secondary:        #5b6ef7;   /* Secondary */
+
+  /* Text */
+  --color-text:             #e8e8f2;   /* OnSurface */
+  --color-text-secondary:   #bdbdbd;   /* OnSurfaceVariant */
+
+  /* Chat bubbles */
+  --color-bubble-user:      #6c7ce7;
+  --color-bubble-assistant: #2a2b3a;
+  --color-bubble-system:    #3a3b4a;
+
+  /* Semantic */
+  --color-error:            #ec7063;   /* AccentRed */
+  --color-success:          #58d68d;   /* AccentGreen */
+  --color-warning:          #f7dc6f;   /* AccentYellow */
+  --color-info:             #5dade2;   /* AccentBlue */
+
+  /* Borders */
+  --color-border:           #34354a;   /* MessageBorder */
+
+  /* Typography */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+/* =========================================================
+   Reset & Base
+   ========================================================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: var(--color-primary);
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #34354a;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6c7ce7;
+}
+
+/* Highlight.js dark theme override — use our surface colors */
+.hljs {
+  background: var(--color-code-bg) !important;
+  color: var(--color-text) !important;
+}

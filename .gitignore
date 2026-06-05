@@ -17,3 +17,8 @@ local.properties
 
 # Local, environment-specific — not shared
 CLAUDE.md
+
+# Web frontend build artifacts
+web/node_modules
+web/dist
+web/.vite
