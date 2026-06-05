@@ -21,7 +21,7 @@ Branch: `web-ui`
 
 ## P2 — Read APIs
 - [x] GET /api/providers, /api/providers/models, /api/settings, /api/chats, /api/chats/{chatId}, /api/groups, /api/keys (masked), /api/search. `currentUsername()` helper reads `AppSettings.current_user`. API keys masked (last 4 chars). `SearchResultDto` server DTO because `:shared` `SearchResult` is not @Serializable. 27 tests total (17 new), all passing.
-- commit: TBD
+- commit: 171ecdd
 
 ## P3 — Streaming send (core)
 - [ ] SSE endpoint + `StreamingCallback`→SSE bridge via `respondTextWriter`, server-side tool execution/persistence, thinking events, title generation. Tests: fake provider → assert SSE event sequence.
