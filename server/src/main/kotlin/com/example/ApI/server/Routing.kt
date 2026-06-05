@@ -103,6 +103,9 @@ fun Application.configureRouting(authConfig: AuthConfig = AuthConfig(password = 
             call.respond(HttpStatusCode.OK, mapOf("ok" to true))
         }
 
+        // ── Public OAuth callbacks (must be outside auth block) ──────────────
+        oauthCallbackRoutes()
+
         // ── Authenticated API ─────────────────────────────────────────────────
         authenticate("session") {
             route("/api") {
@@ -162,6 +165,10 @@ fun Route.apiRoutes() {
 
     // ── P4: Mutation APIs ─────────────────────────────────────────────────────
     mutationRoutes()
+
+    // ── P5: File upload + integrations OAuth ─────────────────────────────────
+    fileRoutes()
+    integrationRoutes()
 
     // ── Providers ────────────────────────────────────────────────────────────
 

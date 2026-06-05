@@ -33,7 +33,14 @@ private val log = LoggerFactory.getLogger("ServerMain")
  * out on restart — acceptable for local/dev use).
  */
 @Serializable
-data class UserSession(val authenticated: Boolean = true, val issuedAt: Long = System.currentTimeMillis()) : Principal
+data class UserSession(
+    val authenticated: Boolean = true,
+    val issuedAt: Long = System.currentTimeMillis(),
+    /** CSRF state token stored during GitHub OAuth flow. Cleared after use. */
+    val githubOAuthState: String? = null,
+    /** CSRF state token stored during Google OAuth flow. Cleared after use. */
+    val googleOAuthState: String? = null
+) : Principal
 
 /**
  * Auth configuration injected into [Application.module].
@@ -84,14 +91,20 @@ fun main() {
 fun Application.module(
     storage: ServerPlatformStorage = ServerPlatformStorage(),
     authConfig: AuthConfig = AuthConfig(password = resolvePassword()),
+    oauthExchanger: com.example.ApI.server.oauth.OAuthTokenExchanger? = null,
     chatEngineFactory: ((DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null
 ) {
     // ── Dependency wiring ────────────────────────────────────────────────────
     val repository = DataRepository(storage)
-    val appModule = if (chatEngineFactory != null) {
-        AppModule(repository, chatEngineFactory(repository))
-    } else {
-        AppModule(repository)
+    val appModule = when {
+        chatEngineFactory != null && oauthExchanger != null ->
+            AppModule(repository, chatEngineFactory(repository), oauthExchanger)
+        chatEngineFactory != null ->
+            AppModule(repository, chatEngineFactory(repository))
+        oauthExchanger != null ->
+            AppModule(repository, oauthExchanger = oauthExchanger)
+        else ->
+            AppModule(repository)
     }
     installAppModule(appModule)
 
@@ -163,3 +176,47 @@ fun Application.module(
     // ── Routes ───────────────────────────────────────────────────────────────
     configureRouting(authConfig)
 }
+
+// ── OAuth client credentials helpers ────────────────────────────────────────
+
+/**
+ * Resolve the public base URL used to build OAuth redirect URIs.
+ *
+ * In production this should be `https://api-divonr.xyz`.
+ * Set `PUBLIC_BASE_URL` in the environment; defaults to `http://localhost:8091`.
+ */
+fun resolvePublicBaseUrl(): String =
+    System.getenv("PUBLIC_BASE_URL")?.trimEnd('/') ?: "http://localhost:8091"
+
+/**
+ * GitHub OAuth client id.
+ *
+ * Same OAuth app as the desktop/Android client (app `Ov23liIqbBxkhRQcaTn1`).
+ * Override with env `GITHUB_OAUTH_CLIENT_ID` if needed.
+ */
+fun resolveGitHubClientId(): String =
+    System.getenv("GITHUB_OAUTH_CLIENT_ID")?.takeIf { it.isNotBlank() }
+        ?: "Ov23liIqbBxkhRQcaTn1"   // desktop fallback (GitHubOAuthService.CLIENT_ID)
+
+/**
+ * GitHub OAuth client secret.
+ * Override with env `GITHUB_OAUTH_CLIENT_SECRET`.
+ */
+fun resolveGitHubClientSecret(): String =
+    System.getenv("GITHUB_OAUTH_CLIENT_SECRET")?.takeIf { it.isNotBlank() }
+        ?: "6b2e01569404a3ea854e5bb4187d63ff9316f59d"  // desktop fallback
+
+/**
+ * Google OAuth client id.
+ * Set via env `GOOGLE_OAUTH_CLIENT_ID` (no desktop fallback — Android uses Google Sign-In,
+ * desktop doesn't support it; provide a real Web application client id for production).
+ */
+fun resolveGoogleClientId(): String =
+    System.getenv("GOOGLE_OAUTH_CLIENT_ID") ?: ""
+
+/**
+ * Google OAuth client secret.
+ * Set via env `GOOGLE_OAUTH_CLIENT_SECRET`.
+ */
+fun resolveGoogleClientSecret(): String =
+    System.getenv("GOOGLE_OAUTH_CLIENT_SECRET") ?: ""

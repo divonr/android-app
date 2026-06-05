@@ -32,7 +32,7 @@ Branch: `web-ui`
 - commit: 2a05c8b
 
 ## P5 — Files + integrations OAuth
-- [ ] Multipart upload → attachment, GitHub OAuth web redirect + callback, Google OAuth. Tests: upload round-trip; OAuth state/callback with mocked token exchange.
+- [x] POST /api/files/upload (multipart, 50 MB limit) → Attachment; DELETE /api/files. GET/DELETE /api/integrations/github|google; POST /api/integrations/github|google/start (CSRF state in session); GET /oauth/github|google/callback (public); PATCH /api/integrations/google/services. OAuthTokenExchanger seam (RealOAuthTokenExchanger / FakeOAuthTokenExchanger in tests). UserSession extended with githubOAuthState/googleOAuthState fields. GitHub credentials from env (GITHUB_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_SECRET) with desktop app fallback. Google credentials from env only (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET). PUBLIC_BASE_URL env for redirect URIs. 17 new P5 tests (98 total), all passing. commit: TBD
 
 ## P6 — Frontend scaffold
 - [ ] Vite+React+TS, typed API+SSE clients, login flow, app shell + routing, theme, Vitest. Tests: Vitest unit tests for API/SSE client + auth flow (mocked fetch).

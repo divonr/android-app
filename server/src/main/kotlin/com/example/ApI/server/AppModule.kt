@@ -1,6 +1,8 @@
 package com.example.ApI.server
 
 import com.example.ApI.data.repository.DataRepository
+import com.example.ApI.server.oauth.OAuthTokenExchanger
+import com.example.ApI.server.oauth.RealOAuthTokenExchanger
 import com.example.ApI.server.streaming.ChatEngine
 import com.example.ApI.server.streaming.RepositoryChatEngine
 import io.ktor.server.application.*
@@ -15,10 +17,14 @@ import io.ktor.server.application.*
  * A [ChatEngine] is also stored so that the streaming route can be tested with a
  * fake engine that drives [StreamingCallback] deterministically without network calls.
  * In production [chatEngine] is a [RepositoryChatEngine]; tests supply a [FakeChatEngine].
+ *
+ * An [OAuthTokenExchanger] is stored so that OAuth routes can be tested with a fake
+ * exchanger that returns scripted results without making real network calls.
  */
 class AppModule(
     val repository: DataRepository,
-    val chatEngine: ChatEngine = RepositoryChatEngine(repository)
+    val chatEngine: ChatEngine = RepositoryChatEngine(repository),
+    val oauthExchanger: OAuthTokenExchanger = RealOAuthTokenExchanger()
 )
 
 // Ktor attribute key for AppModule
