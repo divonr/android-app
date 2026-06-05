@@ -1,0 +1,412 @@
+/* =========================================================
+   Group Page
+   ========================================================= */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.loading {
+  padding: 2rem;
+  color: var(--color-text-secondary);
+}
+
+/* Topbar */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.backBtn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0.25rem 0.4rem;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+
+.backBtn:hover { background: var(--color-surface-variant); }
+
+.topbarTitle {
+  flex: 1;
+  min-width: 0;
+}
+
+.groupNameDisplay {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.groupNameDisplay:hover {
+  color: var(--color-primary);
+}
+
+.nameInput {
+  background: var(--color-surface-variant);
+  border: 1px solid var(--color-primary);
+  border-radius: 6px;
+  color: var(--color-text);
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  outline: none;
+  width: 200px;
+}
+
+.projectBadge {
+  font-size: 0.7rem;
+  background: rgba(108, 124, 231, 0.2);
+  color: var(--color-primary);
+  border: 1px solid rgba(108, 124, 231, 0.3);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+}
+
+.topbarActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.projectToggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+.projectToggle input {
+  display: none;
+}
+
+.toggleSlider {
+  width: 32px;
+  height: 18px;
+  background: var(--color-border);
+  border-radius: 9px;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggleSlider::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.2s;
+}
+
+.projectToggle input:checked + .toggleSlider {
+  background: var(--color-primary);
+}
+
+.projectToggle input:checked + .toggleSlider::after {
+  transform: translateX(14px);
+}
+
+.deleteBtnSmall {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  border-radius: 6px;
+  padding: 0.25rem 0.45rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: border-color 0.1s, color 0.1s;
+}
+
+.deleteBtnSmall:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+/* Error */
+.error {
+  margin: 0.75rem 1rem;
+  padding: 0.5rem 0.7rem;
+  background: rgba(236, 112, 99, 0.12);
+  border: 1px solid var(--color-error);
+  border-radius: 6px;
+  color: var(--color-error);
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.error button {
+  background: none;
+  border: none;
+  color: var(--color-error);
+  cursor: pointer;
+}
+
+/* Content */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Sections */
+.section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sectionTitle {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chatCount {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  font-weight: 400;
+  background: var(--color-surface-variant);
+  border-radius: 10px;
+  padding: 0.1rem 0.4rem;
+}
+
+.sectionHint {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+/* Prompt area */
+.promptArea {
+  padding: 0.65rem 0.75rem;
+  background: var(--color-surface-variant);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-family: var(--font-sans);
+  line-height: 1.55;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s;
+}
+
+.promptArea:focus {
+  border-color: var(--color-primary);
+}
+
+.saveRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.savedBadge {
+  font-size: 0.875rem;
+  color: var(--color-success);
+}
+
+/* Attachments */
+.attachmentsList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.attachmentRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--color-surface-variant);
+  border-radius: 7px;
+}
+
+.attachmentIcon {
+  flex-shrink: 0;
+}
+
+.attachmentName {
+  flex: 1;
+  font-size: 0.875rem;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachmentType {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.removeBtn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0.1rem 0.25rem;
+  border-radius: 4px;
+  transition: color 0.1s;
+}
+
+.removeBtn:hover {
+  color: var(--color-error);
+}
+
+.emptyAttachments {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  padding: 0.25rem 0;
+}
+
+.addAttachmentRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fileInput {
+  display: none;
+}
+
+/* Chats list */
+.emptyChats {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  padding: 0.5rem 0;
+}
+
+.chatList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.chatRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--color-surface-variant);
+  border-radius: 8px;
+  transition: background 0.1s;
+}
+
+.chatRow:hover {
+  background: var(--color-border);
+}
+
+.chatName {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  cursor: pointer;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatName:hover {
+  color: var(--color-primary);
+}
+
+.chatRowActions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.openChatBtn {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  border-radius: 5px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.1s, color 0.1s;
+}
+
+.openChatBtn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* Buttons */
+.btnPrimary {
+  padding: 0.45rem 1rem;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: opacity 0.15s;
+}
+
+.btnPrimary:hover:not(:disabled) { opacity: 0.85; }
+.btnPrimary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btnSecondary {
+  padding: 0.45rem 0.9rem;
+  background: var(--color-surface-variant);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background 0.15s;
+}
+
+.btnSecondary:hover:not(:disabled) {
+  background: var(--color-border);
+}
+
+.btnSecondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

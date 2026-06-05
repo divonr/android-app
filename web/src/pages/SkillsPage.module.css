@@ -1,0 +1,302 @@
+/* =========================================================
+   Skills Page
+   ========================================================= */
+
+.page {
+  padding: 1.5rem 1.25rem;
+  max-width: 700px;
+}
+
+.loading {
+  padding: 1.5rem 0;
+  color: var(--color-text-secondary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+
+.title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.headerActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.error {
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(236, 112, 99, 0.12);
+  border: 1px solid var(--color-error);
+  border-radius: 6px;
+  color: var(--color-error);
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.error button {
+  background: none;
+  border: none;
+  color: var(--color-error);
+  cursor: pointer;
+}
+
+.empty {
+  padding: 2rem 0;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* Skill list */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.skillRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  transition: background 0.1s;
+}
+
+.skillRow:hover {
+  background: var(--color-surface-variant);
+}
+
+.skillRowDisabled {
+  opacity: 0.55;
+}
+
+.skillInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.skillHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.skillName {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.enabledBadge {
+  font-size: 0.7rem;
+  background: rgba(88, 214, 141, 0.15);
+  color: var(--color-success);
+  border: 1px solid rgba(88, 214, 141, 0.3);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+}
+
+.skillDescription {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skillActions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.iconBtn {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  border-radius: 6px;
+  padding: 0.25rem 0.45rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.1s, color 0.1s;
+}
+
+.iconBtn:hover {
+  background: var(--color-surface-variant);
+  color: var(--color-text);
+}
+
+.deleteBtn:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+/* Toggle switch */
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggleSlider {
+  width: 36px;
+  height: 20px;
+  background: var(--color-border);
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.2s;
+}
+
+.toggleSlider::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.2s;
+}
+
+.toggle input:checked + .toggleSlider {
+  background: var(--color-primary);
+}
+
+.toggle input:checked + .toggleSlider::after {
+  transform: translateX(16px);
+}
+
+/* Editor */
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  height: 100%;
+}
+
+.editorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.editorTitle {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.editorBody {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  min-height: 400px;
+}
+
+.editorFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Form fields */
+.formRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.formRow label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.input {
+  padding: 0.5rem 0.7rem;
+  background: var(--color-surface-variant);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.input:focus { border-color: var(--color-primary); }
+.input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.textarea {
+  padding: 0.5rem 0.7rem;
+  background: var(--color-surface-variant);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  outline: none;
+  resize: vertical;
+  font-family: var(--font-sans);
+  transition: border-color 0.15s;
+  line-height: 1.55;
+}
+
+.textarea:focus { border-color: var(--color-primary); }
+
+/* Buttons */
+.btnPrimary {
+  padding: 0.45rem 1rem;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: opacity 0.15s;
+}
+
+.btnPrimary:hover:not(:disabled) { opacity: 0.85; }
+.btnPrimary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btnSecondary {
+  padding: 0.45rem 0.9rem;
+  background: var(--color-surface-variant);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background 0.15s;
+}
+
+.btnSecondary:hover {
+  background: var(--color-border);
+}

@@ -1,0 +1,270 @@
+/* =========================================================
+   Integrations Page
+   ========================================================= */
+
+.page {
+  padding: 1.5rem 1.25rem;
+  max-width: 600px;
+}
+
+.loading {
+  padding: 2rem;
+  color: var(--color-text-secondary);
+}
+
+.header {
+  margin-bottom: 1.5rem;
+}
+
+.title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.error {
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(236, 112, 99, 0.12);
+  border: 1px solid var(--color-error);
+  border-radius: 6px;
+  color: var(--color-error);
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.error button {
+  background: none;
+  border: none;
+  color: var(--color-error);
+  cursor: pointer;
+}
+
+.success {
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(88, 214, 141, 0.12);
+  border: 1px solid var(--color-success);
+  border-radius: 6px;
+  color: var(--color-success);
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.success button {
+  background: none;
+  border: none;
+  color: var(--color-success);
+  cursor: pointer;
+}
+
+/* Cards */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.integrationCard {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.integrationHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1rem 1.1rem;
+}
+
+.integrationIcon {
+  font-size: 1.8rem;
+  flex-shrink: 0;
+}
+
+.integrationInfo {
+  flex: 1;
+}
+
+.integrationName {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0 0 0.15rem;
+}
+
+.integrationDesc {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.statusDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.statusConnected {
+  background: var(--color-success);
+  box-shadow: 0 0 6px rgba(88, 214, 141, 0.5);
+}
+
+.statusDisconnected {
+  background: var(--color-border);
+}
+
+/* Connected section */
+.connectedSection {
+  padding: 0.75rem 1.1rem 1rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-variant);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.connectedUser {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+}
+
+.connectedLabel {
+  color: var(--color-text-secondary);
+}
+
+.connectedValue {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.connectedMeta {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+/* Services */
+.servicesSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0;
+}
+
+.servicesTitle {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.2rem;
+}
+
+.serviceToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.serviceName {
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+
+.serviceToggle input {
+  display: none;
+}
+
+.toggleSlider {
+  width: 34px;
+  height: 19px;
+  background: var(--color-border);
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.2s;
+}
+
+.toggleSlider::after {
+  content: '';
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.2s;
+}
+
+.serviceToggle input:checked + .toggleSlider {
+  background: var(--color-primary);
+}
+
+.serviceToggle input:checked + .toggleSlider::after {
+  transform: translateX(15px);
+}
+
+/* Buttons */
+.disconnectBtn {
+  padding: 0.4rem 0.8rem;
+  background: none;
+  border: 1px solid var(--color-error);
+  color: var(--color-error);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background 0.15s;
+  align-self: flex-start;
+}
+
+.disconnectBtn:hover:not(:disabled) {
+  background: rgba(236, 112, 99, 0.1);
+}
+
+.disconnectBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Connect section */
+.connectSection {
+  padding: 0.75rem 1.1rem 1rem;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.connectHint {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.connectBtn {
+  padding: 0.5rem 1.1rem;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  align-self: flex-start;
+  transition: opacity 0.15s;
+}
+
+.connectBtn:hover {
+  opacity: 0.85;
+}

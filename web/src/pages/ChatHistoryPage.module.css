@@ -1,0 +1,427 @@
+/* =========================================================
+   Chat History Page
+   ========================================================= */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.loading {
+  padding: 2rem;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.25rem 0.75rem;
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.headerActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Search */
+.searchBar {
+  position: relative;
+  padding: 0 1.25rem 0.75rem;
+  flex-shrink: 0;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  background: var(--color-surface-variant);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.searchInput:focus {
+  border-color: var(--color-primary);
+}
+
+.searchInput::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.clearSearch {
+  position: absolute;
+  right: 1.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.25rem;
+  line-height: 1;
+}
+
+/* Error */
+.error {
+  margin: 0 1.25rem 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(236, 112, 99, 0.12);
+  border: 1px solid var(--color-error);
+  border-radius: 6px;
+  color: var(--color-error);
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.error button {
+  background: none;
+  border: none;
+  color: var(--color-error);
+  cursor: pointer;
+  padding: 0;
+}
+
+/* List container */
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0 1rem;
+}
+
+/* Chat row */
+.chatRow {
+  position: relative;
+  padding: 0.75rem 1.25rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-border);
+  transition: background 0.1s;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.chatRow:hover {
+  background: var(--color-surface-variant);
+}
+
+.chatRowMain {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.chatName {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--color-text);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatTime {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.chatPreview {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moreBtn {
+  position: absolute;
+  right: 0.75rem;
+  top: 0.5rem;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0.25rem 0.35rem;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.chatRow:hover .moreBtn {
+  opacity: 1;
+}
+
+/* Rename inline input */
+.renameInput {
+  width: 100%;
+  background: var(--color-surface-variant);
+  border: 1px solid var(--color-primary);
+  border-radius: 4px;
+  color: var(--color-text);
+  font-size: 0.95rem;
+  padding: 0.25rem 0.5rem;
+  outline: none;
+}
+
+/* Group section */
+.groupSection {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.25rem;
+  cursor: pointer;
+  transition: background 0.1s;
+  user-select: none;
+}
+
+.groupHeader:hover {
+  background: var(--color-surface-variant);
+}
+
+.groupIcon {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  width: 1rem;
+  flex-shrink: 0;
+}
+
+.groupName {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text);
+  flex: 1;
+}
+
+.projectBadge {
+  font-size: 0.7rem;
+  background: rgba(108, 124, 231, 0.2);
+  color: var(--color-primary);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid rgba(108, 124, 231, 0.3);
+}
+
+.groupCount {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.groupBtn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.groupHeader:hover .groupBtn {
+  opacity: 1;
+}
+
+.groupBtn:hover {
+  background: var(--color-border);
+  color: var(--color-text);
+}
+
+.groupChats {
+  padding-left: 1rem;
+  border-left: 2px solid var(--color-border);
+  margin-left: 1.5rem;
+}
+
+/* Empty state */
+.empty {
+  padding: 2rem 1.25rem;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+/* Search results */
+.searching {
+  padding: 1rem 1.25rem;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+.searchResult {
+  padding: 0.75rem 1.25rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-border);
+  transition: background 0.1s;
+}
+
+.searchResult:hover {
+  background: var(--color-surface-variant);
+}
+
+.searchResultTitle {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--color-text);
+  margin-bottom: 0.2rem;
+}
+
+.searchResultSnippet {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.searchResultMeta {
+  font-size: 0.72rem;
+  color: var(--color-primary);
+  margin-top: 0.15rem;
+  text-transform: capitalize;
+}
+
+/* Context menu */
+.contextMenu {
+  position: fixed;
+  z-index: 200;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  min-width: 140px;
+  overflow: hidden;
+}
+
+.contextMenu button {
+  display: block;
+  width: 100%;
+  padding: 0.65rem 1rem;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.1s;
+}
+
+.contextMenu button:hover {
+  background: var(--color-surface-variant);
+}
+
+.contextMenuDelete {
+  color: var(--color-error) !important;
+}
+
+/* Modal overlay */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.dialog {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.dialog h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.dialogInput {
+  padding: 0.6rem 0.75rem;
+  background: var(--color-surface-variant);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.dialogInput:focus {
+  border-color: var(--color-primary);
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* Buttons */
+.btnPrimary {
+  padding: 0.5rem 1.1rem;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: opacity 0.15s;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.btnPrimary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btnSecondary {
+  padding: 0.5rem 1rem;
+  background: var(--color-surface-variant);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.15s;
+}
+
+.btnSecondary:hover {
+  background: var(--color-border);
+}
