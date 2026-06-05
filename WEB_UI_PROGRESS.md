@@ -29,7 +29,7 @@ Branch: `web-ui`
 
 ## P4 — Mutation APIs
 - [x] Chat CRUD (create/rename/system-prompt/delete/export/import), messages (add/delete-from-point), branching (createBranch/switchVariant/branch-info/deleteMessageFromBranch), groups full CRUD + project-status + chat membership + attachments, API keys (add/patch/delete/toggle/reorder), settings PATCH (merge semantics), custom providers CRUD, full custom providers CRUD, skills (list/get-content/create/import/enable-disable/delete), POST /api/providers/refresh. Settings PUT semantics: merge (GET-then-PATCH pattern, only supplied fields overwritten). 46 new tests (81 total), all passing.
-- commit: TBD
+- commit: 2a05c8b
 
 ## P5 — Files + integrations OAuth
 - [ ] Multipart upload → attachment, GitHub OAuth web redirect + callback, Google OAuth. Tests: upload round-trip; OAuth state/callback with mocked token exchange.
