@@ -67,7 +67,7 @@ Branch: `web-ui`
   - `web/src/__tests__/LoginPage.test.tsx` — updated for Hebrew button text.
   - `react-icons@^4.12.0` added to dependencies.
   - `npm run build` ✓ | `npx vitest run` 74/74 ✓
-  - commit: TBD
+  - commit: 575edb9
 
 ## How to run (production)
 See `server/deploy/DEPLOY.md` for the full deployment guide.
