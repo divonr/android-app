@@ -43,6 +43,11 @@ Branch: `web-ui`
 ## P8 — E2E + deploy
 - [x] Static SPA serving from Ktor (WEB_STATIC_DIR env, tailcard GET fallback for SPA routes, /api paths never swallowed). KTOR_PORT + LLM_WEB_DATA_DIR env overrides added. 4 new server tests (102 total, all green). Playwright @1.48.2 + Chromium installed; 9 E2E tests authored and passing (auth, chat CRUD, settings persistence, API keys UI, seeded chat navigation, SPA fallback routing). `npm run test:e2e` wired; Vitest `test` script unchanged (e2e/ excluded). `./gradlew :server:installDist` produces runnable artifact at `server/build/install/server/bin/server`. Smoke test: `curl localhost:8091/health` → `{"status":"ok"}`, `curl localhost:8091/` → SPA index.html. Deployment artifacts: `server/deploy/llm-web.service`, `llm-web.env.example`, `build-and-run.sh`, `DEPLOY.md`. Root .gitignore updated for secrets + Playwright output. commit: 38e5e34
 
+## P9 — Remote sync bootstrap
+
+- [x] Added `SyncConfig` data class + `resolveSyncConfig()` (reads `SYNC_ENABLED`, `SYNC_SERVER_URL`, `SYNC_TOKEN`, `SYNC_USER`, `SYNC_PULL_INTERVAL_SECONDS` env vars). `SyncConfig.startEngine=false` gate lets tests assert config seeding without opening sockets. On startup (when enabled + token set): seeds `RemoteSyncSettings` + optional `current_user` into `AppSettings`, calls `startSync()` + initial `pullNow()`, launches a periodic pull loop (default 20 s) tied to `ApplicationStopping` lifecycle. Added `POST /api/sync/pull` + `GET /api/sync/status` endpoints (auth-gated; token never returned). 8 new tests (110 total, all green). `installDist` still produces a runnable artifact. Docs: `llm-web.env.example` + `DEPLOY.md` updated with sync section.
+- commit: TBD
+
 ## How to run (production)
 See `server/deploy/DEPLOY.md` for the full deployment guide.
 Short version: set secrets in `server/deploy/llm-web.env`, run `./gradlew :server:installDist && npm --prefix web run build`, then `sudo systemctl enable --now llm-web` (after copying the unit file).

@@ -182,3 +182,76 @@ Override with `LLM_WEB_DATA_DIR=/path/to/dir` in `llm-web.env`.
 
 This is separate from the phone/desktop data — the web server maintains
 its own independent chat history, settings, and API keys.
+
+---
+
+## Remote sync (share chats with phone/desktop)
+
+The web server can pull chat history from the same sync server used by your
+phone/desktop app.  Once enabled, the web UI shows the same chats as your
+other devices without any manual import/export.
+
+### How it works
+
+On startup the server:
+1. Seeds `RemoteSyncSettings` into `~/.llm-api-web` from the env vars below.
+2. Calls `startSync()` to bring the engine online.
+3. Does an immediate `pullNow()` so existing chats appear right away.
+4. Runs a background loop that calls `pullNow()` every `SYNC_PULL_INTERVAL_SECONDS`
+   (default 20 s) so changes made on phone/desktop show up automatically.
+
+Pushes happen automatically whenever the server writes a file (same hook as
+desktop/Android).  The sync server is the source of truth.
+
+### Configuration
+
+Add these lines to `server/deploy/llm-web.env` (already gitignored):
+
+```env
+# Enable remote sync
+SYNC_ENABLED=true
+
+# URL of the sync server — use localhost if it runs on the same box
+SYNC_SERVER_URL=http://localhost:8090
+
+# Bearer token from the sync server's env (KEEP SECRET — env file only)
+SYNC_TOKEN=<the-bearer-token-from-sync-server-env>
+
+# Username whose data to load (matches SYNC_USER on phone/desktop)
+SYNC_USER=default
+
+# Optional: pull interval in seconds (default 20)
+# SYNC_PULL_INTERVAL_SECONDS=20
+```
+
+> **Security note:** `SYNC_TOKEN` is a secret.  It must only ever live in
+> `llm-web.env` (which is gitignored) and in the sync server's env file.
+> The token is never logged, never sent to clients, and never stored in any
+> response body — the server keeps it server-side only.
+
+### Apply changes
+
+After editing `llm-web.env`:
+
+```bash
+sudo systemctl restart llm-web
+journalctl -u llm-web -f
+```
+
+Look for log lines like:
+```
+Remote sync configured: url=http://localhost:8090, user=default, interval=20s
+Remote sync engine started — triggering initial pull...
+Periodic sync pull loop started (interval=20s)
+```
+
+### Sync API endpoints (optional / debugging)
+
+Two authenticated endpoints are available for debugging:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/api/sync/status` | Returns `{enabled, serverBaseUrl, lastChangeTick}`. Token omitted. |
+| `POST` | `/api/sync/pull`   | Triggers an immediate pull. Returns `{ok:true}`. |
+
+Both require a valid session cookie (same auth as the rest of the API).

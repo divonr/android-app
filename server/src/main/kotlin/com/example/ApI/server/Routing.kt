@@ -44,6 +44,17 @@ data class SearchResultDto(
 )
 
 /**
+ * Response body for GET /api/sync/status.
+ * The auth token is deliberately omitted — it must never leave the server.
+ */
+@Serializable
+data class SyncStatusResponse(
+    val enabled: Boolean,
+    val serverBaseUrl: String,
+    val lastChangeTick: Long
+)
+
+/**
  * ApiKey with its secret replaced by a masked form for HTTP read responses.
  * The full key is never sent over the wire; the last 4 chars are surfaced so
  * users can identify which key is which.
@@ -245,6 +256,30 @@ fun Route.apiRoutes() {
     // ── P5: File upload + integrations OAuth ─────────────────────────────────
     fileRoutes()
     integrationRoutes()
+
+    // ── Sync ─────────────────────────────────────────────────────────────────
+
+    // POST /api/sync/pull — trigger an immediate pull from the sync server
+    // Safe no-op when sync is disabled (SyncEngine.pullNow() guards on enabled flag).
+    post("/sync/pull") {
+        call.application.appModule.repository.pullNow()
+        call.respond(HttpStatusCode.OK, mapOf("ok" to true))
+    }
+
+    // GET /api/sync/status — returns sync enablement state + last change tick.
+    // Auth token is deliberately excluded from the response.
+    get("/sync/status") {
+        val repo = call.application.appModule.repository
+        val syncSettings = repo.loadAppSettings().remoteSync
+        call.respond(
+            HttpStatusCode.OK,
+            SyncStatusResponse(
+                enabled = syncSettings.enabled,
+                serverBaseUrl = syncSettings.serverBaseUrl,
+                lastChangeTick = repo.syncChangeTick.value
+            )
+        )
+    }
 
     // ── Providers ────────────────────────────────────────────────────────────
 

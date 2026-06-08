@@ -1,5 +1,6 @@
 package com.example.ApI.server
 
+import com.example.ApI.data.model.RemoteSyncSettings
 import com.example.ApI.data.repository.DataRepository
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
@@ -13,6 +14,7 @@ import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
 import io.ktor.server.sessions.*
+import kotlinx.coroutines.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
@@ -72,6 +74,50 @@ fun resolvePassword(): String {
     return "changeme"
 }
 
+// ── Remote sync configuration ────────────────────────────────────────────────
+
+/**
+ * Remote-sync configuration injected into [Application.module].
+ *
+ * Separating it from the module signature lets tests verify config-seeding
+ * without relying on real environment variables and without opening live
+ * network connections.
+ *
+ * @param enabled              Whether to activate sync (mirrors SYNC_ENABLED env var).
+ * @param serverBaseUrl        Sync server base URL (mirrors SYNC_SERVER_URL env var).
+ * @param authToken            Bearer token (mirrors SYNC_TOKEN env var). NEVER hardcode.
+ * @param syncUser             Username whose data to load; null = keep existing current_user.
+ * @param pullIntervalSeconds  Seconds between periodic background pulls (mirrors SYNC_PULL_INTERVAL_SECONDS).
+ * @param startEngine          When false, config is seeded but startSync()/pullNow() are NOT called.
+ *                             Used in tests to assert config without opening sockets.
+ */
+data class SyncConfig(
+    val enabled: Boolean = false,
+    val serverBaseUrl: String = RemoteSyncSettings().serverBaseUrl,
+    val authToken: String = "",
+    val syncUser: String? = null,
+    val pullIntervalSeconds: Long = 20L,
+    val startEngine: Boolean = true
+)
+
+/** Reads sync configuration from environment variables. */
+fun resolveSyncConfig(): SyncConfig {
+    val rawEnabled = System.getenv("SYNC_ENABLED")?.trim()?.lowercase()
+    val enabled = rawEnabled == "true" || rawEnabled == "1"
+    val serverBaseUrl = System.getenv("SYNC_SERVER_URL")?.takeIf { it.isNotBlank() }
+        ?: RemoteSyncSettings().serverBaseUrl
+    val authToken = System.getenv("SYNC_TOKEN") ?: ""
+    val syncUser = System.getenv("SYNC_USER")?.takeIf { it.isNotBlank() }
+    val pullIntervalSeconds = System.getenv("SYNC_PULL_INTERVAL_SECONDS")?.toLongOrNull() ?: 20L
+    return SyncConfig(
+        enabled = enabled,
+        serverBaseUrl = serverBaseUrl,
+        authToken = authToken,
+        syncUser = syncUser,
+        pullIntervalSeconds = pullIntervalSeconds
+    )
+}
+
 fun main() {
     val port = System.getenv("KTOR_PORT")?.toIntOrNull() ?: 8091
     embeddedServer(Netty, port = port, module = Application::module).start(wait = true)
@@ -93,6 +139,7 @@ fun Application.module(
     storage: ServerPlatformStorage = ServerPlatformStorage(),
     authConfig: AuthConfig = AuthConfig(password = resolvePassword()),
     oauthExchanger: com.example.ApI.server.oauth.OAuthTokenExchanger? = null,
+    syncConfig: SyncConfig = resolveSyncConfig(),
     chatEngineFactory: ((DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null
 ) {
     // ── Dependency wiring ────────────────────────────────────────────────────
@@ -108,6 +155,9 @@ fun Application.module(
             AppModule(repository)
     }
     installAppModule(appModule)
+
+    // ── Remote sync bootstrap ────────────────────────────────────────────────
+    applySyncConfig(repository, syncConfig)
 
     // ── Sessions ─────────────────────────────────────────────────────────────
     install(Sessions) {
@@ -176,6 +226,72 @@ fun Application.module(
 
     // ── Routes ───────────────────────────────────────────────────────────────
     configureRouting(authConfig)
+}
+
+// ── Remote sync bootstrap helper ────────────────────────────────────────────
+
+/**
+ * Applies [syncConfig] to the repository's [AppSettings] and, when enabled,
+ * starts the sync engine and a periodic pull loop.
+ *
+ * When [SyncConfig.startEngine] is false (tests), config is seeded but no
+ * network connections are opened.
+ */
+private fun Application.applySyncConfig(repository: DataRepository, syncConfig: SyncConfig) {
+    if (!syncConfig.enabled) return
+
+    if (syncConfig.authToken.isBlank()) {
+        log.warn(
+            "SYNC_ENABLED=true but SYNC_TOKEN is blank — remote sync will NOT start. " +
+            "Set SYNC_TOKEN in server/deploy/llm-web.env to enable sync."
+        )
+        return
+    }
+
+    // Seed declarative sync config into AppSettings so the engine reads it on start.
+    // This is idempotent: restarting the server re-applies the same env-driven config.
+    val current = repository.loadAppSettings()
+    val updated = current.copy(
+        remoteSync = RemoteSyncSettings(
+            enabled = true,
+            serverBaseUrl = syncConfig.serverBaseUrl,
+            authToken = syncConfig.authToken,
+            syncApiKeys = false
+        ),
+        current_user = syncConfig.syncUser ?: current.current_user
+    )
+    repository.saveAppSettings(updated)
+    log.info(
+        "Remote sync configured: url=${syncConfig.serverBaseUrl}, " +
+        "user=${updated.current_user}, interval=${syncConfig.pullIntervalSeconds}s"
+    )
+
+    if (!syncConfig.startEngine) return  // test mode: config seeded, engine not started
+
+    repository.startSync()
+    log.info("Remote sync engine started — triggering initial pull...")
+    repository.pullNow()
+
+    // Periodic pull loop — compensates for the server having no "window focus" event.
+    // Uses its own CoroutineScope so it can be cancelled cleanly on shutdown.
+    val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    environment.monitor.subscribe(ApplicationStopping) {
+        log.info("Stopping periodic sync pull loop")
+        syncScope.cancel()
+    }
+    syncScope.launch {
+        while (isActive) {
+            delay(syncConfig.pullIntervalSeconds * 1000L)
+            try {
+                repository.pullNow()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                log.warn("Periodic sync pull failed: ${e.message}")
+            }
+        }
+    }
+    log.info("Periodic sync pull loop started (interval=${syncConfig.pullIntervalSeconds}s)")
 }
 
 // ── OAuth client credentials helpers ────────────────────────────────────────
