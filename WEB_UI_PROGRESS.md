@@ -65,7 +65,7 @@ Branch: `web-ui`
   - Added `MdFolder`, `MdStar`, `MdForum`, `MdRemove`, `MdStar` to `web/src/ui/icons.ts`.
   - Tests: rewrote `ChatHistoryPage.test.tsx` for Hebrew UI (12 tests, up from 10): top-bar icon buttons, FAB direct-create, Hebrew search placeholder, search mode toggle, context-menu-rename→dialog→API-call. All 76 vitest tests green.
   - `npm run build` ✓ | `npx vitest run` 76/76 ✓
-  - commit: TBD
+  - commit: aa540d6
 
 ## UI Refactor — R0 (Foundation)
 
