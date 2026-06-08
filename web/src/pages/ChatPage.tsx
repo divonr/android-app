@@ -12,6 +12,8 @@ import {
   branching,
   skills as skillsApi,
   files as filesApi,
+  settings as settingsApi,
+  chats as chatsApi,
 } from '../api/client'
 import { sendStream, resendStream } from '../api/stream'
 import type { StreamCallbacks } from '../api/stream'
@@ -23,9 +25,18 @@ import type {
   Attachment,
   ThinkingBudget,
   BranchInfo,
+  Provider,
+  StarredModel,
 } from '../api/types'
 import Markdown from '../components/Markdown'
 import styles from './ChatPage.module.css'
+import ChatTopBar from '../components/chat/ChatTopBar'
+import QuickSettingsBar from '../components/chat/QuickSettingsBar'
+import type { TextDirectionMode } from '../components/chat/QuickSettingsBar'
+import ModelSelectorDialog from '../components/chat/ModelSelectorDialog'
+import SystemPromptDialog from '../components/chat/SystemPromptDialog'
+import Dialog, { DialogButton } from '../ui/Dialog'
+import { t } from '../i18n/he'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -504,6 +515,17 @@ const ChatPage: React.FC = () => {
   const [temperature, setTemperature] = useState<number | null>(null)
   const [skillsList, setSkillsList] = useState<InstalledSkill[]>([])
 
+  // ── Chrome state (R2) ────────────────────────────────────────────────────────
+  const [searchMode, setSearchMode] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [quickSettingsExpanded, setQuickSettingsExpanded] = useState(false)
+  const [showModelSelector, setShowModelSelector] = useState(false)
+  const [showSystemPromptDialog, setShowSystemPromptDialog] = useState(false)
+  const [textDirectionMode, setTextDirectionMode] = useState<TextDirectionMode>('AUTO')
+  const [providersList, setProvidersList] = useState<Provider[]>([])
+  const [starredModels, setStarredModels] = useState<StarredModel[]>([])
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
   // Input state
   const [inputText, setInputText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -531,7 +553,17 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     providersApi.models().then(setModels).catch(() => {})
-    skillsApi.list().then(setSkillsList).catch(() => {})
+    providersApi.list().then(setProvidersList).catch(() => {})
+    skillsApi.list().then((skills) => {
+      setSkillsList(skills)
+      // Initialize enabled tools from skills that are enabled
+      setEnabledToolIds(skills.filter(s => s.enabled).map(s => s.name))
+    }).catch(() => {})
+    settingsApi.get().then((s) => {
+      if (s.selected_provider) setProvider(s.selected_provider)
+      if (s.selected_model) setModel(s.selected_model)
+      if (s.starredModels) setStarredModels(s.starredModels)
+    }).catch(() => {})
   }, [])
 
   // Scroll to bottom when messages change or partial text grows
@@ -803,6 +835,43 @@ const ChatPage: React.FC = () => {
     navigator.clipboard.writeText(text).catch(() => {})
   }, [])
 
+  // ── Chrome handlers (R2) ────────────────────────────────────────────────────
+
+  const handleDeleteChat = useCallback(async () => {
+    if (!chatId) return
+    try {
+      await chatsApi.delete(chatId)
+      navigate('/')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed')
+    }
+    setShowDeleteConfirm(false)
+  }, [chatId, navigate])
+
+  const handleSaveSystemPrompt = useCallback(async (prompt: string) => {
+    if (!chatId) return
+    try {
+      const updated = await chatsApi.update(chatId, { systemPrompt: prompt })
+      updateChat(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save system prompt')
+    }
+  }, [chatId, updateChat])
+
+  const handleModelSelect = useCallback((newProvider: string, newModel: string) => {
+    setProvider(newProvider)
+    setModel(newModel)
+  }, [])
+
+  const handleToggleStar = useCallback((prov: string, modelName: string) => {
+    setStarredModels(prev => {
+      const already = prev.some(s => s.provider === prov && s.modelName === modelName)
+      return already
+        ? prev.filter(s => !(s.provider === prov && s.modelName === modelName))
+        : [...prev, { provider: prov, modelName }]
+    })
+  }, [])
+
   // ── Abort stream ──────────────────────────────────────────────────────────
 
   const handleAbort = () => {
@@ -819,6 +888,14 @@ const ChatPage: React.FC = () => {
     }
   }
 
+  // ── Tool items (useMemo must be before any conditional return) ───────────────
+
+  const toolItems = useMemo(() => {
+    return skillsList
+      .filter(s => s.enabled)
+      .map(s => ({ id: s.name, name: s.name }))
+  }, [skillsList])
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (!currentChat && !stream.streaming) {
@@ -834,53 +911,82 @@ const ChatPage: React.FC = () => {
 
   return (
     <div className={styles.page}>
-      {/* Top bar */}
-      <div className={styles.topbar}>
-        <button
-          className={styles.backBtn}
-          onClick={() => navigate('/')}
-          aria-label="Back to chats"
-        >
-          ←
-        </button>
-        <div className={styles.topbarTitle}>
-          {chat?.preview_name || 'Chat'}
-        </div>
-        <div className={styles.topbarControls}>
-          <ModelPicker
-            provider={provider}
-            model={model}
-            models={models}
-            onChange={(p, m) => { setProvider(p); setModel(m) }}
-          />
-          <button
-            className={`${styles.topbarBtn} ${webSearch ? styles.topbarBtnActive : ''}`}
-            onClick={() => setWebSearch((w) => !w)}
-            title="Web search"
-          >
-            🌐
-          </button>
-          <ToolsDropdown
-            skills={skillsList}
-            enabledToolIds={enabledToolIds}
-            onChange={setEnabledToolIds}
-          />
-          <div className={styles.thinkingSelect}>
-            <select
-              value={thinkingBudget}
-              onChange={(e) => setThinkingBudget(e.target.value as ThinkingBudget)}
-              className={styles.topbarSelect}
-              title="Thinking budget"
-            >
-              <option value="none">No thinking</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="max">Max</option>
-            </select>
-          </div>
-        </div>
-      </div>
+      {/* ── Chrome (R2): top bar + quick settings ── */}
+      <ChatTopBar
+        provider={provider}
+        model={model}
+        searchMode={searchMode}
+        searchQuery={searchQuery}
+        quickSettingsExpanded={quickSettingsExpanded}
+        onBack={() => navigate('/')}
+        onSearch={() => setSearchMode(true)}
+        onShare={() => {
+          // Export chat scaffold (R3 can wire download)
+          if (chatId) chatsApi.export(chatId).catch(() => {})
+        }}
+        onDelete={() => setShowDeleteConfirm(true)}
+        onClickProviderModel={() => setShowModelSelector(true)}
+        onSearchQueryChange={setSearchQuery}
+        onSearchAction={() => { /* in-chat search highlight is R3 */ }}
+        onExitSearch={() => { setSearchMode(false); setSearchQuery('') }}
+        onToggleQuickSettings={() => setQuickSettingsExpanded(v => !v)}
+      />
+
+      <QuickSettingsBar
+        visible={!searchMode}
+        expanded={quickSettingsExpanded}
+        thinkingBudget={thinkingBudget}
+        onThinkingBudgetChange={setThinkingBudget}
+        temperature={temperature}
+        onTemperatureChange={setTemperature}
+        toolItems={toolItems}
+        enabledToolIds={enabledToolIds}
+        onToolToggle={(id, enabled) => {
+          setEnabledToolIds(prev => enabled
+            ? [...prev.filter(x => x !== id), id]
+            : prev.filter(x => x !== id)
+          )
+        }}
+        textDirectionMode={textDirectionMode}
+        onTextDirectionChange={setTextDirectionMode}
+        onSystemPrompt={() => setShowSystemPromptDialog(true)}
+        systemPrompt={chat?.systemPrompt ?? ''}
+      />
+
+      {/* Model selector dialog */}
+      <ModelSelectorDialog
+        open={showModelSelector}
+        onClose={() => setShowModelSelector(false)}
+        providers={providersList}
+        currentProvider={provider}
+        currentModel={model}
+        onSelect={handleModelSelect}
+        starredModels={starredModels}
+        onToggleStar={handleToggleStar}
+      />
+
+      {/* System prompt dialog */}
+      <SystemPromptDialog
+        open={showSystemPromptDialog}
+        onClose={() => setShowSystemPromptDialog(false)}
+        currentPrompt={chat?.systemPrompt ?? ''}
+        onSave={handleSaveSystemPrompt}
+      />
+
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title={t('delete_confirmation_title')}
+        actions={
+          <>
+            <DialogButton label={t('cancel')} onClick={() => setShowDeleteConfirm(false)} />
+            <DialogButton label={t('delete')} onClick={handleDeleteChat} danger />
+          </>
+        }
+      >
+        {t('delete_confirmation_message')}
+      </Dialog>
 
       {/* Error banner */}
       {error && (

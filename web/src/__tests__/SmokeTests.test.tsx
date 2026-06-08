@@ -54,7 +54,7 @@ vi.mock('../api/client', () => ({
     removeAttachment: vi.fn(),
   },
   search: { query: vi.fn().mockResolvedValue([]) },
-  providers: { models: vi.fn().mockResolvedValue([]) },
+  providers: { models: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue([]) },
   branching: { create: vi.fn(), switchVariant: vi.fn() },
   skills: { list: vi.fn().mockResolvedValue([]), getContent: vi.fn(), setEnabled: vi.fn(), create: vi.fn(), delete: vi.fn() },
   files: { upload: vi.fn() },

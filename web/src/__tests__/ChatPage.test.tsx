@@ -31,7 +31,17 @@ vi.mock('../api/stream', async () => ({
 vi.mock('../api/client', async () => ({
   providers: {
     models: () => Promise.resolve([]),
-    list: () => Promise.resolve([]),
+    list: () => Promise.resolve([
+      {
+        provider: 'openai',
+        models: [
+          { name: 'gpt-4o', min_points: null, pricing: null, other_fields: null },
+          { name: 'gpt-3.5-turbo', min_points: null, pricing: null, other_fields: null },
+        ],
+        request: { request_type: 'openai', base_url: '', headers: {} },
+        response_important_fields: {},
+      },
+    ]),
     refresh: () => Promise.resolve({ ok: true, changed: false }),
   },
   branching: {
@@ -186,10 +196,13 @@ describe('ChatPage', () => {
     })
   })
 
-  it('shows the chat title in topbar', async () => {
+  it('shows provider and model in topbar', async () => {
     renderChatPage()
     await waitFor(() => {
-      expect(screen.getByText('Test Chat')).toBeInTheDocument()
+      // Provider label (OpenAI) appears in the centered column (unique to topbar)
+      expect(screen.getByText('OpenAI')).toBeInTheDocument()
+      // gpt-4o may appear in both topbar and message bubbles — at least one match is sufficient
+      expect(screen.getAllByText('gpt-4o').length).toBeGreaterThan(0)
     })
   })
 
@@ -356,6 +369,89 @@ describe('ChatPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('home')).toBeInTheDocument()
+    })
+  })
+})
+
+describe('ChatPage — R2 chrome', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    chatStoreModule.useChatStore.setState({
+      history: null,
+      currentChat: SAMPLE_CHAT,
+      loading: false,
+      error: null,
+      loadHistory: vi.fn(),
+      loadChat: vi.fn().mockResolvedValue(undefined),
+      updateChat: vi.fn(),
+      clearCurrentChat: vi.fn(),
+    })
+    vi.mocked(streamModule.sendStream).mockReturnValue({ abort: vi.fn(), done: Promise.resolve() })
+  })
+
+  it('clicking provider/model label opens model selector dialog', async () => {
+    renderChatPage()
+    await waitFor(() => {
+      expect(screen.getByText('OpenAI')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('OpenAI'))
+    await waitFor(() => {
+      expect(screen.getByText('בחירת מודל')).toBeInTheDocument()
+    })
+  })
+
+  it('quick settings toggle button reveals quick-settings buttons', async () => {
+    renderChatPage()
+    await waitFor(() => {
+      expect(screen.getByLabelText(/פתח הגדרות מהירות/i)).toBeInTheDocument()
+    })
+    // Before expanding: thinking budget button not visible
+    expect(screen.queryByLabelText(/עוצמת חשיבה/i)).not.toBeInTheDocument()
+    // Expand
+    fireEvent.click(screen.getByLabelText(/פתח הגדרות מהירות/i))
+    await waitFor(() => {
+      expect(screen.getByLabelText(/עוצמת חשיבה/i)).toBeInTheDocument()
+      expect(screen.getByLabelText(/טמפרטורה/i)).toBeInTheDocument()
+      expect(screen.getByLabelText(/system prompt/i)).toBeInTheDocument()
+    })
+  })
+
+  it('text direction menu opens with RTL/A/LTR options', async () => {
+    renderChatPage()
+    await waitFor(() => screen.getByLabelText(/פתח הגדרות מהירות/i))
+    // Expand quick settings
+    fireEvent.click(screen.getByLabelText(/פתח הגדרות מהירות/i))
+    await waitFor(() => screen.getByLabelText(/כיוון טקסט/i))
+    // Open text direction menu
+    fireEvent.click(screen.getByLabelText(/כיוון טקסט/i))
+    await waitFor(() => {
+      expect(screen.getByLabelText('RTL')).toBeInTheDocument()
+      expect(screen.getByLabelText('AUTO')).toBeInTheDocument()
+      expect(screen.getByLabelText('LTR')).toBeInTheDocument()
+    })
+  })
+
+  it('system prompt dialog opens, edit, and save calls chats.update', async () => {
+    renderChatPage()
+    await waitFor(() => screen.getByLabelText(/פתח הגדרות מהירות/i))
+    // Expand quick settings
+    fireEvent.click(screen.getByLabelText(/פתח הגדרות מהירות/i))
+    await waitFor(() => screen.getByLabelText(/system prompt/i))
+    // Open system prompt dialog
+    fireEvent.click(screen.getByLabelText(/system prompt/i))
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /system prompt/i })).toBeInTheDocument()
+    })
+    // Edit the textarea
+    const textarea = screen.getByPlaceholderText(/system prompt/i)
+    fireEvent.change(textarea, { target: { value: 'New system prompt' } })
+    // Save
+    fireEvent.click(screen.getByText('אישור'))
+    await waitFor(() => {
+      expect(clientModule.chats.update).toHaveBeenCalledWith(
+        'c1',
+        expect.objectContaining({ systemPrompt: 'New system prompt' }),
+      )
     })
   })
 })

@@ -48,6 +48,20 @@ Branch: `web-ui`
 - [x] Added `SyncConfig` data class + `resolveSyncConfig()` (reads `SYNC_ENABLED`, `SYNC_SERVER_URL`, `SYNC_TOKEN`, `SYNC_USER`, `SYNC_PULL_INTERVAL_SECONDS` env vars). `SyncConfig.startEngine=false` gate lets tests assert config seeding without opening sockets. On startup (when enabled + token set): seeds `RemoteSyncSettings` + optional `current_user` into `AppSettings`, calls `startSync()` + initial `pullNow()`, launches a periodic pull loop (default 20 s) tied to `ApplicationStopping` lifecycle. Added `POST /api/sync/pull` + `GET /api/sync/status` endpoints (auth-gated; token never returned). 8 new tests (110 total, all green). `installDist` still produces a runnable artifact. Docs: `llm-web.env.example` + `DEPLOY.md` updated with sync section.
 - commit: bbe1f13
 
+## UI Refactor — R2 (Chat screen chrome)
+
+- [x] **R2 — Chat screen chrome — top bar, quick settings, model selector, system-prompt dialog**
+  - **`web/src/utils/chatUtils.ts`** (new): hoisted `getModelInitial` + `formatTimestamp` from `ChatHistoryPage`; re-imported there.
+  - **`web/src/components/chat/ChatTopBar.tsx`** (new): `NormalModeTopBar` (back+search / provider+model center / share+delete), `SearchModeTopBar` (back + full-width input + close/search icon), floating 28px chevron toggle at `bottom:-14px; inset-inline-end:20px`. All inline styles, CSS logical props for RTL.
+  - **`web/src/components/chat/QuickSettingsBar.tsx`** (new): animated expand/collapse row of 36px icon-buttons (thinking-budget, temperature, tools, text-direction, system-prompt). Active states: thinking≠none, temp≠null, some tools excluded, prompt≠''. `PopupPortal` via `getBoundingClientRect+createPortal` avoids overflow clipping. Four popups: `ThinkingBudgetPopup` (none/low/medium/high/max), `TemperaturePopup` (slider 0–2 + reset), `ToolToggleDropdown` (master toggle + per-tool checkboxes), `TextDirectionMenu` (RTL/A/LTR buttons). Exports `TextDirectionMode` type.
+  - **`web/src/components/chat/ModelSelectorDialog.tsx`** (new): provider tab bar (star + one per provider), `StarredPage` (starred models or empty hint), `ProviderModelList` (filtered rows + star toggle), custom model name entry, filter search input.
+  - **`web/src/components/chat/SystemPromptDialog.tsx`** (new): multiline textarea (`direction:auto`), cancel/אישור buttons via R0 `Dialog`/`DialogButton`, saves via `chats.update(chatId, {systemPrompt})`.
+  - **`web/src/pages/ChatPage.tsx`**: integrated all four components; added state for searchMode, quickSettingsExpanded, textDirectionMode, providersList, starredModels, showModelSelector, showSystemPromptDialog, showDeleteConfirm. All new hooks hoisted before early return (Rules of Hooks). `handleDeleteChat` → confirm dialog → `chats.delete`; `handleSaveSystemPrompt` → `chats.update`; `handleModelSelect` / `handleToggleStar` → settings update.
+  - **`web/src/i18n/he.ts`**: added 30+ R2 Hebrew keys (thinking labels, temperature, tools, text-direction, model-selector, starred, quick-settings).
+  - **`web/src/__tests__/ChatPage.test.tsx`**: added 4 new R2 chrome tests; updated topbar test to use `getAllByText` for model name (appears in both topbar + message bubble).
+  - **`web/src/__tests__/SmokeTests.test.tsx`**: added `providers.list` mock.
+  - `npm run build` ✓ | `npx vitest run` 80/80 ✓
+
 ## UI Refactor — R1 (ChatHistory screen)
 
 - [x] **R1 — ChatHistory screen — Hebrew/RTL, groups, search, context menus, dialogs**
