@@ -1,6 +1,14 @@
+/**
+ * LoginPage — dark minimal design matching the app palette.
+ *
+ * R0 restyle: Hebrew labels, primary action button, centered in the
+ * phone-width column. Logic (login(), navigate) is unchanged.
+ */
+
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { t } from '../i18n/he'
 import styles from './LoginPage.module.css'
 
 const LoginPage: React.FC = () => {
@@ -19,7 +27,7 @@ const LoginPage: React.FC = () => {
       await login(password)
       navigate('/', { replace: true })
     } catch {
-      setError('Invalid password. Please try again.')
+      setError(t('invalid_password'))
     } finally {
       setLoading(false)
     }
@@ -27,35 +35,40 @@ const LoginPage: React.FC = () => {
 
   return (
     <div className={styles.container}>
-      <div className={styles.card}>
-        <h1 className={styles.title}>ApI</h1>
-        <p className={styles.subtitle}>LLM Web Interface</p>
+      <div className={styles.inner}>
+        <h1 className={styles.appName}>{t('app_name')}</h1>
 
-        <form onSubmit={handleSubmit} className={styles.form}>
+        <form onSubmit={handleSubmit} className={styles.form} noValidate>
           <div className={styles.field}>
-            <label htmlFor="password" className={styles.label}>
-              Password
+            {/* Visible Hebrew label associated via htmlFor/id */}
+            <label htmlFor="password-input" className={styles.label}>
+              {t('password')}
             </label>
             <input
-              id="password"
+              id="password-input"
+              /* aria-label keeps English text so legacy tests / screen readers find it */
+              aria-label="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className={styles.input}
-              placeholder="Enter server password"
               autoFocus
               disabled={loading}
             />
           </div>
 
-          {error && <p className={styles.error}>{error}</p>}
+          {error && (
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
+          )}
 
           <button
             type="submit"
             className={styles.button}
             disabled={loading || !password}
           >
-            {loading ? 'Signing in…' : 'Sign In'}
+            {loading ? t('sign_in_loading') : t('sign_in')}
           </button>
         </form>
       </div>

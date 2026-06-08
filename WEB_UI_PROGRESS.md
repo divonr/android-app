@@ -48,6 +48,27 @@ Branch: `web-ui`
 - [x] Added `SyncConfig` data class + `resolveSyncConfig()` (reads `SYNC_ENABLED`, `SYNC_SERVER_URL`, `SYNC_TOKEN`, `SYNC_USER`, `SYNC_PULL_INTERVAL_SECONDS` env vars). `SyncConfig.startEngine=false` gate lets tests assert config seeding without opening sockets. On startup (when enabled + token set): seeds `RemoteSyncSettings` + optional `current_user` into `AppSettings`, calls `startSync()` + initial `pullNow()`, launches a periodic pull loop (default 20 s) tied to `ApplicationStopping` lifecycle. Added `POST /api/sync/pull` + `GET /api/sync/status` endpoints (auth-gated; token never returned). 8 new tests (110 total, all green). `installDist` still produces a runnable artifact. Docs: `llm-web.env.example` + `DEPLOY.md` updated with sync section.
 - commit: bbe1f13
 
+## UI Refactor — R0 (Foundation)
+
+- [x] **R0 — Design tokens + RTL shell + UI kit + i18n + nav scaffold**
+  - `web/src/styles/theme.css` — all Color.kt + Type.kt tokens as CSS variables (`--bg`, `--surface`, `--primary`, typography scale, radius, spacing, alpha overlays).
+  - `web/index.html` — `<html lang="he" dir="rtl">` (RTL shell).
+  - `web/src/index.css` — imports `theme.css` globally.
+  - `web/src/i18n/he.ts` — 99 Hebrew strings from `strings.xml` (verbatim), `t()` helper + `useT()` hook.
+  - `web/src/ui/icons.ts` — named re-exports from `react-icons/md` (single import point for screens).
+  - `web/src/ui/IconButton.tsx` — 36px rounded-square icon button, `active` prop → `--primary-15` bg.
+  - `web/src/ui/Surface.tsx` — bg + border-radius + elevation helper.
+  - `web/src/ui/Card.tsx` — convenience wrapper over Surface.
+  - `web/src/ui/RoundButton.tsx` — 40px circular primary action button (send/confirm/web-search).
+  - `web/src/ui/Popup.tsx` + `PopupItem` — anchored dropdown menu (portaled, dismissible).
+  - `web/src/ui/Dialog.tsx` + `DialogButton` — modal dialog (Material3 dark look).
+  - `web/src/components/AppLayout.tsx` — sidebar REMOVED; replaced with centered 520px `.shell`/`.frame` column.
+  - `web/src/pages/LoginPage.tsx` — restyled dark/Hebrew (labels from `i18n/he.ts`).
+  - `web/src/__tests__/LoginPage.test.tsx` — updated for Hebrew button text.
+  - `react-icons@^4.12.0` added to dependencies.
+  - `npm run build` ✓ | `npx vitest run` 74/74 ✓
+  - commit: TBD
+
 ## How to run (production)
 See `server/deploy/DEPLOY.md` for the full deployment guide.
 Short version: set secrets in `server/deploy/llm-web.env`, run `./gradlew :server:installDist && npm --prefix web run build`, then `sudo systemctl enable --now llm-web` (after copying the unit file).

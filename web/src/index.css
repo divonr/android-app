@@ -1,3 +1,6 @@
+/* Import canonical design tokens (CSS variables for all Color.kt + Type.kt values) */
+@import './styles/theme.css';
+
 /* =========================================================
    Global design tokens — dark theme matching desktop palette
    (Color.kt values: Background=#0D0E14, Surface=#1A1B26, etc.)

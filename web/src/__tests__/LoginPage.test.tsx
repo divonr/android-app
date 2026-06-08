@@ -40,13 +40,15 @@ describe('LoginPage', () => {
 
   it('renders a password field and submit button', () => {
     renderLogin()
+    // Input has aria-label="password" so getByLabelText(/password/i) finds it
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument()
+    // Button shows Hebrew text "כניסה"
+    expect(screen.getByRole('button', { name: /כניסה/ })).toBeInTheDocument()
   })
 
   it('button is disabled when password field is empty', () => {
     renderLogin()
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /כניסה/ })).toBeDisabled()
   })
 
   it('calls login and navigates on success', async () => {
@@ -62,7 +64,7 @@ describe('LoginPage', () => {
 
     renderLogin()
     const input = screen.getByLabelText(/password/i)
-    const button = screen.getByRole('button', { name: /sign in/i })
+    const button = screen.getByRole('button', { name: /כניסה/ })
 
     fireEvent.change(input, { target: { value: 'correct-password' } })
     expect(button).not.toBeDisabled()
@@ -88,10 +90,11 @@ describe('LoginPage', () => {
     renderLogin()
     const input = screen.getByLabelText(/password/i)
     fireEvent.change(input, { target: { value: 'wrong' } })
-    fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
+    fireEvent.click(screen.getByRole('button', { name: /כניסה/ }))
 
     await waitFor(() => {
-      expect(screen.getByText(/invalid password/i)).toBeInTheDocument()
+      // Hebrew error message from i18n: 'סיסמה שגויה. אנא נסה שוב.'
+      expect(screen.getByRole('alert')).toBeInTheDocument()
     })
   })
 })

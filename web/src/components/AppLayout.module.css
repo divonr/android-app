@@ -1,189 +1,36 @@
 /* =========================================================
-   App shell layout — sidebar + main area, responsive/mobile-first
+   AppLayout — centered phone-width column shell
+   R0: sidebar removed; pure full-screen column model.
    ========================================================= */
 
-.root {
-  display: flex;
+.shell {
   min-height: 100vh;
-  background: var(--color-bg);
-  overflow: hidden;
-}
-
-/* -----------------------------------------------------------
-   Sidebar
-   ----------------------------------------------------------- */
-
-.sidebar {
-  width: 240px;
-  min-width: 240px;
-  background: var(--color-surface);
-  border-right: 1px solid var(--color-border);
   display: flex;
-  flex-direction: column;
-  transition: transform 0.25s ease;
-  z-index: 100;
+  justify-content: center;
+  align-items: flex-start;
+  /* Slightly darker than --bg so the column reads as a phone bezel on wide screens */
+  background: #08090f;
 }
 
-.sidebarHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1.25rem 1rem 1rem;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.logo {
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--color-primary);
-  letter-spacing: -0.5px;
-}
-
-.closeBtn {
-  display: none;
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: 1.1rem;
-  cursor: pointer;
-  padding: 0.25rem;
-  line-height: 1;
-}
-
-.navList {
-  list-style: none;
-  margin: 0;
-  padding: 0.75rem 0;
-  flex: 1;
-  overflow-y: auto;
-}
-
-.navLink {
-  display: block;
-  padding: 0.65rem 1.25rem;
-  color: var(--color-text-secondary);
-  text-decoration: none;
-  font-size: 0.95rem;
-  font-weight: 500;
-  transition: background 0.12s, color 0.12s;
-  border-radius: 0;
-}
-
-.navLink:hover {
-  background: var(--color-surface-variant);
-  color: var(--color-text);
-}
-
-.navLinkActive {
-  color: var(--color-primary) !important;
-  background: rgba(108, 124, 231, 0.12) !important;
-  font-weight: 600;
-}
-
-.sidebarFooter {
-  padding: 1rem;
-  border-top: 1px solid var(--color-border);
-}
-
-.logoutBtn {
-  background: none;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-  border-radius: 8px;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  font-size: 0.9rem;
+.frame {
   width: 100%;
-  transition: border-color 0.15s, color 0.15s;
-}
-
-.logoutBtn:hover {
-  border-color: var(--color-error);
-  color: var(--color-error);
-}
-
-/* -----------------------------------------------------------
-   Main area
-   ----------------------------------------------------------- */
-
-.main {
-  flex: 1;
+  max-width: 520px;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
+  background: var(--bg);
+  position: relative;
+  /* Subtle border to separate column from outer bg on very wide screens */
+  box-shadow: 0 0 0 1px rgba(52, 53, 74, 0.5);
 }
 
-.topbar {
-  display: none;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.menuBtn {
-  background: none;
-  border: none;
-  color: var(--color-text);
-  font-size: 1.25rem;
-  cursor: pointer;
-  padding: 0.25rem;
-  line-height: 1;
-}
-
-.topbarTitle {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--color-primary);
-}
-
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0;
-}
-
-/* -----------------------------------------------------------
-   Overlay (mobile)
-   ----------------------------------------------------------- */
-
-.overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 99;
-}
-
-/* -----------------------------------------------------------
-   Responsive: collapse sidebar on mobile
-   ----------------------------------------------------------- */
-
-@media (max-width: 768px) {
-  .sidebar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    transform: translateX(-100%);
+/* On phone widths the column IS the viewport — outer bg matches */
+@media (max-width: 520px) {
+  .shell {
+    background: var(--bg);
   }
 
-  .sidebarOpen {
-    transform: translateX(0);
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
-  }
-
-  .closeBtn {
-    display: block;
-  }
-
-  .topbar {
-    display: flex;
-  }
-
-  .overlay {
-    display: block;
+  .frame {
+    box-shadow: none;
   }
 }

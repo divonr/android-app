@@ -1,92 +1,26 @@
-import React, { useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../stores/authStore'
+/**
+ * AppLayout — full-screen centered-column shell.
+ *
+ * R0 CHANGE: The persistent sidebar has been removed.
+ * Navigation is now full-screen-screen-switching (back-arrow per page),
+ * matching the Android app's single-stack navigation model.
+ *
+ * Structure:
+ *   .shell   — full viewport, background outside column (--bg, slightly darkened)
+ *   .frame   — max-width 520px centered column, full min-height, bg --bg
+ *              (all protected pages render here via <Outlet />)
+ */
+
+import React from 'react'
+import { Outlet } from 'react-router-dom'
 import styles from './AppLayout.module.css'
 
-const NAV_ITEMS = [
-  { to: '/', label: 'Chats', exact: true },
-  { to: '/keys', label: 'API Keys', exact: false },
-  { to: '/skills', label: 'Skills', exact: false },
-  { to: '/integrations', label: 'Integrations', exact: false },
-  { to: '/settings', label: 'Settings', exact: false },
-]
-
-const AppLayout: React.FC = () => {
-  const navigate = useNavigate()
-  const { logout } = useAuthStore()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login', { replace: true })
-  }
-
-  return (
-    <div className={styles.root}>
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className={styles.overlay}
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* Sidebar */}
-      <nav className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ''}`}>
-        <div className={styles.sidebarHeader}>
-          <span className={styles.logo}>ApI</span>
-          <button
-            className={styles.closeBtn}
-            onClick={() => setSidebarOpen(false)}
-            aria-label="Close menu"
-          >
-            ✕
-          </button>
-        </div>
-
-        <ul className={styles.navList}>
-          {NAV_ITEMS.map((item) => (
-            <li key={item.to}>
-              <NavLink
-                to={item.to}
-                end={item.exact}
-                className={({ isActive }) =>
-                  `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`
-                }
-                onClick={() => setSidebarOpen(false)}
-              >
-                {item.label}
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-
-        <div className={styles.sidebarFooter}>
-          <button className={styles.logoutBtn} onClick={handleLogout}>
-            Sign Out
-          </button>
-        </div>
-      </nav>
-
-      {/* Main area */}
-      <div className={styles.main}>
-        <header className={styles.topbar}>
-          <button
-            className={styles.menuBtn}
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Open menu"
-          >
-            ☰
-          </button>
-          <span className={styles.topbarTitle}>ApI</span>
-        </header>
-
-        <div className={styles.content}>
-          <Outlet />
-        </div>
-      </div>
+const AppLayout: React.FC = () => (
+  <div className={styles.shell}>
+    <div className={styles.frame}>
+      <Outlet />
     </div>
-  )
-}
+  </div>
+)
 
 export default AppLayout
