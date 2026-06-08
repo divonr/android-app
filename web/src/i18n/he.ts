@@ -136,6 +136,34 @@ const strings = {
   sign_in_loading: 'מתחבר...',
   invalid_password: 'סיסמה שגויה. אנא נסה שוב.',
   sign_out: 'התנתקות',
+
+  // Chat History screen — search (R1)
+  search_placeholder: 'חיפוש בשיחות...',
+  search_enter_hint: 'הזן מילות חיפוש למציאת שיחות',
+  search_content_hint: 'החיפוש כולל כותרות שיחות, תוכן הודעות ושמות קבצים',
+  no_results_found: 'לא נמצאו תוצאות',
+  try_different_search: 'נסה מילות חיפוש אחרות',
+  no_chats_yet: 'אין עדיין שיחות',
+  start_new_chat_hint: 'לחץ על + כדי להתחיל שיחה חדשה',
+  close_search: 'סגור חיפוש',
+
+  // Chat context menu extras (R1)
+  share_chat: 'שיתוף שיחה...',
+  add_to_group: 'הוסף לקבוצה',
+  remove_from_group: 'הסר מקבוצה',
+  create_new_group: 'צור קבוצה חדשה',
+
+  // Group context menu (R1)
+  rename_group: 'שנה שם קבוצה',
+  make_project: 'הפוך לפרויקט',
+  delete_group_scatter: 'מחק קבוצה ופזר שיחות',
+
+  // Group dialogs (R1)
+  group_name_label: 'שם הקבוצה',
+  new_group_name_label: 'שם הקבוצה החדש',
+  create_group_title: 'צור קבוצה חדשה',
+  delete_group_title: 'מחיקת קבוצה',
+  delete_group_message: 'כל השיחות בקבוצה זו יפוזרו ויתבטלו מהקבוצה.',
 } as const
 
 export type StringKey = keyof typeof strings

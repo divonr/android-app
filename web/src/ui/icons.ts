@@ -26,6 +26,8 @@ export {
   MdRefresh,
   MdDownload,
   MdFileDownload,
+  MdRemove,
+  MdStar,
   // Search
   MdSearch,
   // Settings / config
@@ -42,6 +44,8 @@ export {
   MdLanguage,
   // Chat / groups
   MdChat,
+  MdForum,
+  MdFolder,
   MdGroup,
   MdKey,
   // Overflow / misc

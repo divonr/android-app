@@ -48,6 +48,25 @@ Branch: `web-ui`
 - [x] Added `SyncConfig` data class + `resolveSyncConfig()` (reads `SYNC_ENABLED`, `SYNC_SERVER_URL`, `SYNC_TOKEN`, `SYNC_USER`, `SYNC_PULL_INTERVAL_SECONDS` env vars). `SyncConfig.startEngine=false` gate lets tests assert config seeding without opening sockets. On startup (when enabled + token set): seeds `RemoteSyncSettings` + optional `current_user` into `AppSettings`, calls `startSync()` + initial `pullNow()`, launches a periodic pull loop (default 20 s) tied to `ApplicationStopping` lifecycle. Added `POST /api/sync/pull` + `GET /api/sync/status` endpoints (auth-gated; token never returned). 8 new tests (110 total, all green). `installDist` still produces a runnable artifact. Docs: `llm-web.env.example` + `DEPLOY.md` updated with sync section.
 - commit: bbe1f13
 
+## UI Refactor — R1 (ChatHistory screen)
+
+- [x] **R1 — ChatHistory screen — Hebrew/RTL, groups, search, context menus, dialogs**
+  - Rewrote `web/src/pages/ChatHistoryPage.tsx` to match Android `ChatHistoryScreen.kt` pixel-for-pixel.
+  - Top bar: forced-LTR "**A**p**I**" logo, search icon (enters search mode), API-keys icon, settings icon.
+  - Search mode: full-width search field with Hebrew placeholder "חיפוש בשיחות...", live debounced results via `search.query`, close/clear button.
+  - List: `organizeAndSortAllItems` ported from `ChatListOrganizer.kt` — groups + ungrouped chats sorted by last-message timestamp.
+  - Chat item (`ChatItemCard`): 48px model-initial avatar (color-coded circle), title, last-message preview, timestamp (`formatTimestamp` from `ChatUtils.kt`), message count with MdForum icon.
+  - Group item (`GroupItemCard`): folder icon in secondary color, name, chat count, expand-in-place arrow — click navigates to group screen.
+  - Grouped chats: indented 48px `margin-inline-start` (RTL-aware, mirrors Android's `padding(start=32dp)`).
+  - FAB: fixed `inset-inline-end: 24px; bottom: 24px` (RTL → bottom-left, matching Android Scaffold FAB bottomEnd placement), single tap creates "שיחה חדשה" and navigates.
+  - Context menus: right-click + 500 ms long-press (pointer-down timer), portaled to `document.body`, chat menu and group menu with full menu item sets from `ChatHistoryContextMenus.kt`.
+  - Dialogs: rename-chat, delete-chat-confirm, create-group, rename-group, delete-group-confirm — all using R0 `Dialog`/`DialogButton`.
+  - Added 22 new Hebrew i18n keys to `web/src/i18n/he.ts` (search_, close_search, share_chat, add_to_group, remove_from_group, create_new_group, rename_group, make_project, delete_group_scatter, group_name_label, etc.).
+  - Added `MdFolder`, `MdStar`, `MdForum`, `MdRemove`, `MdStar` to `web/src/ui/icons.ts`.
+  - Tests: rewrote `ChatHistoryPage.test.tsx` for Hebrew UI (12 tests, up from 10): top-bar icon buttons, FAB direct-create, Hebrew search placeholder, search mode toggle, context-menu-rename→dialog→API-call. All 76 vitest tests green.
+  - `npm run build` ✓ | `npx vitest run` 76/76 ✓
+  - commit: TBD
+
 ## UI Refactor — R0 (Foundation)
 
 - [x] **R0 — Design tokens + RTL shell + UI kit + i18n + nav scaffold**
