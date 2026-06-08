@@ -183,7 +183,7 @@ fun Application.module(
 /**
  * Resolve the public base URL used to build OAuth redirect URIs.
  *
- * In production this should be `https://api-divonr.xyz`.
+ * In production this should be `https://app.api-divonr.xyz`.
  * Set `PUBLIC_BASE_URL` in the environment; defaults to `http://localhost:8091`.
  */
 fun resolvePublicBaseUrl(): String =

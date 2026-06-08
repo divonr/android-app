@@ -1,12 +1,12 @@
 # Deployment Guide — LLM API Web Server
 
-This guide covers deploying the LLM API web interface (`api-divonr.xyz`) to the
+This guide covers deploying the LLM API web interface (`app.api-divonr.xyz`) to the
 24/7 server using systemd and the existing Cloudflare tunnel.
 
 ## Architecture
 
 ```
-Browser  -->  HTTPS  -->  Cloudflare tunnel (api-divonr.xyz)  -->  localhost:8091
+Browser  -->  HTTPS  -->  Cloudflare tunnel (app.api-divonr.xyz)  -->  localhost:8091
                                                                        |
                                                         Ktor server (:server module)
                                                         serving React SPA + REST API
@@ -91,12 +91,12 @@ In the Cloudflare Zero Trust dashboard (where you added `sync.api-divonr.xyz`):
 
 1. Go to **Tunnels** → select your tunnel → **Public Hostnames**
 2. Add a new route:
-   - **Subdomain:** *(leave empty)*
+   - **Subdomain:** `app`
    - **Domain:** `api-divonr.xyz`
    - **Service:** `HTTP` → `localhost:8091`
 3. Save.
 
-Verify: `curl https://api-divonr.xyz/health` should return `{"status":"ok"}`.
+Verify: `curl https://app.api-divonr.xyz/health` should return `{"status":"ok"}`.
 
 ---
 
@@ -106,7 +106,7 @@ If you want GitHub integration (connecting your GitHub account to sync files):
 
 1. Go to **GitHub → Settings → Developer settings → OAuth Apps**
 2. Find the existing "ApI" OAuth app (used by desktop/Android)
-3. Add a new callback URL: `https://api-divonr.xyz/oauth/github/callback`
+3. Add a new callback URL: `https://app.api-divonr.xyz/oauth/github/callback`
 4. Save
 
 The `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` in `llm-web.env`
@@ -123,7 +123,7 @@ If you want Google Workspace integration:
 2. Create a new **OAuth 2.0 Client ID**:
    - Application type: **Web application**
    - Name: "ApI Web"
-   - Authorized redirect URIs: `https://api-divonr.xyz/oauth/google/callback`
+   - Authorized redirect URIs: `https://app.api-divonr.xyz/oauth/google/callback`
 3. Copy the **Client ID** and **Client Secret**
 4. Add to `server/deploy/llm-web.env`:
    ```
@@ -140,11 +140,11 @@ From any machine (or your phone):
 
 ```bash
 # Health check
-curl https://api-divonr.xyz/health
+curl https://app.api-divonr.xyz/health
 # Expected: {"status":"ok"}
 
 # Open in browser
-open https://api-divonr.xyz
+open https://app.api-divonr.xyz
 # Should show the login page
 ```
 
