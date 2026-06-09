@@ -545,9 +545,9 @@ export const sync = {
   /** POST /api/sync/pull — trigger an immediate pull from the remote sync server */
   pull: () => request<OkResponse>('/api/sync/pull', { method: 'POST' }),
 
-  /** GET /api/sync/status — returns current sync enablement state */
+  /** GET /api/sync/status — returns current sync enablement state and remote reachability probe */
   status: () =>
-    request<{ enabled: boolean; serverBaseUrl: string; lastChangeTick: number }>(
+    request<{ enabled: boolean; serverBaseUrl: string; lastChangeTick: number; reachable: boolean | null }>(
       '/api/sync/status',
     ),
 }

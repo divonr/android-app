@@ -33,7 +33,7 @@ vi.mock('../api/client', async () => ({
   },
   sync: {
     pull: vi.fn().mockResolvedValue({ ok: true }),
-    status: vi.fn().mockResolvedValue({ enabled: false, serverBaseUrl: '', lastChangeTick: 0 }),
+    status: vi.fn().mockResolvedValue({ enabled: false, serverBaseUrl: '', lastChangeTick: 0, reachable: null }),
   },
 }))
 
@@ -298,6 +298,38 @@ describe('SettingsPage', () => {
 
     await waitFor(() => {
       expect(clientModule.sync.status).toHaveBeenCalled()
+    })
+  })
+
+  it('Test Connection shows ok when reachable is null (sync disabled)', async () => {
+    vi.mocked(clientModule.sync.status).mockResolvedValue({
+      enabled: false, serverBaseUrl: '', lastChangeTick: 0, reachable: null,
+    })
+    renderPage()
+    await waitFor(() => screen.getByRole('heading', { name: /remote sync/i }))
+
+    const testBtn = screen.getByText('בדוק חיבור')
+    await act(async () => { fireEvent.click(testBtn) })
+
+    // reachable=null → ok
+    await waitFor(() => {
+      expect(screen.getByText('תקין ✓')).toBeInTheDocument()
+    })
+  })
+
+  it('Test Connection shows fail when reachable is false', async () => {
+    vi.mocked(clientModule.sync.status).mockResolvedValue({
+      enabled: true, serverBaseUrl: 'https://sync.example.com', lastChangeTick: 0, reachable: false,
+    })
+    renderPage()
+    await waitFor(() => screen.getByRole('heading', { name: /remote sync/i }))
+
+    const testBtn = screen.getByText('בדוק חיבור')
+    await act(async () => { fireEvent.click(testBtn) })
+
+    // reachable=false → fail
+    await waitFor(() => {
+      expect(screen.getByText('נכשל ✗')).toBeInTheDocument()
     })
   })
 })

@@ -193,4 +193,63 @@ class SyncBootstrapTest {
         assertEquals(HttpStatusCode.OK, response.status)
         assertTrue(response.bodyAsText().contains("true"), "body should contain ok:true")
     }
+
+    @Test
+    fun `GET api sync status includes reachable field and is null when sync disabled`() = testApplication {
+        val storage = tempStorage()
+        // Sync disabled — no network probe should be made, reachable must be null/absent or JSON null
+        application { module(storage, testAuthConfig, syncConfig = SyncConfig(enabled = false)) }
+
+        val cookieClient = createClient { install(HttpCookies) }
+        cookieClient.post("/login") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"password":"$testPassword"}""")
+        }
+
+        val response = cookieClient.get("/api/sync/status")
+        assertEquals(HttpStatusCode.OK, response.status)
+
+        val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertNotNull(body["enabled"], "response must contain 'enabled'")
+        assertNotNull(body["serverBaseUrl"], "response must contain 'serverBaseUrl'")
+        assertNotNull(body["lastChangeTick"], "response must contain 'lastChangeTick'")
+        // When sync is disabled, reachable should be null (JSON null or missing)
+        val reachable = body["reachable"]
+        assertTrue(
+            reachable == null || reachable is JsonNull,
+            "reachable must be null when sync is disabled, got: $reachable"
+        )
+        // Auth token must NEVER be sent over the wire
+        assertNull(body["authToken"], "auth token must NOT appear in the response")
+    }
+
+    @Test
+    fun `GET api sync status reachable is false when sync enabled but remote unreachable`() = testApplication {
+        val storage = tempStorage()
+        // Sync enabled with a bogus URL — testSyncConnection() will fail, reachable must be false
+        val syncConfig = SyncConfig(
+            enabled = true,
+            serverBaseUrl = "http://127.0.0.1:19999", // nothing listening here
+            authToken = "test-token",
+            startEngine = false
+        )
+        application { module(storage, testAuthConfig, syncConfig = syncConfig) }
+
+        val cookieClient = createClient { install(HttpCookies) }
+        cookieClient.post("/login") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"password":"$testPassword"}""")
+        }
+
+        val response = cookieClient.get("/api/sync/status")
+        assertEquals(HttpStatusCode.OK, response.status)
+
+        val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+        val reachable = body["reachable"]
+        assertNotNull(reachable, "reachable field must be present when sync is enabled")
+        assertFalse(
+            reachable?.jsonPrimitive?.booleanOrNull == true,
+            "reachable should be false when remote is unreachable, got: $reachable"
+        )
+    }
 }

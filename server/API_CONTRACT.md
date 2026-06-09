@@ -740,6 +740,35 @@ has been removed. The web client uses browser navigation to `GET /oauth/{provide
 
 ---
 
+## Remote Sync
+
+### GET /api/sync/status
+
+Returns the current remote-sync configuration and performs a live connectivity probe when sync is enabled.
+
+**Response 200**:
+```json
+{
+  "enabled": true,
+  "serverBaseUrl": "https://sync.example.com",
+  "lastChangeTick": 12345,
+  "reachable": true
+}
+```
+
+- `reachable` is `null` when sync is disabled (no network probe attempted).
+- `reachable` is `true` or `false` when sync is enabled (result of `SyncEngine.testConnection()`).
+- The `authToken` field is **never** included in the response.
+
+### POST /api/sync/pull
+
+Triggers an immediate pull from the remote sync server.
+Safe no-op when sync is disabled.
+
+**Response 200**: `{ "ok": true }`
+
+---
+
 ## Error Responses
 
 All error responses use a consistent shape:

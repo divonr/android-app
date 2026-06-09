@@ -486,13 +486,20 @@ const SettingsPage: React.FC = () => {
     }
   }
 
-  // Test connection: display-only stub — no server test endpoint exists.
+  // Test connection: calls GET /api/sync/status which includes a live reachability probe
+  // (server calls SyncEngine.testConnection() when sync is enabled).
   const handleTestConnection = async () => {
     setTestResult(null)
     setTestInProgress(true)
     try {
-      await syncApi.status()
-      setTestResult('ok')
+      const status = await syncApi.status()
+      // reachable=null means sync is disabled (no probe); treat as ok (config retrieved).
+      // reachable=true → remote is reachable; reachable=false → remote probe failed.
+      if (status.reachable === false) {
+        setTestResult('fail')
+      } else {
+        setTestResult('ok')
+      }
     } catch {
       setTestResult('fail')
     } finally {

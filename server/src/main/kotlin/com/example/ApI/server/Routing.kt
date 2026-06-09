@@ -47,12 +47,15 @@ data class SearchResultDto(
 /**
  * Response body for GET /api/sync/status.
  * The auth token is deliberately omitted — it must never leave the server.
+ * [reachable] is null when sync is disabled (no probe attempted);
+ * true/false when sync is enabled and the remote health check ran.
  */
 @Serializable
 data class SyncStatusResponse(
     val enabled: Boolean,
     val serverBaseUrl: String,
-    val lastChangeTick: Long
+    val lastChangeTick: Long,
+    val reachable: Boolean? = null
 )
 
 /**
@@ -270,17 +273,24 @@ fun Route.apiRoutes() {
         call.respond(HttpStatusCode.OK, mapOf("ok" to true))
     }
 
-    // GET /api/sync/status — returns sync enablement state + last change tick.
+    // GET /api/sync/status — returns sync enablement state + last change tick + reachability probe.
     // Auth token is deliberately excluded from the response.
     get("/sync/status") {
         val repo = call.application.appModule.repository
         val syncSettings = repo.loadAppSettings().remoteSync
+        // Probe the remote sync server if sync is enabled; null if disabled (no network attempt).
+        val reachable: Boolean? = if (syncSettings.enabled) {
+            try { repo.testSyncConnection() } catch (_: Exception) { false }
+        } else {
+            null
+        }
         call.respond(
             HttpStatusCode.OK,
             SyncStatusResponse(
                 enabled = syncSettings.enabled,
                 serverBaseUrl = syncSettings.serverBaseUrl,
-                lastChangeTick = repo.syncChangeTick.value
+                lastChangeTick = repo.syncChangeTick.value,
+                reachable = reachable
             )
         )
     }
