@@ -11,6 +11,38 @@ Branch: `web-ui`
 
 ---
 
+## UI Refactor — R7 (Polish + visual verification + deploy build)
+
+- [x] **R7 — Fidelity fixes, visual verification, E2E update, deploy build**
+  - **A1 — Message context menu**: Replaced hover-triggered opacity mechanism with long-press (500ms `onPointerDown` timer) + right-click (`onContextMenu`), portaled and fixed-positioned at cursor coordinates. Matches ChatHistoryPage (R1) pattern and Android long-press behaviour. Menu is no longer invisible on mobile/phone-primary target.
+  - **A2 — KeysPage ScreenTopBar migration**: Replaced inline `topBar` div + `IconButton+h1` in both the loading and main render paths with the shared `ScreenTopBar` component. `headingAriaLabel="API Keys"` preserved for smoke tests.
+  - **A3 — De-dup sha256/isInLockRange**: Extracted to `web/src/utils/crypto.ts` and `web/src/utils/childLock.ts`. Both `SettingsPage` and `ChildLockPage` now import from there; local duplicates removed.
+  - **A4 — Drag reorder**: Skipped (low priority; existing up/down buttons are functional).
+  - **Visual verification** (B): Built fresh `web/dist`, started server on port 8097, took mobile (390×844) + desktop (1280×800) screenshots of Login, ChatHistory, Chat (with Markdown+table+code+Hebrew), Settings, Keys, Skills. Compared against Android reference screenshots. Fidelity is high on all core screens. Remaining drift fixed:
+    - **Code block BIDI**: Added `dir="ltr"` DOM attribute to `<div className={styles.codeWrapper}>` in `Markdown.tsx` so the Unicode bidirectional algorithm does not reorder punctuation (e.g. semicolons) at line ends when an RTL ancestor is present.
+    - All other elements (colors, phone-width column on desktop, RTL-mirrored rows, bottom input bar RTL order, bubble alignment/colors, top bar provider+model centering, scroll buttons) match the Android design.
+  - **E2E update** (C): Rewrote `web/e2e/app.spec.ts` for Hebrew UI — uses `[aria-label="password"]` (not `#password`), checks `[role=alert]` for Hebrew error message, tests chat textarea, adds SPA routing `/keys` test, removes obsolete "save button" assertion (auto-save). 12/12 E2E tests pass.
+  - **Deploy artifact**: `web/dist` is freshly built and ready to serve.
+  - `npm run build` ✓ (tsc + vite) | `npx vitest run` 107/107 ✓ | `npm run test:e2e` 12/12 ✓
+  - commits: 919dfc8 (A1–A3), 71af42a (B visual fix + C E2E)
+
+## Deploy note
+
+To redeploy after pulling:
+```
+# 1. Rebuild server
+./gradlew :server:installDist
+
+# 2. Rebuild web frontend
+npm --prefix web run build
+
+# 3. Restart the service (leaves web/dist as the static artifact)
+sudo systemctl restart llm-web
+```
+The `llm-web` systemd unit must have `WEB_STATIC_DIR` pointing at `web/dist` (absolute path). See `server/deploy/DEPLOY.md` for full env-var reference.
+
+---
+
 ## P0 — Scaffold + API contract
 - [x] `:server` Gradle module (Ktor 2.3.12 + Netty, depends `:shared`), `ServerPlatformStorage`, `ServerMain`, `AppModule`, `configureRouting` with `/health`; `server/API_CONTRACT.md` (full REST+SSE spec for all phases); Ktor testApplication health test + DataRepository smoke tests — all passing. Note: `ktor-server-sse` requires Ktor 3.x; SSE for P3 will use `respondTextWriter` on Ktor 2.x.
 - commit: 4fe993c
