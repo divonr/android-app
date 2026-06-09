@@ -62,7 +62,7 @@ Branch: `web-ui`
   - **`web/src/i18n/he.ts`**: +20 R3 Hebrew keys (thoughts_seconds, editing_message, tool_executing/completed/failed, confirm_edit_and_resend, copy_code, copied, scroll_to_top/bottom, etc.).
   - **`web/src/__tests__/ChatPage.test.tsx`**: +3 R3 tests (full streaming sequence thoughts→tool→text→complete, send/stop toggle, edit mode architecture). Hebrew placeholder + מחשבות assertions.
   - `npm run build` ✓ | `npx vitest run` 83/83 ✓
-  - commit: TBD
+  - commit: 5e6b8c7
 
 ## UI Refactor — R2 (Chat screen chrome)
 
