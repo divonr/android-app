@@ -79,6 +79,14 @@ describe('parseSseChunk', () => {
     expect(parsed.toolName).toBe('web_search')
   })
 
+  it('parses messages_added event', () => {
+    const input = 'event: messages_added\ndata: {}\n\n'
+    const { frames } = parseSseChunk(input)
+    expect(frames).toHaveLength(1)
+    expect(frames[0].event).toBe('messages_added')
+    expect(frames[0].data).toBe('{}')
+  })
+
   it('handles \\r\\n line endings', () => {
     const input = 'event: partial\r\ndata: {"text":"cr-lf"}\r\n\r\n'
     const { frames } = parseSseChunk(input)
@@ -170,6 +178,49 @@ describe('sendStream callbacks', () => {
 
     await handle.done
     expect(partials).toEqual(['hello', ' world'])
+    expect(completed).toBe(true)
+  })
+
+  it('fires onMessagesAdded for messages_added event', async () => {
+    const sseData =
+      'event: messages_added\ndata: {}\n\n' +
+      'event: complete\ndata: {"text":"done","messageId":"m1"}\n\n'
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: makeSseBody([sseData]),
+        headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+      }),
+    )
+
+    let messagesAddedFired = false
+    let completed = false
+    const callbacks: StreamCallbacks = {
+      onMessagesAdded: () => { messagesAddedFired = true },
+      onComplete: () => { completed = true },
+    }
+
+    const handle = sendStream(
+      {
+        chatId: 'c1',
+        provider: 'openai',
+        modelName: 'gpt-4o',
+        messages: [],
+        systemPrompt: '',
+        webSearchEnabled: false,
+        enabledToolIds: [],
+        thinkingBudget: 'none',
+        temperature: null,
+        projectAttachments: [],
+      },
+      callbacks,
+    )
+
+    await handle.done
+    expect(messagesAddedFired).toBe(true)
     expect(completed).toBe(true)
   })
 

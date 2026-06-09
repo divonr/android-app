@@ -244,6 +244,9 @@ internal suspend fun ApplicationCall.streamSseResponse(
                 }
                 repo.addResponseToCurrentVariant(username, chatId, toolCallMessage)
                 repo.addResponseToCurrentVariant(username, chatId, toolResponseMessage)
+                // Notify the client that new messages were persisted mid-stream so it
+                // can reload the chat history and clear the streaming overlay.
+                sseChannel.trySend(sseFrame("messages_added", "{}"))
             }
 
             override fun onComplete(fullText: String) {

@@ -315,6 +315,10 @@ export interface SseErrorEvent {
   error: string
 }
 
+export interface SseMessagesAddedEvent {
+  // empty payload — client reloads the chat from its own context
+}
+
 // ---------------------------------------------------------------------------
 // Send request shape
 // ---------------------------------------------------------------------------

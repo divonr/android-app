@@ -90,6 +90,7 @@ function makeStreamCallbacks(
   setStream: React.Dispatch<React.SetStateAction<StreamState>>,
   onComplete: () => void,
   onError: (msg: string) => void,
+  onMessagesAdded?: () => void,
 ): StreamCallbacks {
   return {
     onPartial: (e) =>
@@ -121,6 +122,7 @@ function makeStreamCallbacks(
             : tc,
         ),
       })),
+    onMessagesAdded: onMessagesAdded ? () => onMessagesAdded() : undefined,
     onComplete: () => {
       setStream(EMPTY_STREAM)
       onComplete()
@@ -266,6 +268,7 @@ const ChatPage: React.FC = () => {
         setStream,
         () => { if (chatId) loadChat(chatId) },
         setError,
+        () => { if (chatId) loadChat(chatId) },
       )
 
       const handle = sendStream(req, cbs)
@@ -321,6 +324,7 @@ const ChatPage: React.FC = () => {
           setStream,
           () => { if (chatId) loadChat(chatId) },
           setError,
+          () => { if (chatId) loadChat(chatId) },
         )
 
         const handle = resendStream(chatId, newMsgId, resendReq, cbs)
@@ -354,6 +358,7 @@ const ChatPage: React.FC = () => {
         setStream,
         () => { if (chatId) loadChat(chatId) },
         setError,
+        () => { if (chatId) loadChat(chatId) },
       )
 
       const handle = resendStream(chatId, msg.id, resendReq, cbs)

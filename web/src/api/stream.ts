@@ -16,6 +16,7 @@
 import type {
   SseCompleteEvent,
   SseErrorEvent,
+  SseMessagesAddedEvent,
   SsePartialEvent,
   SseThinkingCompleteEvent,
   SseThinkingPartialEvent,
@@ -48,6 +49,8 @@ export interface StreamCallbacks {
   onToolResult?: (event: SseToolResultEvent) => void
   /** Stream complete — final message text + persisted message ID */
   onComplete?: (event: SseCompleteEvent) => void
+  /** Tool messages persisted mid-stream — client should reload chat history */
+  onMessagesAdded?: (event: SseMessagesAddedEvent) => void
   /** Server-side or network error */
   onError?: (event: SseErrorEvent) => void
 }
@@ -131,6 +134,9 @@ function dispatchFrame(
         break
       case 'complete':
         callbacks.onComplete?.(json as SseCompleteEvent)
+        break
+      case 'messages_added':
+        callbacks.onMessagesAdded?.(json as SseMessagesAddedEvent)
         break
       case 'error':
         callbacks.onError?.(json as SseErrorEvent)
