@@ -515,6 +515,21 @@ export const integrations = {
 }
 
 // ---------------------------------------------------------------------------
+// Remote Sync (server-side sync engine control)
+// ---------------------------------------------------------------------------
+
+export const sync = {
+  /** POST /api/sync/pull — trigger an immediate pull from the remote sync server */
+  pull: () => request<OkResponse>('/api/sync/pull', { method: 'POST' }),
+
+  /** GET /api/sync/status — returns current sync enablement state */
+  status: () =>
+    request<{ enabled: boolean; serverBaseUrl: string; lastChangeTick: number }>(
+      '/api/sync/status',
+    ),
+}
+
+// ---------------------------------------------------------------------------
 // Health (unauthenticated)
 // ---------------------------------------------------------------------------
 

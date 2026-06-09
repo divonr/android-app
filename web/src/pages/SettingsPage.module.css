@@ -1,171 +1,84 @@
 /* =========================================================
-   Settings Page
+   SettingsPage — R5 refactor
+   Mirrors Android UsernameScreen.kt (dark, RTL, phone-width).
+   All spacing/colors from theme.css variables.
    ========================================================= */
 
+/* ── Page shell ── */
+
 .page {
-  padding: 1.5rem 1.25rem;
-  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
 }
 
-.loading {
-  padding: 2rem;
-  color: var(--color-text-secondary);
+/* ── Scrollable content ── */
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.header {
+/* ── Section card (RoundedCornerShape(20dp) SurfaceVariant) ── */
+
+.card {
+  background: var(--surface-variant);
+  border-radius: 20px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Smaller card (RoundedCornerShape(16dp) Surface) ── */
+
+.cardSmall {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Section row: label + control ── */
+
+.sectionRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 1.5rem;
+  gap: 12px;
 }
 
-.title {
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.headerActions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.savedBadge {
-  font-size: 0.875rem;
-  color: var(--color-success);
-  font-weight: 500;
-}
-
-.error {
-  margin-bottom: 1rem;
-  padding: 0.6rem 0.75rem;
-  background: rgba(236, 112, 99, 0.12);
-  border: 1px solid var(--color-error);
-  border-radius: 6px;
-  color: var(--color-error);
-  font-size: 0.875rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.error button {
-  background: none;
-  border: none;
-  color: var(--color-error);
-  cursor: pointer;
-}
-
-/* Sections */
-.sections {
+.sectionLabel {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-}
-
-.section {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: 1rem 1.1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-.sectionTitle {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--color-text);
-  margin-bottom: 0.1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.subSection {
-  display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-}
-
-.subSectionTitle {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-/* Field row */
-.fieldRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.fieldLabel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  font-size: 0.9rem;
-  color: var(--color-text);
+  gap: 4px;
   flex: 1;
 }
 
-.fieldHint {
-  font-size: 0.78rem;
-  color: var(--color-text-secondary);
-  font-weight: 400;
+.sectionTitle {
+  font-size: var(--fs-body-large);
+  font-weight: 500;
+  color: var(--on-surface);
+  margin: 0;
 }
 
-/* Inputs */
-.input {
-  padding: 0.45rem 0.65rem;
-  background: var(--color-surface-variant);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  color: var(--color-text);
-  font-size: 0.9rem;
-  outline: none;
-  transition: border-color 0.15s;
-  min-width: 160px;
+.sectionHint {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+  line-height: 1.35;
+  opacity: 0.8;
 }
 
-.input:focus {
-  border-color: var(--color-primary);
-}
+/* ── Toggle switch (CSS-only pill) ── */
 
-.inputSmall {
-  padding: 0.35rem 0.55rem;
-  background: var(--color-surface-variant);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  color: var(--color-text);
-  font-size: 0.85rem;
-  outline: none;
-  transition: border-color 0.15s;
-  width: 120px;
-}
-
-.inputSmall:focus {
-  border-color: var(--color-primary);
-}
-
-.select {
-  padding: 0.45rem 0.65rem;
-  background: var(--color-surface-variant);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  color: var(--color-text);
-  font-size: 0.9rem;
-  outline: none;
-  cursor: pointer;
-  min-width: 120px;
-}
-
-/* Toggle switch */
 .toggle {
   position: relative;
   display: inline-flex;
@@ -182,10 +95,10 @@
 }
 
 .toggleSlider {
-  width: 40px;
-  height: 22px;
-  background: var(--color-border);
-  border-radius: 11px;
+  width: 44px;
+  height: 24px;
+  background: rgba(189, 189, 189, 0.2);
+  border-radius: 12px;
   position: relative;
   transition: background 0.2s;
 }
@@ -193,112 +106,628 @@
 .toggleSlider::after {
   content: '';
   position: absolute;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--on-surface-variant);
   top: 3px;
-  left: 3px;
-  transition: transform 0.2s;
+  inset-inline-start: 3px;
+  transition: transform 0.2s, background 0.2s;
 }
 
 .toggle input:checked + .toggleSlider {
-  background: var(--color-primary);
+  background: rgba(108, 124, 231, 0.3);
 }
 
 .toggle input:checked + .toggleSlider::after {
-  transform: translateX(18px);
+  background: var(--primary);
+  transform: translateX(20px);
 }
 
-/* Starred models */
-.starredList {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+/* RTL fix for toggle */
+[dir='rtl'] .toggle input:checked + .toggleSlider::after {
+  transform: translateX(-20px);
 }
 
-.starredItem {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.3rem 0.6rem;
-  background: var(--color-surface-variant);
-  border-radius: 6px;
-  font-size: 0.85rem;
+/* ── Spacer ── */
+
+.spacer {
+  height: 16px;
 }
 
-.starredProvider {
-  color: var(--color-primary);
-  font-weight: 500;
-  flex-shrink: 0;
+.spacerSmall {
+  height: 12px;
 }
 
-.starredModel {
-  color: var(--color-text);
-  flex: 1;
-}
+/* ── Provider selector (title gen) ── */
 
-.removeBtn {
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-size: 0.75rem;
-  padding: 0.1rem 0.2rem;
-  transition: color 0.1s;
-}
-
-.removeBtn:hover {
-  color: var(--color-error);
-}
-
-.addStarredRow {
+.providerBtn {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-}
-
-.btnSmall {
-  padding: 0.35rem 0.7rem;
-  background: var(--color-primary);
-  color: #fff;
+  justify-content: space-between;
+  width: 100%;
+  background: var(--surface);
   border: none;
-  border-radius: 6px;
+  border-radius: 16px;
+  padding: 16px;
   cursor: pointer;
-  font-size: 0.82rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  color: var(--on-surface);
+  font-family: inherit;
   transition: opacity 0.15s;
 }
 
-.btnSmall:disabled {
-  opacity: 0.4;
+.providerBtn:hover {
+  opacity: 0.85;
+}
+
+.providerBtnLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: start;
+}
+
+.providerBtnTitle {
+  font-size: var(--fs-body-medium);
+  font-weight: 500;
+  color: var(--on-surface);
+}
+
+.providerBtnValue {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+}
+
+/* ── Provider dropdown list ── */
+
+.providerList {
+  background: rgba(26, 27, 38, 0.5);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+
+.providerOption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.1s;
+}
+
+.providerOption:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+/* ── Checkbox row ── */
+
+.checkboxRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.checkboxLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  font-size: var(--fs-body-medium);
+  color: var(--on-surface);
+  cursor: pointer;
+}
+
+.checkboxHint {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+  opacity: 0.8;
+}
+
+input[type='checkbox'].appCheck {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ── Text field (Remote Sync) ── */
+
+.textField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+  font-weight: 500;
+}
+
+.fieldInputWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.fieldInput {
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid rgba(232, 232, 242, 0.3);
+  border-radius: 8px;
+  color: var(--on-surface);
+  font-size: var(--fs-body-medium);
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.fieldInput:focus {
+  border-color: var(--primary);
+}
+
+.fieldInput.hasTrailing {
+  padding-inline-end: 40px;
+}
+
+.trailingBtn {
+  position: absolute;
+  inset-inline-end: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--on-surface-variant);
+  display: flex;
+  align-items: center;
+  padding: 6px;
+  border-radius: 6px;
+  transition: color 0.15s;
+}
+
+.trailingBtn:hover {
+  color: var(--on-surface);
+}
+
+/* ── Action buttons row ── */
+
+.actionRow {
+  display: flex;
+  gap: 12px;
+}
+
+.outlineBtn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid rgba(108, 124, 231, 0.6);
+  border-radius: 12px;
+  color: var(--primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.15s, border-color 0.15s;
+  min-height: 40px;
+}
+
+.outlineBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.outlineBtn:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* Save button */
-.btnPrimary {
-  padding: 0.5rem 1.1rem;
-  background: var(--color-primary);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
+.outlineBtnOk {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.outlineBtnFail {
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+
+.outlineBtnNeutral {
+  border-color: rgba(189, 189, 189, 0.3);
+  color: var(--on-surface);
+}
+
+/* ── Time display row (child lock active state) ── */
+
+.timeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+  margin-top: 16px;
+  gap: 12px;
+}
+
+.timeChip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-body-small);
+  color: var(--on-surface);
+}
+
+/* ── Navigation row (Integrations, Skills, Logs) ── */
+
+.navRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.15);
   cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
+  border: none;
+  width: 100%;
+  font-family: inherit;
+  color: var(--on-surface);
   transition: opacity 0.15s;
 }
 
-.btnPrimary:hover:not(:disabled) { opacity: 0.85; }
-.btnPrimary:disabled { opacity: 0.4; cursor: not-allowed; }
+.navRow:hover {
+  opacity: 0.85;
+}
 
-@media (max-width: 500px) {
-  .fieldRow {
-    flex-direction: column;
-    align-items: flex-start;
-  }
+.navRowLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: start;
+}
 
-  .input {
-    width: 100%;
-    min-width: unset;
-  }
+.navRowTitle {
+  font-size: var(--fs-body-medium);
+  font-weight: 500;
+  color: var(--on-surface);
+}
+
+.navRowSub {
+  font-size: var(--fs-body-small);
+  color: var(--primary);
+}
+
+/* ── User info card ── */
+
+.userCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+}
+
+.userAvatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--primary-15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.userInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.userName {
+  font-size: var(--fs-body-medium);
+  font-weight: 500;
+  color: var(--on-surface);
+}
+
+.userLabel {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+}
+
+/* ── Error banner ── */
+
+.error {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  background: rgba(236, 112, 99, 0.12);
+  border: 1px solid var(--accent-red);
+  border-radius: 8px;
+  color: var(--accent-red);
+  font-size: var(--fs-body-small);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.errorClose {
+  background: none;
+  border: none;
+  color: var(--accent-red);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 14px;
+}
+
+/* ── Loading ── */
+
+.loading {
+  padding: 2rem;
+  color: var(--on-surface-variant);
+  text-align: center;
+}
+
+/* ── Status text ── */
+
+.statusOn {
+  font-size: var(--fs-body-small);
+  color: var(--primary);
+  opacity: 0.9;
+}
+
+.statusOff {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+  opacity: 0.5;
+}
+
+/* ── Spinner ── */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+
+/* ── Dialog fields ── */
+
+.dialogField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dialogLabel {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+}
+
+.dialogInput {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--surface-variant);
+  border: 1px solid rgba(232, 232, 242, 0.2);
+  border-radius: 8px;
+  color: var(--on-surface);
+  font-size: var(--fs-body-medium);
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.dialogInput:focus {
+  border-color: var(--primary);
+}
+
+.dialogInputWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.dialogInputTrailing {
+  position: absolute;
+  inset-inline-end: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--on-surface-variant);
+  display: flex;
+  align-items: center;
+  padding: 6px;
+  border-radius: 6px;
+}
+
+.timeSelectRow {
+  display: flex;
+  gap: 16px;
+}
+
+.timeSelectCol {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.timePickerBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--surface-variant);
+  border: none;
+  border-radius: 8px;
+  color: var(--on-surface);
+  font-family: inherit;
+  font-size: var(--fs-body-medium);
+  cursor: pointer;
+  width: 100%;
+}
+
+/* ── Time picker dialog ── */
+
+.timePicker {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.timeDisplay {
+  background: rgba(108, 124, 231, 0.1);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: 2px;
+}
+
+.timePickerCols {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.timePickerColon {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--on-surface);
+  padding: 0 8px;
+}
+
+.numberPicker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.numberPickerLabel {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+  margin-bottom: 4px;
+}
+
+.pickerArrow {
+  width: 32px;
+  height: 32px;
+  background: var(--surface-variant);
+  border: none;
+  border-radius: 4px;
+  color: var(--on-surface);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: background 0.1s;
+}
+
+.pickerArrow:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.pickerValue {
+  width: 48px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(108, 124, 231, 0.15);
+  border-radius: 8px;
+  font-size: var(--fs-body-large);
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.pickerAdjacent {
+  width: 48px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-body-medium);
+  color: var(--on-surface-variant);
+  opacity: 0.5;
+}
+
+/* ── Quick hours chips ── */
+
+.quickHoursSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chipsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: var(--surface-variant);
+  border: none;
+  color: var(--on-surface-variant);
+  font-family: inherit;
+  font-size: var(--fs-body-small);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.chip:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.chipSelected {
+  background: var(--primary);
+  color: white;
+}
+
+/* ── Time picker mode toggle ── */
+
+.modeToggleRow {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.modeToggleBtn {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-family: inherit;
+  font-size: var(--fs-body-small);
+  cursor: pointer;
+  padding: 4px 8px;
 }

@@ -227,6 +227,37 @@ const strings = {
   delete_provider_body: 'הספק יימחק ולא ניתן יהיה לשחזר אותו',
   invalid_json: 'JSON לא תקין',
 
+  // Settings screen (R5)
+  advanced_settings: 'הגדרות מתקדמות',
+  current_user_label: 'משתמש נוכחי',
+
+  // Child lock (R5)
+  child_lock_mode: 'מצב נעילת ילדים',
+  child_lock_hours_hint: 'הגדר שעות בהן האפליקציה אינה פעילה',
+  child_lock_setup_title: 'הגדרת נעילת ילדים',
+  child_lock_setup_warning: 'להפעלת מצב נעילת ילדים, הקלידו סיסמה. זכרו את הסיסמה! לא תהיה אפשרות לשחרר את נעילת הילדים ללא הסיסמה',
+  child_lock_disable_title: 'שחרור נעילת ילדים',
+  child_lock_disable_body: 'הקלד את הסיסמה כדי לשחרר את נעילת הילדים:',
+  child_lock_password_label: 'סיסמה',
+  child_lock_password_placeholder: 'הקלד סיסמה',
+  child_lock_from: 'משעה:',
+  child_lock_until: 'עד שעה:',
+  child_lock_locked_title: 'האפליקציה נעולה',
+  child_lock_until_time_prefix: 'האפליקציה נעולה עד לשעה',
+  child_lock_available_msg: 'האפליקציה תהיה זמינה מחוץ לשעות הנעילה',
+  child_lock_wrong_password: 'סיסמה שגויה',
+  child_lock_enter_password_to_unlock: 'הזן סיסמה לביטול הנעילה',
+  child_lock_unlock: 'בטל נעילה',
+
+  // Time picker (R5)
+  time_picker_title: 'בחר שעה',
+  time_picker_quick_mode: 'בחירה מהירה',
+  time_picker_precise_mode: 'בחירה מדויקת',
+  time_picker_hours: 'שעות',
+  time_picker_minutes: 'דקות',
+  time_picker_common_hours: 'שעות נפוצות:',
+  time_picker_minutes_label: 'דקות:',
+
   // Chat body + input (R3)
   thoughts_seconds: 'שניות',
   editing_message: 'עריכת הודעה',

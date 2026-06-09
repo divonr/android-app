@@ -57,4 +57,16 @@ export {
   MdArrowDropUp,
   MdArrowUpward,
   MdArrowDownward,
+  // Child lock / visibility
+  MdLock,
+  MdAccessTime,
+  MdVisibility,
+  MdVisibilityOff,
+  // Sync
+  MdSync,
+  MdCloudSync,
+  // Person
+  MdPerson,
+  // Link
+  MdLink,
 } from 'react-icons/md'

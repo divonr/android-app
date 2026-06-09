@@ -92,8 +92,13 @@ vi.mock('../api/client', () => ({
       excludedToolIds: [],
       skipWelcomeScreen: false,
       starredModels: [],
+      remoteSync: { enabled: false, serverBaseUrl: 'https://sync.example.com', authToken: '', syncApiKeys: false },
     }),
     update: vi.fn(),
+  },
+  sync: {
+    pull: vi.fn().mockResolvedValue({ ok: true }),
+    status: vi.fn().mockResolvedValue({ enabled: false, serverBaseUrl: '', lastChangeTick: 0 }),
   },
   integrations: {
     github: { get: vi.fn().mockResolvedValue(null), disconnect: vi.fn(), startOAuth: vi.fn() },
@@ -156,7 +161,8 @@ describe('Smoke tests — all screens render without crash', () => {
   it('SettingsPage renders and shows title', async () => {
     render(<MemoryRouter><SettingsPage /></MemoryRouter>)
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /settings/i })).toBeInTheDocument()
+      // Heading has headingAriaLabel="Advanced Settings" (matches /settings/i and /advanced settings/i)
+      expect(screen.getByRole('heading', { name: /advanced settings/i })).toBeInTheDocument()
     })
   })
 

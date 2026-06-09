@@ -12,6 +12,7 @@ import KeysPage from './pages/KeysPage'
 import SettingsPage from './pages/SettingsPage'
 import SkillsPage from './pages/SkillsPage'
 import IntegrationsPage from './pages/IntegrationsPage'
+import ChildLockPage from './pages/ChildLockPage'
 
 const App: React.FC = () => {
   const { markUnauthenticated } = useAuthStore()
@@ -44,6 +45,7 @@ const App: React.FC = () => {
           <Route path="settings" element={<SettingsPage />} />
           <Route path="skills" element={<SkillsPage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
+          <Route path="child-lock" element={<ChildLockPage />} />
         </Route>
 
         {/* Catch-all */}

@@ -107,6 +107,13 @@ export interface ChildLockSettings {
   endTime: string
 }
 
+export interface RemoteSyncSettings {
+  enabled: boolean
+  serverBaseUrl: string
+  authToken: string
+  syncApiKeys: boolean
+}
+
 export interface StarredModel {
   provider: string
   modelName: string
@@ -124,6 +131,7 @@ export interface AppSettings {
   excludedToolIds: string[]
   skipWelcomeScreen: boolean
   starredModels: StarredModel[]
+  remoteSync: RemoteSyncSettings
 }
 
 // ---------------------------------------------------------------------------

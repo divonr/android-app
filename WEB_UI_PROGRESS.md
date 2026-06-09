@@ -48,6 +48,11 @@ Branch: `web-ui`
 - [x] Added `SyncConfig` data class + `resolveSyncConfig()` (reads `SYNC_ENABLED`, `SYNC_SERVER_URL`, `SYNC_TOKEN`, `SYNC_USER`, `SYNC_PULL_INTERVAL_SECONDS` env vars). `SyncConfig.startEngine=false` gate lets tests assert config seeding without opening sockets. On startup (when enabled + token set): seeds `RemoteSyncSettings` + optional `current_user` into `AppSettings`, calls `startSync()` + initial `pullNow()`, launches a periodic pull loop (default 20 s) tied to `ApplicationStopping` lifecycle. Added `POST /api/sync/pull` + `GET /api/sync/status` endpoints (auth-gated; token never returned). 8 new tests (110 total, all green). `installDist` still produces a runnable artifact. Docs: `llm-web.env.example` + `DEPLOY.md` updated with sync section.
 - commit: bbe1f13
 
+## UI Refactor — R5 (User Settings + Child Lock screens)
+
+- [~] **R5 — User settings + child lock — Hebrew/RTL, app-style cards, auto-save, dialogs, time picker**
+  - (commit hash to be filled in after commit)
+
 ## UI Refactor — R4 (API Keys + Custom Providers screens)
 
 - [x] **R4 — API Keys screen + custom provider dialogs — Hebrew/RTL, app-style cards, dialogs**
