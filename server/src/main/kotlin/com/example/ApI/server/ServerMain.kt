@@ -97,7 +97,8 @@ data class SyncConfig(
     val authToken: String = "",
     val syncUser: String? = null,
     val pullIntervalSeconds: Long = 20L,
-    val startEngine: Boolean = true
+    val startEngine: Boolean = true,
+    val syncApiKeys: Boolean = false
 )
 
 /** Reads sync configuration from environment variables. */
@@ -109,12 +110,15 @@ fun resolveSyncConfig(): SyncConfig {
     val authToken = System.getenv("SYNC_TOKEN") ?: ""
     val syncUser = System.getenv("SYNC_USER")?.takeIf { it.isNotBlank() }
     val pullIntervalSeconds = System.getenv("SYNC_PULL_INTERVAL_SECONDS")?.toLongOrNull() ?: 20L
+    val rawSyncApiKeys = System.getenv("SYNC_API_KEYS")?.trim()?.lowercase()
+    val syncApiKeys = rawSyncApiKeys == "true" || rawSyncApiKeys == "1"
     return SyncConfig(
         enabled = enabled,
         serverBaseUrl = serverBaseUrl,
         authToken = authToken,
         syncUser = syncUser,
-        pullIntervalSeconds = pullIntervalSeconds
+        pullIntervalSeconds = pullIntervalSeconds,
+        syncApiKeys = syncApiKeys
     )
 }
 
@@ -256,7 +260,7 @@ private fun Application.applySyncConfig(repository: DataRepository, syncConfig: 
             enabled = true,
             serverBaseUrl = syncConfig.serverBaseUrl,
             authToken = syncConfig.authToken,
-            syncApiKeys = false
+            syncApiKeys = syncConfig.syncApiKeys
         ),
         current_user = syncConfig.syncUser ?: current.current_user
     )

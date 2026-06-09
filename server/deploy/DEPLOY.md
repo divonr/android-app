@@ -222,6 +222,11 @@ SYNC_USER=default
 
 # Optional: pull interval in seconds (default 20)
 # SYNC_PULL_INTERVAL_SECONDS=20
+
+# Optional: also sync API keys (default false)
+# Keys are encrypted at rest on the sync server.  Enable only if you want
+# the web server to share the same provider API keys as your phone/desktop.
+# SYNC_API_KEYS=false
 ```
 
 > **Security note:** `SYNC_TOKEN` is a secret.  It must only ever live in

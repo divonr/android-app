@@ -67,6 +67,24 @@ class SyncBootstrapTest {
     }
 
     @Test
+    fun `syncApiKeys=true in SyncConfig is seeded into AppSettings`() = testApplication {
+        val storage = tempStorage()
+        val syncConfig = SyncConfig(
+            enabled = true,
+            serverBaseUrl = "http://test-sync:8090",
+            authToken = "secret-bearer-token",
+            syncApiKeys = true,
+            startEngine = false
+        )
+        application { module(storage, testAuthConfig, syncConfig = syncConfig) }
+        client.get("/health")
+
+        val repo = DataRepository(storage)
+        val settings = repo.loadAppSettings()
+        assertTrue(settings.remoteSync.syncApiKeys, "syncApiKeys should be true when SyncConfig.syncApiKeys=true")
+    }
+
+    @Test
     fun `sync user is not overridden when syncUser is null`() = testApplication {
         val storage = tempStorage()
         // Pre-seed settings with a specific user
