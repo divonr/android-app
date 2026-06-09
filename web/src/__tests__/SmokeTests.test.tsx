@@ -48,7 +48,7 @@ const { mockGroup, mockSkill } = vi.hoisted(() => ({
     group_name: 'Test Group',
     is_project: false,
     system_prompt: null as null,
-    group_attachments: [] as unknown[],
+    group_attachments: [] as any[],
   },
   mockSkill: { name: 'test-skill', description: 'A test skill', enabled: false },
 }))
