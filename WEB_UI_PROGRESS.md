@@ -50,8 +50,25 @@ Branch: `web-ui`
 
 ## UI Refactor — R5 (User Settings + Child Lock screens)
 
-- [~] **R5 — User settings + child lock — Hebrew/RTL, app-style cards, auto-save, dialogs, time picker**
-  - (commit hash to be filled in after commit)
+- [x] **R5 — User settings + child lock — Hebrew/RTL, app-style cards, auto-save, dialogs, time picker**
+  - **`web/src/components/ScreenTopBar.tsx`** (new): Shared top-bar used by SettingsPage + ChildLockPage. Back-arrow IconButton (40px, surface-variant bg) + bold Hebrew title. `headingAriaLabel` prop exposes English aria-label for test selectors while showing Hebrew visually. R6/R7 can migrate KeysPage + other screens.
+  - **`web/src/pages/SettingsPage.tsx`** (rewritten): Matches Android UsernameScreen.kt structure. User info card (read-only username + MdPerson avatar). TitleGenerationSection: enable toggle → provider selector (expandable radio list, all 6 providers from TitleGenerationSection.kt) → update-on-extension checkbox. Multi-message mode card with Hebrew explainer. Child lock section: toggle → ChildLockSetupDialog (password + show/hide eye + start/end time pickers) → ChildLockDisableDialog (password verify). Remote sync section: enabled toggle + server URL + auth token (show/hide) + sync-api-keys toggle with warning + Sync-Now (→ POST /api/sync/pull) + Test-Connection (→ GET /api/sync/status, display-only stub noted below).
+  - **`web/src/pages/ChildLockPage.tsx`** (new): Black full-screen lock screen matching ChildLockScreen.kt. MdLock 80px icon, Hebrew headlines, end-time display, password entry to unlock early (SHA-256 verify against stored hash). On load: if lock not currently active (time range check), redirects to /. Route: /child-lock.
+  - **`web/src/pages/SettingsPage.module.css`** (rewritten): card/cardSmall (RoundedCornerShape 20dp/16dp SurfaceVariant/Surface), toggle switch (CSS-only pill matching Android Switch), providerBtn+providerList (expandable), checkboxRow, textField+fieldInputWrap+trailingBtn (password eye), actionRow+outlineBtn (Sync-Now/Test-Connection), timeRow+timeChip (lock time display), TimePicker: timeDisplay (digital, primary color), numberPicker (up/down arrows + adjacent ghost values), quickHoursSection+chipsRow+chip.
+  - **Auto-save**: Toggle switches call `settings.update({ field })` immediately. Text inputs (server URL, auth token) debounced 800ms then auto-save. Child lock dialogs save on confirm.
+  - **TimePicker**: Two modes — wheel picker (up/down arrows, 3-visible wrap, matches NumberPicker from TimePickerComponents.kt) + quick-select chips (common hours + :00/:15/:30/:45 minutes). Mode toggle button. Wrapped in R0 `Dialog` (open=true, actions). Note: no drag support; that's R7.
+  - **Password hashing**: Web uses SHA-256 (SubtleCrypto) for child lock password storage. Not interoperable with Android's AES/CBC/PBKDF2+EncryptedSharedPreferences — noted. Password is web-only when set via web.
+  - **Remote sync — what's wired vs display-only**: Enabled toggle + server URL + auth token + sync-api-keys → persisted via `settings.update`. "Sync Now" → `POST /api/sync/pull` (wired). "Test Connection" → `GET /api/sync/status` (partial: verifies server is reachable, not an end-to-end remote-server check; no `/api/sync/test-connection` endpoint exists — noted for R6/R7).
+  - **`web/src/api/types.ts`**: Added `RemoteSyncSettings` interface (`enabled`, `serverBaseUrl`, `authToken`, `syncApiKeys`) + `remoteSync: RemoteSyncSettings` to `AppSettings`.
+  - **`web/src/api/client.ts`**: Added `sync.pull()` + `sync.status()` endpoints.
+  - **`web/src/ui/icons.ts`**: Added MdLock, MdAccessTime, MdVisibility, MdVisibilityOff, MdSync, MdCloudSync, MdPerson, MdLink.
+  - **`web/src/i18n/he.ts`**: +28 R5 Hebrew keys: advanced_settings, current_user_label, child_lock_mode/hours_hint/setup_title/setup_warning/disable_title/disable_body/password_label/password_placeholder/from/until/locked_title/until_time_prefix/available_msg/wrong_password/enter_password_to_unlock/unlock, time_picker_title/quick_mode/precise_mode/hours/minutes/common_hours/minutes_label.
+  - **`web/src/__tests__/SettingsPage.test.tsx`** (rewritten): 10 tests — section heading renders (Advanced Settings/Title Generation/Multi-Message Mode/Child Lock/Remote Sync using aria-label queries), username display, auto-save on toggle (multi-message, title gen, remote sync enabled), child lock enable→setup dialog, dialog cancel, Sync-Now→sync.pull called, Test-Connection→sync.status called. All 94 tests green.
+  - **`web/src/__tests__/SmokeTests.test.tsx`**: Updated SettingsPage smoke assertion to `/advanced settings/i`; added `remoteSync` to mock settings; added `sync` mock.
+  - **ScreenTopBar migration**: Used in SettingsPage + ChildLockPage. KeysPage (R4) not migrated — lower risk to leave unchanged; noted for R7.
+  - **LabeledField extraction**: Not extracted — the field pattern across pages is varied enough that a generic wrapper wouldn't simplify. Noted for R7.
+  - `npm run build` ✓ | `npx vitest run` 94/94 ✓
+  - commit: 5ad2725
 
 ## UI Refactor — R4 (API Keys + Custom Providers screens)
 
