@@ -211,7 +211,20 @@ class SyncEngine(
         var anythingChanged = false
 
         for (filename in tracked) {
-            val remoteMeta = remoteIndex[filename] ?: continue // not on server yet
+            val remoteMeta = remoteIndex[filename]
+            if (remoteMeta == null) {
+                // File not on server yet — if it exists locally (and is not the
+                // bookkeeping file that is never uploaded), mark it dirty so the
+                // end-of-pull flush loop schedules the initial upload.  This handles
+                // newly-tracked files such as api_keys when syncApiKeys is toggled on.
+                if (filename != "sync_state.json") {
+                    val localFile = File(internalDir, filename)
+                    if (localFile.exists()) {
+                        syncState.markDirty(filename)
+                    }
+                }
+                continue
+            }
 
             val entry = syncState.get(filename)
 
