@@ -55,4 +55,6 @@ export {
   // Arrows
   MdArrowDropDown,
   MdArrowDropUp,
+  MdArrowUpward,
+  MdArrowDownward,
 } from 'react-icons/md'

@@ -198,6 +198,27 @@ const strings = {
   sort_newest_first: 'מהחדש לישן',
   sort_recommended: 'מומלץ',
   use_custom_model: 'שימוש במודל:',
+
+  // Chat body + input (R3)
+  thoughts_seconds: 'שניות',
+  editing_message: 'עריכת הודעה',
+  regenerate: 'צור מחדש',
+  delete_from_here: 'מחק מכאן',
+  empty_chat_message: 'שלח הודעה ראשונה...',
+  tool_executing: 'מבצע...',
+  tool_completed: 'הושלם',
+  tool_failed: 'נכשל',
+  stop_streaming: 'עצור',
+  confirm_edit: 'אישור עריכה',
+  confirm_edit_and_resend: 'אישור ושלח',
+  attach_file: 'צרף קובץ',
+  web_search_toggle: 'חיפוש ברשת',
+  copy_code: 'העתק',
+  copied: 'הועתק!',
+  previous_variant: 'ענף קודם',
+  next_variant: 'ענף הבא',
+  scroll_to_top: 'גלול למעלה',
+  scroll_to_bottom: 'גלול למטה',
 } as const
 
 export type StringKey = keyof typeof strings

@@ -1,3 +1,11 @@
+/**
+ * ChatPage — wires all R3 components together.
+ *
+ * Keeps all R2 chrome (ChatTopBar, QuickSettingsBar, dialogs).
+ * Adds: message list with MessageBubble, streaming assistant bubble
+ * with ThoughtsBubble + ToolCallBlock, ChatInputArea, floating scroll buttons.
+ */
+
 import React, {
   useEffect,
   useState,
@@ -24,12 +32,12 @@ import type {
   InstalledSkill,
   Attachment,
   ThinkingBudget,
-  BranchInfo,
   Provider,
   StarredModel,
 } from '../api/types'
-import Markdown from '../components/Markdown'
 import styles from './ChatPage.module.css'
+
+// ── R2 chrome ─────────────────────────────────────────────────────────────────
 import ChatTopBar from '../components/chat/ChatTopBar'
 import QuickSettingsBar from '../components/chat/QuickSettingsBar'
 import type { TextDirectionMode } from '../components/chat/QuickSettingsBar'
@@ -38,29 +46,30 @@ import SystemPromptDialog from '../components/chat/SystemPromptDialog'
 import Dialog, { DialogButton } from '../ui/Dialog'
 import { t } from '../i18n/he'
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// ── R3 body components ────────────────────────────────────────────────────────
+import MessageBubble from '../components/chat/MessageBubble'
+import ThoughtsBubble from '../components/chat/ThoughtsBubble'
+import ToolCallBlock from '../components/chat/ToolCallBlock'
+import ChatInputArea from '../components/chat/ChatInputArea'
+import { MdArrowUpward, MdArrowDownward } from '../ui/icons'
 
-function detectDir(text: string): 'rtl' | 'ltr' {
-  // Simple heuristic: if the first strong character is RTL, use RTL
-  const rtlRe = /[֑-߿יִ-﷽ﹰ-ﻼ]/
-  return rtlRe.test(text.slice(0, 50)) ? 'rtl' : 'ltr'
-}
-
-function formatTime(datetime: string | null | undefined): string {
-  if (!datetime) return ''
-  const d = new Date(datetime)
-  if (isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-// ─── streaming state ─────────────────────────────────────────────────────────
+// ─── Streaming state ──────────────────────────────────────────────────────────
 
 interface StreamState {
   partialText: string
   thinkingText: string
   thinkingOpen: boolean
   thinkingDone: boolean
-  toolCalls: Array<{ toolId: string; toolName: string; parameters: Record<string, unknown>; result?: string; success?: boolean }>
+  thinkingStartTime: number | null
+  thinkingDurationSeconds: number | null
+  toolCalls: Array<{
+    toolId: string
+    toolName: string
+    parameters: Record<string, unknown>
+    result?: string
+    success?: boolean
+    executing: boolean
+  }>
   streaming: boolean
 }
 
@@ -69,433 +78,58 @@ const EMPTY_STREAM: StreamState = {
   thinkingText: '',
   thinkingOpen: false,
   thinkingDone: false,
+  thinkingStartTime: null,
+  thinkingDurationSeconds: null,
   toolCalls: [],
   streaming: false,
 }
 
-// ─── BranchNavigator ─────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-interface BranchNavProps {
-  chatId: string
-  nodeId: string
-  totalVariants: number
-  currentVariantIndex: number
-  onSwitch: (chat: Chat) => void
-}
-
-const BranchNav: React.FC<BranchNavProps> = ({
-  chatId, nodeId, totalVariants, currentVariantIndex, onSwitch,
-}) => {
-  const [busy, setBusy] = useState(false)
-
-  const go = async (dir: -1 | 1) => {
-    setBusy(true)
-    try {
-      const idx = currentVariantIndex + dir
-      const chat = await branching.switchVariant(chatId, nodeId, idx)
-      onSwitch(chat)
-    } catch {
-      // ignore
-    } finally {
-      setBusy(false)
-    }
+function makeStreamCallbacks(
+  setStream: React.Dispatch<React.SetStateAction<StreamState>>,
+  onComplete: () => void,
+  onError: (msg: string) => void,
+): StreamCallbacks {
+  return {
+    onPartial: (e) =>
+      setStream((s) => ({ ...s, partialText: s.partialText + e.text })),
+    onThinkingStarted: () =>
+      setStream((s) => ({ ...s, thinkingOpen: true, thinkingStartTime: Date.now() })),
+    onThinkingPartial: (e) =>
+      setStream((s) => ({ ...s, thinkingText: s.thinkingText + e.text })),
+    onThinkingComplete: (e) =>
+      setStream((s) => ({
+        ...s,
+        thinkingDone: true,
+        thinkingDurationSeconds: e.durationSeconds,
+      })),
+    onToolCall: (e) =>
+      setStream((s) => ({
+        ...s,
+        toolCalls: [
+          ...s.toolCalls,
+          { toolId: e.toolId, toolName: e.toolName, parameters: e.parameters, executing: true },
+        ],
+      })),
+    onToolResult: (e) =>
+      setStream((s) => ({
+        ...s,
+        toolCalls: s.toolCalls.map((tc) =>
+          tc.toolId === e.toolId
+            ? { ...tc, result: e.output, success: e.success, executing: false }
+            : tc,
+        ),
+      })),
+    onComplete: () => {
+      setStream(EMPTY_STREAM)
+      onComplete()
+    },
+    onError: (e) => {
+      setStream(EMPTY_STREAM)
+      onError(e.error)
+    },
   }
-
-  if (totalVariants <= 1) return null
-
-  return (
-    <div className={styles.branchNav}>
-      <button
-        disabled={currentVariantIndex === 0 || busy}
-        onClick={() => go(-1)}
-        aria-label="Previous variant"
-      >
-        ‹
-      </button>
-      <span>{currentVariantIndex + 1}/{totalVariants}</span>
-      <button
-        disabled={currentVariantIndex === totalVariants - 1 || busy}
-        onClick={() => go(1)}
-        aria-label="Next variant"
-      >
-        ›
-      </button>
-    </div>
-  )
-}
-
-// ─── Tool call block ─────────────────────────────────────────────────────────
-
-interface ToolCallBlockProps {
-  toolName: string
-  parameters: Record<string, unknown>
-  result?: string
-  success?: boolean
-}
-
-const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolName, parameters, result, success }) => {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className={styles.toolCall}>
-      <button className={styles.toolCallHeader} onClick={() => setOpen((o) => !o)}>
-        <span className={styles.toolCallIcon}>{result !== undefined ? (success ? '✓' : '✗') : '⚙'}</span>
-        <span className={styles.toolCallName}>{toolName}</span>
-        <span className={styles.toolCallToggle}>{open ? '▴' : '▾'}</span>
-      </button>
-      {open && (
-        <div className={styles.toolCallBody}>
-          <div className={styles.toolCallSection}>
-            <div className={styles.toolCallLabel}>Parameters</div>
-            <pre className={styles.toolCallPre}>{JSON.stringify(parameters, null, 2)}</pre>
-          </div>
-          {result !== undefined && (
-            <div className={styles.toolCallSection}>
-              <div className={styles.toolCallLabel}>Result</div>
-              <pre className={styles.toolCallPre}>{result}</pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Thinking block ───────────────────────────────────────────────────────────
-
-interface ThinkingBlockProps {
-  text: string
-  done: boolean
-}
-
-const ThinkingBlock: React.FC<ThinkingBlockProps> = ({ text, done }) => {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className={styles.thinking}>
-      <button className={styles.thinkingHeader} onClick={() => setOpen((o) => !o)}>
-        <span className={styles.thinkingDot}>{done ? '●' : '◌'}</span>
-        <span>{done ? 'Thought for a moment' : 'Thinking…'}</span>
-        <span className={styles.thinkingToggle}>{open ? '▴' : '▾'}</span>
-      </button>
-      {open && <div className={styles.thinkingBody}>{text}</div>}
-    </div>
-  )
-}
-
-// ─── Message bubble ───────────────────────────────────────────────────────────
-
-interface MessageBubbleProps {
-  msg: Message
-  chat: Chat
-  onEdit: (msg: Message) => void
-  onCopy: (text: string) => void
-  onDelete: (msgId: string) => void
-  onRegenerate: (msg: Message) => void
-  onBranchSwitch: (chat: Chat) => void
-}
-
-const MessageBubble: React.FC<MessageBubbleProps> = ({
-  msg, chat, onEdit, onCopy, onDelete, onRegenerate, onBranchSwitch,
-}) => {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const isUser = msg.role === 'user'
-  const isToolCall = msg.role === 'tool_call'
-  const isToolResponse = msg.role === 'tool_response'
-
-  // Find branch info for this message
-  const branchInfo = useMemo((): BranchInfo | null => {
-    if (!msg.nodeId) return null
-    for (const node of chat.messageNodes ?? []) {
-      if (node.nodeId === msg.nodeId && node.variants.length > 1) {
-        const variantIdx = node.variants.findIndex(
-          (v) => v.variantId === msg.variantId || v.userMessage.id === msg.id
-        )
-        return {
-          nodeId: node.nodeId,
-          currentVariantIndex: variantIdx >= 0 ? variantIdx : 0,
-          totalVariants: node.variants.length,
-          currentVariantId: msg.variantId ?? node.variants[0].variantId,
-        }
-      }
-    }
-    return null
-  }, [chat, msg])
-
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false)
-      }
-    }
-    window.addEventListener('mousedown', handler)
-    return () => window.removeEventListener('mousedown', handler)
-  }, [menuOpen])
-
-  if (isToolCall && msg.toolCall) {
-    return (
-      <div className={styles.bubbleWrap} data-role="tool_call">
-        <ToolCallBlock
-          toolName={msg.toolCall.toolName}
-          parameters={msg.toolCall.parameters}
-        />
-      </div>
-    )
-  }
-
-  if (isToolResponse) {
-    return (
-      <div className={styles.bubbleWrap} data-role="tool_response">
-        <ToolCallBlock
-          toolName="Result"
-          parameters={{}}
-          result={msg.toolResponseOutput ?? msg.text}
-          success
-        />
-      </div>
-    )
-  }
-
-  const dir = detectDir(msg.text)
-
-  return (
-    <div
-      className={`${styles.bubbleWrap} ${isUser ? styles.bubbleWrapUser : styles.bubbleWrapAssistant}`}
-    >
-      <div className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant}`}>
-        {/* Thinking block for assistant */}
-        {!isUser && msg.thoughtsStatus === 'PRESENT' && msg.thoughts && (
-          <ThinkingBlock text={msg.thoughts} done />
-        )}
-
-        {/* Message content */}
-        <div
-          className={styles.bubbleContent}
-          dir={dir}
-        >
-          {isUser ? (
-            <span className={styles.userText}>{msg.text}</span>
-          ) : (
-            <Markdown content={msg.text} />
-          )}
-        </div>
-
-        {/* Attachments */}
-        {msg.attachments && msg.attachments.length > 0 && (
-          <div className={styles.attachments}>
-            {msg.attachments.map((att, i) => (
-              <div key={i} className={styles.attachment}>
-                📎 {att.file_name}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Footer: time + model + actions */}
-        <div className={styles.bubbleFooter}>
-          {msg.model && !isUser && (
-            <span className={styles.bubbleModel}>{msg.model}</span>
-          )}
-          <span className={styles.bubbleTime}>{formatTime(msg.datetime)}</span>
-          <div className={styles.bubbleActions} ref={menuRef}>
-            <button
-              className={styles.bubbleActionBtn}
-              onClick={() => setMenuOpen((o) => !o)}
-              aria-label="Message actions"
-            >
-              ⋯
-            </button>
-            {menuOpen && (
-              <div className={styles.bubbleMenu}>
-                <button onClick={() => { onCopy(msg.text); setMenuOpen(false) }}>Copy</button>
-                {isUser && <button onClick={() => { onEdit(msg); setMenuOpen(false) }}>Edit</button>}
-                {!isUser && <button onClick={() => { onRegenerate(msg); setMenuOpen(false) }}>Regenerate</button>}
-                <button
-                  className={styles.bubbleMenuDelete}
-                  onClick={() => { onDelete(msg.id); setMenuOpen(false) }}
-                >
-                  Delete from here
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Branch navigator */}
-      {branchInfo && branchInfo.totalVariants > 1 && (
-        <BranchNav
-          chatId={chat.chat_id}
-          nodeId={branchInfo.nodeId}
-          totalVariants={branchInfo.totalVariants}
-          currentVariantIndex={branchInfo.currentVariantIndex}
-          onSwitch={onBranchSwitch}
-        />
-      )}
-    </div>
-  )
-}
-
-// ─── Model picker ─────────────────────────────────────────────────────────────
-
-interface ModelPickerProps {
-  provider: string
-  model: string
-  onChange: (provider: string, model: string) => void
-  models: ProviderModel_Flat[]
-}
-
-const ModelPicker: React.FC<ModelPickerProps> = ({ provider, model, onChange, models }) => {
-  const [open, setOpen] = useState(false)
-  const [filter, setFilter] = useState('')
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    window.addEventListener('mousedown', handler)
-    return () => window.removeEventListener('mousedown', handler)
-  }, [open])
-
-  const grouped = useMemo(() => {
-    const map = new Map<string, string[]>()
-    for (const m of models) {
-      if (filter && !m.modelName.toLowerCase().includes(filter.toLowerCase()) &&
-          !m.provider.toLowerCase().includes(filter.toLowerCase())) continue
-      const arr = map.get(m.provider) ?? []
-      arr.push(m.modelName)
-      map.set(m.provider, arr)
-    }
-    return map
-  }, [models, filter])
-
-  const label = model ? `${provider} / ${model}` : 'Select model'
-
-  return (
-    <div className={styles.modelPicker} ref={ref}>
-      <button
-        className={styles.modelPickerBtn}
-        onClick={() => setOpen((o) => !o)}
-        title={label}
-      >
-        {label.length > 35 ? label.slice(0, 35) + '…' : label}
-        <span>▾</span>
-      </button>
-      {open && (
-        <div className={styles.modelPickerDropdown}>
-          <input
-            className={styles.modelPickerSearch}
-            placeholder="Filter models…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            autoFocus
-          />
-          <div className={styles.modelPickerList}>
-            {[...grouped.entries()].map(([prov, modelNames]) => (
-              <div key={prov}>
-                <div className={styles.modelPickerGroup}>{prov}</div>
-                {modelNames.map((mn) => (
-                  <button
-                    key={mn}
-                    className={`${styles.modelPickerItem} ${prov === provider && mn === model ? styles.modelPickerItemActive : ''}`}
-                    onClick={() => { onChange(prov, mn); setOpen(false); setFilter('') }}
-                  >
-                    {mn}
-                  </button>
-                ))}
-              </div>
-            ))}
-            {grouped.size === 0 && (
-              <div className={styles.modelPickerEmpty}>No models found</div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Tools dropdown ───────────────────────────────────────────────────────────
-
-interface ToolsDropdownProps {
-  skills: InstalledSkill[]
-  enabledToolIds: string[]
-  onChange: (ids: string[]) => void
-}
-
-const BUILT_IN_TOOLS = [
-  { id: 'web_search', name: 'Web Search' },
-  { id: 'code_execution', name: 'Code Execution' },
-  { id: 'file_read', name: 'File Read' },
-]
-
-const ToolsDropdown: React.FC<ToolsDropdownProps> = ({ skills, enabledToolIds, onChange }) => {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    window.addEventListener('mousedown', handler)
-    return () => window.removeEventListener('mousedown', handler)
-  }, [open])
-
-  const toggle = (id: string) => {
-    if (enabledToolIds.includes(id)) {
-      onChange(enabledToolIds.filter((x) => x !== id))
-    } else {
-      onChange([...enabledToolIds, id])
-    }
-  }
-
-  const count = enabledToolIds.length
-
-  return (
-    <div className={styles.toolsDropdown} ref={ref}>
-      <button
-        className={`${styles.topbarBtn} ${count > 0 ? styles.topbarBtnActive : ''}`}
-        onClick={() => setOpen((o) => !o)}
-        title="Tools"
-      >
-        🔧 {count > 0 ? count : ''}
-      </button>
-      {open && (
-        <div className={styles.toolsMenu}>
-          <div className={styles.toolsMenuSection}>Built-in</div>
-          {BUILT_IN_TOOLS.map((t) => (
-            <label key={t.id} className={styles.toolsMenuItem}>
-              <input
-                type="checkbox"
-                checked={enabledToolIds.includes(t.id)}
-                onChange={() => toggle(t.id)}
-              />
-              {t.name}
-            </label>
-          ))}
-          {skills.length > 0 && (
-            <>
-              <div className={styles.toolsMenuSection}>Skills</div>
-              {skills.filter((s) => s.enabled).map((s) => (
-                <label key={s.name} className={styles.toolsMenuItem}>
-                  <input
-                    type="checkbox"
-                    checked={enabledToolIds.includes(s.name)}
-                    onChange={() => toggle(s.name)}
-                  />
-                  {s.name}
-                </label>
-              ))}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
 // ─── Main ChatPage ────────────────────────────────────────────────────────────
@@ -505,7 +139,7 @@ const ChatPage: React.FC = () => {
   const navigate = useNavigate()
   const { currentChat, loadChat, updateChat } = useChatStore()
 
-  // Top-bar / controls state
+  // ── Controls state (unchanged from R2) ────────────────────────────────────
   const [models, setModels] = useState<ProviderModel_Flat[]>([])
   const [provider, setProvider] = useState('openai')
   const [model, setModel] = useState('gpt-4o')
@@ -515,7 +149,7 @@ const ChatPage: React.FC = () => {
   const [temperature, setTemperature] = useState<number | null>(null)
   const [skillsList, setSkillsList] = useState<InstalledSkill[]>([])
 
-  // ── Chrome state (R2) ────────────────────────────────────────────────────────
+  // ── Chrome state (R2) ────────────────────────────────────────────────────
   const [searchMode, setSearchMode] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [quickSettingsExpanded, setQuickSettingsExpanded] = useState(false)
@@ -526,26 +160,28 @@ const ChatPage: React.FC = () => {
   const [starredModels, setStarredModels] = useState<StarredModel[]>([])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-  // Input state
+  // ── Input state ──────────────────────────────────────────────────────────
   const [inputText, setInputText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploading, setUploading] = useState(false)
-
-  // Edit mode
   const [editingMsg, setEditingMsg] = useState<Message | null>(null)
 
-  // Streaming state
+  // ── Streaming state ──────────────────────────────────────────────────────
   const [stream, setStream] = useState<StreamState>(EMPTY_STREAM)
   const streamHandleRef = useRef<{ abort: () => void } | null>(null)
 
-  // Error
+  // ── UI state ─────────────────────────────────────────────────────────────
   const [error, setError] = useState<string | null>(null)
+  const [showScrollDown, setShowScrollDown] = useState(false)
+  const [showScrollUp, setShowScrollUp] = useState(false)
 
-  // Scroll
+  // ── Refs ─────────────────────────────────────────────────────────────────
+  const messagesRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // ── Load chat & models on mount ──────────────────────────────────────────
+  // ── Load chat & data ─────────────────────────────────────────────────────
 
   useEffect(() => {
     if (chatId) loadChat(chatId)
@@ -556,8 +192,7 @@ const ChatPage: React.FC = () => {
     providersApi.list().then(setProvidersList).catch(() => {})
     skillsApi.list().then((skills) => {
       setSkillsList(skills)
-      // Initialize enabled tools from skills that are enabled
-      setEnabledToolIds(skills.filter(s => s.enabled).map(s => s.name))
+      setEnabledToolIds(skills.filter((s) => s.enabled).map((s) => s.name))
     }).catch(() => {})
     settingsApi.get().then((s) => {
       if (s.selected_provider) setProvider(s.selected_provider)
@@ -566,12 +201,39 @@ const ChatPage: React.FC = () => {
     }).catch(() => {})
   }, [])
 
-  // Scroll to bottom when messages change or partial text grows
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [currentChat?.messages?.length, stream.partialText])
+  // ── Autoscroll while streaming ───────────────────────────────────────────
 
-  // ── Send message ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (stream.streaming) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [stream.partialText, stream.streaming])
+
+  useEffect(() => {
+    if (!stream.streaming) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [currentChat?.messages?.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Scroll button visibility ─────────────────────────────────────────────
+
+  const handleScroll = useCallback(() => {
+    const el = messagesRef.current
+    if (!el) return
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    const distFromTop = el.scrollTop
+    setShowScrollDown(distFromBottom > 150)
+    setShowScrollUp(distFromTop > 150)
+  }, [])
+
+  useEffect(() => {
+    const el = messagesRef.current
+    if (!el) return
+    el.addEventListener('scroll', handleScroll, { passive: true })
+    return () => el.removeEventListener('scroll', handleScroll)
+  }, [handleScroll])
+
+  // ── Send message ─────────────────────────────────────────────────────────
 
   const doSend = useCallback(
     (text: string, atts: Attachment[]) => {
@@ -598,50 +260,15 @@ const ChatPage: React.FC = () => {
         projectAttachments: [],
       }
 
-      const newStream: StreamState = {
-        partialText: '',
-        thinkingText: '',
-        thinkingOpen: false,
-        thinkingDone: false,
-        toolCalls: [],
-        streaming: true,
-      }
-      setStream(newStream)
+      setStream({ ...EMPTY_STREAM, streaming: true })
 
-      const callbacks: StreamCallbacks = {
-        onPartial: (e) =>
-          setStream((s) => ({ ...s, partialText: s.partialText + e.text })),
-        onThinkingStarted: () =>
-          setStream((s) => ({ ...s, thinkingOpen: true })),
-        onThinkingPartial: (e) =>
-          setStream((s) => ({ ...s, thinkingText: s.thinkingText + e.text })),
-        onThinkingComplete: () =>
-          setStream((s) => ({ ...s, thinkingDone: true })),
-        onToolCall: (e) =>
-          setStream((s) => ({
-            ...s,
-            toolCalls: [...s.toolCalls, { toolId: e.toolId, toolName: e.toolName, parameters: e.parameters }],
-          })),
-        onToolResult: (e) =>
-          setStream((s) => ({
-            ...s,
-            toolCalls: s.toolCalls.map((tc) =>
-              tc.toolId === e.toolId
-                ? { ...tc, result: e.output, success: e.success }
-                : tc,
-            ),
-          })),
-        onComplete: () => {
-          setStream(EMPTY_STREAM)
-          if (chatId) loadChat(chatId)
-        },
-        onError: (e) => {
-          setStream(EMPTY_STREAM)
-          setError(e.error)
-        },
-      }
+      const cbs = makeStreamCallbacks(
+        setStream,
+        () => { if (chatId) loadChat(chatId) },
+        setError,
+      )
 
-      const handle = sendStream(req, callbacks)
+      const handle = sendStream(req, cbs)
       streamHandleRef.current = handle
     },
     [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, loadChat],
@@ -651,7 +278,6 @@ const ChatPage: React.FC = () => {
     if (!inputText.trim() || stream.streaming) return
 
     if (editingMsg) {
-      // Edit: create a branch from that message
       handleEditSubmit(editingMsg, inputText, attachments)
       return
     }
@@ -659,9 +285,9 @@ const ChatPage: React.FC = () => {
     doSend(inputText, attachments)
     setInputText('')
     setAttachments([])
-  }, [inputText, attachments, stream.streaming, editingMsg, doSend])
+  }, [inputText, attachments, stream.streaming, editingMsg, doSend]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Edit / resend ────────────────────────────────────────────────────────
+  // ── Edit / resend ─────────────────────────────────────────────────────────
 
   const handleEditSubmit = useCallback(
     async (originalMsg: Message, newText: string, atts: Attachment[]) => {
@@ -678,17 +304,8 @@ const ChatPage: React.FC = () => {
         setInputText('')
         setAttachments([])
 
-        // Now resend from the new variant's last user message
         const newMsgId = result.newVariantId
-        const newStream: StreamState = {
-          partialText: '',
-          thinkingText: '',
-          thinkingOpen: false,
-          thinkingDone: false,
-          toolCalls: [],
-          streaming: true,
-        }
-        setStream(newStream)
+        setStream({ ...EMPTY_STREAM, streaming: true })
 
         const resendReq = {
           provider,
@@ -700,41 +317,13 @@ const ChatPage: React.FC = () => {
           temperature,
         }
 
-        const callbacks: StreamCallbacks = {
-          onPartial: (e) =>
-            setStream((s) => ({ ...s, partialText: s.partialText + e.text })),
-          onThinkingStarted: () =>
-            setStream((s) => ({ ...s, thinkingOpen: true })),
-          onThinkingPartial: (e) =>
-            setStream((s) => ({ ...s, thinkingText: s.thinkingText + e.text })),
-          onThinkingComplete: () =>
-            setStream((s) => ({ ...s, thinkingDone: true })),
-          onToolCall: (e) =>
-            setStream((s) => ({
-              ...s,
-              toolCalls: [...s.toolCalls, { toolId: e.toolId, toolName: e.toolName, parameters: e.parameters }],
-            })),
-          onToolResult: (e) =>
-            setStream((s) => ({
-              ...s,
-              toolCalls: s.toolCalls.map((tc) =>
-                tc.toolId === e.toolId
-                  ? { ...tc, result: e.output, success: e.success }
-                  : tc,
-              ),
-            })),
-          onComplete: () => {
-            setStream(EMPTY_STREAM)
-            if (chatId) loadChat(chatId)
-          },
-          onError: (e) => {
-            setStream(EMPTY_STREAM)
-            setError(e.error)
-          },
-        }
+        const cbs = makeStreamCallbacks(
+          setStream,
+          () => { if (chatId) loadChat(chatId) },
+          setError,
+        )
 
-        // Use resendStream with the variant message id
-        const handle = resendStream(chatId, newMsgId, resendReq, callbacks)
+        const handle = resendStream(chatId, newMsgId, resendReq, cbs)
         streamHandleRef.current = handle
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Edit failed')
@@ -749,16 +338,7 @@ const ChatPage: React.FC = () => {
     (msg: Message) => {
       if (!chatId || stream.streaming) return
       setError(null)
-
-      const newStream: StreamState = {
-        partialText: '',
-        thinkingText: '',
-        thinkingOpen: false,
-        thinkingDone: false,
-        toolCalls: [],
-        streaming: true,
-      }
-      setStream(newStream)
+      setStream({ ...EMPTY_STREAM, streaming: true })
 
       const resendReq = {
         provider,
@@ -770,26 +350,13 @@ const ChatPage: React.FC = () => {
         temperature,
       }
 
-      const callbacks: StreamCallbacks = {
-        onPartial: (e) =>
-          setStream((s) => ({ ...s, partialText: s.partialText + e.text })),
-        onThinkingStarted: () =>
-          setStream((s) => ({ ...s, thinkingOpen: true })),
-        onThinkingPartial: (e) =>
-          setStream((s) => ({ ...s, thinkingText: s.thinkingText + e.text })),
-        onThinkingComplete: () =>
-          setStream((s) => ({ ...s, thinkingDone: true })),
-        onComplete: () => {
-          setStream(EMPTY_STREAM)
-          if (chatId) loadChat(chatId)
-        },
-        onError: (e) => {
-          setStream(EMPTY_STREAM)
-          setError(e.error)
-        },
-      }
+      const cbs = makeStreamCallbacks(
+        setStream,
+        () => { if (chatId) loadChat(chatId) },
+        setError,
+      )
 
-      const handle = resendStream(chatId, msg.id, resendReq, callbacks)
+      const handle = resendStream(chatId, msg.id, resendReq, cbs)
       streamHandleRef.current = handle
     },
     [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, stream.streaming, loadChat],
@@ -835,7 +402,7 @@ const ChatPage: React.FC = () => {
     navigator.clipboard.writeText(text).catch(() => {})
   }, [])
 
-  // ── Chrome handlers (R2) ────────────────────────────────────────────────────
+  // ── Chat-level actions (R2) ───────────────────────────────────────────────
 
   const handleDeleteChat = useCallback(async () => {
     if (!chatId) return
@@ -864,36 +431,56 @@ const ChatPage: React.FC = () => {
   }, [])
 
   const handleToggleStar = useCallback((prov: string, modelName: string) => {
-    setStarredModels(prev => {
-      const already = prev.some(s => s.provider === prov && s.modelName === modelName)
+    setStarredModels((prev) => {
+      const already = prev.some((s) => s.provider === prov && s.modelName === modelName)
       return already
-        ? prev.filter(s => !(s.provider === prov && s.modelName === modelName))
+        ? prev.filter((s) => !(s.provider === prov && s.modelName === modelName))
         : [...prev, { provider: prov, modelName }]
     })
   }, [])
 
-  // ── Abort stream ──────────────────────────────────────────────────────────
+  // ── Abort ─────────────────────────────────────────────────────────────────
 
-  const handleAbort = () => {
+  const handleAbort = useCallback(() => {
     streamHandleRef.current?.abort()
     setStream(EMPTY_STREAM)
-  }
+  }, [])
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
     }
+  }, [handleSubmit])
+
+  // ── Edit mode helpers ──────────────────────────────────────────────────────
+
+  const startEditing = useCallback((msg: Message) => {
+    setEditingMsg(msg)
+    setInputText(msg.text)
+    setTimeout(() => textareaRef.current?.focus(), 50)
+  }, [])
+
+  const cancelEdit = useCallback(() => {
+    setEditingMsg(null)
+    setInputText('')
+  }, [])
+
+  // ── Scroll helpers ────────────────────────────────────────────────────────
+
+  const scrollToBottom = () => {
+    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' })
+  }
+  const scrollToTop = () => {
+    messagesRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  // ── Tool items (useMemo must be before any conditional return) ───────────────
+  // ── toolItems (for QuickSettingsBar) ──────────────────────────────────────
 
   const toolItems = useMemo(() => {
-    return skillsList
-      .filter(s => s.enabled)
-      .map(s => ({ id: s.name, name: s.name }))
+    return skillsList.filter((s) => s.enabled).map((s) => ({ id: s.name, name: s.name }))
   }, [skillsList])
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -911,7 +498,7 @@ const ChatPage: React.FC = () => {
 
   return (
     <div className={styles.page}>
-      {/* ── Chrome (R2): top bar + quick settings ── */}
+      {/* ── R2 chrome ─── */}
       <ChatTopBar
         provider={provider}
         model={model}
@@ -921,15 +508,14 @@ const ChatPage: React.FC = () => {
         onBack={() => navigate('/')}
         onSearch={() => setSearchMode(true)}
         onShare={() => {
-          // Export chat scaffold (R3 can wire download)
           if (chatId) chatsApi.export(chatId).catch(() => {})
         }}
         onDelete={() => setShowDeleteConfirm(true)}
         onClickProviderModel={() => setShowModelSelector(true)}
         onSearchQueryChange={setSearchQuery}
-        onSearchAction={() => { /* in-chat search highlight is R3 */ }}
+        onSearchAction={() => { /* R3 in-chat search is future */ }}
         onExitSearch={() => { setSearchMode(false); setSearchQuery('') }}
-        onToggleQuickSettings={() => setQuickSettingsExpanded(v => !v)}
+        onToggleQuickSettings={() => setQuickSettingsExpanded((v) => !v)}
       />
 
       <QuickSettingsBar
@@ -942,9 +528,8 @@ const ChatPage: React.FC = () => {
         toolItems={toolItems}
         enabledToolIds={enabledToolIds}
         onToolToggle={(id, enabled) => {
-          setEnabledToolIds(prev => enabled
-            ? [...prev.filter(x => x !== id), id]
-            : prev.filter(x => x !== id)
+          setEnabledToolIds((prev) =>
+            enabled ? [...prev.filter((x) => x !== id), id] : prev.filter((x) => x !== id),
           )
         }}
         textDirectionMode={textDirectionMode}
@@ -953,7 +538,7 @@ const ChatPage: React.FC = () => {
         systemPrompt={chat?.systemPrompt ?? ''}
       />
 
-      {/* Model selector dialog */}
+      {/* ── Dialogs ─── */}
       <ModelSelectorDialog
         open={showModelSelector}
         onClose={() => setShowModelSelector(false)}
@@ -965,7 +550,6 @@ const ChatPage: React.FC = () => {
         onToggleStar={handleToggleStar}
       />
 
-      {/* System prompt dialog */}
       <SystemPromptDialog
         open={showSystemPromptDialog}
         onClose={() => setShowSystemPromptDialog(false)}
@@ -973,7 +557,6 @@ const ChatPage: React.FC = () => {
         onSave={handleSaveSystemPrompt}
       />
 
-      {/* Delete confirmation dialog */}
       <Dialog
         open={showDeleteConfirm}
         onClose={() => setShowDeleteConfirm(false)}
@@ -988,20 +571,20 @@ const ChatPage: React.FC = () => {
         {t('delete_confirmation_message')}
       </Dialog>
 
-      {/* Error banner */}
+      {/* ── Error banner ─── */}
       {error && (
         <div className={styles.error} role="alert">
-          {error}
-          <button onClick={() => setError(null)}>✕</button>
+          <span>{error}</span>
+          <button type="button" onClick={() => setError(null)}>✕</button>
         </div>
       )}
 
-      {/* Messages */}
-      <div className={styles.messages}>
+      {/* ── Message list ─── */}
+      <div className={styles.messages} ref={messagesRef}>
         {messages.length === 0 && !stream.streaming && (
           <div className={styles.emptyChat}>
             <div className={styles.emptyChatIcon}>💬</div>
-            <p>Start a conversation</p>
+            <p>{t('empty_chat_message')}</p>
           </div>
         )}
 
@@ -1010,7 +593,8 @@ const ChatPage: React.FC = () => {
             key={msg.id}
             msg={msg}
             chat={chat!}
-            onEdit={(m) => { setEditingMsg(m); setInputText(m.text) }}
+            textDirectionMode={textDirectionMode}
+            onEdit={startEditing}
             onCopy={handleCopy}
             onDelete={handleDeleteMessage}
             onRegenerate={handleRegenerate}
@@ -1018,113 +602,112 @@ const ChatPage: React.FC = () => {
           />
         ))}
 
-        {/* Streaming partial */}
+        {/* ── Streaming partial assistant bubble ─── */}
         {stream.streaming && (
-          <div className={`${styles.bubbleWrap} ${styles.bubbleWrapAssistant}`}>
-            <div className={`${styles.bubble} ${styles.bubbleAssistant}`}>
-              {stream.thinkingOpen && (
-                <ThinkingBlock text={stream.thinkingText} done={stream.thinkingDone} />
-              )}
-              {stream.toolCalls.map((tc, i) => (
-                <ToolCallBlock
-                  key={i}
-                  toolName={tc.toolName}
-                  parameters={tc.parameters}
-                  result={tc.result}
-                  success={tc.success}
-                />
-              ))}
-              {stream.partialText ? (
-                <div className={styles.bubbleContent}>
-                  <Markdown content={stream.partialText} />
-                </div>
-              ) : (
+          <div className={styles.streamingBubble}>
+            {/* ThoughtsBubble during / after thinking */}
+            {stream.thinkingOpen && (
+              <ThoughtsBubble
+                text={stream.thinkingText}
+                done={stream.thinkingDone}
+                activelyThinking={!stream.thinkingDone}
+                startTime={stream.thinkingStartTime}
+                durationSeconds={stream.thinkingDurationSeconds}
+              />
+            )}
+
+            {/* Inline tool calls */}
+            {stream.toolCalls.map((tc, i) => (
+              <ToolCallBlock
+                key={i}
+                toolName={tc.toolName}
+                parameters={tc.parameters}
+                result={tc.result}
+                success={tc.success}
+                executing={tc.executing}
+              />
+            ))}
+
+            {/* Partial markdown text */}
+            {stream.partialText ? (
+              <div
+                style={{ fontSize: 15, lineHeight: '22px', color: 'var(--color-text)' }}
+                dir="auto"
+              >
+                {/* Use plain text for streaming to avoid parsing lag */}
+                <span style={{ whiteSpace: 'pre-wrap' }}>{stream.partialText}</span>
+              </div>
+            ) : (
+              /* Typing indicator dots when waiting for first token */
+              !stream.thinkingOpen && !stream.toolCalls.length && (
                 <div className={styles.streamingDots}>
                   <span /><span /><span />
                 </div>
-              )}
-            </div>
+              )
+            )}
           </div>
         )}
 
         <div ref={bottomRef} />
       </div>
 
-      {/* Input area */}
-      <div className={styles.inputArea}>
-        {editingMsg && (
-          <div className={styles.editBanner}>
-            Editing message
-            <button onClick={() => { setEditingMsg(null); setInputText('') }}>✕</button>
-          </div>
-        )}
+      {/* ── Floating scroll buttons (blue circles per screenshot) ─── */}
+      {showScrollUp && (
+        <button
+          type="button"
+          className={styles.scrollBtn}
+          style={{ bottom: 'calc(var(--input-height, 120px) + 60px)' }}
+          onClick={scrollToTop}
+          aria-label={t('scroll_to_top')}
+        >
+          <MdArrowUpward size={20} />
+        </button>
+      )}
+      {showScrollDown && (
+        <button
+          type="button"
+          className={styles.scrollBtn}
+          style={{ bottom: 'calc(var(--input-height, 120px) + 8px)' }}
+          onClick={scrollToBottom}
+          aria-label={t('scroll_to_bottom')}
+        >
+          <MdArrowDownward size={20} />
+        </button>
+      )}
 
-        {attachments.length > 0 && (
-          <div className={styles.attachmentsList}>
-            {attachments.map((att, i) => (
-              <div key={i} className={styles.attachmentChip}>
-                📎 {att.file_name}
-                <button onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}>
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* ── Input area ─── */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        style={{ display: 'none' }}
+        onChange={handleFileSelect}
+        aria-label="Attach file"
+      />
 
-        <div className={styles.inputRow}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            className={styles.fileInput}
-            onChange={handleFileSelect}
-            aria-label="Attach file"
-          />
-          <button
-            className={styles.attachBtn}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            title="Attach file"
-          >
-            {uploading ? '⏳' : '📎'}
-          </button>
-
-          <textarea
-            className={styles.textarea}
-            placeholder={editingMsg ? 'Edit your message…' : 'Type a message… (Enter to send, Shift+Enter for newline)'}
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            style={{ height: 'auto' }}
-            ref={(el) => {
-              if (el) {
-                el.style.height = 'auto'
-                el.style.height = Math.min(el.scrollHeight, 200) + 'px'
-              }
-            }}
-          />
-
-          {stream.streaming ? (
-            <button
-              className={`${styles.sendBtn} ${styles.stopBtn}`}
-              onClick={handleAbort}
-              aria-label="Stop generation"
-            >
-              ⏹
-            </button>
-          ) : (
-            <button
-              className={styles.sendBtn}
-              onClick={handleSubmit}
-              disabled={!inputText.trim() || uploading}
-              aria-label="Send message"
-            >
-              ➤
-            </button>
-          )}
-        </div>
-      </div>
+      <ChatInputArea
+        inputText={inputText}
+        onInputChange={setInputText}
+        attachments={attachments}
+        uploading={uploading}
+        onRemoveAttachment={(idx) => setAttachments((prev) => prev.filter((_, j) => j !== idx))}
+        onAttachFile={() => fileInputRef.current?.click()}
+        streaming={stream.streaming}
+        editingMsg={!!editingMsg}
+        webSearch={webSearch}
+        showWebSearch={true} // always show; future: check model capabilities
+        onToggleWebSearch={() => setWebSearch((v) => !v)}
+        onSend={handleSubmit}
+        onStop={handleAbort}
+        onConfirmEdit={() => {
+          if (editingMsg) handleEditSubmit(editingMsg, inputText, attachments)
+        }}
+        onConfirmEditAndResend={() => {
+          if (editingMsg) handleEditSubmit(editingMsg, inputText, attachments)
+        }}
+        onCancelEdit={cancelEdit}
+        onKeyDown={handleKeyDown}
+        textareaRef={textareaRef}
+      />
     </div>
   )
 }

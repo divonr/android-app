@@ -48,6 +48,22 @@ Branch: `web-ui`
 - [x] Added `SyncConfig` data class + `resolveSyncConfig()` (reads `SYNC_ENABLED`, `SYNC_SERVER_URL`, `SYNC_TOKEN`, `SYNC_USER`, `SYNC_PULL_INTERVAL_SECONDS` env vars). `SyncConfig.startEngine=false` gate lets tests assert config seeding without opening sockets. On startup (when enabled + token set): seeds `RemoteSyncSettings` + optional `current_user` into `AppSettings`, calls `startSync()` + initial `pullNow()`, launches a periodic pull loop (default 20 s) tied to `ApplicationStopping` lifecycle. Added `POST /api/sync/pull` + `GET /api/sync/status` endpoints (auth-gated; token never returned). 8 new tests (110 total, all green). `installDist` still produces a runnable artifact. Docs: `llm-web.env.example` + `DEPLOY.md` updated with sync section.
 - commit: bbe1f13
 
+## UI Refactor — R3 (Chat screen body + input)
+
+- [x] **R3 — Message bubbles, ThoughtsBubble, ToolCallBlock, BranchNavigator, streaming render, ChatInputArea, scroll buttons, Markdown restyle, i18n, tests**
+  - **`web/src/components/chat/MessageBubble.tsx`** (new): User=#6C7CE7 (topLeftRadius 6, align flex-start=RIGHT in RTL), assistant=#2A2B3A (topRightRadius 6, align flex-end=LEFT in RTL), system=#3A3B4A. Inline ThoughtsBubble + ToolCallBlock for assistant. Model avatar 32px. ContextMenu (portaled, hover-on ⋯). BranchNavigator below user messages.
+  - **`web/src/components/chat/ThoughtsBubble.tsx`** (new): Live elapsed timer (setInterval 100ms) while streaming. primary-08 bg, primary-20 border. Hebrew "מחשבות... (x.x שניות)". Expand/collapse when done.
+  - **`web/src/components/chat/ToolCallBlock.tsx`** (new): MdExtension icon in 40px circle. Tool name, parameters JSON, result with green/red bg per success/failure. Status: מבצע.../הושלם/נכשל.
+  - **`web/src/components/chat/BranchNavigator.tsx`** (new): `‹ n/m ›` with prev/next chevrons; hidden when totalVariants ≤ 1.
+  - **`web/src/components/chat/ChatInputArea.tsx`** (new): Pill layout (MdAdd attach | textarea | action buttons). Edit banner with cancel X. File previews (single=list, multiple=4-col grid). isExpanded ≥3 estimated lines → vertical stack. WebSearchToggleBtn (primary-15 when on). RoundBtn 40px: send/stop/confirm/resend.
+  - **`web/src/pages/ChatPage.tsx`** (rewritten): makeStreamCallbacks() helper; thinkingStartTime/durationSeconds in StreamState; streaming bubble with ThoughtsBubble + ToolCallBlock + partial text; floating scroll buttons (MdArrowUpward/Downward); ChatInputArea integration.
+  - **`web/src/pages/ChatPage.module.css`** (simplified): page-shell only; .streamingBubble, .streamingDots (streamPulse animation), .scrollBtn (absolute, 42px circle, primary bg, RTL-safe centering).
+  - **`web/src/components/Markdown.tsx`** + **`Markdown.module.css`**: Code blocks: .codeHeader bar with language chip (.codeLang) + copy button (.copyBtn), uses t('copy_code')/t('copied'). RTL-safe: padding-inline-start on lists, border-inline-start on blockquotes, text-align:start on tables.
+  - **`web/src/i18n/he.ts`**: +20 R3 Hebrew keys (thoughts_seconds, editing_message, tool_executing/completed/failed, confirm_edit_and_resend, copy_code, copied, scroll_to_top/bottom, etc.).
+  - **`web/src/__tests__/ChatPage.test.tsx`**: +3 R3 tests (full streaming sequence thoughts→tool→text→complete, send/stop toggle, edit mode architecture). Hebrew placeholder + מחשבות assertions.
+  - `npm run build` ✓ | `npx vitest run` 83/83 ✓
+  - commit: TBD
+
 ## UI Refactor — R2 (Chat screen chrome)
 
 - [x] **R2 — Chat screen chrome — top bar, quick settings, model selector, system-prompt dialog**

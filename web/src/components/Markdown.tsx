@@ -1,3 +1,14 @@
+/**
+ * Markdown — react-markdown renderer styled to match CodeBlockRenderer.kt,
+ * TableRenderer.kt and MarkdownText.kt from the Android app.
+ *
+ * - Code blocks: dark bg + language label top-left + copy button top-right
+ * - Inline code: surface-variant bg + primary-light color
+ * - GFM tables: border/header from TableRenderer.kt
+ * - KaTeX math (remark-math + rehype-katex)
+ * - RTL-safe: dir="auto" on the wrapper so Hebrew flows naturally
+ */
+
 import React, { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -6,20 +17,23 @@ import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import 'katex/dist/katex.min.css'
 import styles from './Markdown.module.css'
+import { t } from '../i18n/he'
 
 // ---------------------------------------------------------------------------
-// Code block with copy button
+// Code block with language label + copy button
 // ---------------------------------------------------------------------------
 
 interface CodeBlockProps {
   className?: string
   children?: React.ReactNode
+  inline?: boolean
 }
 
-const CodeBlock: React.FC<CodeBlockProps> = ({ className, children, ...rest }) => {
+const CodeBlock: React.FC<CodeBlockProps> = ({ className, children, inline, ...rest }) => {
   const [copied, setCopied] = useState(false)
 
   const isBlock = className?.startsWith('language-')
+  const lang = isBlock ? className!.replace('language-', '') : ''
   const code = String(children ?? '').replace(/\n$/, '')
 
   const handleCopy = () => {
@@ -29,7 +43,7 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ className, children, ...rest }) =
     })
   }
 
-  if (!isBlock) {
+  if (!isBlock || inline) {
     return (
       <code className={`${styles.inlineCode} ${className ?? ''}`} {...rest}>
         {children}
@@ -39,14 +53,18 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ className, children, ...rest }) =
 
   return (
     <div className={styles.codeWrapper}>
-      <button
-        className={styles.copyBtn}
-        onClick={handleCopy}
-        aria-label="Copy code"
-      >
-        {copied ? 'Copied!' : 'Copy'}
-      </button>
-      <code className={className} {...rest}>
+      {/* Header bar: language label + copy button */}
+      <div className={styles.codeHeader}>
+        <span className={styles.codeLang}>{lang || 'code'}</span>
+        <button
+          className={styles.copyBtn}
+          onClick={handleCopy}
+          aria-label={t('copy_code')}
+        >
+          {copied ? t('copied') : t('copy_code')}
+        </button>
+      </div>
+      <code className={`${styles.codeBody} ${className ?? ''}`} {...rest}>
         {children}
       </code>
     </div>
