@@ -144,20 +144,23 @@ fun Application.module(
     authConfig: AuthConfig = AuthConfig(password = resolvePassword()),
     oauthExchanger: com.example.ApI.server.oauth.OAuthTokenExchanger? = null,
     syncConfig: SyncConfig = resolveSyncConfig(),
+    titleGeneratorFactory: ((DataRepository) -> TitleGenerator)? = null,
     chatEngineFactory: ((DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null
 ) {
     // ── Dependency wiring ────────────────────────────────────────────────────
     val repository = DataRepository(storage)
-    val appModule = when {
-        chatEngineFactory != null && oauthExchanger != null ->
-            AppModule(repository, chatEngineFactory(repository), oauthExchanger)
-        chatEngineFactory != null ->
-            AppModule(repository, chatEngineFactory(repository))
-        oauthExchanger != null ->
-            AppModule(repository, oauthExchanger = oauthExchanger)
-        else ->
-            AppModule(repository)
-    }
+    val appModule = AppModule(
+        repository = repository,
+        chatEngine = chatEngineFactory?.invoke(repository)
+            ?: com.example.ApI.server.streaming.RepositoryChatEngine(repository),
+        oauthExchanger = oauthExchanger
+            ?: com.example.ApI.server.oauth.RealOAuthTokenExchanger(),
+        titleGenerator = titleGeneratorFactory?.invoke(repository)
+            ?: object : TitleGenerator {
+                override suspend fun generate(username: String, chatId: String, provider: String?): String =
+                    repository.generateConversationTitle(username, chatId, provider)
+            }
+    )
     installAppModule(appModule)
 
     // ── Remote sync bootstrap ────────────────────────────────────────────────

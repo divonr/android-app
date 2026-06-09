@@ -8,6 +8,17 @@ import com.example.ApI.server.streaming.RepositoryChatEngine
 import io.ktor.server.application.*
 
 /**
+ * Seam for title generation — allows tests to inject a fake that returns a
+ * deterministic title without making real LLM network calls.
+ *
+ * Declared as a `fun interface` so tests can use SAM lambda syntax:
+ * `TitleGenerator { username, chatId, provider -> "Fake Title" }`
+ */
+fun interface TitleGenerator {
+    suspend fun generate(username: String, chatId: String, provider: String?): String
+}
+
+/**
  * Application-level dependency holder.
  *
  * A single [DataRepository] is created at startup (with [ServerPlatformStorage])
@@ -20,11 +31,18 @@ import io.ktor.server.application.*
  *
  * An [OAuthTokenExchanger] is stored so that OAuth routes can be tested with a fake
  * exchanger that returns scripted results without making real network calls.
+ *
+ * A [TitleGenerator] is stored so that the generate-title route can be tested with a
+ * fake that returns a deterministic title without real LLM calls.
  */
 class AppModule(
     val repository: DataRepository,
     val chatEngine: ChatEngine = RepositoryChatEngine(repository),
-    val oauthExchanger: OAuthTokenExchanger = RealOAuthTokenExchanger()
+    val oauthExchanger: OAuthTokenExchanger = RealOAuthTokenExchanger(),
+    val titleGenerator: TitleGenerator = object : TitleGenerator {
+        override suspend fun generate(username: String, chatId: String, provider: String?): String =
+            repository.generateConversationTitle(username, chatId, provider)
+    }
 )
 
 // Ktor attribute key for AppModule

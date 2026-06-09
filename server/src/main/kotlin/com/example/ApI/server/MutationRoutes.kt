@@ -112,6 +112,16 @@ data class AddMessageRequest(
     val attachments: List<Attachment> = emptyList()
 )
 
+@Serializable
+data class GenerateTitleRequest(
+    val provider: String = "auto"
+)
+
+@Serializable
+data class TitleResponse(
+    val title: String
+)
+
 // ── P4 Mutation Routes ───────────────────────────────────────────────────────
 
 fun Route.mutationRoutes() {
@@ -270,6 +280,52 @@ fun Route.mutationRoutes() {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
         } else {
             call.respond(HttpStatusCode.OK, updated)
+        }
+    }
+
+    // POST /api/chats/{chatId}/generate-title — regenerate title regardless of message count
+    post("/chats/{chatId}/generate-title") {
+        val chatId = call.parameters["chatId"] ?: return@post call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val body = try {
+            call.receive<GenerateTitleRequest>()
+        } catch (e: Exception) {
+            GenerateTitleRequest()
+        }
+        val repo = call.application.appModule.repository
+        val username = call.currentUsername()
+
+        // Verify chat exists
+        val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
+        if (chat == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+            return@post
+        }
+
+        val providerArg = body.provider.takeIf { it.isNotBlank() && it != "auto" }
+        val titleGenerator = call.application.appModule.titleGenerator
+
+        try {
+            val title = titleGenerator.generate(username, chatId, providerArg)
+
+            // Persist the generated title
+            if (title.isNotBlank()) {
+                val history = repo.loadChatHistory(username)
+                val updated = history.copy(
+                    chat_history = history.chat_history.map { c ->
+                        if (c.chat_id == chatId) c.copy(preview_name = title) else c
+                    }
+                )
+                repo.saveChatHistory(updated)
+            }
+
+            call.respond(HttpStatusCode.OK, TitleResponse(title = title))
+        } catch (e: Exception) {
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                mapOf("error" to "Title generation failed: ${e.message}")
+            )
         }
     }
 
