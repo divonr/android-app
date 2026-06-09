@@ -11,6 +11,24 @@ Branch: `web-ui`
 
 ---
 
+## R8 — Parity audit + sync fixes (Android = source of truth)
+
+Full two-agent audit (UI parity + capability/REST parity) found and fixed:
+
+- [x] **Sync: newly-tracked files never uploaded** — `SyncEngine.pull()` now marks tracked-but-missing-on-server local files dirty so "Sync Now" uploads them (e.g. api_keys after enabling syncApiKeys). commit 72a201d
+- [x] **Sync: web server hardcoded syncApiKeys=false** — new `SYNC_API_KEYS` env var wired through SyncConfig; docs updated. commit bb528e1. Deployed with `SYNC_API_KEYS=true`; verified all 15 api keys pulled to `~/.llm-api-web`.
+- [x] **POST /api/chats/{id}/generate-title** — was 404; web "AI Rename" now works. TitleGenerator seam in AppModule. commit c99ee3f
+- [x] **POST /api/chats/{id}/messages/{id}/resend (SSE)** — was 404; web edit-resend/regenerate now work. Shared `streamSseResponse` helper extracted from send route. commit 3bbd932
+- [x] **GET /oauth/{github,google}/start** — web OAuth connect was 404; now 302-redirect routes (session-validated, CSRF state in session); redundant POST /api/integrations/*/start removed. commit fad38f2
+- [x] **messages_added SSE event** — emitted after mid-stream tool message persistence; web parser + ChatPage reload wired. commit 930a6a2
+- [x] **SettingsPage nav links** to Integrations/Skills/Logs (labels verbatim from Android). commit ecebbcc
+- [x] **Skill ZIP export/import** — GET /api/skills/{name}/export + POST /api/skills/import-zip + SkillsPage UI. commit dfe17dd
+- [x] **Test Connection wired** — /api/sync/status gained live `reachable` probe via SyncEngine.testConnection(). commit 4bb73e8
+
+Remaining known (intentional/low): drag-reorder of API keys (web uses up/down buttons), full-custom-provider editor uses JSON blobs, skip-welcome toggle not surfaced on web.
+
+Verified: :server:test green, web vitest 114/114, deployed (installDist + web build + llm-web restart), new endpoints live (401/302 not 404), fresh APK built for apk-server.
+
 ## UI Refactor — R7 (Polish + visual verification + deploy build)
 
 - [x] **R7 — Fidelity fixes, visual verification, E2E update, deploy build**
