@@ -247,6 +247,29 @@ describe('SettingsPage', () => {
     expect(clientModule.settings.update).not.toHaveBeenCalled()
   })
 
+  // ── Navigation links ────────────────────────────────────────────────────────
+
+  it('shows Integrations navigation button', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /integrations/i })).toBeInTheDocument()
+    })
+  })
+
+  it('shows Skills navigation button', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /skills/i })).toBeInTheDocument()
+    })
+  })
+
+  it('shows Logs navigation button', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /logs/i })).toBeInTheDocument()
+    })
+  })
+
   // ── Remote sync action buttons ──────────────────────────────────────────────
 
   it('Sync Now button triggers sync.pull', async () => {

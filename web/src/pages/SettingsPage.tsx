@@ -536,6 +536,26 @@ const SettingsPage: React.FC = () => {
           </div>
         </div>
 
+        {/* ── Navigation: Integrations ── */}
+        <button
+          className={styles.navRow}
+          onClick={() => navigate('/integrations')}
+          aria-label="Integrations"
+        >
+          <span className={styles.navRowTitle}>אינטגרציות (MCPs)</span>
+          <span style={{ fontSize: 18, color: 'var(--on-surface-variant)', opacity: 0.7 }}>›</span>
+        </button>
+
+        {/* ── Navigation: Skills ── */}
+        <button
+          className={styles.navRow}
+          onClick={() => navigate('/skills')}
+          aria-label="Skills"
+        >
+          <span className={styles.navRowTitle}>סקילים (Skills)</span>
+          <span style={{ fontSize: 18, color: 'var(--on-surface-variant)', opacity: 0.7 }}>›</span>
+        </button>
+
         {/* ── Title generation ── */}
         <div className={styles.card}>
           <div className={styles.sectionRow}>
@@ -775,6 +795,16 @@ const SettingsPage: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* ── Navigation: Logs ── */}
+        <button
+          className={styles.navRow}
+          onClick={() => navigate('/logs')}
+          aria-label="Logs"
+        >
+          <span className={styles.navRowTitle}>מסך לוגים</span>
+          <span style={{ fontSize: 18, color: 'var(--on-surface-variant)', opacity: 0.7 }}>›</span>
+        </button>
       </div>
 
       {/* ── Child lock setup dialog ── */}
