@@ -48,6 +48,24 @@ Branch: `web-ui`
 - [x] Added `SyncConfig` data class + `resolveSyncConfig()` (reads `SYNC_ENABLED`, `SYNC_SERVER_URL`, `SYNC_TOKEN`, `SYNC_USER`, `SYNC_PULL_INTERVAL_SECONDS` env vars). `SyncConfig.startEngine=false` gate lets tests assert config seeding without opening sockets. On startup (when enabled + token set): seeds `RemoteSyncSettings` + optional `current_user` into `AppSettings`, calls `startSync()` + initial `pullNow()`, launches a periodic pull loop (default 20 s) tied to `ApplicationStopping` lifecycle. Added `POST /api/sync/pull` + `GET /api/sync/status` endpoints (auth-gated; token never returned). 8 new tests (110 total, all green). `installDist` still produces a runnable artifact. Docs: `llm-web.env.example` + `DEPLOY.md` updated with sync section.
 - commit: bbe1f13
 
+## UI Refactor — R6 (Groups + Skills + Integrations + Logs/Welcome screens)
+
+- [x] **R6 — Groups, Skills, Integrations, Logs, Welcome — Hebrew/RTL, app-style, full interaction**
+  - **`web/src/pages/GroupPage.tsx`** (rewritten): ScreenTopBar with project-mode toggle (checkbox+slider) in `actions`. `ProjectArea` renders system-prompt textarea + attachment file grid with add/remove. `ChatItem` shows model-initial circle + meta. Handlers: `handleToggleProject` → `groupsApi.update(id, {isProject})`, `handleSavePrompt`, `handleFileUpload` → `filesApi.upload` + `groupsApi.addAttachment`, `handleNewChat` → `chatsApi.create` then navigate.
+  - **`web/src/pages/SkillsPage.tsx`** (rewritten): `SkillCard` with 44dp icon box, enable/disable toggle (stopPropagation). Dialogs: `ImportTextDialog` (SKILL.md textarea), `CreateSkillDialog` (name enforced lowercase/hyphens, description), `DeleteSkillDialog`. ScreenTopBar with import (⬇) + create (+) action buttons.
+  - **`web/src/pages/SkillEditorPage.tsx`** (new): `/skills/:name/edit`. Monospace `dir="ltr"` textarea + description meta field. Save button shown when dirty. Loads via `skillsApi.list()` + `skillsApi.getContent(name)`.
+  - **`web/src/pages/IntegrationsPage.tsx`** (rewritten): Tool section (date/time, group-conversations, Python toggles → `settingsApi.update`). `GitHubCard`: connect/disconnect via `integrations.github.startOAuth()/disconnect()`. `GoogleCard`: connect/disconnect + service sub-toggles (Gmail, Calendar, Drive) → `integrations.google.updateServices`. Returns from OAuth with `?github=connected`/`?google=connected` show success banner.
+  - **`web/src/pages/LogsPage.tsx`** (new): `/logs`. Client-side log capture via `appLogger.subscribe`. Black terminal theme. Auto-scroll to bottom. Clear button → `clearLogs()`.
+  - **`web/src/utils/appLogger.ts`** (new): Ring buffer (max 500 entries), subscriber pattern, `_timestamp()`. Intercepts console.log/warn/error + `window.error` only when `import.meta.env?.MODE !== 'test'`.
+  - **`web/src/pages/WelcomePage.tsx`** (new): `/welcome`. FREE_PROVIDERS (Google, Poe, Cohere, LLM Stats) + PAID_PROVIDERS (OpenAI, Anthropic, OpenRouter) as styled cards linking to API key pages. Skip-welcome checkbox → `settingsApi.update`. "יש לי מפתח API >" → navigate('/keys').
+  - **`web/src/components/ScreenTopBar.tsx`** (updated): Added optional `actions?: React.ReactNode` prop for trailing elements (e.g. project toggle, save button, import/create buttons).
+  - **`web/src/i18n/he.ts`**: +50 R6 Hebrew keys (group_*, skills_*, skill_editor_*, integrations_*, logs_*, welcome_*).
+  - **`web/src/App.tsx`**: Added routes for `skills/:name/edit`, `logs`, `welcome`.
+  - **`web/tsconfig.json`**: Added `"vite/client"` to `types` array to fix `import.meta.env` TS error.
+  - **`web/src/__tests__/SmokeTests.test.tsx`**: Updated with `vi.hoisted()` for `cssProxy`, `mockGroup`, `mockSkill` (fixes TDZ hoisting errors). Added 12 new R6 interaction tests (GroupPage, SkillsPage, SkillEditorPage, IntegrationsPage, LogsPage, WelcomePage).
+  - `npm run build` ✓ | `npx vitest run` 107/107 ✓
+  - commit: 13a2176
+
 ## UI Refactor — R5 (User Settings + Child Lock screens)
 
 - [x] **R5 — User settings + child lock — Hebrew/RTL, app-style cards, auto-save, dialogs, time picker**
