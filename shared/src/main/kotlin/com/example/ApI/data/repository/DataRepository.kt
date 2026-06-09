@@ -368,4 +368,6 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     fun setSkillEnabled(skillName: String, enabled: Boolean) = skillsStorageManager.setSkillEnabled(skillName, enabled)
     fun getSkillMdContent(skillName: String) = skillsStorageManager.getSkillMdContent(skillName)
     fun importSkillFromText(content: String) = skillsStorageManager.importFromText(content)
+    fun importSkillFromZip(zipInputStream: java.util.zip.ZipInputStream) = skillsStorageManager.importFromZip(zipInputStream)
+    fun exportSkillToZip(skillName: String, zipOutputStream: java.util.zip.ZipOutputStream) = skillsStorageManager.exportToZip(skillName, zipOutputStream)
 }

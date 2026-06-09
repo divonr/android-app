@@ -20,9 +20,10 @@ interface SkillCardProps {
   onEdit: () => void
   onToggle: (enabled: boolean) => void
   onDelete: () => void
+  onExport: () => void
 }
 
-const SkillCard: React.FC<SkillCardProps> = ({ skill, onEdit, onToggle, onDelete }) => (
+const SkillCard: React.FC<SkillCardProps> = ({ skill, onEdit, onToggle, onDelete, onExport }) => (
   <div
     className={`${styles.skillCard} ${!skill.enabled ? styles.skillCardDisabled : ''}`}
     onClick={onEdit}
@@ -42,6 +43,17 @@ const SkillCard: React.FC<SkillCardProps> = ({ skill, onEdit, onToggle, onDelete
       </p>
     </div>
 
+    {/* Export download button */}
+    <button
+      className={styles.topbarBtn}
+      onClick={(e) => { e.stopPropagation(); onExport() }}
+      aria-label={`Export ${skill.name} as ZIP`}
+      title="ייצוא ZIP"
+      style={{ fontSize: 16 }}
+    >
+      ⬇
+    </button>
+
     {/* Toggle (click doesn't bubble to card's onEdit) */}
     <label
       className={styles.toggle}
@@ -58,6 +70,56 @@ const SkillCard: React.FC<SkillCardProps> = ({ skill, onEdit, onToggle, onDelete
     </label>
   </div>
 )
+
+// ── Import ZIP dialog ─────────────────────────────────────────────────────────
+
+interface ImportZipDialogProps {
+  onImport: (file: File) => Promise<void>
+  onClose: () => void
+}
+
+const ImportZipDialog: React.FC<ImportZipDialogProps> = ({ onImport, onClose }) => {
+  const [file, setFile] = useState<File | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const handleImport = async () => {
+    if (!file) { setErr('בחר קובץ ZIP'); return }
+    setBusy(true)
+    setErr('')
+    try {
+      await onImport(file)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Import failed')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      title="ייבוא סקיל מ-ZIP"
+      onClose={onClose}
+      actions={
+        <>
+          <DialogButton label={t('cancel')} onClick={onClose} />
+          <DialogButton label={busy ? '...' : 'ייבוא'} onClick={handleImport} primary disabled={busy || !file} />
+        </>
+      }
+    >
+      <p className={styles.dialogHint}>בחר קובץ ZIP המכיל תיקיית סקיל עם קובץ SKILL.md</p>
+      <div className={styles.dialogField}>
+        <input
+          type="file"
+          accept=".zip,application/zip"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          style={{ color: 'var(--on-surface)', fontFamily: 'inherit', fontSize: 'var(--fs-body-small)' }}
+        />
+      </div>
+      {err && <div className={styles.error}>{err}</div>}
+    </Dialog>
+  )
+}
 
 // ── Import text dialog ────────────────────────────────────────────────────────
 
@@ -218,6 +280,7 @@ const SkillsPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showImportDialog, setShowImportDialog] = useState(false)
+  const [showImportZipDialog, setShowImportZipDialog] = useState(false)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [deletingSkill, setDeletingSkill] = useState<InstalledSkill | null>(null)
 
@@ -262,6 +325,24 @@ const SkillsPage: React.FC = () => {
     await loadSkills()
   }
 
+  const handleImportZip = async (file: File) => {
+    await skillsApi.importZip(file)
+    setShowImportZipDialog(false)
+    await loadSkills()
+  }
+
+  // ── Export ─────────────────────────────────────────────────────────────────
+
+  const handleExport = (skillName: string) => {
+    const url = skillsApi.exportUrl(skillName)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${skillName}.zip`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+
   // ── Create ─────────────────────────────────────────────────────────────────
 
   const handleCreate = async (name: string, description: string) => {
@@ -276,6 +357,15 @@ const SkillsPage: React.FC = () => {
 
   const topbarActions = (
     <>
+      <button
+        className={styles.topbarBtn}
+        onClick={() => setShowImportZipDialog(true)}
+        aria-label="ייבוא מ-ZIP"
+        title="ייבוא מ-ZIP"
+        style={{ fontSize: 14 }}
+      >
+        📦
+      </button>
       <button
         className={styles.topbarBtn}
         onClick={() => setShowImportDialog(true)}
@@ -329,6 +419,7 @@ const SkillsPage: React.FC = () => {
                 onEdit={() => navigate(`/skills/${encodeURIComponent(skill.name)}/edit`)}
                 onToggle={(enabled) => handleToggle(skill, enabled)}
                 onDelete={() => setDeletingSkill(skill)}
+                onExport={() => handleExport(skill.name)}
               />
             ))
           )}
@@ -336,6 +427,12 @@ const SkillsPage: React.FC = () => {
       </div>
 
       {/* Dialogs rendered outside the page column */}
+      {showImportZipDialog && (
+        <ImportZipDialog
+          onImport={handleImportZip}
+          onClose={() => setShowImportZipDialog(false)}
+        />
+      )}
       {showImportDialog && (
         <ImportTextDialog
           onImport={handleImport}

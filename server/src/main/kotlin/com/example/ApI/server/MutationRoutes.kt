@@ -7,11 +7,15 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.http.content.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
+import java.io.ByteArrayInputStream
 import java.util.UUID
 
 private val lenientJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+private const val MAX_ZIP_UPLOAD_BYTES = 50L * 1024 * 1024  // 50 MB
 
 // ── P4 Request DTOs ──────────────────────────────────────────────────────────
 
@@ -877,5 +881,82 @@ fun Route.mutationRoutes() {
         }
         repo.deleteSkill(skillName)
         call.respond(HttpStatusCode.NoContent)
+    }
+
+    // GET /api/skills/{skillName}/export — download skill as application/zip
+    get("/skills/{skillName}/export") {
+        val skillName = call.parameters["skillName"] ?: return@get call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing skillName")
+        )
+        val repo = call.application.appModule.repository
+        val skills = repo.getInstalledSkills()
+        if (skills.none { it.directoryName == skillName }) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Skill not found"))
+            return@get
+        }
+        val zipBytes = java.io.ByteArrayOutputStream().use { baos ->
+            java.util.zip.ZipOutputStream(baos).use { zos ->
+                val ok = repo.exportSkillToZip(skillName, zos)
+                if (!ok) return@get call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Export failed"))
+            }
+            baos.toByteArray()
+        }
+        call.response.header(
+            io.ktor.http.HttpHeaders.ContentDisposition,
+            "attachment; filename=\"${skillName}.zip\""
+        )
+        call.respondBytes(zipBytes, ContentType.parse("application/zip"), HttpStatusCode.OK)
+    }
+
+    // POST /api/skills/import-zip — multipart ZIP upload; validates SKILL.md presence
+    post("/skills/import-zip") {
+        val multipart = call.receiveMultipart()
+        var zipBytes: ByteArray? = null
+        var tooLarge = false
+
+        multipart.forEachPart { part ->
+            when (part) {
+                is PartData.FileItem -> {
+                    if (!tooLarge) {
+                        val bytes = part.streamProvider().use { it.readBytes() }
+                        if (bytes.size.toLong() > MAX_ZIP_UPLOAD_BYTES) {
+                            tooLarge = true
+                        } else {
+                            zipBytes = bytes
+                        }
+                    }
+                }
+                else -> {}
+            }
+            part.dispose()
+        }
+
+        if (tooLarge) {
+            call.respond(HttpStatusCode.PayloadTooLarge, mapOf("error" to "File exceeds maximum allowed size (50 MB)"))
+            return@post
+        }
+
+        val bytes = zipBytes
+        if (bytes == null || bytes.isEmpty()) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "No ZIP file received"))
+            return@post
+        }
+
+        val repo = call.application.appModule.repository
+        val skill = try {
+            val zipStream = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes))
+            val result = repo.importSkillFromZip(zipStream)
+            zipStream.close()
+            result
+        } catch (e: Exception) {
+            null
+        }
+
+        if (skill == null) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid skill ZIP: SKILL.md not found or ZIP is malformed"))
+            return@post
+        }
+
+        call.respond(HttpStatusCode.Created, skill)
     }
 }

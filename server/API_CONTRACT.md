@@ -543,6 +543,28 @@ Deletes the skill.
 
 **Response 204**
 
+### GET /api/skills/{skillName}/export
+
+Downloads the skill directory as a ZIP archive (mirrors Android `SkillsStorageManager.exportToZip`).
+
+**Response 200** — `application/zip` body; `Content-Disposition: attachment; filename="<skillName>.zip"`
+
+The ZIP entries follow the pattern `<directoryName>/<relativeFilePath>` (e.g. `my-skill/SKILL.md`).
+
+**Response 404** — skill not found.
+
+### POST /api/skills/import-zip
+
+Imports a skill from a multipart ZIP upload (mirrors Android ZIP import path). The ZIP must contain a SKILL.md file (at the root or inside one subdirectory); otherwise 400 is returned.
+
+**Request** — `multipart/form-data` with a single `file` part containing the ZIP bytes. Max size: 50 MB.
+
+**Response 201** — `InstalledSkill` JSON of the newly installed skill.
+
+**Response 400** — `{ "error": "Invalid skill ZIP: SKILL.md not found or ZIP is malformed" }` when the ZIP contains no SKILL.md.
+
+**Response 413** — when the upload exceeds 50 MB.
+
 ---
 
 ## Branching (P4)

@@ -4,10 +4,12 @@ import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import io.ktor.client.plugins.cookies.*
 import io.ktor.client.request.*
+import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.testing.*
 import kotlinx.serialization.json.*
+import java.io.ByteArrayInputStream
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -899,5 +901,114 @@ class MutationApisTest {
             setBody("""{"enabled":true}""")
         }
         assertEquals(HttpStatusCode.NotFound, response.status)
+    }
+
+    // ── Skills export (ZIP) ───────────────────────────────────────────────────
+
+    @Test
+    fun `GET api skills skillName export returns zip bytes for known skill`() = testApplication {
+        val (storage, repo) = seededStorage()
+        application { module(storage, testAuthConfig) }
+        val c = loggedInClient()
+
+        repo.createSkill("export-skill", "Export test", "## Instructions\nDo things")
+
+        val response = c.get("/api/skills/export-skill/export")
+        assertEquals(HttpStatusCode.OK, response.status)
+        val ct = response.contentType()
+        assertNotNull(ct)
+        assertTrue(ct!!.match(ContentType.parse("application/zip")), "Expected application/zip, got $ct")
+        val bytes = response.readBytes()
+        assertTrue(bytes.isNotEmpty(), "ZIP bytes should not be empty")
+
+        // Verify zip contains SKILL.md entry
+        val zis = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes))
+        val entries = mutableListOf<String>()
+        var entry = zis.nextEntry
+        while (entry != null) {
+            entries.add(entry.name)
+            zis.closeEntry()
+            entry = zis.nextEntry
+        }
+        zis.close()
+        assertTrue(entries.any { it.endsWith("SKILL.md") }, "ZIP should contain SKILL.md, entries: $entries")
+    }
+
+    @Test
+    fun `GET api skills unknown skill export returns 404`() = testApplication {
+        val (storage, _) = seededStorage()
+        application { module(storage, testAuthConfig) }
+        val c = loggedInClient()
+
+        val response = c.get("/api/skills/no-such-skill/export")
+        assertEquals(HttpStatusCode.NotFound, response.status)
+    }
+
+    // ── Skills import-zip ────────────────────────────────────────────────────
+
+    @Test
+    fun `POST api skills import-zip installs skill from valid zip`() = testApplication {
+        val (storage, repo) = seededStorage()
+        application { module(storage, testAuthConfig) }
+        val c = loggedInClient()
+
+        // Build an in-memory ZIP containing SKILL.md
+        val skillMdContent = "---\nname: zip-skill\ndescription: Imported from ZIP\n---\n\n# Zip Skill\n\nDoes things."
+        val zipBytes = java.io.ByteArrayOutputStream().also { baos ->
+            java.util.zip.ZipOutputStream(baos).use { zos ->
+                zos.putNextEntry(java.util.zip.ZipEntry("zip-skill/SKILL.md"))
+                zos.write(skillMdContent.toByteArray(Charsets.UTF_8))
+                zos.closeEntry()
+            }
+        }.toByteArray()
+
+        val response = c.post("/api/skills/import-zip") {
+            setBody(
+                io.ktor.client.request.forms.MultiPartFormDataContent(
+                    io.ktor.client.request.forms.formData {
+                        append("file", zipBytes, io.ktor.http.Headers.build {
+                            append(io.ktor.http.HttpHeaders.ContentDisposition, "filename=\"zip-skill.zip\"")
+                            append(io.ktor.http.HttpHeaders.ContentType, "application/zip")
+                        })
+                    }
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.Created, response.status)
+        val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals("zip-skill", body["directoryName"]?.jsonPrimitive?.content)
+
+        // Verify via repository
+        assertTrue(repo.getInstalledSkills().any { it.directoryName == "zip-skill" }, "Skill should be installed")
+    }
+
+    @Test
+    fun `POST api skills import-zip returns 400 when zip lacks SKILL md`() = testApplication {
+        val (storage, _) = seededStorage()
+        application { module(storage, testAuthConfig) }
+        val c = loggedInClient()
+
+        // Build an in-memory ZIP WITHOUT SKILL.md
+        val zipBytes = java.io.ByteArrayOutputStream().also { baos ->
+            java.util.zip.ZipOutputStream(baos).use { zos ->
+                zos.putNextEntry(java.util.zip.ZipEntry("readme.txt"))
+                zos.write("no skill here".toByteArray(Charsets.UTF_8))
+                zos.closeEntry()
+            }
+        }.toByteArray()
+
+        val response = c.post("/api/skills/import-zip") {
+            setBody(
+                io.ktor.client.request.forms.MultiPartFormDataContent(
+                    io.ktor.client.request.forms.formData {
+                        append("file", zipBytes, io.ktor.http.Headers.build {
+                            append(io.ktor.http.HttpHeaders.ContentDisposition, "filename=\"bad.zip\"")
+                            append(io.ktor.http.HttpHeaders.ContentType, "application/zip")
+                        })
+                    }
+                )
+            )
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
     }
 }

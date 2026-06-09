@@ -437,6 +437,29 @@ export const skills = {
   /** DELETE /api/skills/:name */
   delete: (name: string) =>
     request<void>(`/api/skills/${name}`, { method: 'DELETE' }),
+
+  /** GET /api/skills/:name/export — returns download URL (use as anchor href) */
+  exportUrl: (name: string) => `${BASE_URL}/api/skills/${encodeURIComponent(name)}/export`,
+
+  /**
+   * POST /api/skills/import-zip — multipart ZIP upload.
+   * Returns the created InstalledSkill.
+   */
+  importZip: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE_URL}/api/skills/import-zip`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new ApiError(res.status, body)
+      }
+      return res.json() as Promise<InstalledSkill>
+    })
+  },
 }
 
 // ---------------------------------------------------------------------------
