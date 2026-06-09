@@ -25,6 +25,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { settings as settingsApi, sync as syncApi } from '../api/client'
 import type { AppSettings, ChildLockSettings, RemoteSyncSettings, TitleGenerationSettings } from '../api/types'
+import { sha256 } from '../utils/crypto'
+import { isInLockRange } from '../utils/childLock'
 import { t } from '../i18n/he'
 import ScreenTopBar from '../components/ScreenTopBar'
 import Dialog, { DialogButton } from '../ui/Dialog'
@@ -62,33 +64,7 @@ function getProviderLabel(key: string): string {
   return PROVIDERS_FOR_TITLE_GEN.find((p) => p.key === key)?.label ?? key
 }
 
-/** SHA-256 hash using Web Crypto API (returns lowercase hex). */
-async function sha256(text: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-/** Check if current local time falls within [startTime, endTime] (handles overnight). */
-function isInLockRange(startTime: string, endTime: string): boolean {
-  try {
-    const now = new Date()
-    const [sh, sm] = startTime.split(':').map(Number)
-    const [eh, em] = endTime.split(':').map(Number)
-    const nowMins = now.getHours() * 60 + now.getMinutes()
-    const startMins = sh * 60 + sm
-    const endMins = eh * 60 + em
-    if (startMins < endMins) {
-      return nowMins >= startMins && nowMins < endMins
-    } else {
-      // overnight: e.g. 23:00 → 07:00
-      return nowMins >= startMins || nowMins < endMins
-    }
-  } catch {
-    return false
-  }
-}
+// sha256 and isInLockRange are imported from utils/crypto and utils/childLock (A3 dedup).
 
 // ─── TimePicker component ─────────────────────────────────────────────────────
 

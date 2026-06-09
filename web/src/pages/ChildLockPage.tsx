@@ -22,33 +22,8 @@ import { settings as settingsApi } from '../api/client'
 import type { AppSettings } from '../api/types'
 import { t } from '../i18n/he'
 import { MdLock, MdVisibility, MdVisibilityOff } from '../ui/icons'
-
-// ── SHA-256 helper (same as SettingsPage) ─────────────────────────────────────
-
-async function sha256(text: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-function isInLockRange(startTime: string, endTime: string): boolean {
-  try {
-    const now = new Date()
-    const [sh, sm] = startTime.split(':').map(Number)
-    const [eh, em] = endTime.split(':').map(Number)
-    const nowMins = now.getHours() * 60 + now.getMinutes()
-    const startMins = sh * 60 + sm
-    const endMins = eh * 60 + em
-    if (startMins < endMins) {
-      return nowMins >= startMins && nowMins < endMins
-    } else {
-      return nowMins >= startMins || nowMins < endMins
-    }
-  } catch {
-    return false
-  }
-}
+import { sha256 } from '../utils/crypto'
+import { isInLockRange } from '../utils/childLock'
 
 // ── Component ─────────────────────────────────────────────────────────────────
 

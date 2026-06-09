@@ -31,10 +31,10 @@ import type {
   FullCustomProviderConfig,
 } from '../api/types'
 import { t } from '../i18n/he'
+import ScreenTopBar from '../components/ScreenTopBar'
 import IconButton from '../ui/IconButton'
 import Dialog, { DialogButton } from '../ui/Dialog'
 import {
-  MdArrowBack,
   MdAdd,
   MdDelete,
   MdEdit,
@@ -1075,10 +1075,11 @@ const KeysPage: React.FC = () => {
   if (loading) {
     return (
       <div className={styles.page}>
-        <div className={styles.topBar}>
-          <IconButton icon={MdArrowBack} aria-label="חזור" onClick={() => navigate(-1)} size={36} />
-          <h1 className={styles.topBarTitle} aria-label="API Keys">{t('api_keys')}</h1>
-        </div>
+        <ScreenTopBar
+          title={t('api_keys')}
+          onBack={() => navigate(-1)}
+          headingAriaLabel="API Keys"
+        />
         <div className={styles.loading}>{'טוען...'}</div>
       </div>
     )
@@ -1087,10 +1088,11 @@ const KeysPage: React.FC = () => {
   return (
     <div className={styles.page}>
       {/* ── Top bar ── */}
-      <div className={styles.topBar}>
-        <IconButton icon={MdArrowBack} aria-label="חזור" onClick={() => navigate(-1)} size={36} />
-        <h1 className={styles.topBarTitle} aria-label="API Keys">{t('api_keys')}</h1>
-      </div>
+      <ScreenTopBar
+        title={t('api_keys')}
+        onBack={() => navigate(-1)}
+        headingAriaLabel="API Keys"
+      />
 
       {/* ── Error banner ── */}
       {error && (

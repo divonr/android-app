@@ -9,12 +9,15 @@
  *  - User (RIGHT in RTL):  all 20px except border-top-left-radius: 6px (topEnd in RTL)
  *  - Assistant (LEFT in RTL): all 20px except border-top-right-radius: 6px (topStart in RTL)
  *
- * Context menu (right-click / ⋯ button): Copy, Edit (user), Regenerate (asst), Delete from here
+ * Context menu: long-press (~500ms) + right-click on the bubble.
+ * Replicates the long-press pattern from ChatHistoryPage (R1).
+ * Menu items: Copy, Edit (user), Regenerate (asst), Delete from here.
  * ThoughtsBubble and ToolCallBlocks rendered inside assistant bubble.
  * BranchNavigator below user messages with multiple variants.
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react'
+import ReactDOM from 'react-dom'
 import Markdown from '../Markdown'
 import ThoughtsBubble from './ThoughtsBubble'
 import ToolCallBlock from './ToolCallBlock'
@@ -42,69 +45,94 @@ function formatTime(datetime: string | null | undefined): string {
   return d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
 }
 
-// ─── Context menu ─────────────────────────────────────────────────────────────
+// ─── Context menu (portaled, positioned at pointer coordinates) ───────────────
 
 interface ContextMenuProps {
+  x: number
+  y: number
   isUser: boolean
   onCopy: () => void
   onEdit?: () => void
   onRegenerate?: () => void
   onDelete: () => void
   onClose: () => void
-  anchorRef: React.RefObject<HTMLDivElement | null>
 }
 
 const ContextMenu: React.FC<ContextMenuProps> = ({
-  isUser, onCopy, onEdit, onRegenerate, onDelete, onClose, anchorRef,
+  x, y, isUser, onCopy, onEdit, onRegenerate, onDelete, onClose,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null)
 
+  // Adjust position so menu stays within viewport
+  const [pos, setPos] = useState({ top: y, left: x })
+
+  useEffect(() => {
+    if (menuRef.current) {
+      const { width, height } = menuRef.current.getBoundingClientRect()
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      setPos({
+        top: Math.min(y, vh - height - 8),
+        left: Math.min(x, vw - width - 8),
+      })
+    }
+  }, [x, y])
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (
-        menuRef.current && !menuRef.current.contains(e.target as Node) &&
-        anchorRef.current && !anchorRef.current.contains(e.target as Node)
-      ) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         onClose()
       }
     }
-    window.addEventListener('mousedown', handler)
-    return () => window.removeEventListener('mousedown', handler)
-  }, [onClose, anchorRef])
+    const escHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    // Delay slightly so the pointerdown that opened us doesn't immediately close
+    const t = setTimeout(() => {
+      window.addEventListener('mousedown', handler)
+      window.addEventListener('keydown', escHandler)
+    }, 80)
+    return () => {
+      clearTimeout(t)
+      window.removeEventListener('mousedown', handler)
+      window.removeEventListener('keydown', escHandler)
+    }
+  }, [onClose])
 
   const itemStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
     width: '100%',
-    padding: '9px 14px',
+    padding: '10px 16px',
     background: 'none',
     border: 'none',
     textAlign: 'start',
     color: 'var(--color-text)',
     cursor: 'pointer',
     fontSize: 14,
+    whiteSpace: 'nowrap',
     transition: 'background 0.1s',
   }
 
-  return (
+  const menuNode = (
     <div
       ref={menuRef}
+      role="menu"
       style={{
-        position: 'absolute',
-        bottom: 'calc(100% + 4px)',
-        insetInlineEnd: 0,
-        zIndex: 300,
+        position: 'fixed',
+        top: pos.top,
+        left: pos.left,
+        zIndex: 400,
         background: 'var(--surface)',
         border: '1px solid var(--color-border)',
-        borderRadius: 10,
-        boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
-        minWidth: 160,
+        borderRadius: 12,
+        boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+        minWidth: 170,
         overflow: 'hidden',
       }}
     >
       <button
         type="button"
+        role="menuitem"
         style={itemStyle}
         onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-variant)')}
         onMouseLeave={e => (e.currentTarget.style.background = 'none')}
@@ -117,6 +145,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
       {isUser && onEdit && (
         <button
           type="button"
+          role="menuitem"
           style={itemStyle}
           onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-variant)')}
           onMouseLeave={e => (e.currentTarget.style.background = 'none')}
@@ -130,6 +159,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
       {!isUser && onRegenerate && (
         <button
           type="button"
+          role="menuitem"
           style={itemStyle}
           onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-variant)')}
           onMouseLeave={e => (e.currentTarget.style.background = 'none')}
@@ -142,6 +172,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 
       <button
         type="button"
+        role="menuitem"
         style={{ ...itemStyle, color: 'var(--color-error)' }}
         onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-variant)')}
         onMouseLeave={e => (e.currentTarget.style.background = 'none')}
@@ -152,6 +183,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
       </button>
     </div>
   )
+
+  return ReactDOM.createPortal(menuNode, document.body)
 }
 
 // ─── MessageBubble ────────────────────────────────────────────────────────────
@@ -171,8 +204,39 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   msg, chat, textDirectionMode,
   onEdit, onCopy, onDelete, onRegenerate, onBranchSwitch,
 }) => {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuAnchorRef = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+
+  // Long-press timer (500ms) + right-click open the context menu
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const startPosRef = useRef({ x: 0, y: 0 })
+
+  const cancelTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    // Only primary button (left/touch)
+    if (e.button !== 0 && e.pointerType === 'mouse') return
+    startPosRef.current = { x: e.clientX, y: e.clientY }
+    timerRef.current = setTimeout(() => {
+      setMenuPos({ x: e.clientX, y: e.clientY })
+    }, 500)
+  }
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const dx = Math.abs(e.clientX - startPosRef.current.x)
+    const dy = Math.abs(e.clientY - startPosRef.current.y)
+    if (dx > 8 || dy > 8) cancelTimer()
+  }
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    cancelTimer()
+    setMenuPos({ x: e.clientX, y: e.clientY })
+  }
 
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
@@ -255,6 +319,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     maxWidth: 'min(320px, 88%)',
     wordBreak: 'break-word',
     position: 'relative',
+    // Subtle press feedback for long-press affordance
+    cursor: 'default',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
   }
 
   return (
@@ -300,8 +368,16 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         )}
 
-        {/* Bubble */}
-        <div style={bubbleStyle}>
+        {/* Bubble — long-press + right-click opens context menu */}
+        <div
+          style={bubbleStyle}
+          onPointerDown={handlePointerDown}
+          onPointerUp={cancelTimer}
+          onPointerLeave={cancelTimer}
+          onPointerMove={handlePointerMove}
+          onContextMenu={handleContextMenu}
+          aria-label="Message actions"
+        >
           {/* Model name label (assistant only, like WhatsApp sender name) */}
           {!isUser && !isSystem && msg.model && (
             <div
@@ -368,62 +444,19 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             </div>
           )}
 
-          {/* Footer: timestamp + menu */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              marginTop: 6,
-              justifyContent: isUser ? 'flex-end' : 'flex-start',
-            }}
-          >
-            {timeStr && (
-              <span
-                style={{
-                  fontSize: 11,
-                  color: isUser ? 'rgba(255,255,255,0.7)' : 'var(--on-surface-variant)',
-                }}
-              >
-                {timeStr}
-              </span>
-            )}
-
-            {/* ⋯ context menu anchor */}
-            <div ref={menuAnchorRef} style={{ position: 'relative', marginInlineStart: 'auto' }}>
-              <button
-                type="button"
-                onClick={() => setMenuOpen((o) => !o)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: isUser ? 'rgba(255,255,255,0.6)' : 'var(--on-surface-variant)',
-                  cursor: 'pointer',
-                  padding: '0 2px',
-                  fontSize: 16,
-                  lineHeight: 1,
-                  opacity: 0,
-                  transition: 'opacity 0.15s',
-                }}
-                onMouseEnter={e => { (e.currentTarget.style.opacity = '1') }}
-                onMouseLeave={e => { if (!menuOpen) e.currentTarget.style.opacity = '0' }}
-                aria-label="Message actions"
-              >
-                ⋯
-              </button>
-              {menuOpen && (
-                <ContextMenu
-                  isUser={isUser}
-                  onCopy={() => onCopy(msg.text)}
-                  onEdit={isUser ? () => onEdit(msg) : undefined}
-                  onRegenerate={!isUser ? () => onRegenerate(msg) : undefined}
-                  onDelete={() => onDelete(msg.id)}
-                  onClose={() => setMenuOpen(false)}
-                  anchorRef={menuAnchorRef}
-                />
-              )}
+          {/* Timestamp footer */}
+          {timeStr && (
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 11,
+                color: isUser ? 'rgba(255,255,255,0.7)' : 'var(--on-surface-variant)',
+                textAlign: isUser ? 'end' : 'start',
+              }}
+            >
+              {timeStr}
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -435,6 +468,20 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           totalVariants={branchInfo.totalVariants}
           currentVariantIndex={branchInfo.currentVariantIndex}
           onSwitch={onBranchSwitch}
+        />
+      )}
+
+      {/* Context menu (portaled, long-press or right-click) */}
+      {menuPos && (
+        <ContextMenu
+          x={menuPos.x}
+          y={menuPos.y}
+          isUser={isUser}
+          onCopy={() => onCopy(msg.text)}
+          onEdit={isUser ? () => onEdit(msg) : undefined}
+          onRegenerate={!isUser ? () => onRegenerate(msg) : undefined}
+          onDelete={() => onDelete(msg.id)}
+          onClose={() => setMenuPos(null)}
         />
       )}
     </div>
