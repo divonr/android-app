@@ -59,7 +59,7 @@ Branch: `web-ui`
   - **`web/src/__tests__/KeysPage.test.tsx`** (rewritten): 13 tests — Hebrew UI assertions, provider dropdown interaction (portal findable in JSDOM), masked key display, toggle/delete/reorder calls, custom provider add flow. `aria-label="API Keys"` on heading keeps SmokeTests `/api keys/i` regex passing without touching SmokeTests.test.tsx.
   - Reusable for R5/R6: `Dialog`+`DialogButton` (already R0), `IconButton` (R0). Shared `ScreenShell` pattern (back-arrow + title row) could be extracted into a `ScreenTopBar` component for R5/R6 to import.
   - `npm run build` ✓ | `npx vitest run` 88/88 ✓
-  - commit: TBD
+  - commit: efc8116
 
 ## UI Refactor — R3 (Chat screen body + input)
 
