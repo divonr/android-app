@@ -1,115 +1,448 @@
-import React, { useEffect, useState, useCallback } from 'react'
+/**
+ * KeysPage — R4 refactor.
+ *
+ * Visual + UX parity with Android ApiKeysScreen.kt:
+ *   - Top bar: back arrow + Hebrew title "מפתחות API"
+ *   - Two action buttons side-by-side: "הוסף מפתח API" (primary) + "קבל מפתח API" (green)
+ *   - API keys list: gradient cards (provider-coloured), masked key, status toggle, delete, up/down reorder
+ *   - Add-key dialog: provider dropdown (built-in + custom + full-custom with edit/delete) + key + custom name
+ *   - Custom providers list: each with edit/delete + Add button
+ *   - Full custom providers list: each with edit/delete + Add button
+ *   - Dialogs: AddKeyDialog, DeleteKeyConfirm, SimpleCustomProviderDialog, FullCustomProviderDialog, DeleteProviderConfirm
+ *
+ * Simplification note for R7:
+ *   - FullCustomProviderDialog uses web-API fields (requestTemplate+responseMapping JSON blobs) rather than
+ *     the Android bodyTemplate/messageFields/parserType/eventMappings streaming-config sub-editors —
+ *     those require backend support for the richer schema first.
+ */
+
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import ReactDOM from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { apiKeys, customProviders, fullCustomProviders } from '../api/client'
-import type { ApiKey, CustomProviderConfig, FullCustomProviderConfig } from '../api/types'
+import type {
+  ApiKey,
+  CustomProviderConfig,
+  FullCustomProviderConfig,
+} from '../api/types'
+import { t } from '../i18n/he'
+import IconButton from '../ui/IconButton'
+import Dialog, { DialogButton } from '../ui/Dialog'
+import {
+  MdArrowBack,
+  MdAdd,
+  MdDelete,
+  MdEdit,
+  MdExpandMore,
+  MdExpandLess,
+  MdArrowUpward,
+  MdArrowDownward,
+} from '../ui/icons'
 import styles from './KeysPage.module.css'
 
-// ─── Provider list (common providers to show in dropdown) ────────────────────
+// ─── Provider color helpers (mirrors ApiKeysScreen.kt) ───────────────────────
 
-const COMMON_PROVIDERS = [
-  'openai', 'anthropic', 'google', 'poe', 'cohere', 'openrouter', 'mistral', 'together', 'custom',
-]
-
-// ─── Add Key Form ─────────────────────────────────────────────────────────────
-
-interface AddKeyFormProps {
-  onAdd: (provider: string, key: string, customName: string) => Promise<void>
-  onCancel: () => void
+function providerGradient(provider: string): string {
+  switch (provider.toLowerCase()) {
+    case 'openai':
+      return 'linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.08) 100%)'
+    case 'anthropic':
+      return 'linear-gradient(180deg, rgba(198,97,63,0.25) 0%, rgba(198,97,63,0.15) 100%)'
+    case 'google':
+      return 'linear-gradient(90deg, rgba(66,133,244,0.25) 0%, rgba(234,67,53,0.25) 33%, rgba(251,188,5,0.25) 66%, rgba(52,168,83,0.25) 100%)'
+    case 'poe':
+      return 'linear-gradient(180deg, rgba(105,75,194,0.25) 0%, rgba(105,75,194,0.15) 100%)'
+    case 'cohere':
+      return 'linear-gradient(180deg, rgba(57,89,77,0.25) 0%, rgba(57,89,77,0.15) 100%)'
+    case 'openrouter':
+      return 'linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.08) 100%)'
+    case 'llmstats':
+      return 'linear-gradient(180deg, rgba(14,165,233,0.25) 0%, rgba(14,165,233,0.15) 100%)'
+    default:
+      return 'var(--surface-variant)'
+  }
 }
 
-const AddKeyForm: React.FC<AddKeyFormProps> = ({ onAdd, onCancel }) => {
-  const [provider, setProvider] = useState('openai')
-  const [customProvider, setCustomProvider] = useState('')
-  const [key, setKey] = useState('')
+// ─── Built-in providers ───────────────────────────────────────────────────────
+
+const BUILTIN_PROVIDERS = [
+  { key: 'openai', label: t('provider_openai') },
+  { key: 'anthropic', label: t('provider_anthropic') },
+  { key: 'google', label: t('provider_google') },
+  { key: 'poe', label: t('provider_poe') },
+  { key: 'cohere', label: t('provider_cohere') },
+  { key: 'openrouter', label: t('provider_openrouter') },
+  { key: 'llmstats', label: t('provider_llmstats') },
+]
+
+// ─── Provider Dropdown ────────────────────────────────────────────────────────
+
+interface ProviderDropdownProps {
+  value: string
+  onChange: (v: string) => void
+  customList: CustomProviderConfig[]
+  fullList: FullCustomProviderConfig[]
+  onEditCustom: (cfg: CustomProviderConfig) => void
+  onDeleteCustom: (cfg: CustomProviderConfig) => void
+  onEditFull: (cfg: FullCustomProviderConfig) => void
+  onDeleteFull: (cfg: FullCustomProviderConfig) => void
+  onCreateNew: () => void
+}
+
+const ProviderDropdown: React.FC<ProviderDropdownProps> = ({
+  value, onChange, customList, fullList,
+  onEditCustom, onDeleteCustom, onEditFull, onDeleteFull, onCreateNew,
+}) => {
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 0 })
+
+  const openMenu = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect()
+      setMenuPos({ top: rect.bottom + 4, left: rect.left, width: rect.width })
+    }
+    setOpen(true)
+  }
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        triggerRef.current && !triggerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const selectedLabel = (() => {
+    if (!value) return t('select_provider')
+    const builtin = BUILTIN_PROVIDERS.find(p => p.key === value)
+    if (builtin) return builtin.label
+    const cp = customList.find(c => c.id === value || c.name === value)
+    if (cp) return cp.name
+    const fp = fullList.find(f => f.id === value || f.name === value)
+    if (fp) return fp.name
+    return value
+  })()
+
+  const pick = (v: string) => {
+    onChange(v)
+    setOpen(false)
+  }
+
+  return (
+    <div className={styles.providerDropdown}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={styles.providerDropdownTrigger}
+        onClick={openMenu}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span>{selectedLabel}</span>
+        <MdExpandMore size={18} />
+      </button>
+
+      {open && ReactDOM.createPortal(
+        <div
+          ref={menuRef}
+          className={styles.providerDropdownMenu}
+          role="listbox"
+          style={{ top: menuPos.top, left: menuPos.left, width: menuPos.width }}
+        >
+          {/* Built-in providers */}
+          {BUILTIN_PROVIDERS.map(p => (
+            <div
+              key={p.key}
+              role="option"
+              aria-selected={value === p.key}
+              className={`${styles.dropdownItem} ${value === p.key ? styles.dropdownItemSelected : ''}`}
+              onClick={() => pick(p.key)}
+            >
+              {p.label}
+            </div>
+          ))}
+
+          {/* Custom providers */}
+          {customList.length > 0 && (
+            <>
+              <div className={styles.dropdownDivider} />
+              {customList.map(cp => (
+                <div key={cp.id} className={`${styles.dropdownItem} ${styles.dropdownItemCustom}`}>
+                  <span
+                    style={{ flex: 1, cursor: 'pointer' }}
+                    onClick={() => pick(cp.id ?? cp.name)}
+                  >
+                    {cp.name}
+                  </span>
+                  <div className={styles.dropdownItemActions}>
+                    <button
+                      type="button"
+                      className={styles.dropdownActionBtn}
+                      aria-label={`${t('edit')} ${cp.name}`}
+                      onClick={(e) => { e.stopPropagation(); setOpen(false); onEditCustom(cp) }}
+                    >
+                      <MdEdit size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.dropdownActionBtn} ${styles.dropdownActionBtnDelete}`}
+                      aria-label={`${t('delete')} ${cp.name}`}
+                      onClick={(e) => { e.stopPropagation(); setOpen(false); onDeleteCustom(cp) }}
+                    >
+                      <MdDelete size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* Full custom providers */}
+          {fullList.length > 0 && (
+            <>
+              <div className={styles.dropdownDivider} />
+              {fullList.map(fp => (
+                <div key={fp.id} className={`${styles.dropdownItem} ${styles.dropdownItemFull}`}>
+                  <span
+                    style={{ flex: 1, cursor: 'pointer' }}
+                    onClick={() => pick(fp.id ?? fp.name)}
+                  >
+                    {fp.name}
+                  </span>
+                  <div className={styles.dropdownItemActions}>
+                    <button
+                      type="button"
+                      className={styles.dropdownActionBtn}
+                      aria-label={`${t('edit')} ${fp.name}`}
+                      onClick={(e) => { e.stopPropagation(); setOpen(false); onEditFull(fp) }}
+                    >
+                      <MdEdit size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.dropdownActionBtn} ${styles.dropdownActionBtnDelete}`}
+                      aria-label={`${t('delete')} ${fp.name}`}
+                      onClick={(e) => { e.stopPropagation(); setOpen(false); onDeleteFull(fp) }}
+                    >
+                      <MdDelete size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* Create new */}
+          <div className={styles.dropdownDivider} />
+          <div
+            role="option"
+            aria-selected={false}
+            className={`${styles.dropdownItem} ${styles.dropdownItemCreate}`}
+            onClick={() => { setOpen(false); onCreateNew() }}
+          >
+            <MdAdd size={18} />
+            {t('define_new_provider')}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  )
+}
+
+// ─── Add API Key Dialog ───────────────────────────────────────────────────────
+
+interface AddKeyDialogProps {
+  open: boolean
+  customList: CustomProviderConfig[]
+  fullList: FullCustomProviderConfig[]
+  onConfirm: (provider: string, key: string, customName: string | null) => Promise<void>
+  onDismiss: () => void
+  onEditCustom: (cfg: CustomProviderConfig) => void
+  onDeleteCustom: (cfg: CustomProviderConfig) => void
+  onEditFull: (cfg: FullCustomProviderConfig) => void
+  onDeleteFull: (cfg: FullCustomProviderConfig) => void
+  onCreateNew: () => void
+}
+
+const AddKeyDialog: React.FC<AddKeyDialogProps> = ({
+  open, customList, fullList,
+  onConfirm, onDismiss,
+  onEditCustom, onDeleteCustom, onEditFull, onDeleteFull, onCreateNew,
+}) => {
+  const [provider, setProvider] = useState('')
+  const [apiKey, setApiKey] = useState('')
   const [customName, setCustomName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  const handleSubmit = async () => {
-    const prov = provider === 'custom' ? customProvider.trim() : provider
-    if (!prov || !key.trim()) {
-      setError('Provider and key are required')
+  // Reset when opened
+  useEffect(() => {
+    if (open) {
+      setProvider('')
+      setApiKey('')
+      setCustomName('')
+      setError('')
+    }
+  }, [open])
+
+  const handleConfirm = async () => {
+    if (!provider || !apiKey.trim()) {
+      setError('יש לבחור ספק ולהזין מפתח API')
       return
     }
     setBusy(true)
     setError('')
     try {
-      await onAdd(prov, key.trim(), customName.trim())
+      await onConfirm(provider, apiKey.trim(), customName.trim() || null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add key')
+      setError(err instanceof Error ? err.message : 'שגיאה בהוספת מפתח')
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className={styles.addForm}>
-      <h3>Add API Key</h3>
-      <div className={styles.formRow}>
-        <label>Provider</label>
-        <select
-          className={styles.select}
-          value={provider}
-          onChange={(e) => setProvider(e.target.value)}
-        >
-          {COMMON_PROVIDERS.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
-      </div>
-      {provider === 'custom' && (
-        <div className={styles.formRow}>
-          <label>Provider name</label>
-          <input
-            className={styles.input}
-            placeholder="e.g. my-provider"
-            value={customProvider}
-            onChange={(e) => setCustomProvider(e.target.value)}
+    <Dialog
+      open={open}
+      onClose={onDismiss}
+      title={t('add_api_key')}
+      maxWidth={440}
+      actions={
+        <>
+          <DialogButton label={t('cancel')} onClick={onDismiss} />
+          <DialogButton
+            label={t('approve')}
+            primary
+            disabled={busy || !provider || !apiKey.trim()}
+            onClick={handleConfirm}
+          />
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Provider dropdown */}
+        <div className={styles.dialogField}>
+          <label className={styles.dialogLabel}>{'ספק'}</label>
+          <ProviderDropdown
+            value={provider}
+            onChange={setProvider}
+            customList={customList}
+            fullList={fullList}
+            onEditCustom={onEditCustom}
+            onDeleteCustom={onDeleteCustom}
+            onEditFull={onEditFull}
+            onDeleteFull={onDeleteFull}
+            onCreateNew={onCreateNew}
           />
         </div>
-      )}
-      <div className={styles.formRow}>
-        <label>API Key</label>
-        <input
-          className={styles.input}
-          type="password"
-          placeholder="sk-…"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-        />
+
+        {/* API Key input */}
+        <div className={styles.dialogField}>
+          <label className={styles.dialogLabel}>{'מפתח API'}</label>
+          <input
+            className={styles.dialogInput}
+            type="password"
+            placeholder="sk-…"
+            value={apiKey}
+            onChange={e => setApiKey(e.target.value)}
+            dir="ltr"
+          />
+        </div>
+
+        {/* Custom name (optional) */}
+        <div className={styles.dialogField}>
+          <label className={styles.dialogLabel}>{t('custom_name_optional')}</label>
+          <input
+            className={styles.dialogInput}
+            placeholder={t('custom_name_placeholder')}
+            value={customName}
+            onChange={e => setCustomName(e.target.value)}
+          />
+        </div>
+
+        {error && <div className={styles.dialogError}>{error}</div>}
       </div>
-      <div className={styles.formRow}>
-        <label>Display name (optional)</label>
-        <input
-          className={styles.input}
-          placeholder="e.g. Work key"
-          value={customName}
-          onChange={(e) => setCustomName(e.target.value)}
-        />
-      </div>
-      {error && <div className={styles.error}>{error}</div>}
-      <div className={styles.formActions}>
-        <button className={styles.btnSecondary} onClick={onCancel}>Cancel</button>
-        <button
-          className={styles.btnPrimary}
-          onClick={handleSubmit}
-          disabled={busy || !key.trim()}
-        >
-          {busy ? 'Adding…' : 'Add Key'}
-        </button>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
-// ─── Custom Provider Form ─────────────────────────────────────────────────────
+// ─── Delete Key Confirmation Dialog ──────────────────────────────────────────
 
-interface CustomProviderFormProps {
-  initial?: CustomProviderConfig
-  onSave: (cfg: CustomProviderConfig) => Promise<void>
-  onCancel: () => void
+interface DeleteKeyDialogProps {
+  open: boolean
+  onConfirm: () => void
+  onDismiss: () => void
 }
 
-const CustomProviderForm: React.FC<CustomProviderFormProps> = ({ initial, onSave, onCancel }) => {
+const DeleteKeyDialog: React.FC<DeleteKeyDialogProps> = ({ open, onConfirm, onDismiss }) => (
+  <Dialog
+    open={open}
+    onClose={onDismiss}
+    title={t('delete_api_key_title')}
+    actions={
+      <>
+        <DialogButton label={t('cancel')} onClick={onDismiss} />
+        <DialogButton label={t('delete')} danger onClick={onConfirm} />
+      </>
+    }
+  >
+    {t('delete_api_key_body')}
+  </Dialog>
+)
+
+// ─── Delete Provider Confirmation Dialog ─────────────────────────────────────
+
+interface DeleteProviderDialogProps {
+  open: boolean
+  onConfirm: () => void
+  onDismiss: () => void
+}
+
+const DeleteProviderDialog: React.FC<DeleteProviderDialogProps> = ({ open, onConfirm, onDismiss }) => (
+  <Dialog
+    open={open}
+    onClose={onDismiss}
+    title={t('delete_provider_title')}
+    actions={
+      <>
+        <DialogButton label={t('cancel')} onClick={onDismiss} />
+        <DialogButton label={t('delete')} danger onClick={onConfirm} />
+      </>
+    }
+  >
+    {t('delete_provider_body')}
+  </Dialog>
+)
+
+// ─── Simple Custom Provider Dialog ───────────────────────────────────────────
+// Matches CustomProviderDialog.kt (OpenAI-compatible, web-API shape)
+
+interface SimpleCustomProviderDialogProps {
+  open: boolean
+  initial?: CustomProviderConfig
+  onConfirm: (cfg: CustomProviderConfig) => Promise<void>
+  onDismiss: () => void
+  onSwitchToFull: () => void
+}
+
+const SimpleCustomProviderDialog: React.FC<SimpleCustomProviderDialogProps> = ({
+  open, initial, onConfirm, onDismiss, onSwitchToFull,
+}) => {
   const [name, setName] = useState(initial?.name ?? '')
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '')
   const [apiKey, setApiKey] = useState(initial?.apiKey ?? '')
@@ -117,165 +450,490 @@ const CustomProviderForm: React.FC<CustomProviderFormProps> = ({ initial, onSave
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  const handleSave = async () => {
-    if (!name.trim() || !baseUrl.trim()) {
-      setError('Name and base URL are required')
+  const isEditing = !!initial
+
+  // Reset on open
+  useEffect(() => {
+    if (open) {
+      setName(initial?.name ?? '')
+      setBaseUrl(initial?.baseUrl ?? 'https://')
+      setApiKey(initial?.apiKey ?? '')
+      setModelNamesText((initial?.modelNames ?? []).join('\n'))
+      setError('')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  const isValid = name.trim() && baseUrl.trim()
+
+  const handleConfirm = async () => {
+    if (!isValid) {
+      setError('שם וכתובת API נדרשים')
       return
     }
     setBusy(true)
     setError('')
     try {
-      await onSave({
+      await onConfirm({
         id: initial?.id,
         name: name.trim(),
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim() || null,
-        modelNames: modelNamesText.split('\n').map((s) => s.trim()).filter(Boolean),
+        modelNames: modelNamesText.split('\n').map(s => s.trim()).filter(Boolean),
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save')
+      setError(err instanceof Error ? err.message : 'שגיאה בשמירת הספק')
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className={styles.addForm}>
-      <h3>{initial ? 'Edit' : 'Add'} Custom Provider</h3>
-      <div className={styles.formRow}>
-        <label>Name</label>
-        <input className={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="My Provider" />
+    <Dialog
+      open={open}
+      onClose={onDismiss}
+      title={isEditing ? t('edit_custom_provider') : t('create_custom_provider')}
+      maxWidth={480}
+      actions={
+        <>
+          <DialogButton label={t('cancel')} onClick={onDismiss} />
+          <DialogButton
+            label={isEditing ? t('save') : t('create')}
+            primary
+            disabled={busy || !isValid}
+            onClick={handleConfirm}
+          />
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* OpenAI-compatible indicator */}
+        <label className={styles.checkRow}>
+          <input
+            type="checkbox"
+            checked={true}
+            onChange={e => { if (!e.target.checked) onSwitchToFull() }}
+          />
+          <span className={styles.checkLabel}>{t('openai_compatible_label')}</span>
+        </label>
+
+        {/* Provider Name */}
+        <div className={styles.dialogField}>
+          <label className={styles.dialogLabel}>{t('provider_name')}</label>
+          <input
+            className={styles.dialogInput}
+            placeholder="e.g. My Local LLM"
+            value={name}
+            onChange={e => setName(e.target.value)}
+          />
+        </div>
+
+        {/* Base URL */}
+        <div className={styles.dialogField}>
+          <label className={styles.dialogLabel}>{t('api_base_url')}</label>
+          <input
+            className={styles.dialogInput}
+            placeholder="https://api.example.com/v1/chat/completions"
+            value={baseUrl}
+            onChange={e => setBaseUrl(e.target.value)}
+            dir="ltr"
+          />
+        </div>
+
+        {/* API Key */}
+        <div className={styles.dialogField}>
+          <label className={styles.dialogLabel}>{t('provider_api_key')}</label>
+          <input
+            className={styles.dialogInput}
+            type="password"
+            placeholder="sk-…"
+            value={apiKey}
+            onChange={e => setApiKey(e.target.value)}
+            dir="ltr"
+          />
+        </div>
+
+        {/* Model names */}
+        <div className={styles.dialogField}>
+          <label className={styles.dialogLabel}>{t('model_names_label')}</label>
+          <textarea
+            className={styles.dialogTextarea}
+            rows={4}
+            placeholder={'gpt-4o\ngpt-3.5-turbo'}
+            value={modelNamesText}
+            onChange={e => setModelNamesText(e.target.value)}
+            dir="ltr"
+          />
+        </div>
+
+        {error && <div className={styles.dialogError}>{error}</div>}
       </div>
-      <div className={styles.formRow}>
-        <label>Base URL</label>
-        <input className={styles.input} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
-      </div>
-      <div className={styles.formRow}>
-        <label>API Key (optional)</label>
-        <input className={styles.input} type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-…" />
-      </div>
-      <div className={styles.formRow}>
-        <label>Model names (one per line)</label>
-        <textarea className={styles.textarea} value={modelNamesText} onChange={(e) => setModelNamesText(e.target.value)} rows={4} placeholder="gpt-4o&#10;gpt-3.5-turbo" />
-      </div>
-      {error && <div className={styles.error}>{error}</div>}
-      <div className={styles.formActions}>
-        <button className={styles.btnSecondary} onClick={onCancel}>Cancel</button>
-        <button className={styles.btnPrimary} onClick={handleSave} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
-// ─── Full Custom Provider Form ────────────────────────────────────────────────
+// ─── Full Custom Provider Dialog ──────────────────────────────────────────────
+// Matches FullCustomProviderDialog.kt (3-tab: Request / Response / Model)
+// Simplified: uses web-API requestTemplate/responseMapping JSON blobs instead of
+// the Android bodyTemplate/messageFields/streamingConfig sub-editors (R7 follow-up).
 
-interface FullCustomProviderFormProps {
+interface FullCustomProviderDialogProps {
+  open: boolean
   initial?: FullCustomProviderConfig
-  onSave: (cfg: FullCustomProviderConfig) => Promise<void>
-  onCancel: () => void
+  onConfirm: (cfg: FullCustomProviderConfig) => Promise<void>
+  onDismiss: () => void
+  onSwitchToSimple: () => void
 }
 
-const FullCustomProviderForm: React.FC<FullCustomProviderFormProps> = ({ initial, onSave, onCancel }) => {
+const FullCustomProviderDialog: React.FC<FullCustomProviderDialogProps> = ({
+  open, initial, onConfirm, onDismiss, onSwitchToSimple,
+}) => {
+  const [activeTab, setActiveTab] = useState<'request' | 'response' | 'model'>('request')
   const [name, setName] = useState(initial?.name ?? '')
-  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '')
+  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? 'https://')
   const [apiKey, setApiKey] = useState(initial?.apiKey ?? '')
-  const [modelNamesText, setModelNamesText] = useState((initial?.modelNames ?? []).join('\n'))
   const [requestTemplate, setRequestTemplate] = useState(
     initial?.requestTemplate ? JSON.stringify(initial.requestTemplate, null, 2) : '',
   )
   const [responseMapping, setResponseMapping] = useState(
     initial?.responseMapping ? JSON.stringify(initial.responseMapping, null, 2) : '',
   )
+  const [modelNamesText, setModelNamesText] = useState((initial?.modelNames ?? []).join('\n'))
+  const [streamingConfirmed, setStreamingConfirmed] = useState(!!initial)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  const handleSave = async () => {
-    if (!name.trim() || !baseUrl.trim()) {
-      setError('Name and base URL are required')
-      return
+  const isEditing = !!initial
+
+  useEffect(() => {
+    if (open) {
+      setActiveTab('request')
+      setName(initial?.name ?? '')
+      setBaseUrl(initial?.baseUrl ?? 'https://')
+      setApiKey(initial?.apiKey ?? '')
+      setRequestTemplate(initial?.requestTemplate ? JSON.stringify(initial.requestTemplate, null, 2) : '')
+      setResponseMapping(initial?.responseMapping ? JSON.stringify(initial.responseMapping, null, 2) : '')
+      setModelNamesText((initial?.modelNames ?? []).join('\n'))
+      setStreamingConfirmed(!!initial)
+      setError('')
     }
-    let req: Record<string, unknown> | null = null
-    let res: Record<string, unknown> | null = null
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  // JSON validation
+  const parseJson = (s: string): [Record<string, unknown> | null, boolean] => {
+    if (!s.trim()) return [null, true]
     try {
-      if (requestTemplate.trim()) req = JSON.parse(requestTemplate)
-      if (responseMapping.trim()) res = JSON.parse(responseMapping)
+      return [JSON.parse(s), true]
     } catch {
-      setError('Invalid JSON in request template or response mapping')
+      return [null, false]
+    }
+  }
+
+  const [reqObj, reqValid] = parseJson(requestTemplate)
+  const [resObj, resValid] = parseJson(responseMapping)
+  const isValid = name.trim() && baseUrl.trim() && reqValid && resValid && streamingConfirmed
+
+  const handleConfirm = async () => {
+    if (!isValid) {
+      setError('שם, כתובת API ו-JSON תקין נדרשים; אשר גם הגדרת סטרימינג')
       return
     }
     setBusy(true)
     setError('')
     try {
-      await onSave({
+      await onConfirm({
         id: initial?.id,
         name: name.trim(),
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim() || null,
-        modelNames: modelNamesText.split('\n').map((s) => s.trim()).filter(Boolean),
-        requestTemplate: req,
-        responseMapping: res,
+        modelNames: modelNamesText.split('\n').map(s => s.trim()).filter(Boolean),
+        requestTemplate: reqObj,
+        responseMapping: resObj,
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save')
+      setError(err instanceof Error ? err.message : 'שגיאה בשמירת הספק')
     } finally {
       setBusy(false)
     }
   }
 
+  const DEFAULT_BODY = `{
+  "model": "{model}",
+  "stream": true,
+  "messages": [
+    {"role": "system", "content": "{system}"},
+    {"role": "user", "content": "{prompt}"}
+  ],
+  "max_tokens": 4096
+}`
+
   return (
-    <div className={styles.addForm}>
-      <h3>{initial ? 'Edit' : 'Add'} Full Custom Provider</h3>
-      <div className={styles.formRow}>
-        <label>Name</label>
-        <input className={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="My Provider" />
+    <Dialog
+      open={open}
+      onClose={onDismiss}
+      title={isEditing ? t('edit_full_provider') : t('define_full_provider')}
+      maxWidth={520}
+      actions={
+        <>
+          <DialogButton label={t('cancel')} onClick={onDismiss} />
+          <DialogButton
+            label={isEditing ? t('save') : t('create')}
+            primary
+            disabled={busy || !isValid}
+            onClick={handleConfirm}
+          />
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* OpenAI-compatible toggle → switches to simple dialog */}
+        <label className={styles.checkRow}>
+          <input
+            type="checkbox"
+            checked={false}
+            onChange={e => { if (e.target.checked) onSwitchToSimple() }}
+          />
+          <span className={styles.checkLabel}>{t('openai_compatible_label')}</span>
+        </label>
+
+        {/* Tab bar */}
+        <div className={styles.tabBar}>
+          {(['request', 'response', 'model'] as const).map(tab => (
+            <button
+              key={tab}
+              type="button"
+              className={`${styles.tabBtn} ${activeTab === tab ? styles.tabBtnActive : ''}`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab === 'request' ? t('request_tab') : tab === 'response' ? t('response_tab') : t('model_tab')}
+            </button>
+          ))}
+        </div>
+
+        {/* Request tab */}
+        {activeTab === 'request' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{t('provider_name')}</label>
+              <input
+                className={styles.dialogInput}
+                placeholder="e.g. My Custom API"
+                value={name}
+                onChange={e => setName(e.target.value)}
+              />
+            </div>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{t('api_base_url')}</label>
+              <input
+                className={styles.dialogInput}
+                placeholder="https://api.example.com/v1/chat"
+                value={baseUrl}
+                onChange={e => setBaseUrl(e.target.value)}
+                dir="ltr"
+              />
+            </div>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{t('provider_api_key')}</label>
+              <input
+                className={styles.dialogInput}
+                type="password"
+                placeholder="sk-…"
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                dir="ltr"
+              />
+            </div>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{t('request_template_label')}</label>
+              <textarea
+                className={styles.dialogTextarea}
+                rows={10}
+                placeholder={DEFAULT_BODY}
+                value={requestTemplate}
+                onChange={e => setRequestTemplate(e.target.value)}
+                dir="ltr"
+                style={{ fontFamily: 'monospace', fontSize: 12 }}
+              />
+              {requestTemplate && !reqValid && (
+                <div className={styles.dialogError}>{t('invalid_json')}</div>
+              )}
+            </div>
+            {/* Streaming confirmed checkbox */}
+            <label className={styles.checkRow}>
+              <input
+                type="checkbox"
+                checked={streamingConfirmed}
+                onChange={e => setStreamingConfirmed(e.target.checked)}
+              />
+              <span className={styles.checkLabel}>{t('streaming_confirmed_label')}</span>
+            </label>
+          </div>
+        )}
+
+        {/* Response tab */}
+        {activeTab === 'response' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{t('response_mapping_label')}</label>
+              <textarea
+                className={styles.dialogTextarea}
+                rows={10}
+                placeholder={'{"text": "choices[0].delta.content"}'}
+                value={responseMapping}
+                onChange={e => setResponseMapping(e.target.value)}
+                dir="ltr"
+                style={{ fontFamily: 'monospace', fontSize: 12 }}
+              />
+              {responseMapping && !resValid && (
+                <div className={styles.dialogError}>{t('invalid_json')}</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Model tab */}
+        {activeTab === 'model' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{t('model_names_label')}</label>
+              <textarea
+                className={styles.dialogTextarea}
+                rows={6}
+                placeholder={'gpt-4o\nclaude-3-opus\nllama-3.1'}
+                value={modelNamesText}
+                onChange={e => setModelNamesText(e.target.value)}
+                dir="ltr"
+              />
+            </div>
+          </div>
+        )}
+
+        {error && <div className={styles.dialogError}>{error}</div>}
       </div>
-      <div className={styles.formRow}>
-        <label>Base URL</label>
-        <input className={styles.input} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
-      </div>
-      <div className={styles.formRow}>
-        <label>API Key (optional)</label>
-        <input className={styles.input} type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-      </div>
-      <div className={styles.formRow}>
-        <label>Model names (one per line)</label>
-        <textarea className={styles.textarea} value={modelNamesText} onChange={(e) => setModelNamesText(e.target.value)} rows={3} />
-      </div>
-      <div className={styles.formRow}>
-        <label>Request template (JSON, optional)</label>
-        <textarea className={`${styles.textarea} ${styles.codeArea}`} value={requestTemplate} onChange={(e) => setRequestTemplate(e.target.value)} rows={6} placeholder='{"messages": ..., "model": ...}' />
-      </div>
-      <div className={styles.formRow}>
-        <label>Response mapping (JSON, optional)</label>
-        <textarea className={`${styles.textarea} ${styles.codeArea}`} value={responseMapping} onChange={(e) => setResponseMapping(e.target.value)} rows={4} />
-      </div>
-      {error && <div className={styles.error}>{error}</div>}
-      <div className={styles.formActions}>
-        <button className={styles.btnSecondary} onClick={onCancel}>Cancel</button>
-        <button className={styles.btnPrimary} onClick={handleSave} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+    </Dialog>
+  )
+}
+
+// ─── Key Card ─────────────────────────────────────────────────────────────────
+
+interface KeyCardProps {
+  apiKey: ApiKey
+  index: number
+  total: number
+  onToggle: () => void
+  onDelete: () => void
+  onMoveUp: () => void
+  onMoveDown: () => void
+}
+
+const KeyCard: React.FC<KeyCardProps> = ({
+  apiKey: k, index, total, onToggle, onDelete, onMoveUp, onMoveDown,
+}) => {
+  const initial = k.provider.charAt(0).toUpperCase()
+
+  return (
+    <div
+      className={styles.keyCard}
+      style={{ background: providerGradient(k.provider) }}
+    >
+      <div className={styles.keyCardInner}>
+        {/* Provider icon circle */}
+        <div className={styles.providerIcon}>
+          <span className={styles.providerInitial}>{initial}</span>
+        </div>
+
+        {/* Info column */}
+        <div className={styles.keyInfo}>
+          <span className={styles.providerName}>{k.provider.toUpperCase()}</span>
+          <span className={styles.maskedKey}>{k.key}</span>
+          {k.customName && (
+            <span className={styles.customName}>{k.customName}</span>
+          )}
+        </div>
+
+        {/* Status toggle */}
+        <button
+          type="button"
+          className={`${styles.statusPill} ${k.isActive ? styles.statusActive : styles.statusInactive}`}
+          onClick={onToggle}
+          aria-label={k.isActive ? t('key_status_active') : t('key_status_inactive')}
+          aria-pressed={k.isActive}
+        >
+          {k.isActive ? t('key_status_active') : t('key_status_inactive')}
+        </button>
+
+        {/* Reorder buttons */}
+        <div className={styles.reorderBtns}>
+          <button
+            type="button"
+            className={styles.reorderBtn}
+            onClick={onMoveUp}
+            disabled={index === 0}
+            aria-label={t('reorder_up')}
+            title={t('reorder_up')}
+          >
+            <MdArrowUpward size={12} />
+          </button>
+          <button
+            type="button"
+            className={styles.reorderBtn}
+            onClick={onMoveDown}
+            disabled={index === total - 1}
+            aria-label={t('reorder_down')}
+            title={t('reorder_down')}
+          >
+            <MdArrowDownward size={12} />
+          </button>
+        </div>
+
+        {/* Delete button */}
+        <button
+          type="button"
+          className={styles.deleteBtn}
+          onClick={onDelete}
+          aria-label={`${t('delete_api_key_title')}`}
+          title="Delete"
+        >
+          <MdDelete size={20} />
+        </button>
       </div>
     </div>
   )
 }
 
-// ─── Main KeysPage ────────────────────────────────────────────────────────────
+// ─── Main KeysPage ─────────────────────────────────────────────────────────────
 
-type ActiveSection = 'keys' | 'custom' | 'fullcustom'
-type FormMode = 'none' | 'add-key' | 'add-custom' | 'edit-custom' | 'add-full' | 'edit-full'
+type ProviderDialogMode = 'none' | 'simple-add' | 'simple-edit' | 'full-add' | 'full-edit'
 
 const KeysPage: React.FC = () => {
+  const navigate = useNavigate()
+
+  // ── Data state ────────────────────────────────────────────────────────────
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [customList, setCustomList] = useState<CustomProviderConfig[]>([])
   const [fullList, setFullList] = useState<FullCustomProviderConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeSection, setActiveSection] = useState<ActiveSection>('keys')
-  const [formMode, setFormMode] = useState<FormMode>('none')
-  const [editCustom, setEditCustom] = useState<CustomProviderConfig | undefined>()
-  const [editFull, setEditFull] = useState<FullCustomProviderConfig | undefined>()
 
+  // ── Dialog state ──────────────────────────────────────────────────────────
+  const [showAddKey, setShowAddKey] = useState(false)
+  const [deleteKeyTarget, setDeleteKeyTarget] = useState<ApiKey | null>(null)
+  const [providerDialogMode, setProviderDialogMode] = useState<ProviderDialogMode>('none')
+  const [editingCustom, setEditingCustom] = useState<CustomProviderConfig | undefined>()
+  const [editingFull, setEditingFull] = useState<FullCustomProviderConfig | undefined>()
+  const [deleteProviderTarget, setDeleteProviderTarget] = useState<
+    { kind: 'simple'; cfg: CustomProviderConfig } |
+    { kind: 'full'; cfg: FullCustomProviderConfig } |
+    null
+  >(null)
+
+  // ── Load ──────────────────────────────────────────────────────────────────
   const loadAll = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const [k, c, f] = await Promise.all([
         apiKeys.list(),
@@ -286,7 +944,7 @@ const KeysPage: React.FC = () => {
       setCustomList(c)
       setFullList(f)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Load failed')
+      setError(err instanceof Error ? err.message : 'שגיאה בטעינה')
     } finally {
       setLoading(false)
     }
@@ -294,35 +952,41 @@ const KeysPage: React.FC = () => {
 
   useEffect(() => { loadAll() }, [loadAll])
 
-  // ── Key actions ────────────────────────────────────────────────────────────
+  // ── API Key actions ────────────────────────────────────────────────────────
 
-  const handleAddKey = async (provider: string, key: string, customName: string) => {
-    await apiKeys.create({
-      provider,
-      key,
-      isActive: true,
-      customName: customName || null,
-    })
-    setFormMode('none')
+  const handleAddKey = async (provider: string, key: string, customName: string | null) => {
+    await apiKeys.create({ provider, key, isActive: true, customName })
+    setShowAddKey(false)
     await loadAll()
   }
 
   const handleToggleKey = async (keyId: string) => {
     try {
       const updated = await apiKeys.toggle(keyId)
-      setKeys((prev) => prev.map((k) => k.id === updated.id ? updated : k))
+      setKeys(prev => prev.map(k => k.id === updated.id ? updated : k))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Toggle failed')
+      setError(err instanceof Error ? err.message : 'שגיאה בשינוי מצב')
     }
   }
 
-  const handleDeleteKey = async (keyId: string) => {
-    if (!window.confirm('Delete this API key?')) return
+  const handleDeleteKey = async () => {
+    if (!deleteKeyTarget) return
     try {
-      await apiKeys.delete(keyId)
-      setKeys((prev) => prev.filter((k) => k.id !== keyId))
+      await apiKeys.delete(deleteKeyTarget.id)
+      setKeys(prev => prev.filter(k => k.id !== deleteKeyTarget.id))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delete failed')
+      setError(err instanceof Error ? err.message : 'שגיאה במחיקה')
+    } finally {
+      setDeleteKeyTarget(null)
+    }
+  }
+
+  const handleReorder = async (fromIndex: number, toIndex: number) => {
+    try {
+      const updated = await apiKeys.reorder({ fromIndex, toIndex })
+      setKeys(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'שגיאה בסידור מחדש')
     }
   }
 
@@ -334,20 +998,24 @@ const KeysPage: React.FC = () => {
     } else {
       await customProviders.create(cfg)
     }
-    setFormMode('none')
-    setEditCustom(undefined)
+    setProviderDialogMode('none')
+    setEditingCustom(undefined)
     await loadAll()
   }
 
-  const handleDeleteCustom = async (id: string) => {
-    if (!window.confirm('Delete this custom provider?')) return
+  const handleDeleteCustom = async () => {
+    if (!deleteProviderTarget || deleteProviderTarget.kind !== 'simple') return
     try {
-      await customProviders.delete(id)
+      await customProviders.delete(deleteProviderTarget.cfg.id!)
       await loadAll()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delete failed')
+      setError(err instanceof Error ? err.message : 'שגיאה במחיקת ספק')
+    } finally {
+      setDeleteProviderTarget(null)
     }
   }
+
+  // ── Full custom provider actions ───────────────────────────────────────────
 
   const handleSaveFull = async (cfg: FullCustomProviderConfig) => {
     if (cfg.id) {
@@ -355,228 +1023,268 @@ const KeysPage: React.FC = () => {
     } else {
       await fullCustomProviders.create(cfg)
     }
-    setFormMode('none')
-    setEditFull(undefined)
+    setProviderDialogMode('none')
+    setEditingFull(undefined)
     await loadAll()
   }
 
-  const handleDeleteFull = async (id: string) => {
-    if (!window.confirm('Delete this provider?')) return
+  const handleDeleteFull = async () => {
+    if (!deleteProviderTarget || deleteProviderTarget.kind !== 'full') return
     try {
-      await fullCustomProviders.delete(id)
+      await fullCustomProviders.delete(deleteProviderTarget.cfg.id!)
       await loadAll()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delete failed')
+      setError(err instanceof Error ? err.message : 'שגיאה במחיקת ספק')
+    } finally {
+      setDeleteProviderTarget(null)
     }
   }
 
-  // ── Reorder keys ──────────────────────────────────────────────────────────
+  // ── Handlers to open dialogs from inside the Add Key dialog ───────────────
 
-  const handleReorder = async (fromIndex: number, toIndex: number) => {
-    try {
-      const updated = await apiKeys.reorder({ fromIndex, toIndex })
-      setKeys(updated)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Reorder failed')
-    }
+  const openEditCustomFromDropdown = (cfg: CustomProviderConfig) => {
+    setEditingCustom(cfg)
+    setProviderDialogMode('simple-edit')
+    setShowAddKey(false)
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const openDeleteCustomFromDropdown = (cfg: CustomProviderConfig) => {
+    setDeleteProviderTarget({ kind: 'simple', cfg })
+    setShowAddKey(false)
+  }
+
+  const openEditFullFromDropdown = (cfg: FullCustomProviderConfig) => {
+    setEditingFull(cfg)
+    setProviderDialogMode('full-edit')
+    setShowAddKey(false)
+  }
+
+  const openDeleteFullFromDropdown = (cfg: FullCustomProviderConfig) => {
+    setDeleteProviderTarget({ kind: 'full', cfg })
+    setShowAddKey(false)
+  }
+
+  const openCreateProviderFromDropdown = () => {
+    setProviderDialogMode('full-add')
+    setEditingFull(undefined)
+    setShowAddKey(false)
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return <div className={styles.loading}>Loading…</div>
+    return (
+      <div className={styles.page}>
+        <div className={styles.topBar}>
+          <IconButton icon={MdArrowBack} aria-label="חזור" onClick={() => navigate(-1)} size={36} />
+          <h1 className={styles.topBarTitle} aria-label="API Keys">{t('api_keys')}</h1>
+        </div>
+        <div className={styles.loading}>{'טוען...'}</div>
+      </div>
+    )
   }
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <h1 className={styles.title}>API Keys & Providers</h1>
+      {/* ── Top bar ── */}
+      <div className={styles.topBar}>
+        <IconButton icon={MdArrowBack} aria-label="חזור" onClick={() => navigate(-1)} size={36} />
+        <h1 className={styles.topBarTitle} aria-label="API Keys">{t('api_keys')}</h1>
       </div>
 
+      {/* ── Error banner ── */}
       {error && (
-        <div className={styles.error} role="alert">
-          {error}
-          <button onClick={() => setError(null)}>✕</button>
+        <div className={styles.errorBanner} role="alert">
+          <span>{error}</span>
+          <button className={styles.errorCloseBtn} onClick={() => setError(null)}>✕</button>
         </div>
       )}
 
-      {/* Tabs */}
-      <div className={styles.tabs}>
-        {(['keys', 'custom', 'fullcustom'] as ActiveSection[]).map((s) => (
+      {/* ── Scrollable content ── */}
+      <div className={styles.content}>
+
+        {/* Action buttons */}
+        <div className={styles.actionButtons}>
           <button
-            key={s}
-            className={`${styles.tab} ${activeSection === s ? styles.tabActive : ''}`}
-            onClick={() => { setActiveSection(s); setFormMode('none') }}
+            type="button"
+            className={styles.addKeyBtn}
+            aria-label={t('add_api_key')}
+            onClick={() => setShowAddKey(true)}
           >
-            {s === 'keys' ? 'API Keys' : s === 'custom' ? 'Custom Providers' : 'Full Custom Providers'}
+            <MdAdd size={18} />
+            {t('add_api_key')}
           </button>
-        ))}
-      </div>
+          <button type="button" className={styles.getKeyBtn}>
+            {'⭐'}
+            {t('get_api_key')}
+          </button>
+        </div>
 
-      {/* Form section */}
-      {formMode === 'add-key' && (
-        <AddKeyForm onAdd={handleAddKey} onCancel={() => setFormMode('none')} />
-      )}
-      {(formMode === 'add-custom' || formMode === 'edit-custom') && (
-        <CustomProviderForm
-          initial={editCustom}
-          onSave={handleSaveCustom}
-          onCancel={() => { setFormMode('none'); setEditCustom(undefined) }}
-        />
-      )}
-      {(formMode === 'add-full' || formMode === 'edit-full') && (
-        <FullCustomProviderForm
-          initial={editFull}
-          onSave={handleSaveFull}
-          onCancel={() => { setFormMode('none'); setEditFull(undefined) }}
-        />
-      )}
-
-      {/* API Keys list */}
-      {activeSection === 'keys' && formMode === 'none' && (
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <span className={styles.sectionCount}>{keys.length} key{keys.length !== 1 ? 's' : ''}</span>
-            <button
-              className={styles.btnPrimary}
-              onClick={() => setFormMode('add-key')}
-            >
-              + Add Key
-            </button>
-          </div>
+        {/* ── API Keys list ── */}
+        <div className={styles.keysList}>
           {keys.length === 0 ? (
-            <div className={styles.empty}>No API keys yet. Add one to start chatting.</div>
-          ) : (
-            <div className={styles.list}>
-              {keys.map((k, idx) => (
-                <div key={k.id} className={`${styles.keyRow} ${!k.isActive ? styles.keyRowInactive : ''}`}>
-                  <div className={styles.keyInfo}>
-                    <span className={styles.keyProvider}>{k.provider}</span>
-                    {k.customName && <span className={styles.keyName}>{k.customName}</span>}
-                    <span className={styles.keyMasked}>{k.key}</span>
-                  </div>
-                  <div className={styles.keyActions}>
-                    {idx > 0 && (
-                      <button
-                        className={styles.iconBtn}
-                        onClick={() => handleReorder(idx, idx - 1)}
-                        title="Move up"
-                      >↑</button>
-                    )}
-                    {idx < keys.length - 1 && (
-                      <button
-                        className={styles.iconBtn}
-                        onClick={() => handleReorder(idx, idx + 1)}
-                        title="Move down"
-                      >↓</button>
-                    )}
-                    <button
-                      className={`${styles.toggleBtn} ${k.isActive ? styles.toggleActive : ''}`}
-                      onClick={() => handleToggleKey(k.id)}
-                      title={k.isActive ? 'Disable' : 'Enable'}
-                    >
-                      {k.isActive ? 'Active' : 'Inactive'}
-                    </button>
-                    <button
-                      className={`${styles.iconBtn} ${styles.deleteBtn}`}
-                      onClick={() => handleDeleteKey(k.id)}
-                      title="Delete"
-                    >
-                      🗑
-                    </button>
-                  </div>
-                </div>
-              ))}
+            <div className={styles.emptyState}>
+              {'אין מפתחות API. לחץ על "הוסף מפתח API" להתחלה.'}
             </div>
+          ) : (
+            keys.map((k, idx) => (
+              <KeyCard
+                key={k.id}
+                apiKey={k}
+                index={idx}
+                total={keys.length}
+                onToggle={() => handleToggleKey(k.id)}
+                onDelete={() => setDeleteKeyTarget(k)}
+                onMoveUp={() => handleReorder(idx, idx - 1)}
+                onMoveDown={() => handleReorder(idx, idx + 1)}
+              />
+            ))
           )}
         </div>
-      )}
 
-      {/* Custom Providers list */}
-      {activeSection === 'custom' && formMode === 'none' && (
+        {/* ── Simple Custom Providers section ── */}
         <div className={styles.section}>
           <div className={styles.sectionHeader}>
-            <span className={styles.sectionCount}>{customList.length} provider{customList.length !== 1 ? 's' : ''}</span>
-            <button className={styles.btnPrimary} onClick={() => setFormMode('add-custom')}>
-              + Add Provider
+            <h2 className={styles.sectionTitle}>{t('custom_providers')}</h2>
+            <button
+              type="button"
+              className={styles.sectionAddBtn}
+              onClick={() => { setEditingCustom(undefined); setProviderDialogMode('simple-add') }}
+            >
+              <MdAdd size={14} />
+              {t('create')}
             </button>
           </div>
           {customList.length === 0 ? (
-            <div className={styles.empty}>
-              No custom providers. Custom providers allow using OpenAI-compatible APIs.
-            </div>
+            <div className={styles.emptyState}>{'אין ספקים מותאמים אישית'}</div>
           ) : (
-            <div className={styles.list}>
-              {customList.map((cp) => (
-                <div key={cp.id} className={styles.providerRow}>
-                  <div className={styles.providerInfo}>
-                    <span className={styles.providerName}>{cp.name}</span>
-                    <span className={styles.providerUrl}>{cp.baseUrl}</span>
-                    <span className={styles.providerModels}>{cp.modelNames.length} model{cp.modelNames.length !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className={styles.keyActions}>
-                    <button
-                      className={styles.iconBtn}
-                      onClick={() => { setEditCustom(cp); setFormMode('edit-custom') }}
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      className={`${styles.iconBtn} ${styles.deleteBtn}`}
-                      onClick={() => handleDeleteCustom(cp.id!)}
-                    >
-                      🗑
-                    </button>
-                  </div>
+            customList.map(cp => (
+              <div key={cp.id} className={styles.providerRow}>
+                <div className={styles.providerRowInfo}>
+                  <span className={styles.providerRowName}>{cp.name}</span>
+                  <span className={styles.providerRowUrl}>{cp.baseUrl}</span>
+                  <span className={styles.providerRowMeta}>
+                    {cp.modelNames.length} {'מודלים'}
+                  </span>
                 </div>
-              ))}
-            </div>
+                <div className={styles.providerRowActions}>
+                  <IconButton
+                    icon={MdEdit}
+                    aria-label={`${t('edit')} ${cp.name}`}
+                    onClick={() => { setEditingCustom(cp); setProviderDialogMode('simple-edit') }}
+                    size={32}
+                    iconSize={16}
+                  />
+                  <IconButton
+                    icon={MdDelete}
+                    aria-label={`${t('delete')} ${cp.name}`}
+                    onClick={() => setDeleteProviderTarget({ kind: 'simple', cfg: cp })}
+                    size={32}
+                    iconSize={16}
+                  />
+                </div>
+              </div>
+            ))
           )}
         </div>
-      )}
 
-      {/* Full Custom Providers list */}
-      {activeSection === 'fullcustom' && formMode === 'none' && (
+        {/* ── Full Custom Providers section ── */}
         <div className={styles.section}>
           <div className={styles.sectionHeader}>
-            <span className={styles.sectionCount}>{fullList.length} provider{fullList.length !== 1 ? 's' : ''}</span>
-            <button className={styles.btnPrimary} onClick={() => setFormMode('add-full')}>
-              + Add Full Provider
+            <h2 className={styles.sectionTitle}>{t('full_custom_providers')}</h2>
+            <button
+              type="button"
+              className={styles.sectionAddBtn}
+              onClick={() => { setEditingFull(undefined); setProviderDialogMode('full-add') }}
+            >
+              <MdAdd size={14} />
+              {t('create')}
             </button>
           </div>
           {fullList.length === 0 ? (
-            <div className={styles.empty}>
-              No full custom providers. These allow fully custom request/response templates.
-            </div>
+            <div className={styles.emptyState}>{'אין ספקים מותאמים אישית מלאים'}</div>
           ) : (
-            <div className={styles.list}>
-              {fullList.map((fp) => (
-                <div key={fp.id} className={styles.providerRow}>
-                  <div className={styles.providerInfo}>
-                    <span className={styles.providerName}>{fp.name}</span>
-                    <span className={styles.providerUrl}>{fp.baseUrl}</span>
-                    <span className={styles.providerModels}>{fp.modelNames.length} model{fp.modelNames.length !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className={styles.keyActions}>
-                    <button
-                      className={styles.iconBtn}
-                      onClick={() => { setEditFull(fp); setFormMode('edit-full') }}
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      className={`${styles.iconBtn} ${styles.deleteBtn}`}
-                      onClick={() => handleDeleteFull(fp.id!)}
-                    >
-                      🗑
-                    </button>
-                  </div>
+            fullList.map(fp => (
+              <div key={fp.id} className={styles.providerRow}>
+                <div className={styles.providerRowInfo}>
+                  <span className={styles.providerRowName}>{fp.name}</span>
+                  <span className={styles.providerRowUrl}>{fp.baseUrl}</span>
+                  <span className={styles.providerRowMeta}>
+                    {fp.modelNames.length} {'מודלים'}
+                  </span>
                 </div>
-              ))}
-            </div>
+                <div className={styles.providerRowActions}>
+                  <IconButton
+                    icon={MdEdit}
+                    aria-label={`${t('edit')} ${fp.name}`}
+                    onClick={() => { setEditingFull(fp); setProviderDialogMode('full-edit') }}
+                    size={32}
+                    iconSize={16}
+                  />
+                  <IconButton
+                    icon={MdDelete}
+                    aria-label={`${t('delete')} ${fp.name}`}
+                    onClick={() => setDeleteProviderTarget({ kind: 'full', cfg: fp })}
+                    size={32}
+                    iconSize={16}
+                  />
+                </div>
+              </div>
+            ))
           )}
         </div>
-      )}
+      </div>
+
+      {/* ── Dialogs ── */}
+
+      <AddKeyDialog
+        open={showAddKey}
+        customList={customList}
+        fullList={fullList}
+        onConfirm={handleAddKey}
+        onDismiss={() => setShowAddKey(false)}
+        onEditCustom={openEditCustomFromDropdown}
+        onDeleteCustom={openDeleteCustomFromDropdown}
+        onEditFull={openEditFullFromDropdown}
+        onDeleteFull={openDeleteFullFromDropdown}
+        onCreateNew={openCreateProviderFromDropdown}
+      />
+
+      <DeleteKeyDialog
+        open={!!deleteKeyTarget}
+        onConfirm={handleDeleteKey}
+        onDismiss={() => setDeleteKeyTarget(null)}
+      />
+
+      <SimpleCustomProviderDialog
+        open={providerDialogMode === 'simple-add' || providerDialogMode === 'simple-edit'}
+        initial={editingCustom}
+        onConfirm={handleSaveCustom}
+        onDismiss={() => { setProviderDialogMode('none'); setEditingCustom(undefined) }}
+        onSwitchToFull={() => {
+          setProviderDialogMode('full-add')
+          setEditingFull(undefined)
+          setEditingCustom(undefined)
+        }}
+      />
+
+      <FullCustomProviderDialog
+        open={providerDialogMode === 'full-add' || providerDialogMode === 'full-edit'}
+        initial={editingFull}
+        onConfirm={handleSaveFull}
+        onDismiss={() => { setProviderDialogMode('none'); setEditingFull(undefined) }}
+        onSwitchToSimple={() => {
+          setProviderDialogMode('simple-add')
+          setEditingCustom(undefined)
+          setEditingFull(undefined)
+        }}
+      />
+
+      <DeleteProviderDialog
+        open={!!deleteProviderTarget}
+        onConfirm={deleteProviderTarget?.kind === 'simple' ? handleDeleteCustom : handleDeleteFull}
+        onDismiss={() => setDeleteProviderTarget(null)}
+      />
     </div>
   )
 }
