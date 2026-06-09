@@ -681,9 +681,11 @@ Returns the current user's GitHub connection status.
 ### GET /oauth/github/start
 
 Redirects the browser to GitHub's OAuth authorization page.
-Server generates a random `state` token, stores it in session.
+Server validates the session cookie (no valid session → redirect to `/login`),
+generates a random `state` token, stores it in the session, then issues a 302.
 
 **Response 302** → `https://github.com/login/oauth/authorize?...`
+**Response 302** → `/login` (if not authenticated)
 
 ### GET /oauth/github/callback?code={code}&state={state}
 
@@ -706,10 +708,13 @@ Disconnects GitHub (calls `DataRepository.removeGitHubConnection`).
 Same pattern as GitHub, using `GoogleWorkspaceConnection`.
 
 - `GET    /api/integrations/google`         — returns connection or null
-- `GET    /oauth/google/start`              — redirect to Google OAuth
+- `GET    /oauth/google/start`              — 302 redirect to Google OAuth (session required; 302 to /login if not authenticated; 503 if GOOGLE_OAUTH_CLIENT_ID unset)
 - `GET    /oauth/google/callback`           — exchange code, store connection
 - `DELETE /api/integrations/google`         — disconnect
 - `PATCH  /api/integrations/google/services` — update `EnabledGoogleServices`
+
+Note: `POST /api/integrations/{provider}/start` (which returned the authorize URL as JSON)
+has been removed. The web client uses browser navigation to `GET /oauth/{provider}/start`.
 
 ---
 

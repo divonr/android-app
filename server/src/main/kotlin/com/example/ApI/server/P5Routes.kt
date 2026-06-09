@@ -171,32 +171,7 @@ fun Route.integrationRoutes() {
         call.respond(HttpStatusCode.NoContent)
     }
 
-    // POST /api/integrations/github/start — returns authorize URL, stores CSRF state in session
-    post("/integrations/github/start") {
-        val session = call.sessions.get<UserSession>()
-            ?: return@post call.respond(
-                HttpStatusCode.Unauthorized,
-                mapOf("error" to "unauthorized")
-            )
-
-        val state = generateOAuthState()
-        call.sessions.set(session.copy(githubOAuthState = state))
-
-        val clientId = resolveGitHubClientId()
-        val baseUrl = resolvePublicBaseUrl()
-        val redirectUri = "$baseUrl/oauth/github/callback"
-        val scopes = "repo,read:user,user:email,read:org"
-
-        val authorizeUrl = buildString {
-            append("https://github.com/login/oauth/authorize")
-            append("?client_id=").append(clientId)
-            append("&redirect_uri=").append(URLEncoder.encode(redirectUri, "UTF-8"))
-            append("&scope=").append(URLEncoder.encode(scopes, "UTF-8"))
-            append("&state=").append(state)
-        }
-
-        call.respond(HttpStatusCode.OK, OAuthStartResponse(authorizeUrl = authorizeUrl))
-    }
+    // (POST /api/integrations/github/start removed — use GET /oauth/github/start instead)
 
     // GET /api/integrations/google — Google connection or null
     get("/integrations/google") {
@@ -218,13 +193,68 @@ fun Route.integrationRoutes() {
         call.respond(HttpStatusCode.NoContent)
     }
 
-    // POST /api/integrations/google/start — returns authorize URL, stores CSRF state in session
-    post("/integrations/google/start") {
+    // (POST /api/integrations/google/start removed — use GET /oauth/google/start instead)
+
+    // PATCH /api/integrations/google/services — update enabled Google services
+    patch("/integrations/google/services") {
+        val repo = call.application.appModule.repository
+        val username = call.currentUsername()
+        val services = call.receive<EnabledGoogleServices>()
+        repo.updateGoogleWorkspaceEnabledServices(username, services)
+        call.respond(HttpStatusCode.OK, services)
+    }
+}
+
+// ── PUBLIC OAuth callback routes (outside auth block) ─────────────────────────
+
+/**
+ * Registers the public OAuth start + callback routes at `/oauth/{provider}/start`
+ * and `/oauth/{provider}/callback`.  Called from the root routing block (NOT inside
+ * `authenticate { }`), because the browser navigates to these URLs directly.
+ *
+ * `/start` validates the session manually (no Ktor auth plugin — the session
+ * cookie IS sent by the browser during top-level navigation).  Unauthenticated
+ * requests are redirected to `/login`.
+ *
+ * CSRF protection: a random [state] token is stored in the session by the
+ * `/start` route and validated in the corresponding `/callback` route.
+ */
+fun Route.oauthCallbackRoutes() {
+
+    // GET /oauth/github/start — redirect to GitHub authorize URL
+    get("/oauth/github/start") {
         val session = call.sessions.get<UserSession>()
-            ?: return@post call.respond(
-                HttpStatusCode.Unauthorized,
-                mapOf("error" to "unauthorized")
-            )
+        if (session == null || !session.authenticated) {
+            call.respondRedirect("/login")
+            return@get
+        }
+
+        val state = generateOAuthState()
+        call.sessions.set(session.copy(githubOAuthState = state))
+
+        val clientId = resolveGitHubClientId()
+        val baseUrl = resolvePublicBaseUrl()
+        val redirectUri = "$baseUrl/oauth/github/callback"
+        val scopes = "repo,read:user,user:email,read:org"
+
+        val authorizeUrl = buildString {
+            append("https://github.com/login/oauth/authorize")
+            append("?client_id=").append(clientId)
+            append("&redirect_uri=").append(URLEncoder.encode(redirectUri, "UTF-8"))
+            append("&scope=").append(URLEncoder.encode(scopes, "UTF-8"))
+            append("&state=").append(state)
+        }
+
+        call.respondRedirect(authorizeUrl)
+    }
+
+    // GET /oauth/google/start — redirect to Google authorize URL
+    get("/oauth/google/start") {
+        val session = call.sessions.get<UserSession>()
+        if (session == null || !session.authenticated) {
+            call.respondRedirect("/login")
+            return@get
+        }
 
         val clientId = resolveGoogleClientId()
         if (clientId.isBlank()) {
@@ -232,7 +262,7 @@ fun Route.integrationRoutes() {
                 HttpStatusCode.ServiceUnavailable,
                 mapOf("error" to "Google OAuth not configured — set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET")
             )
-            return@post
+            return@get
         }
 
         val state = generateOAuthState()
@@ -240,7 +270,6 @@ fun Route.integrationRoutes() {
 
         val baseUrl = resolvePublicBaseUrl()
         val redirectUri = "$baseUrl/oauth/google/callback"
-        // Scopes from desktop GoogleWorkspaceAuthService companion (SCOPE_GMAIL_MODIFY, SCOPE_CALENDAR, SCOPE_DRIVE_FILE)
         val scopes = listOf(
             "https://www.googleapis.com/auth/gmail.modify",
             "https://www.googleapis.com/auth/calendar",
@@ -261,30 +290,8 @@ fun Route.integrationRoutes() {
             append("&prompt=consent")
         }
 
-        call.respond(HttpStatusCode.OK, OAuthStartResponse(authorizeUrl = authorizeUrl))
+        call.respondRedirect(authorizeUrl)
     }
-
-    // PATCH /api/integrations/google/services — update enabled Google services
-    patch("/integrations/google/services") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
-        val services = call.receive<EnabledGoogleServices>()
-        repo.updateGoogleWorkspaceEnabledServices(username, services)
-        call.respond(HttpStatusCode.OK, services)
-    }
-}
-
-// ── PUBLIC OAuth callback routes (outside auth block) ─────────────────────────
-
-/**
- * Registers the public OAuth callback routes at `/oauth/github/callback` and
- * `/oauth/google/callback`.  Called from the root routing block (NOT inside
- * `authenticate { }`), because GitHub/Google redirect the browser directly here.
- *
- * CSRF protection: a random [state] token is stored in the session by the
- * corresponding `/start` route and validated here before exchanging the code.
- */
-fun Route.oauthCallbackRoutes() {
 
     // GET /oauth/github/callback?code=&state=
     get("/oauth/github/callback") {
