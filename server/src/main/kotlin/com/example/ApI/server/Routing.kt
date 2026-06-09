@@ -1,6 +1,7 @@
 package com.example.ApI.server
 
 import com.example.ApI.data.model.ApiKey
+import com.example.ApI.server.streaming.resendRoute
 import com.example.ApI.server.streaming.sendRoute
 import io.ktor.http.*
 import io.ktor.http.content.*
@@ -249,6 +250,9 @@ fun Route.apiRoutes() {
 
     // ── P3: Streaming send ────────────────────────────────────────────────────
     sendRoute()
+
+    // ── P4: Resend (SSE, same plumbing as sendRoute) ──────────────────────────
+    resendRoute()
 
     // ── P4: Mutation APIs ─────────────────────────────────────────────────────
     mutationRoutes()
