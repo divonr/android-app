@@ -1,0 +1,172 @@
+/* =========================================================
+   LogsPage — R6 refactor
+   Mirrors Android LogsScreen.kt (black terminal theme).
+   ========================================================= */
+
+/* ── Page shell ── */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #000000;
+}
+
+/* ── Topbar override colors to match black theme ── */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #111111;
+  border-bottom: 1px solid #222222;
+  flex-shrink: 0;
+}
+
+.topbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.backBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #222222;
+  border: none;
+  color: #cccccc;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: background 0.15s;
+}
+
+.backBtn:hover {
+  background: #333333;
+}
+
+.topbarTitle {
+  font-size: var(--fs-title-medium);
+  font-weight: 500;
+  color: #cccccc;
+  margin: 0;
+}
+
+.clearBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: #222222;
+  border: none;
+  border-radius: 8px;
+  color: #cccccc;
+  font-size: var(--fs-body-small);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.clearBtn:hover {
+  background: #333333;
+}
+
+/* ── Column headers ── */
+
+.tableHeader {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: #111111;
+  border-bottom: 1px solid #222222;
+  direction: ltr;
+  flex-shrink: 0;
+}
+
+.headerTime {
+  width: 70px;
+  font-size: var(--fs-label-small);
+  font-weight: 700;
+  color: #888888;
+  font-family: monospace;
+  flex-shrink: 0;
+}
+
+.headerLog {
+  font-size: var(--fs-label-small);
+  font-weight: 700;
+  color: #888888;
+  font-family: monospace;
+}
+
+.headerDivider {
+  height: 1px;
+  background: #222222;
+  flex-shrink: 0;
+}
+
+/* ── Log list ── */
+
+.logList {
+  flex: 1;
+  overflow-y: auto;
+  direction: ltr;
+}
+
+/* ── Empty state ── */
+
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: #888888;
+  font-size: var(--fs-body-medium);
+  font-family: monospace;
+}
+
+/* ── Log row ── */
+
+.logRow {
+  display: flex;
+  align-items: flex-start;
+  padding: 6px 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+  cursor: text;
+  user-select: text;
+}
+
+.logRowEven {
+  background: #050505;
+}
+
+.logRowOdd {
+  background: #0a0a0a;
+}
+
+.logTime {
+  width: 70px;
+  font-size: 11px;
+  color: #888888;
+  font-family: monospace;
+  flex-shrink: 0;
+}
+
+.logMsg {
+  font-size: 11px;
+  font-family: monospace;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.logMsgInfo    { color: #cccccc; }
+.logMsgDebug   { color: #888888; }
+.logMsgWarning { color: #ffe066; }
+.logMsgError   { color: #ff6b6b; }

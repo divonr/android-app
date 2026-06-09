@@ -30,9 +30,14 @@ interface ScreenTopBarProps {
    * match /settings/i, /keys/i, etc. while the visible text is Hebrew).
    */
   headingAriaLabel?: string
+  /**
+   * Optional trailing action elements (e.g. a project-mode toggle).
+   * Rendered at the inline-end of the bar, after the title.
+   */
+  actions?: React.ReactNode
 }
 
-const ScreenTopBar: React.FC<ScreenTopBarProps> = ({ title, onBack, headingAriaLabel }) => (
+const ScreenTopBar: React.FC<ScreenTopBarProps> = ({ title, onBack, headingAriaLabel, actions }) => (
   <div
     style={{
       display: 'flex',
@@ -53,10 +58,19 @@ const ScreenTopBar: React.FC<ScreenTopBarProps> = ({ title, onBack, headingAriaL
         fontWeight: 600,
         color: 'var(--on-surface)',
         margin: 0,
+        flex: 1,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
       }}
     >
       {title}
     </h1>
+    {actions && (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        {actions}
+      </div>
+    )}
   </div>
 )
 

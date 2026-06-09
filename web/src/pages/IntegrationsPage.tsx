@@ -1,83 +1,134 @@
+/**
+ * IntegrationsPage — R6 refactor.
+ * Mirrors Android IntegrationsScreen.kt:
+ *   - Available tools section (date/time, group conversations, Python)
+ *   - GitHub connection card (OAuth redirect + return handling)
+ *   - Google Workspace connection card (OAuth redirect + per-service toggles)
+ */
 import React, { useEffect, useState, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { integrations } from '../api/client'
-import type { GitHubConnection, GoogleWorkspaceConnection, EnabledGoogleServices } from '../api/types'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { integrations, settings as settingsApi } from '../api/client'
+import type { AppSettings, GitHubConnection, GoogleWorkspaceConnection, EnabledGoogleServices } from '../api/types'
+import ScreenTopBar from '../components/ScreenTopBar'
+import { t } from '../i18n/he'
 import styles from './IntegrationsPage.module.css'
 
-// ─── GitHub section ───────────────────────────────────────────────────────────
+// ── Toggle component ──────────────────────────────────────────────────────────
 
-interface GitHubSectionProps {
+interface ToggleProps {
+  checked: boolean
+  onChange: (v: boolean) => void
+  small?: boolean
+  label?: string
+}
+
+const Toggle: React.FC<ToggleProps> = ({ checked, onChange, small, label }) => (
+  <label className={`${styles.toggle} ${small ? styles.toggleSmall : ''}`}>
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+      aria-label={label}
+    />
+    <span className={styles.toggleSlider} />
+  </label>
+)
+
+// ── Tool item ─────────────────────────────────────────────────────────────────
+
+interface ToolItemProps {
+  title: string
+  description: string
+  enabled: boolean
+  onToggle: (v: boolean) => void
+}
+
+const ToolItem: React.FC<ToolItemProps> = ({ title, description, enabled, onToggle }) => (
+  <div className={styles.toolItem}>
+    <div className={styles.toolInfo}>
+      <p className={styles.toolTitle}>{title}</p>
+      <p className={styles.toolDesc}>{description}</p>
+    </div>
+    <Toggle checked={enabled} onChange={onToggle} label={title} />
+  </div>
+)
+
+// ── GitHub integration card ───────────────────────────────────────────────────
+
+interface GitHubCardProps {
   connection: GitHubConnection | null
   onConnect: () => void
   onDisconnect: () => Promise<void>
 }
 
-const GitHubSection: React.FC<GitHubSectionProps> = ({ connection, onConnect, onDisconnect }) => {
-  const [disconnecting, setDisconnecting] = useState(false)
+const GitHubCard: React.FC<GitHubCardProps> = ({ connection, onConnect, onDisconnect }) => {
+  const isConnected = connection !== null
 
-  const handleDisconnect = async () => {
-    if (!window.confirm('Disconnect GitHub?')) return
-    setDisconnecting(true)
-    try {
-      await onDisconnect()
-    } finally {
-      setDisconnecting(false)
-    }
+  const handleToggle = async (checked: boolean) => {
+    if (checked) onConnect()
+    else await onDisconnect()
   }
 
+  const githubTools = [
+    'קריאת קבצים מ-repositories',
+    'כתיבה ועדכון קבצים',
+    'רשימת תוכן תיקיות',
+    'חיפוש קוד ב-repositories',
+    'יצירת ענפים (branches)',
+    'יצירת Pull Requests',
+    'קבלת מידע על repositories',
+    'רשימת repositories של המשתמש',
+  ]
+
   return (
-    <div className={styles.integrationCard}>
-      <div className={styles.integrationHeader}>
-        <div className={styles.integrationIcon}>🐙</div>
+    <div className={styles.integrationItem}>
+      <div className={styles.integrationMainRow}>
         <div className={styles.integrationInfo}>
-          <h3 className={styles.integrationName}>GitHub</h3>
-          <p className={styles.integrationDesc}>Access repositories, issues, and pull requests</p>
+          <p className={styles.integrationTitle}>{t('integration_github_title')}</p>
+          <p className={styles.integrationDesc}>
+            {isConnected
+              ? `${t('integration_github_connected_as')}${connection!.user.login}`
+              : t('integration_github_desc')}
+          </p>
         </div>
-        <div className={`${styles.statusDot} ${connection ? styles.statusConnected : styles.statusDisconnected}`} />
+        <Toggle
+          checked={isConnected}
+          onChange={handleToggle}
+          label={t('integration_github_title')}
+        />
       </div>
 
-      {connection ? (
-        <div className={styles.connectedSection}>
-          <div className={styles.connectedUser}>
-            <span className={styles.connectedLabel}>Connected as</span>
-            <span className={styles.connectedValue}>@{connection.user.login}</span>
+      {isConnected && (
+        <>
+          <div className={styles.divider} />
+          <div className={styles.connectedSection}>
+            <p className={styles.connectedSubtitle}>{t('integration_github_tools_title')}</p>
+            <ul className={styles.toolsList}>
+              {githubTools.map((tool) => (
+                <li key={tool} className={styles.toolsListItem}>
+                  <span aria-hidden="true">•</span>
+                  <span>{tool}</span>
+                </li>
+              ))}
+            </ul>
           </div>
-          <div className={styles.connectedMeta}>
-            Connected {new Date(connection.connectedAt).toLocaleDateString()}
-          </div>
-          <button
-            className={styles.disconnectBtn}
-            onClick={handleDisconnect}
-            disabled={disconnecting}
-          >
-            {disconnecting ? 'Disconnecting…' : 'Disconnect'}
-          </button>
-        </div>
-      ) : (
-        <div className={styles.connectSection}>
-          <p className={styles.connectHint}>
-            Connect to access GitHub data from the chat assistant.
-          </p>
-          <button className={styles.connectBtn} onClick={onConnect}>
-            Connect GitHub
-          </button>
-        </div>
+        </>
       )}
     </div>
   )
 }
 
-// ─── Google section ───────────────────────────────────────────────────────────
+// ── Google Workspace card ─────────────────────────────────────────────────────
 
-interface GoogleSectionProps {
+interface GoogleCardProps {
   connection: GoogleWorkspaceConnection | null
   onConnect: () => void
   onDisconnect: () => Promise<void>
   onServicesChange: (services: Partial<EnabledGoogleServices>) => Promise<void>
 }
 
-const GoogleSection: React.FC<GoogleSectionProps> = ({ connection, onConnect, onDisconnect, onServicesChange }) => {
-  const [disconnecting, setDisconnecting] = useState(false)
+const GoogleCard: React.FC<GoogleCardProps> = ({ connection, onConnect, onDisconnect, onServicesChange }) => {
+  const isConnected = connection !== null
   const [services, setServices] = useState<EnabledGoogleServices>({
     gmail: false,
     drive: false,
@@ -85,88 +136,90 @@ const GoogleSection: React.FC<GoogleSectionProps> = ({ connection, onConnect, on
     ...connection?.enabledServices,
   })
 
-  const handleDisconnect = async () => {
-    if (!window.confirm('Disconnect Google Workspace?')) return
-    setDisconnecting(true)
-    try {
-      await onDisconnect()
-    } finally {
-      setDisconnecting(false)
-    }
+  // Sync services when connection prop changes
+  useEffect(() => {
+    setServices({
+      gmail: false,
+      drive: false,
+      calendar: false,
+      ...connection?.enabledServices,
+    })
+  }, [connection])
+
+  const handleMainToggle = async (checked: boolean) => {
+    if (checked) onConnect()
+    else await onDisconnect()
   }
 
-  const handleServiceToggle = async (service: keyof EnabledGoogleServices) => {
-    const newServices = { ...services, [service]: !services[service] }
-    setServices(newServices)
+  const handleServiceToggle = async (svc: keyof EnabledGoogleServices, enabled: boolean) => {
+    const next = { ...services, [svc]: enabled }
+    setServices(next)
     try {
-      await onServicesChange(newServices)
+      await onServicesChange(next)
     } catch {
-      // Revert on error
-      setServices(services)
+      setServices(services) // revert on error
     }
   }
 
-  const googleUser = connection?.user as { email?: string; name?: string } | undefined
+  const googleUser = connection?.user as { email?: string } | undefined
+
+  const serviceItems: Array<{ key: keyof EnabledGoogleServices; label: string; desc: string }> = [
+    { key: 'gmail', label: 'Gmail', desc: t('integration_gmail_desc') },
+    { key: 'calendar', label: 'Calendar', desc: t('integration_calendar_desc') },
+    { key: 'drive', label: 'Drive', desc: t('integration_drive_desc') },
+  ]
 
   return (
-    <div className={styles.integrationCard}>
-      <div className={styles.integrationHeader}>
-        <div className={styles.integrationIcon}>🔵</div>
+    <div className={styles.integrationItem}>
+      <div className={styles.integrationMainRow}>
         <div className={styles.integrationInfo}>
-          <h3 className={styles.integrationName}>Google Workspace</h3>
-          <p className={styles.integrationDesc}>Access Gmail, Drive, and Calendar</p>
+          <p className={styles.integrationTitle}>{t('integration_google_title')}</p>
+          <p className={styles.integrationDesc}>
+            {isConnected
+              ? `${t('integration_google_connected_as')}${googleUser?.email ?? 'user'}`
+              : t('integration_google_desc')}
+          </p>
         </div>
-        <div className={`${styles.statusDot} ${connection ? styles.statusConnected : styles.statusDisconnected}`} />
+        <Toggle
+          checked={isConnected}
+          onChange={handleMainToggle}
+          label={t('integration_google_title')}
+        />
       </div>
 
-      {connection ? (
-        <div className={styles.connectedSection}>
-          {googleUser?.email && (
-            <div className={styles.connectedUser}>
-              <span className={styles.connectedLabel}>Connected as</span>
-              <span className={styles.connectedValue}>{googleUser.email}</span>
-            </div>
-          )}
-          <div className={styles.servicesSection}>
-            <div className={styles.servicesTitle}>Enabled Services</div>
-            {(['gmail', 'drive', 'calendar'] as (keyof EnabledGoogleServices)[]).map((svc) => (
-              <label key={svc} className={styles.serviceToggle}>
-                <span className={styles.serviceName}>{svc.charAt(0).toUpperCase() + svc.slice(1)}</span>
-                <input
-                  type="checkbox"
-                  checked={services[svc]}
-                  onChange={() => handleServiceToggle(svc)}
+      {isConnected && (
+        <>
+          <div className={styles.divider} />
+          <div className={styles.connectedSection}>
+            <p className={styles.connectedSubtitle}>{t('integration_google_services_title')}</p>
+            {serviceItems.map(({ key, label, desc }) => (
+              <div key={key} className={styles.serviceRow}>
+                <div className={styles.serviceInfo}>
+                  <p className={styles.serviceTitle}>{label}</p>
+                  <p className={styles.serviceDesc}>{desc}</p>
+                </div>
+                <Toggle
+                  checked={services[key]}
+                  onChange={(v) => handleServiceToggle(key, v)}
+                  small
+                  label={label}
                 />
-                <span className={styles.toggleSlider} />
-              </label>
+              </div>
             ))}
           </div>
-          <button
-            className={styles.disconnectBtn}
-            onClick={handleDisconnect}
-            disabled={disconnecting}
-          >
-            {disconnecting ? 'Disconnecting…' : 'Disconnect'}
-          </button>
-        </div>
-      ) : (
-        <div className={styles.connectSection}>
-          <p className={styles.connectHint}>
-            Connect to use Gmail, Drive, and Calendar from the chat assistant.
-          </p>
-          <button className={styles.connectBtn} onClick={onConnect}>
-            Connect Google
-          </button>
-        </div>
+        </>
       )}
     </div>
   )
 }
 
-// ─── Main IntegrationsPage ────────────────────────────────────────────────────
+// ── Main IntegrationsPage ─────────────────────────────────────────────────────
 
 const IntegrationsPage: React.FC = () => {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null)
   const [github, setGithub] = useState<GitHubConnection | null>(null)
   const [google, setGoogle] = useState<GoogleWorkspaceConnection | null>(null)
   const [loading, setLoading] = useState(true)
@@ -176,14 +229,14 @@ const IntegrationsPage: React.FC = () => {
   const loadAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [gh, g] = await Promise.allSettled([
+      const [s, ghResult, gResult] = await Promise.allSettled([
+        settingsApi.get(),
         integrations.github.get(),
         integrations.google.get(),
       ])
-      if (gh.status === 'fulfilled') setGithub(gh.value)
-      if (g.status === 'fulfilled') setGoogle(g.value)
-    } catch {
-      // Continue with nulls
+      if (s.status === 'fulfilled') setAppSettings(s.value)
+      if (ghResult.status === 'fulfilled') setGithub(ghResult.value)
+      if (gResult.status === 'fulfilled') setGoogle(gResult.value)
     } finally {
       setLoading(false)
     }
@@ -191,22 +244,38 @@ const IntegrationsPage: React.FC = () => {
 
   useEffect(() => {
     loadAll()
-    // Check for OAuth return params
+    // Handle OAuth return
     const ghConnected = searchParams.get('github')
-    const googleConnected = searchParams.get('google')
+    const gConnected = searchParams.get('google')
     if (ghConnected === 'connected') {
-      setSuccessMsg('GitHub connected successfully!')
+      setSuccessMsg('GitHub חובר בהצלחה!')
       setSearchParams({})
-      loadAll()
-    } else if (googleConnected === 'connected') {
-      setSuccessMsg('Google Workspace connected successfully!')
+    } else if (gConnected === 'connected') {
+      setSuccessMsg('Google Workspace חובר בהצלחה!')
       setSearchParams({})
-      loadAll()
     }
   }, [loadAll, searchParams, setSearchParams])
 
+  // ── Tool toggles (via settings.update) ────────────────────────────────────
+
+  const toggleTool = async (toolId: string, enabled: boolean) => {
+    if (!appSettings) return
+    const current = appSettings.enabledTools ?? []
+    const next = enabled
+      ? [...current, toolId]
+      : current.filter((id) => id !== toolId)
+    try {
+      const updated = await settingsApi.update({ enabledTools: next })
+      setAppSettings(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Update failed')
+    }
+  }
+
+  // ── GitHub OAuth (redirect to server, handle return) ──────────────────────
+
   const handleGithubConnect = () => {
-    integrations.github.startOAuth()
+    integrations.github.startOAuth() // navigates to /oauth/github/start
   }
 
   const handleGithubDisconnect = async () => {
@@ -218,8 +287,10 @@ const IntegrationsPage: React.FC = () => {
     }
   }
 
+  // ── Google OAuth ───────────────────────────────────────────────────────────
+
   const handleGoogleConnect = () => {
-    integrations.google.startOAuth()
+    integrations.google.startOAuth() // navigates to /oauth/google/start
   }
 
   const handleGoogleDisconnect = async () => {
@@ -233,50 +304,80 @@ const IntegrationsPage: React.FC = () => {
 
   const handleGoogleServices = async (services: Partial<EnabledGoogleServices>) => {
     await integrations.google.updateServices(services)
-    // Update local state
-    setGoogle((prev) => prev ? {
-      ...prev,
-      enabledServices: { ...prev.enabledServices, ...services } as EnabledGoogleServices,
-    } : prev)
+    setGoogle((prev) =>
+      prev
+        ? { ...prev, enabledServices: { ...prev.enabledServices, ...services } as EnabledGoogleServices }
+        : prev,
+    )
   }
 
-  if (loading) {
-    return <div className={styles.loading}>Loading integrations…</div>
-  }
+  const enabledTools = appSettings?.enabledTools ?? []
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <h1 className={styles.title}>Integrations</h1>
-      </div>
+      <ScreenTopBar
+        title={t('integrations_title')}
+        headingAriaLabel="Integrations"
+        onBack={() => navigate(-1)}
+      />
 
-      {successMsg && (
-        <div className={styles.success} role="status">
-          {successMsg}
-          <button onClick={() => setSuccessMsg(null)}>✕</button>
+      {loading ? (
+        <div className={styles.loading}>טוען…</div>
+      ) : (
+        <div className={styles.content}>
+          {successMsg && (
+            <div className={styles.success} role="status">
+              {successMsg}
+              <button className={styles.successClose} onClick={() => setSuccessMsg(null)}>✕</button>
+            </div>
+          )}
+          {error && (
+            <div className={styles.error} role="alert">
+              {error}
+              <button className={styles.errorClose} onClick={() => setError(null)}>✕</button>
+            </div>
+          )}
+
+          {/* ── Available tools ── */}
+          <div className={styles.sectionCard}>
+            <p className={styles.sectionTitle}>{t('integrations_tools_section')}</p>
+
+            <ToolItem
+              title={t('integration_datetime')}
+              description={t('integration_datetime_desc')}
+              enabled={enabledTools.includes('get_date_time')}
+              onToggle={(v) => toggleTool('get_date_time', v)}
+            />
+            <ToolItem
+              title={t('integration_group_conv')}
+              description={t('integration_group_conv_desc')}
+              enabled={enabledTools.includes('get_current_group_conversations')}
+              onToggle={(v) => toggleTool('get_current_group_conversations', v)}
+            />
+            <ToolItem
+              title={t('integration_python')}
+              description={t('integration_python_desc')}
+              enabled={enabledTools.includes('python_interpreter')}
+              onToggle={(v) => toggleTool('python_interpreter', v)}
+            />
+
+            {/* ── GitHub ── */}
+            <GitHubCard
+              connection={github}
+              onConnect={handleGithubConnect}
+              onDisconnect={handleGithubDisconnect}
+            />
+
+            {/* ── Google Workspace ── */}
+            <GoogleCard
+              connection={google}
+              onConnect={handleGoogleConnect}
+              onDisconnect={handleGoogleDisconnect}
+              onServicesChange={handleGoogleServices}
+            />
+          </div>
         </div>
       )}
-
-      {error && (
-        <div className={styles.error} role="alert">
-          {error}
-          <button onClick={() => setError(null)}>✕</button>
-        </div>
-      )}
-
-      <div className={styles.cards}>
-        <GitHubSection
-          connection={github}
-          onConnect={handleGithubConnect}
-          onDisconnect={handleGithubDisconnect}
-        />
-        <GoogleSection
-          connection={google}
-          onConnect={handleGoogleConnect}
-          onDisconnect={handleGoogleDisconnect}
-          onServicesChange={handleGoogleServices}
-        />
-      </div>
     </div>
   )
 }

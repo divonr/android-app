@@ -1,158 +1,225 @@
+/**
+ * SkillsPage — R6 refactor.
+ * Mirrors Android SkillsScreen.kt: list with enable/disable toggle,
+ * create dialog, import-from-text dialog, delete confirm.
+ * Tap a skill → navigate to /skills/:name/edit (SkillEditorPage).
+ */
 import React, { useEffect, useState, useCallback } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { skills as skillsApi } from '../api/client'
 import type { InstalledSkill } from '../api/types'
+import ScreenTopBar from '../components/ScreenTopBar'
+import Dialog, { DialogButton } from '../ui/Dialog'
+import { t } from '../i18n/he'
 import styles from './SkillsPage.module.css'
 
-// ─── Skill Editor ─────────────────────────────────────────────────────────────
+// ── Skill card ────────────────────────────────────────────────────────────────
 
-interface SkillEditorProps {
-  skill: InstalledSkill | null   // null = new skill
-  onSave: (params: { name?: string; description?: string; body?: string }) => Promise<void>
-  onCancel: () => void
+interface SkillCardProps {
+  skill: InstalledSkill
+  onEdit: () => void
+  onToggle: (enabled: boolean) => void
+  onDelete: () => void
 }
 
-const SkillEditor: React.FC<SkillEditorProps> = ({ skill, onSave, onCancel }) => {
-  const [name, setName] = useState(skill?.name ?? '')
-  const [description, setDescription] = useState(skill?.description ?? '')
-  const [body, setBody] = useState(skill?.body ?? '')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+const SkillCard: React.FC<SkillCardProps> = ({ skill, onEdit, onToggle, onDelete }) => (
+  <div
+    className={`${styles.skillCard} ${!skill.enabled ? styles.skillCardDisabled : ''}`}
+    onClick={onEdit}
+    role="button"
+    aria-label={skill.name}
+  >
+    {/* Icon */}
+    <div className={styles.skillIcon} aria-hidden="true">✨</div>
 
-  // Load full body if not present
-  useEffect(() => {
-    if (skill && !skill.body) {
-      skillsApi.getContent(skill.name).then((content) => setBody(content)).catch(() => {})
-    }
-  }, [skill])
-
-  const handleSave = async () => {
-    if (!name.trim()) {
-      setError('Skill name is required')
-      return
-    }
-    setBusy(true)
-    setError('')
-    try {
-      await onSave({ name: name.trim(), description: description.trim(), body: body.trim() })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed')
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className={styles.editor}>
-      <div className={styles.editorHeader}>
-        <h2 className={styles.editorTitle}>{skill ? `Edit: ${skill.name}` : 'New Skill'}</h2>
-        <button className={styles.btnSecondary} onClick={onCancel}>Cancel</button>
-      </div>
-
-      <div className={styles.formRow}>
-        <label>Skill Name</label>
-        <input
-          className={styles.input}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="my_skill"
-          disabled={!!skill}
-        />
-      </div>
-      <div className={styles.formRow}>
-        <label>Description</label>
-        <input
-          className={styles.input}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="What this skill does"
-        />
-      </div>
-      <div className={styles.formRow}>
-        <label>Body (Markdown)</label>
-        <textarea
-          className={`${styles.textarea} ${styles.editorBody}`}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="# Skill Name&#10;&#10;Describe the skill in markdown..."
-          rows={20}
-        />
-      </div>
-
-      {error && <div className={styles.error}>{error}</div>}
-
-      <div className={styles.editorFooter}>
-        <button className={styles.btnPrimary} onClick={handleSave} disabled={busy}>
-          {busy ? 'Saving…' : 'Save Skill'}
-        </button>
-      </div>
+    {/* Text */}
+    <div className={styles.skillInfo}>
+      <p className={`${styles.skillName} ${skill.enabled ? styles.skillNameEnabled : styles.skillNameDisabled}`}>
+        {skill.name}
+      </p>
+      <p className={`${styles.skillDescription} ${skill.enabled ? styles.skillDescEnabled : styles.skillDescDisabled}`}>
+        {skill.description || 'No description'}
+      </p>
     </div>
-  )
-}
 
-// ─── Import skill ────────────────────────────────────────────────────────────
+    {/* Toggle (click doesn't bubble to card's onEdit) */}
+    <label
+      className={styles.toggle}
+      onClick={(e) => e.stopPropagation()}
+      title={skill.enabled ? 'Disable' : 'Enable'}
+    >
+      <input
+        type="checkbox"
+        checked={skill.enabled}
+        onChange={(e) => onToggle(e.target.checked)}
+        aria-label={`${skill.enabled ? 'Disable' : 'Enable'} ${skill.name}`}
+      />
+      <span className={styles.toggleSlider} />
+    </label>
+  </div>
+)
 
-interface ImportSkillProps {
+// ── Import text dialog ────────────────────────────────────────────────────────
+
+interface ImportTextDialogProps {
   onImport: (text: string) => Promise<void>
-  onCancel: () => void
+  onClose: () => void
 }
 
-const ImportSkillForm: React.FC<ImportSkillProps> = ({ onImport, onCancel }) => {
+const ImportTextDialog: React.FC<ImportTextDialogProps> = ({ onImport, onClose }) => {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [err, setErr] = useState('')
 
   const handleImport = async () => {
-    if (!text.trim()) {
-      setError('Paste skill text to import')
-      return
-    }
+    if (!text.trim()) { setErr(t('skill_import_from_text') + ' is empty'); return }
     setBusy(true)
-    setError('')
+    setErr('')
     try {
       await onImport(text)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Import failed')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Import failed')
       setBusy(false)
     }
   }
 
   return (
-    <div className={styles.editor}>
-      <div className={styles.editorHeader}>
-        <h2 className={styles.editorTitle}>Import Skill</h2>
-        <button className={styles.btnSecondary} onClick={onCancel}>Cancel</button>
-      </div>
-      <div className={styles.formRow}>
-        <label>Paste skill content (Markdown)</label>
+    <Dialog
+      open
+      title={t('skill_import_text_title')}
+      onClose={onClose}
+      actions={
+        <>
+          <DialogButton label={t('cancel')} onClick={onClose} />
+          <DialogButton label={busy ? '...' : t('skill_import_from_text')} onClick={handleImport} primary disabled={busy || !text.includes('---')} />
+        </>
+      }
+    >
+      <p className={styles.dialogHint}>{t('skill_import_text_hint')}</p>
+      <div className={styles.dialogField}>
         <textarea
-          className={`${styles.textarea} ${styles.editorBody}`}
+          className={styles.dialogTextarea}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Paste full skill markdown here…"
-          rows={16}
+          placeholder={'---\nname: my-skill\ndescription: ...\n---\n\n# My Skill\n...'}
           autoFocus
         />
       </div>
-      {error && <div className={styles.error}>{error}</div>}
-      <div className={styles.editorFooter}>
-        <button className={styles.btnPrimary} onClick={handleImport} disabled={busy || !text.trim()}>
-          {busy ? 'Importing…' : 'Import'}
-        </button>
-      </div>
-    </div>
+      {err && <div className={styles.error}>{err}</div>}
+    </Dialog>
   )
 }
 
-// ─── Main SkillsPage ──────────────────────────────────────────────────────────
+// ── Create skill dialog ───────────────────────────────────────────────────────
 
-type ViewMode = 'list' | 'edit' | 'new' | 'import'
+interface CreateDialogProps {
+  onCreate: (name: string, description: string) => Promise<void>
+  onClose: () => void
+}
+
+const CreateSkillDialog: React.FC<CreateDialogProps> = ({ onCreate, onClose }) => {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const handleCreate = async () => {
+    if (!name.trim() || !description.trim()) { setErr('שם ותיאור נדרשים'); return }
+    setBusy(true)
+    setErr('')
+    try {
+      await onCreate(name.trim(), description.trim())
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Create failed')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      title={t('skill_create_new')}
+      onClose={onClose}
+      actions={
+        <>
+          <DialogButton label={t('cancel')} onClick={onClose} />
+          <DialogButton label={busy ? '...' : t('create')} onClick={handleCreate} primary disabled={busy || !name.trim() || !description.trim()} />
+        </>
+      }
+    >
+      <div className={styles.dialogField}>
+        <label className={styles.dialogLabel}>{t('skill_create_name_label')}</label>
+        <input
+          className={styles.dialogInput}
+          value={name}
+          onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+          placeholder="my-skill-name"
+          autoFocus
+        />
+      </div>
+      <div className={styles.dialogField}>
+        <label className={styles.dialogLabel}>{t('skill_create_desc_label')}</label>
+        <input
+          className={styles.dialogInput}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="תיאור קצר של מה הסקיל עושה ומתי להשתמש בו"
+        />
+      </div>
+      {err && <div className={styles.error}>{err}</div>}
+    </Dialog>
+  )
+}
+
+// ── Delete confirm dialog ─────────────────────────────────────────────────────
+
+interface DeleteDialogProps {
+  skillName: string
+  onConfirm: () => Promise<void>
+  onClose: () => void
+}
+
+const DeleteSkillDialog: React.FC<DeleteDialogProps> = ({ skillName, onConfirm, onClose }) => {
+  const [busy, setBusy] = useState(false)
+
+  const handleDelete = async () => {
+    setBusy(true)
+    try {
+      await onConfirm()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      title={t('skill_delete_title')}
+      onClose={onClose}
+      actions={
+        <>
+          <DialogButton label={t('cancel')} onClick={onClose} />
+          <DialogButton label={busy ? '...' : t('skill_delete_confirm')} onClick={handleDelete} primary disabled={busy} />
+        </>
+      }
+    >
+      <p style={{ color: 'var(--on-surface-variant)', margin: 0 }}>
+        למחוק את הסקיל &quot;{skillName}&quot; וכל הקבצים שלו?
+      </p>
+    </Dialog>
+  )
+}
+
+// ── Main SkillsPage ───────────────────────────────────────────────────────────
 
 const SkillsPage: React.FC = () => {
+  const navigate = useNavigate()
   const [skills, setSkills] = useState<InstalledSkill[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>('list')
-  const [editingSkill, setEditingSkill] = useState<InstalledSkill | null>(null)
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [deletingSkill, setDeletingSkill] = useState<InstalledSkill | null>(null)
 
   const loadSkills = useCallback(async () => {
     setLoading(true)
@@ -168,144 +235,127 @@ const SkillsPage: React.FC = () => {
 
   useEffect(() => { loadSkills() }, [loadSkills])
 
-  // ── Toggle skill ──────────────────────────────────────────────────────────
+  // ── Toggle ─────────────────────────────────────────────────────────────────
 
-  const handleToggle = async (skill: InstalledSkill) => {
+  const handleToggle = async (skill: InstalledSkill, enabled: boolean) => {
     try {
-      const updated = await skillsApi.setEnabled(skill.name, !skill.enabled)
-      setSkills((prev) => prev.map((s) => s.name === updated.name ? updated : s))
+      const updated = await skillsApi.setEnabled(skill.name, enabled)
+      setSkills((prev) => prev.map((s) => (s.name === updated.name ? updated : s)))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Toggle failed')
     }
   }
 
-  // ── Delete skill ──────────────────────────────────────────────────────────
+  // ── Delete ─────────────────────────────────────────────────────────────────
 
   const handleDelete = async (name: string) => {
-    if (!window.confirm(`Delete skill "${name}"?`)) return
-    try {
-      await skillsApi.delete(name)
-      setSkills((prev) => prev.filter((s) => s.name !== name))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delete failed')
-    }
+    await skillsApi.delete(name)
+    setSkills((prev) => prev.filter((s) => s.name !== name))
+    setDeletingSkill(null)
   }
 
-  // ── Save skill (create or update) ─────────────────────────────────────────
-
-  const handleSave = async (params: { name?: string; description?: string; body?: string }) => {
-    if (editingSkill) {
-      // Update existing: patch enabled stays the same; body update via create with name
-      await skillsApi.create({ ...params, name: editingSkill.name })
-    } else {
-      await skillsApi.create(params)
-    }
-    setViewMode('list')
-    setEditingSkill(null)
-    await loadSkills()
-  }
-
-  // ── Import skill ──────────────────────────────────────────────────────────
+  // ── Import ─────────────────────────────────────────────────────────────────
 
   const handleImport = async (text: string) => {
     await skillsApi.create({ importText: text })
-    setViewMode('list')
+    setShowImportDialog(false)
     await loadSkills()
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Create ─────────────────────────────────────────────────────────────────
 
-  if (viewMode === 'edit' || viewMode === 'new') {
-    return (
-      <div className={styles.page}>
-        <SkillEditor
-          skill={viewMode === 'edit' ? editingSkill : null}
-          onSave={handleSave}
-          onCancel={() => { setViewMode('list'); setEditingSkill(null) }}
-        />
-      </div>
-    )
+  const handleCreate = async (name: string, description: string) => {
+    const created = await skillsApi.create({ name, description, body: `# ${name}\n\n${description}\n` })
+    setShowCreateDialog(false)
+    await loadSkills()
+    // Navigate to editor
+    navigate(`/skills/${encodeURIComponent(created.name)}/edit`)
   }
 
-  if (viewMode === 'import') {
-    return (
-      <div className={styles.page}>
-        <ImportSkillForm
-          onImport={handleImport}
-          onCancel={() => setViewMode('list')}
-        />
-      </div>
-    )
-  }
+  // ── Topbar action buttons ──────────────────────────────────────────────────
+
+  const topbarActions = (
+    <>
+      <button
+        className={styles.topbarBtn}
+        onClick={() => setShowImportDialog(true)}
+        aria-label={t('skill_import_from_text')}
+        title={t('skill_import_from_text')}
+      >
+        ⬇
+      </button>
+      <button
+        className={styles.topbarBtn}
+        onClick={() => setShowCreateDialog(true)}
+        aria-label={t('skill_create_new')}
+        title={t('skill_create_new')}
+      >
+        +
+      </button>
+    </>
+  )
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <h1 className={styles.title}>Skills</h1>
-        <div className={styles.headerActions}>
-          <button className={styles.btnSecondary} onClick={() => setViewMode('import')}>
-            Import
-          </button>
-          <button className={styles.btnPrimary} onClick={() => { setEditingSkill(null); setViewMode('new') }}>
-            + New Skill
-          </button>
+    <>
+      <div className={styles.page}>
+        <ScreenTopBar
+          title={t('skills_title')}
+          headingAriaLabel="Skills"
+          onBack={() => navigate(-1)}
+          actions={topbarActions}
+        />
+
+        <div className={styles.content}>
+          {error && (
+            <div className={styles.error} role="alert">
+              {error}
+              <button className={styles.errorClose} onClick={() => setError(null)}>✕</button>
+            </div>
+          )}
+
+          {loading ? (
+            <div className={styles.loading}>טוען סקילים…</div>
+          ) : skills.length === 0 ? (
+            <div className={styles.empty}>
+              <div className={styles.emptyIcon} aria-hidden="true">✨</div>
+              <p className={styles.emptyTitle}>{t('skills_empty_title')}</p>
+              <p className={styles.emptyHint}>{t('skills_empty_hint')}</p>
+            </div>
+          ) : (
+            skills.map((skill) => (
+              <SkillCard
+                key={skill.name}
+                skill={skill}
+                onEdit={() => navigate(`/skills/${encodeURIComponent(skill.name)}/edit`)}
+                onToggle={(enabled) => handleToggle(skill, enabled)}
+                onDelete={() => setDeletingSkill(skill)}
+              />
+            ))
+          )}
         </div>
       </div>
 
-      {error && (
-        <div className={styles.error} role="alert">
-          {error}
-          <button onClick={() => setError(null)}>✕</button>
-        </div>
+      {/* Dialogs rendered outside the page column */}
+      {showImportDialog && (
+        <ImportTextDialog
+          onImport={handleImport}
+          onClose={() => setShowImportDialog(false)}
+        />
       )}
-
-      {loading ? (
-        <div className={styles.loading}>Loading skills…</div>
-      ) : skills.length === 0 ? (
-        <div className={styles.empty}>
-          <p>No skills installed yet.</p>
-          <p>Skills extend the assistant's capabilities with custom instructions.</p>
-        </div>
-      ) : (
-        <div className={styles.list}>
-          {skills.map((skill) => (
-            <div key={skill.name} className={`${styles.skillRow} ${!skill.enabled ? styles.skillRowDisabled : ''}`}>
-              <div className={styles.skillInfo}>
-                <div className={styles.skillHeader}>
-                  <span className={styles.skillName}>{skill.name}</span>
-                  {skill.enabled && <span className={styles.enabledBadge}>Active</span>}
-                </div>
-                <span className={styles.skillDescription}>{skill.description || 'No description'}</span>
-              </div>
-              <div className={styles.skillActions}>
-                <label className={styles.toggle} title={skill.enabled ? 'Disable' : 'Enable'}>
-                  <input
-                    type="checkbox"
-                    checked={skill.enabled}
-                    onChange={() => handleToggle(skill)}
-                  />
-                  <span className={styles.toggleSlider} />
-                </label>
-                <button
-                  className={styles.iconBtn}
-                  onClick={() => { setEditingSkill(skill); setViewMode('edit') }}
-                  title="Edit"
-                >
-                  ✏️
-                </button>
-                <button
-                  className={`${styles.iconBtn} ${styles.deleteBtn}`}
-                  onClick={() => handleDelete(skill.name)}
-                  title="Delete"
-                >
-                  🗑
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+      {showCreateDialog && (
+        <CreateSkillDialog
+          onCreate={handleCreate}
+          onClose={() => setShowCreateDialog(false)}
+        />
       )}
-    </div>
+      {deletingSkill && (
+        <DeleteSkillDialog
+          skillName={deletingSkill.name}
+          onConfirm={() => handleDelete(deletingSkill.name)}
+          onClose={() => setDeletingSkill(null)}
+        />
+      )}
+    </>
   )
 }
 

@@ -1,156 +1,175 @@
 /* =========================================================
-   Skills Page
+   SkillsPage — R6 refactor
+   Mirrors Android SkillsScreen.kt (dark, RTL, phone-width).
    ========================================================= */
 
+/* ── Page shell ── */
+
 .page {
-  padding: 1.5rem 1.25rem;
-  max-width: 700px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
 }
 
-.loading {
-  padding: 1.5rem 0;
-  color: var(--color-text-secondary);
-}
+/* ── Topbar actions (create + import buttons) ── */
 
-.header {
+.topbarBtn {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1.25rem;
-}
-
-.title {
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.headerActions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.error {
-  margin-bottom: 1rem;
-  padding: 0.6rem 0.75rem;
-  background: rgba(236, 112, 99, 0.12);
-  border: 1px solid var(--color-error);
-  border-radius: 6px;
-  color: var(--color-error);
-  font-size: 0.875rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.error button {
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-icon-btn);
   background: none;
   border: none;
-  color: var(--color-error);
+  color: var(--primary);
   cursor: pointer;
+  font-size: 20px;
+  transition: background 0.15s;
 }
+
+.topbarBtn:hover {
+  background: var(--primary-15);
+}
+
+/* ── Scrollable content ── */
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Loading ── */
+
+.loading {
+  padding: 2rem;
+  color: var(--on-surface-variant);
+  text-align: center;
+}
+
+/* ── Empty state ── */
 
 .empty {
-  padding: 2rem 0;
-  color: var(--color-text-secondary);
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  gap: 16px;
+  text-align: center;
 }
 
-/* Skill list */
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+.emptyIcon {
+  font-size: 64px;
+  opacity: 0.4;
 }
 
-.skillRow {
+.emptyTitle {
+  font-size: var(--fs-title-medium);
+  font-weight: 500;
+  color: var(--on-surface);
+  opacity: 0.7;
+  margin: 0;
+}
+
+.emptyHint {
+  font-size: var(--fs-body-medium);
+  color: var(--on-surface-variant);
+  opacity: 0.5;
+  line-height: 1.6;
+  margin: 0;
+  max-width: 280px;
+}
+
+/* ── Skill card (RoundedCornerShape(16dp), shadowElevation=2dp) ── */
+
+.skillCard {
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.85rem 1rem;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  transition: background 0.1s;
+  padding: 16px;
+  gap: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
 }
 
-.skillRow:hover {
-  background: var(--color-surface-variant);
+.skillCard:hover {
+  background: var(--surface-variant);
 }
 
-.skillRowDisabled {
+.skillCardDisabled {
   opacity: 0.55;
 }
+
+/* ── Skill icon box (44dp, RoundedCornerShape(12dp)) ── */
+
+.skillIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--primary-15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 22px;
+  color: var(--primary);
+}
+
+/* ── Skill text ── */
 
 .skillInfo {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.skillHeader {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
 }
 
 .skillName {
-  font-size: 0.95rem;
+  font-size: var(--fs-body-large);
   font-weight: 600;
-  color: var(--color-text);
+  margin: 0 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.enabledBadge {
-  font-size: 0.7rem;
-  background: rgba(88, 214, 141, 0.15);
-  color: var(--color-success);
-  border: 1px solid rgba(88, 214, 141, 0.3);
-  border-radius: 4px;
-  padding: 0.1rem 0.4rem;
+.skillNameEnabled {
+  color: var(--on-surface);
+}
+
+.skillNameDisabled {
+  color: rgba(232, 232, 242, 0.5);
 }
 
 .skillDescription {
-  font-size: 0.82rem;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
+  font-size: var(--fs-body-small);
+  margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.4;
 }
 
-.skillActions {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-shrink: 0;
+.skillDescEnabled {
+  color: rgba(232, 232, 242, 0.6);
 }
 
-.iconBtn {
-  background: none;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-  border-radius: 6px;
-  padding: 0.25rem 0.45rem;
-  cursor: pointer;
-  font-size: 0.85rem;
-  transition: background 0.1s, color 0.1s;
+.skillDescDisabled {
+  color: rgba(232, 232, 242, 0.35);
 }
 
-.iconBtn:hover {
-  background: var(--color-surface-variant);
-  color: var(--color-text);
-}
+/* ── Toggle switch (matches Android SwitchDefaults) ── */
 
-.deleteBtn:hover {
-  border-color: var(--color-error);
-  color: var(--color-error);
-}
-
-/* Toggle switch */
 .toggle {
   position: relative;
   display: inline-flex;
@@ -167,10 +186,10 @@
 }
 
 .toggleSlider {
-  width: 36px;
-  height: 20px;
-  background: var(--color-border);
-  border-radius: 10px;
+  width: 40px;
+  height: 22px;
+  background: rgba(232, 232, 242, 0.1);
+  border-radius: 11px;
   position: relative;
   transition: background 0.2s;
 }
@@ -178,125 +197,108 @@
 .toggleSlider::after {
   content: '';
   position: absolute;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: #fff;
+  background: rgba(232, 232, 242, 0.3);
   top: 3px;
-  left: 3px;
-  transition: transform 0.2s;
+  inset-inline-start: 3px;
+  transition: transform 0.2s, background 0.2s;
 }
 
 .toggle input:checked + .toggleSlider {
-  background: var(--color-primary);
+  background: rgba(108, 124, 231, 0.3);
 }
 
 .toggle input:checked + .toggleSlider::after {
-  transform: translateX(16px);
+  background: var(--primary);
+  transform: translateX(18px);
 }
 
-/* Editor */
-.editor {
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-  height: 100%;
+[dir='rtl'] .toggle input:checked + .toggleSlider::after {
+  transform: translateX(-18px);
 }
 
-.editorHeader {
+/* ── Error banner ── */
+
+.error {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  background: rgba(236, 112, 99, 0.12);
+  border: 1px solid var(--accent-red);
+  border-radius: 8px;
+  color: var(--accent-red);
+  font-size: var(--fs-body-small);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.25rem;
+  gap: 8px;
 }
 
-.editorTitle {
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: var(--color-text);
+.errorClose {
+  background: none;
+  border: none;
+  color: var(--accent-red);
+  cursor: pointer;
+  padding: 2px 4px;
 }
 
-.editorBody {
-  font-family: var(--font-mono);
-  font-size: 0.875rem;
-  min-height: 400px;
-}
+/* ── Dialog fields ── */
 
-.editorFooter {
-  display: flex;
-  justify-content: flex-end;
-}
-
-/* Form fields */
-.formRow {
+.dialogField {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 6px;
+  margin-bottom: 12px;
 }
 
-.formRow label {
-  font-size: 0.82rem;
+.dialogLabel {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
   font-weight: 500;
-  color: var(--color-text-secondary);
 }
 
-.input {
-  padding: 0.5rem 0.7rem;
-  background: var(--color-surface-variant);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  color: var(--color-text);
-  font-size: 0.9rem;
+.dialogInput {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--surface-variant);
+  border: 1px solid rgba(232, 232, 242, 0.2);
+  border-radius: 8px;
+  color: var(--on-surface);
+  font-size: var(--fs-body-medium);
+  font-family: inherit;
   outline: none;
   transition: border-color 0.15s;
+  box-sizing: border-box;
 }
 
-.input:focus { border-color: var(--color-primary); }
-.input:disabled { opacity: 0.6; cursor: not-allowed; }
+.dialogInput:focus {
+  border-color: var(--primary);
+}
 
-.textarea {
-  padding: 0.5rem 0.7rem;
-  background: var(--color-surface-variant);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  color: var(--color-text);
-  font-size: 0.9rem;
+.dialogTextarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 10px 12px;
+  background: var(--surface-variant);
+  border: 1px solid rgba(232, 232, 242, 0.2);
+  border-radius: 8px;
+  color: var(--on-surface);
+  font-size: var(--fs-body-small);
+  font-family: monospace;
   outline: none;
   resize: vertical;
-  font-family: var(--font-sans);
   transition: border-color 0.15s;
-  line-height: 1.55;
+  box-sizing: border-box;
 }
 
-.textarea:focus { border-color: var(--color-primary); }
-
-/* Buttons */
-.btnPrimary {
-  padding: 0.45rem 1rem;
-  background: var(--color-primary);
-  color: #fff;
-  border: none;
-  border-radius: 7px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  font-weight: 500;
-  transition: opacity 0.15s;
+.dialogTextarea:focus {
+  border-color: var(--primary);
 }
 
-.btnPrimary:hover:not(:disabled) { opacity: 0.85; }
-.btnPrimary:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.btnSecondary {
-  padding: 0.45rem 0.9rem;
-  background: var(--color-surface-variant);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  transition: background 0.15s;
-}
-
-.btnSecondary:hover {
-  background: var(--color-border);
+.dialogHint {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+  opacity: 0.7;
+  margin: 0 0 8px;
 }

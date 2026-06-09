@@ -278,6 +278,77 @@ const strings = {
   next_variant: 'ענף הבא',
   scroll_to_top: 'גלול למעלה',
   scroll_to_bottom: 'גלול למטה',
+
+  // ── R6: Group/Project screen ────────────────────────────────────────────────
+  group_project_mode: 'פרויקט',
+  group_instructions: 'הוראות',
+  group_no_instructions: 'לא הוגדרו הוראות',
+  group_files: 'קבצים',
+  group_add_files_placeholder: 'הוסיפו קבצים...',
+  group_add_file: 'הוסף קובץ',
+  group_no_chats: 'אין עדיין שיחות בקבוצה זו',
+  group_add_chat_hint: 'לחץ לחיצה ארוכה על שיחה כדי להוסיפה לקבוצה',
+  group_not_found: 'הקבוצה לא נמצאה',
+  group_new_chat: 'שיחה חדשה בקבוצה',
+  group_save_prompt: 'שמור הוראות',
+
+  // ── R6: Skills screen ───────────────────────────────────────────────────────
+  skills_title: 'סקילים',
+  skills_empty_title: 'אין סקילים מותקנים',
+  skills_empty_hint: 'סקילים מרחיבים את יכולות המודל עם ידע ומומחיות ייעודיים. ייבא סקיל קיים או צור חדש.',
+  skill_import_from_text: 'ייבוא מטקסט',
+  skill_import_text_title: 'ייבוא סקיל מטקסט',
+  skill_import_text_hint: 'הדבק את תוכן ה-SKILL.md כולל ה-frontmatter:',
+  skill_create_new: 'יצירת סקיל חדש',
+  skill_create_name_label: 'שם (אנגלית, מקפים)',
+  skill_create_desc_label: 'תיאור',
+  skill_delete_title: 'מחיקת סקיל',
+  skill_delete_confirm: 'מחיקה',
+  skill_files_count: 'קבצים',
+
+  // ── R6: Skill editor ────────────────────────────────────────────────────────
+  skill_editor_add_file: 'הוספת קובץ',
+  skill_editor_saved: 'נשמר ✓',
+  skill_editor_save_error: 'שגיאה בשמירה',
+  skill_editor_not_found: 'הסקיל לא נמצא',
+  skill_editor_new_file_title: 'הוספת קובץ חדש',
+  skill_editor_file_name: 'שם קובץ',
+
+  // ── R6: Integrations screen ─────────────────────────────────────────────────
+  integrations_title: 'כלים חיצוניים',
+  integrations_tools_section: 'כלים זמינים',
+  integration_datetime: 'תאריך ושעה',
+  integration_datetime_desc: 'מאפשר למודל לקבל את התאריך והשעה הנוכחיים במכשיר',
+  integration_group_conv: 'שיחות בקבוצה',
+  integration_group_conv_desc: 'אפשר למודל לראות שיחות אחרות באותה הקבוצה',
+  integration_python: 'מפרש Python',
+  integration_python_desc: 'הרצת קוד Python עם pandas, numpy, matplotlib לניתוח נתונים',
+  integration_github_title: 'חיבור ל-GitHub',
+  integration_github_desc: 'אפשר למודל לעבוד עם קוד ב-GitHub',
+  integration_github_connected_as: 'מחובר כ-',
+  integration_github_tools_title: 'כלי GitHub כלולים:',
+  integration_google_title: 'חיבור ל-Google Workspace',
+  integration_google_desc: 'גישה ל-Gmail, Calendar ו-Drive',
+  integration_google_connected_as: 'מחובר כ-',
+  integration_google_services_title: 'שירותים מופעלים:',
+  integration_gmail_desc: 'קריאה, שליחה וחיפוש אימיילים',
+  integration_calendar_desc: 'רשימת אירועים, יצירה וצפייה',
+  integration_drive_desc: 'רשימה, קריאה, העלאה ומחיקה',
+  integration_connect: 'התחבר',
+  integration_disconnect: 'נתק',
+
+  // ── R6: Logs screen ─────────────────────────────────────────────────────────
+  logs_title: 'לוגים',
+  logs_clear: 'נקה',
+  logs_no_logs: 'No logs yet',
+
+  // ── R6: Welcome screen ──────────────────────────────────────────────────────
+  welcome_title: 'ברוכים הבאים!',
+  welcome_subtitle: 'כדי להתחיל, תצטרכו מפתח API. לחצו על שם הספק כדי לקבל מפתח.',
+  welcome_free_section: 'מומלץ להתחיל כאן - ספקים אלו ניתן לקבל מפתח ניסיון ללא תשלום',
+  welcome_paid_section: 'ספקים נוספים - תשלום מינימלי 5$ לקבלת מפתח פעיל',
+  welcome_have_api_key: 'יש לי מפתח API >',
+  welcome_skip_screen: 'אל תציגו מסך זה שוב',
 } as const
 
 export type StringKey = keyof typeof strings
