@@ -28,5 +28,8 @@ web/test-results
 web/playwright-report
 web/.playwright
 
+# R7 visual verification screenshots (local only)
+web/r7-screenshots/
+
 # Deployment secrets — never commit real env file
 server/deploy/llm-web.env

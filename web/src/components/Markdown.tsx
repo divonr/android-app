@@ -52,7 +52,9 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ className, children, inline, ...r
   }
 
   return (
-    <div className={styles.codeWrapper}>
+    // dir="ltr" prevents the Unicode BIDI algorithm from reversing punctuation
+    // in code blocks when the parent has dir="rtl".
+    <div className={styles.codeWrapper} dir="ltr">
       {/* Header bar: language label + copy button */}
       <div className={styles.codeHeader}>
         <span className={styles.codeLang}>{lang || 'code'}</span>
