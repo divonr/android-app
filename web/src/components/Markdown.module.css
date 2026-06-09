@@ -96,6 +96,8 @@
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 0.875em;
   color: var(--color-primary-light);
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 /* ── Code blocks (CodeBlockRenderer.kt) ────────────────────── */
@@ -155,6 +157,12 @@
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 13px;
   line-height: 1.6;
+  /* Force code into an isolated LTR context so the BIDI algorithm does not
+     reorder trailing punctuation (e.g. `;`) under the RTL page. */
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
+  white-space: pre;
 }
 
 /* ── KaTeX math ─────────────────────────────────────────────── */

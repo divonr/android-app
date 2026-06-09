@@ -32,9 +32,13 @@ interface CodeBlockProps {
 const CodeBlock: React.FC<CodeBlockProps> = ({ className, children, inline, ...rest }) => {
   const [copied, setCopied] = useState(false)
 
-  const isBlock = className?.startsWith('language-')
-  const lang = isBlock ? className!.replace('language-', '') : ''
   const code = String(children ?? '').replace(/\n$/, '')
+  // rehype-highlight prefixes the class with `hljs ` (e.g. "hljs language-js"),
+  // so a startsWith check misses real fenced blocks. Detect a block by the
+  // presence of `language-` anywhere, or by a multi-line body.
+  const isBlock = (className?.includes('language-') ?? false) || code.includes('\n')
+  const langMatch = className?.match(/language-(\w+)/)
+  const lang = langMatch ? langMatch[1] : ''
 
   const handleCopy = () => {
     navigator.clipboard.writeText(code).then(() => {
@@ -45,7 +49,7 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ className, children, inline, ...r
 
   if (!isBlock || inline) {
     return (
-      <code className={`${styles.inlineCode} ${className ?? ''}`} {...rest}>
+      <code className={`${styles.inlineCode} ${className ?? ''}`} dir="ltr" {...rest}>
         {children}
       </code>
     )
