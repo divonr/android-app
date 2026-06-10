@@ -177,7 +177,10 @@ export const chats = {
     request<Chat>('/api/chats', { method: 'POST', body: JSON.stringify(params) }),
 
   /** PATCH /api/chats/:id */
-  update: (chatId: string, params: { previewName?: string; systemPrompt?: string }) =>
+  update: (
+    chatId: string,
+    params: { previewName?: string; systemPrompt?: string; shareLink?: string; shareId?: string },
+  ) =>
     request<Chat>(`/api/chats/${chatId}`, {
       method: 'PATCH',
       body: JSON.stringify(params),

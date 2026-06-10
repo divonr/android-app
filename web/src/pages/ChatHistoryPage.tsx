@@ -32,6 +32,7 @@ import type { Chat, ChatGroup, SearchResult } from '../api/types'
 import { t } from '../i18n/he'
 import IconButton from '../ui/IconButton'
 import Dialog, { DialogButton } from '../ui/Dialog'
+import ChatExportDialog from '../components/chat/ChatExportDialog'
 import {
   MdSearch,
   MdClose,
@@ -346,6 +347,7 @@ const ChatHistoryPage: React.FC = () => {
   const [renameDialog, setRenameDialog] = useState<Chat | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteDialog, setDeleteDialog] = useState<Chat | null>(null)
+  const [exportDialogChat, setExportDialogChat] = useState<Chat | null>(null)
   const [createGroupDialog, setCreateGroupDialog] = useState(false)
   const [createGroupForChat, setCreateGroupForChat] = useState<Chat | null>(null)
   const [newGroupName, setNewGroupName] = useState('')
@@ -474,24 +476,11 @@ const ChatHistoryPage: React.FC = () => {
     }
   }
 
-  // ── Share / export chat ────────────────────────────────────────────────────
+  // ── Share / export chat — opens the export dialog (selectAndExportChat) ───
 
-  const handleShareChat = async (chat: Chat) => {
+  const handleShareChat = (chat: Chat) => {
     setChatMenu(null)
-    try {
-      const data = await chatsApi.export(chat.chat_id)
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: 'application/json',
-      })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${chat.preview_name || 'chat'}.json`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch {
-      // silently fail
-    }
+    setExportDialogChat(chat)
   }
 
   // ── Delete chat ────────────────────────────────────────────────────────────
@@ -1109,6 +1098,14 @@ const ChatHistoryPage: React.FC = () => {
       >
         {t('delete_confirmation_message')}
       </Dialog>
+
+      {/* ── Chat export/share dialog ── */}
+      <ChatExportDialog
+        open={!!exportDialogChat}
+        chat={exportDialogChat}
+        onClose={() => setExportDialogChat(null)}
+        onChatUpdated={() => { loadHistory() }}
+      />
 
       {/* ── Create group dialog ── */}
       <Dialog

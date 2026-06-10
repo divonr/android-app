@@ -29,7 +29,10 @@ data class CreateChatRequest(
 @Serializable
 data class PatchChatRequest(
     val previewName: String? = null,
-    val systemPrompt: String? = null
+    val systemPrompt: String? = null,
+    // Share-link fields are patched together (empty strings clear the link)
+    val shareLink: String? = null,
+    val shareId: String? = null
 )
 
 @Serializable
@@ -184,6 +187,9 @@ fun Route.mutationRoutes() {
             )
             repo.saveChatHistory(updatedHistory)
             chat = updatedHistory.chat_history.find { it.chat_id == chatId } ?: chat
+        }
+        if (body.shareLink != null && body.shareId != null) {
+            chat = repo.updateChatShareLink(username, chatId, body.shareLink, body.shareId) ?: chat
         }
         call.respond(HttpStatusCode.OK, chat!!)
     }

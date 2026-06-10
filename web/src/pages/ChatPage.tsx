@@ -47,6 +47,7 @@ import QuickSettingsBar from '../components/chat/QuickSettingsBar'
 import type { TextDirectionMode } from '../components/chat/QuickSettingsBar'
 import ModelSelectorDialog from '../components/chat/ModelSelectorDialog'
 import SystemPromptDialog from '../components/chat/SystemPromptDialog'
+import ChatExportDialog from '../components/chat/ChatExportDialog'
 import Dialog, { DialogButton } from '../ui/Dialog'
 import { t } from '../i18n/he'
 
@@ -168,6 +169,7 @@ const ChatPage: React.FC = () => {
   const [activeKeyProviders, setActiveKeyProviders] = useState<string[]>([])
   const [starredModels, setStarredModels] = useState<StarredModel[]>([])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showExportDialog, setShowExportDialog] = useState(false)
 
   // ── Multi-message mode (mirrors MessageSendingManager.kt) ────────────────
   const [multiMessageMode, setMultiMessageMode] = useState(false)
@@ -632,9 +634,7 @@ const ChatPage: React.FC = () => {
         quickSettingsExpanded={quickSettingsExpanded}
         onBack={() => navigate('/')}
         onSearch={() => setSearchMode(true)}
-        onShare={() => {
-          if (chatId) chatsApi.export(chatId).catch(() => {})
-        }}
+        onShare={() => setShowExportDialog(true)}
         onDelete={() => setShowDeleteConfirm(true)}
         onClickProviderModel={() => setShowModelSelector(true)}
         onSearchQueryChange={setSearchQuery}
@@ -677,6 +677,13 @@ const ChatPage: React.FC = () => {
         onClose={() => setShowSystemPromptDialog(false)}
         currentPrompt={chat?.systemPrompt ?? ''}
         onSave={handleSaveSystemPrompt}
+      />
+
+      <ChatExportDialog
+        open={showExportDialog}
+        chat={chat ?? null}
+        onClose={() => setShowExportDialog(false)}
+        onChatUpdated={() => { if (chatId) loadChat(chatId) }}
       />
 
       <Dialog

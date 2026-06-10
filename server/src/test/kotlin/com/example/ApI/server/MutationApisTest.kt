@@ -621,6 +621,33 @@ class MutationApisTest {
         assertEquals(2, arr.size)
     }
 
+    @Test
+    fun `PATCH api chats updates share link fields`() = testApplication {
+        val (storage, repo) = seededStorage()
+        application { module(storage, testAuthConfig) }
+        val c = loggedInClient()
+
+        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val response = c.patch("/api/chats/$chatId") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"shareLink":"https://api-divonr.xyz/viewer/?id=abc#key=deadbeef","shareId":"abc"}""")
+        }
+        assertEquals(HttpStatusCode.OK, response.status)
+
+        val saved = repo.loadChatHistory("testuser").chat_history.first { it.chat_id == chatId }
+        assertEquals("https://api-divonr.xyz/viewer/?id=abc#key=deadbeef", saved.shareLink)
+        assertEquals("abc", saved.shareId)
+
+        // Clearing works with empty strings
+        c.patch("/api/chats/$chatId") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"shareLink":"","shareId":""}""")
+        }
+        val cleared = repo.loadChatHistory("testuser").chat_history.first { it.chat_id == chatId }
+        assertEquals("", cleared.shareLink)
+        assertEquals("", cleared.shareId)
+    }
+
     // ── Settings ─────────────────────────────────────────────────────────────
 
     @Test
