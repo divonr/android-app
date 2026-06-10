@@ -42,6 +42,9 @@ fun UserSettingsScreen(
     modifier: Modifier = Modifier
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        val syncNeedsReauth by viewModel.syncNeedsReauth.collectAsState()
+        val syncSignInInProgress by viewModel.syncSignInInProgress.collectAsState()
+
                 var showImportWarning by remember { mutableStateOf(false) }
 
         // Child lock state
@@ -238,12 +241,15 @@ fun UserSettingsScreen(
                 // 6. Remote Sync Section
                 RemoteSyncSection(
                     settings = appSettings.remoteSync,
+                    needsReauth = syncNeedsReauth,
+                    isSignInInProgress = syncSignInInProgress,
                     onEnabledChange = { viewModel.updateRemoteSyncEnabled(it) },
                     onServerUrlChange = { viewModel.updateRemoteSyncServerUrl(it) },
-                    onAuthTokenChange = { viewModel.updateRemoteSyncAuthToken(it) },
                     onSyncApiKeysChange = { viewModel.updateRemoteSyncApiKeys(it) },
                     onSyncNow = { viewModel.triggerSyncNow() },
-                    onTestConnection = { viewModel.testSyncConnection() }
+                    onTestConnection = { viewModel.testSyncConnection() },
+                    onSignInClick = { viewModel.signInToSyncWithGoogle() },
+                    onSignOutClick = { viewModel.signOutOfSync() }
                 )
 
                 // 7. Logs Screen Navigation

@@ -5,16 +5,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ApI.R
@@ -27,31 +24,31 @@ import kotlinx.coroutines.launch
 @Composable
 fun RemoteSyncSection(
     settings: RemoteSyncSettings,
+    needsReauth: Boolean,
+    isSignInInProgress: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     onServerUrlChange: (String) -> Unit,
-    onAuthTokenChange: (String) -> Unit,
     onSyncApiKeysChange: (Boolean) -> Unit,
     onSyncNow: () -> Unit,
     onTestConnection: suspend () -> Boolean,
+    onSignInClick: () -> Unit,
+    onSignOutClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    var tokenVisible by remember { mutableStateOf(false) }
     var syncNowConfirmed by remember { mutableStateOf(false) }
     var testConnectionResult by remember { mutableStateOf<Boolean?>(null) }
     var testInProgress by remember { mutableStateOf(false) }
 
-    // Local editable state for text fields — seeded from settings, persisted on change
+    // Local editable state for the server URL field
     var serverUrlInput by remember { mutableStateOf(settings.serverBaseUrl) }
-    var authTokenInput by remember { mutableStateOf(settings.authToken) }
 
-    // Keep local inputs in sync if settings change externally (e.g. from a sync pull)
+    // Keep local input in sync if settings change externally (e.g. from a sync pull)
     LaunchedEffect(settings.serverBaseUrl) {
         if (serverUrlInput != settings.serverBaseUrl) serverUrlInput = settings.serverBaseUrl
     }
-    LaunchedEffect(settings.authToken) {
-        if (authTokenInput != settings.authToken) authTokenInput = settings.authToken
-    }
+
+    val isSignedIn = settings.accountEmail.isNotEmpty()
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -61,7 +58,7 @@ fun RemoteSyncSection(
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
 
-            // Header row: title + enabled toggle
+            // ── Header row: title + enabled toggle ──────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -75,19 +72,31 @@ fun RemoteSyncSection(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = if (settings.enabled)
-                            stringResource(R.string.remote_sync_status_enabled)
-                        else
-                            stringResource(R.string.remote_sync_status_off),
+                        text = when {
+                            needsReauth -> stringResource(R.string.remote_sync_status_needs_reauth)
+                            settings.enabled && isSignedIn -> stringResource(R.string.remote_sync_status_signed_in)
+                            else -> stringResource(R.string.remote_sync_status_off)
+                        },
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (settings.enabled) Primary.copy(alpha = 0.9f)
-                                else OnSurface.copy(alpha = 0.5f),
+                        color = when {
+                            needsReauth -> MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                            settings.enabled && isSignedIn -> Primary.copy(alpha = 0.9f)
+                            else -> OnSurface.copy(alpha = 0.5f)
+                        },
                         fontSize = 12.sp
                     )
                 }
                 Switch(
                     checked = settings.enabled,
-                    onCheckedChange = { onEnabledChange(it) },
+                    onCheckedChange = { on ->
+                        if (on && !isSignedIn) {
+                            // No account yet — launch sign-in flow instead of enabling directly
+                            onSignInClick()
+                        } else {
+                            onEnabledChange(on)
+                        }
+                    },
+                    enabled = !isSignInInProgress,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Primary,
                         checkedTrackColor = Primary.copy(alpha = 0.3f),
@@ -97,9 +106,140 @@ fun RemoteSyncSection(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Server URL field
+            // ── Account area ─────────────────────────────────────────────────────
+
+            when {
+                isSignInInProgress -> {
+                    // Sign-in in progress indicator
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = Primary
+                        )
+                        Text(
+                            text = stringResource(R.string.remote_sync_signing_in),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurface.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+
+                needsReauth -> {
+                    // Session-expired warning row
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = stringResource(R.string.remote_sync_session_expired),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedButton(
+                                onClick = onSignInClick,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                ),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f))
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.remote_sync_sign_in),
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                isSignedIn -> {
+                    // Signed-in account row
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Primary.copy(alpha = 0.08f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.remote_sync_signed_in_as),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = OnSurface.copy(alpha = 0.6f),
+                                    fontSize = 11.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = settings.accountEmail,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = OnSurface,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            TextButton(
+                                onClick = onSignOutClick,
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = OnSurface.copy(alpha = 0.6f)
+                                )
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.remote_sync_sign_out),
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    // Signed-out state — "Sign in with Google" button
+                    OutlinedButton(
+                        onClick = onSignInClick,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Primary),
+                        border = BorderStroke(1.dp, Primary.copy(alpha = 0.6f))
+                    ) {
+                        Text(
+                            text = stringResource(R.string.remote_sync_sign_in),
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── Server URL field (advanced) ───────────────────────────────────────
+
             OutlinedTextField(
                 value = serverUrlInput,
                 onValueChange = { newVal ->
@@ -108,7 +248,7 @@ fun RemoteSyncSection(
                 },
                 label = {
                     Text(
-                        text = stringResource(R.string.remote_sync_server_url),
+                        text = stringResource(R.string.remote_sync_server_url_advanced),
                         color = OnSurface.copy(alpha = 0.7f)
                     )
                 },
@@ -124,48 +264,10 @@ fun RemoteSyncSection(
                 )
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Auth token field (password-style with show/hide)
-            OutlinedTextField(
-                value = authTokenInput,
-                onValueChange = { newVal ->
-                    authTokenInput = newVal
-                    onAuthTokenChange(newVal)
-                },
-                label = {
-                    Text(
-                        text = stringResource(R.string.remote_sync_auth_token),
-                        color = OnSurface.copy(alpha = 0.7f)
-                    )
-                },
-                singleLine = true,
-                visualTransformation = if (tokenVisible) VisualTransformation.None
-                                       else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                trailingIcon = {
-                    IconButton(onClick = { tokenVisible = !tokenVisible }) {
-                        Icon(
-                            imageVector = if (tokenVisible) Icons.Default.VisibilityOff
-                                          else Icons.Default.Visibility,
-                            contentDescription = if (tokenVisible) "Hide token" else "Show token",
-                            tint = OnSurface.copy(alpha = 0.6f)
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Primary,
-                    unfocusedBorderColor = OnSurface.copy(alpha = 0.3f),
-                    focusedTextColor = OnSurface,
-                    unfocusedTextColor = OnSurface,
-                    cursorColor = Primary
-                )
-            )
-
             Spacer(modifier = Modifier.height(16.dp))
 
-            // "Also sync API keys" toggle with warning subtitle
+            // ── "Also sync API keys" toggle ───────────────────────────────────────
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -200,7 +302,8 @@ fun RemoteSyncSection(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Action buttons: "Sync now" + "Test connection"
+            // ── Action buttons: "Sync now" + "Test connection" ────────────────────
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)

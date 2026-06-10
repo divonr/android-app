@@ -57,13 +57,23 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
       syncNeedsReauth + syncSignInInProgress StateFlows exposed; updateRemoteSyncAuthToken removed
 - [x] Activity result wiring in UserSettingsScreen mirrors IntegrationsScreen pattern
 - [x] build `:app:assembleDebug` ✓ (1m 3s, 0 errors)
-- commit: 01847e0
+- commit: 972c10f
 
 ## Step 4 — Desktop (:desktop) [S]
-- [ ] `DesktopGoogleSignInProvider`: loopback OAuth on 127.0.0.1:53682, PKCE,
-      code→id_token exchange, scopes `openid email profile`
-- [ ] desktop `RemoteSyncSection` rework (mirror Step 3)
-- [ ] build `:desktop:compileKotlin`, commit
+- [x] `DesktopGoogleSignInProvider`: loopback OAuth on 127.0.0.1:53682, PKCE S256,
+      OkHttp code→id_token exchange, JWT payload decode for email; client secret
+      from env GOOGLE_OAUTH_CLIENT_SECRET or empty bundled constant (same pattern
+      as GitHubOAuthService.CLIENT_SECRET); 3-minute timeout via CompletableDeferred
+- [x] desktop `RemoteSyncSection` rework — token field removed; 4 states (signed-out,
+      signed-in+email row+sign-out, needsReauth warning, in-progress spinner);
+      URL field labeled "advanced"; 10 new R.kt string constants (99–108);
+      UsernameScreen wired to new params + sign-in/sign-out callbacks
+- [x] DesktopRepository: needsReauth StateFlow + signInToSync + signOutOfSync delegates
+      to syncEngine / UserMigration / RemoteStorageClient (mirrors DataRepository)
+- [x] ChatViewModel (desktop): syncSignInInProgress + syncNeedsReauth StateFlows,
+      signInToSyncWithGoogle() direct coroutine (no activity-result indirection),
+      signOutOfSync(), reloadUserDataAfterSignIn(); updateRemoteSyncAuthToken removed
+- [x] build `:desktop:compileKotlin` ✓ (BUILD SUCCESSFUL in 9s)
 - commit:
 
 ## Step 5 — Web server (:server) multi-user [S]

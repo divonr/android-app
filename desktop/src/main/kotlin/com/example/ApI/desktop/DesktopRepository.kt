@@ -7,6 +7,8 @@ import com.example.ApI.data.network.GoogleCalendarApiService
 import com.example.ApI.data.network.GoogleDriveApiService
 import com.example.ApI.data.network.LLMApiService
 import com.example.ApI.data.repository.*
+import com.example.ApI.data.sync.GoogleIdentity
+import com.example.ApI.data.sync.RemoteStorageClient
 import com.example.ApI.data.sync.SyncEngine
 import com.example.ApI.tools.ToolSpecification
 import com.example.ApI.util.JsonConfig
@@ -75,8 +77,59 @@ class DesktopRepository(private val appDir: File) {
     /** Increments whenever a pull overwrites local files; observe and reload visible data. */
     val syncChangeTick: StateFlow<Long> get() = syncEngine.changeTick
 
+    /** True when the last authenticated call received 401; UI should prompt re-authentication. */
+    val needsReauth: StateFlow<Boolean> get() = syncEngine.needsReauth
+
     /** Health-check the sync server with current settings. Returns true on success. */
     suspend fun testSyncConnection(): Boolean = syncEngine.testConnection()
+
+    /**
+     * Full sign-in-to-sync flow (mirrors DataRepository.signInToSync):
+     * 1. Exchange Google identity for a server-minted token.
+     * 2. Migrate local per-user files to the canonical username.
+     * 3. Persist updated RemoteSyncSettings.
+     * 4. Clear the needsReauth flag and start sync.
+     */
+    suspend fun signInToSync(identity: GoogleIdentity): Result<String> {
+        return try {
+            val current = loadAppSettings()
+            val authResult = RemoteStorageClient(baseUrl = current.remoteSync.serverBaseUrl, token = "")
+                .authGoogle(identity.idToken)
+            UserMigration.migrateToAccount(internalDir, JsonConfig.prettyPrint, authResult.username)
+            val postMigration = loadAppSettings()
+            saveAppSettings(
+                postMigration.copy(
+                    remoteSync = postMigration.remoteSync.copy(
+                        enabled = true,
+                        authToken = authResult.token,
+                        accountEmail = authResult.email
+                    )
+                )
+            )
+            syncEngine.clearReauth()
+            startSync()
+            Result.success(authResult.username)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Sign out of sync: disables sync and clears the minted token and account email.
+     * Local data and the current username are preserved.
+     */
+    fun signOutOfSync() {
+        val current = loadAppSettings()
+        saveAppSettings(
+            current.copy(
+                remoteSync = current.remoteSync.copy(
+                    enabled = false,
+                    authToken = "",
+                    accountEmail = ""
+                )
+            )
+        )
+    }
 
     // ==================== Models ====================
     suspend fun refreshModelsIfNeeded(): Boolean = modelsCacheManager.refreshModelsIfNeeded()

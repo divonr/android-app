@@ -107,6 +107,17 @@ object R {
         const val remote_sync_test = 96
         const val remote_sync_test_ok = 97
         const val remote_sync_test_fail = 98
+        // Step 4 additions — Google Sign-In for sync
+        const val remote_sync_sign_in = 99
+        const val remote_sync_sign_out = 100
+        const val remote_sync_signed_in_as = 101
+        const val remote_sync_status_signed_in = 102
+        const val remote_sync_status_needs_reauth = 103
+        const val remote_sync_signing_in = 104
+        const val remote_sync_session_expired = 105
+        const val remote_sync_server_url_advanced = 106
+        const val remote_sync_sign_in_success = 107
+        const val remote_sync_sign_in_error = 108
     }
 }
 
@@ -209,7 +220,18 @@ private val stringValues = mapOf(
     R.string.remote_sync_now_done to "Synced!",
     R.string.remote_sync_test to "Test connection",
     R.string.remote_sync_test_ok to "OK ✓",
-    R.string.remote_sync_test_fail to "Failed ✗"
+    R.string.remote_sync_test_fail to "Failed ✗",
+    // Step 4 additions
+    R.string.remote_sync_sign_in to "Sign in with Google",
+    R.string.remote_sync_sign_out to "Sign out",
+    R.string.remote_sync_signed_in_as to "Signed in as",
+    R.string.remote_sync_status_signed_in to "Enabled — synced",
+    R.string.remote_sync_status_needs_reauth to "Session expired",
+    R.string.remote_sync_signing_in to "Signing in...",
+    R.string.remote_sync_session_expired to "Session expired — sign in again to resume sync",
+    R.string.remote_sync_server_url_advanced to "Server URL (advanced)",
+    R.string.remote_sync_sign_in_success to "Signed in as %s",
+    R.string.remote_sync_sign_in_error to "Sign-in failed"
 )
 
 /** Desktop replacement for Android's stringResource(). */

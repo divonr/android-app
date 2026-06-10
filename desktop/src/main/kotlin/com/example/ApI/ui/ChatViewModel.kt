@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.example.ApI.data.model.*
+import com.example.ApI.data.network.DesktopGoogleSignInProvider
 import com.example.ApI.desktop.DesktopContext
 import com.example.ApI.desktop.DesktopRepository
 import com.example.ApI.desktop.DesktopStreamingCoordinator
@@ -47,6 +48,13 @@ class ChatViewModel(
 
     private val _appSettings = MutableStateFlow(AppSettings("default", "openai", "gpt-4o"))
     val appSettings: StateFlow<AppSettings> = _appSettings.asStateFlow()
+
+    // Remote sync sign-in state
+    private val _syncSignInInProgress = MutableStateFlow(false)
+    val syncSignInInProgress: StateFlow<Boolean> = _syncSignInInProgress.asStateFlow()
+
+    /** True when the sync token has expired and the user must re-authenticate. */
+    val syncNeedsReauth: StateFlow<Boolean> get() = repository.needsReauth
 
     private val streamingCoordinator = DesktopStreamingCoordinator(repository)
 
@@ -513,15 +521,6 @@ class ChatViewModel(
         _appSettings.value = updatedSettings
     }
 
-    /** Update the remote sync auth token. */
-    fun updateRemoteSyncAuthToken(token: String) {
-        val updatedSettings = _appSettings.value.copy(
-            remoteSync = _appSettings.value.remoteSync.copy(authToken = token)
-        )
-        repository.saveAppSettings(updatedSettings)
-        _appSettings.value = updatedSettings
-    }
-
     /** Update the "Also sync API keys" toggle. */
     fun updateRemoteSyncApiKeys(syncApiKeys: Boolean) {
         val updatedSettings = _appSettings.value.copy(
@@ -538,6 +537,85 @@ class ChatViewModel(
 
     /** Test the sync connection. Returns true on success, false on failure. */
     suspend fun testSyncConnection(): Boolean = repository.testSyncConnection()
+
+    // ── Google Sign-In for sync ───────────────────────────────────────────────
+
+    /**
+     * Launch the desktop loopback Google OAuth flow (DesktopGoogleSignInProvider),
+     * exchange the resulting ID token for a server-minted sync token, run the
+     * one-time local user migration, and reload all user data so the UI reflects
+     * the (potentially new) username.
+     */
+    fun signInToSyncWithGoogle() {
+        scope.launch {
+            _syncSignInInProgress.value = true
+            try {
+                val provider = DesktopGoogleSignInProvider()
+                val identityResult = provider.signIn()
+                identityResult.fold(
+                    onSuccess = { identity ->
+                        val signInResult = repository.signInToSync(identity)
+                        signInResult.fold(
+                            onSuccess = { username ->
+                                reloadUserDataAfterSignIn()
+                                showSnackbar("Signed in as $username")
+                            },
+                            onFailure = { error ->
+                                showSnackbar(error.message ?: "Sign-in failed")
+                            }
+                        )
+                    },
+                    onFailure = { error ->
+                        showSnackbar(error.message ?: "Sign-in failed")
+                    }
+                )
+            } finally {
+                _syncSignInInProgress.value = false
+            }
+        }
+    }
+
+    /**
+     * Signs out of remote sync: disables sync, clears the server-minted token
+     * and account email. Local data and the current username are preserved.
+     */
+    fun signOutOfSync() {
+        repository.signOutOfSync()
+        val updatedSettings = repository.loadAppSettings()
+        _appSettings.value = updatedSettings
+    }
+
+    /**
+     * Reloads all user-scoped data after a successful sign-in (current_user may
+     * have changed due to the one-time default→username migration).
+     */
+    private fun reloadUserDataAfterSignIn() {
+        scope.launch {
+            val settings = repository.loadAppSettings()
+            _appSettings.value = settings
+
+            repository.initializeCustomProviders(settings.current_user)
+            repository.initializeFullCustomProviders(settings.current_user)
+
+            val allProviders = repository.loadProviders()
+            val activeProviders = repository.loadApiKeys(settings.current_user)
+                .filter { it.isActive }.map { it.provider }
+            val providers = allProviders.filter { it.provider in activeProviders }
+            val currentProvider = providers.find { it.provider == settings.selected_provider }
+                ?: providers.firstOrNull()
+
+            repository.cleanupEmptyChats(settings.current_user)
+            val refreshedHistory = repository.loadChatHistory(settings.current_user)
+
+            _uiState.value = _uiState.value.copy(
+                availableProviders = providers,
+                currentProvider = currentProvider,
+                chatHistory = refreshedHistory.chat_history,
+                groups = refreshedHistory.groups,
+                currentChat = refreshedHistory.chat_history.lastOrNull()
+            )
+        }
+    }
 
     // ==================== Navigation ====================
     fun navigateToScreen(screen: Screen) {
