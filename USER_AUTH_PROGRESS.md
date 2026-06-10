@@ -42,15 +42,22 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
 - [x] `DataRepository.signInToSync(identity)` / `signOutOfSync()` + `needsReauth` exposed
 - [x] build `:shared:compileKotlin` ✓  `:app:compileDebugKotlin` ✓  `:desktop:compileKotlin` ✓
       no compile-fixes needed in :app or :desktop; existing UI still compiles unchanged
-- commit:
+      (orchestrator also verified :server:compileKotlin ✓)
+- commit: 2c1ac98
 
 ## Step 3 — Android (:app) [S]
-- [ ] `SyncGoogleSignInProvider` (minimal scopes, existing web client id)
-- [ ] `RemoteSyncSection` rework: sign-in button / account row / sign-out /
-      needsReauth state; token field removed; URL field stays
-- [ ] ViewModel wiring (signInToSync / signOutOfSync)
-- [ ] build `:app:assembleDebug`, commit
-- commit:
+- [x] `SyncGoogleSignInProvider` — minimal scopes (id/email/profile only), reuses
+      GoogleWorkspaceAuthService.CLIENT_ID, fires sign-out before returning intent
+      so account picker always appears
+- [x] `RemoteSyncSection` rework — auth-token field removed; signed-out/signed-in/
+      needsReauth/in-progress states; account email row + sign-out; URL field kept
+      as "advanced"; all strings via strings.xml
+- [x] ViewModel wiring — getSyncSignInIntent / handleSyncSignInResult (exchanges
+      token, runs signInToSync, reloads user data, shows snackbar) / signOutOfSync;
+      syncNeedsReauth + syncSignInInProgress StateFlows exposed; updateRemoteSyncAuthToken removed
+- [x] Activity result wiring in UserSettingsScreen mirrors IntegrationsScreen pattern
+- [x] build `:app:assembleDebug` ✓ (1m 3s, 0 errors)
+- commit: 01847e0
 
 ## Step 4 — Desktop (:desktop) [S]
 - [ ] `DesktopGoogleSignInProvider`: loopback OAuth on 127.0.0.1:53682, PKCE,

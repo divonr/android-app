@@ -36,6 +36,7 @@ import android.provider.Settings
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.runtime.collectAsState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,6 +49,17 @@ fun UserSettingsScreen(
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         val context = LocalContext.current
         var showImportWarning by remember { mutableStateOf(false) }
+
+        // Sync sign-in ActivityResultLauncher — mirrors the Workspace flow in IntegrationsScreen.
+        // Google Sign-In returns RESULT_CANCELED even on success; the SDK parses the intent data.
+        val syncSignInLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            result.data?.let { data -> viewModel.handleSyncSignInResult(data) }
+        }
+
+        val syncNeedsReauth by viewModel.syncNeedsReauth.collectAsState()
+        val syncSignInInProgress by viewModel.syncSignInInProgress.collectAsState()
 
         // Child lock state
         var showChildLockSetupDialog by remember { mutableStateOf(false) }
@@ -240,12 +252,18 @@ fun UserSettingsScreen(
                 // 6. Remote Sync Section
                 RemoteSyncSection(
                     settings = appSettings.remoteSync,
+                    needsReauth = syncNeedsReauth,
+                    isSignInInProgress = syncSignInInProgress,
                     onEnabledChange = { viewModel.updateRemoteSyncEnabled(it) },
                     onServerUrlChange = { viewModel.updateRemoteSyncServerUrl(it) },
-                    onAuthTokenChange = { viewModel.updateRemoteSyncAuthToken(it) },
                     onSyncApiKeysChange = { viewModel.updateRemoteSyncApiKeys(it) },
                     onSyncNow = { viewModel.triggerSyncNow() },
-                    onTestConnection = { viewModel.testSyncConnection() }
+                    onTestConnection = { viewModel.testSyncConnection() },
+                    onSignInClick = {
+                        val intent = viewModel.getSyncSignInIntent()
+                        syncSignInLauncher.launch(intent)
+                    },
+                    onSignOutClick = { viewModel.signOutOfSync() }
                 )
 
                 // 7. Logs Screen Navigation

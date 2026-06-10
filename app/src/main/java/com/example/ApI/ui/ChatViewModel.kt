@@ -48,6 +48,7 @@ import com.example.ApI.ui.managers.io.SharedIntentManager
 import com.example.ApI.ui.managers.integration.AuthManager
 import com.example.ApI.ui.managers.integration.ToolManager
 import com.example.ApI.ui.managers.settings.ChildLockManager
+import com.example.ApI.data.network.SyncGoogleSignInProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -85,6 +86,14 @@ class ChatViewModel(
 
     private val _appSettings = MutableStateFlow(AppSettings("default", "openai", "gpt-4o"))
     val appSettings: StateFlow<AppSettings> = _appSettings.asStateFlow()
+
+    // Remote sync sign-in provider and in-progress indicator
+    private val syncSignInProvider: SyncGoogleSignInProvider by lazy { SyncGoogleSignInProvider(context) }
+    private val _syncSignInInProgress = MutableStateFlow(false)
+    val syncSignInInProgress: StateFlow<Boolean> = _syncSignInInProgress.asStateFlow()
+
+    /** True when the sync token has expired and the user must re-authenticate. */
+    val syncNeedsReauth: StateFlow<Boolean> get() = repository.needsReauth
 
     // Shared dependencies for managers
     private val managerDeps by lazy {
@@ -1104,15 +1113,6 @@ class ChatViewModel(
         _appSettings.value = updatedSettings
     }
 
-    /** Update the remote sync auth token. */
-    fun updateRemoteSyncAuthToken(token: String) {
-        val updatedSettings = _appSettings.value.copy(
-            remoteSync = _appSettings.value.remoteSync.copy(authToken = token)
-        )
-        repository.saveAppSettings(updatedSettings)
-        _appSettings.value = updatedSettings
-    }
-
     /** Update the "Also sync API keys" toggle. */
     fun updateRemoteSyncApiKeys(syncApiKeys: Boolean) {
         val updatedSettings = _appSettings.value.copy(
@@ -1129,6 +1129,100 @@ class ChatViewModel(
 
     /** Test the sync connection. Returns true on success, false on failure. */
     suspend fun testSyncConnection(): Boolean = repository.testSyncConnection()
+
+    // ── Google Sign-In for sync ───────────────────────────────────────────────
+
+    /**
+     * Returns the Google Sign-In intent to launch via an ActivityResultLauncher.
+     * Signs out any existing cached session first so the account chooser always
+     * appears (allowing account switching).
+     */
+    fun getSyncSignInIntent(): android.content.Intent = syncSignInProvider.getSignInIntent()
+
+    /**
+     * Processes the ActivityResult returned after the user completes (or cancels)
+     * the Google sign-in flow.  On success, exchanges the ID token for a
+     * server-minted sync token, runs the one-time local user migration, and
+     * reloads all user data so the UI reflects the (potentially new) username.
+     */
+    fun handleSyncSignInResult(data: android.content.Intent) {
+        viewModelScope.launch {
+            _syncSignInInProgress.value = true
+            try {
+                val identityResult = syncSignInProvider.handleSignInResult(data)
+                identityResult.fold(
+                    onSuccess = { identity ->
+                        val signInResult = repository.signInToSync(identity)
+                        signInResult.fold(
+                            onSuccess = { username ->
+                                reloadUserDataAfterSignIn()
+                                showSnackbar(
+                                    context.getString(R.string.remote_sync_sign_in_success, username)
+                                )
+                            },
+                            onFailure = { error ->
+                                showSnackbar(
+                                    error.message
+                                        ?: context.getString(R.string.remote_sync_sign_in_error)
+                                )
+                            }
+                        )
+                    },
+                    onFailure = { error ->
+                        showSnackbar(
+                            error.message
+                                ?: context.getString(R.string.remote_sync_sign_in_error)
+                        )
+                    }
+                )
+            } finally {
+                _syncSignInInProgress.value = false
+            }
+        }
+    }
+
+    /**
+     * Signs out of remote sync: disables sync, clears the server-minted token
+     * and account email.  Local data and the current username are preserved.
+     */
+    fun signOutOfSync() {
+        repository.signOutOfSync()
+        val updatedSettings = repository.loadAppSettings()
+        _appSettings.value = updatedSettings
+    }
+
+    /**
+     * Reloads all user-scoped data after a successful sign-in (current_user may
+     * have changed due to the one-time default→username migration).
+     */
+    private fun reloadUserDataAfterSignIn() {
+        viewModelScope.launch {
+            val settings = repository.loadAppSettings()
+            _appSettings.value = settings
+
+            repository.initializeCustomProviders(settings.current_user)
+            repository.initializeFullCustomProviders(settings.current_user)
+
+            val allProviders = repository.loadProviders()
+            val activeProviders = repository.loadApiKeys(settings.current_user)
+                .filter { it.isActive }.map { it.provider }
+            val providers = allProviders.filter { it.provider in activeProviders }
+            val currentProvider = providers.find { it.provider == settings.selected_provider }
+                ?: providers.firstOrNull()
+
+            val chatHistory = repository.loadChatHistory(settings.current_user)
+            repository.cleanupEmptyChats(settings.current_user)
+            val refreshedHistory = repository.loadChatHistory(settings.current_user)
+
+            _uiState.value = _uiState.value.copy(
+                availableProviders = providers,
+                currentProvider = currentProvider,
+                chatHistory = refreshedHistory.chat_history,
+                groups = refreshedHistory.groups,
+                currentChat = refreshedHistory.chat_history.lastOrNull()
+            )
+        }
+    }
 
 }
 

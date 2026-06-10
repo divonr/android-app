@@ -118,6 +118,16 @@
     <string name="remote_sync_test">בדוק חיבור</string>
     <string name="remote_sync_test_ok">תקין ✓</string>
     <string name="remote_sync_test_fail">נכשל ✗</string>
+    <string name="remote_sync_sign_in">התחבר עם Google</string>
+    <string name="remote_sync_sign_out">התנתק</string>
+    <string name="remote_sync_signed_in_as">מחובר כ:</string>
+    <string name="remote_sync_session_expired">פג תוקף החיבור — התחבר שוב</string>
+    <string name="remote_sync_signing_in">מתחבר…</string>
+    <string name="remote_sync_status_signed_in">סנכרון פעיל</string>
+    <string name="remote_sync_status_needs_reauth">נדרשת התחברות מחדש</string>
+    <string name="remote_sync_server_url_advanced">כתובת שרת (מתקדם)</string>
+    <string name="remote_sync_sign_in_success">נרשמת בהצלחה כ: %1$s</string>
+    <string name="remote_sync_sign_in_error">שגיאת התחברות לסנכרון</string>
 
     <!-- Full Custom Provider Feature -->
     <!-- Note: The following UI components use hardcoded Hebrew strings and do not reference string resources:
