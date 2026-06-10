@@ -74,7 +74,7 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
       signInToSyncWithGoogle() direct coroutine (no activity-result indirection),
       signOutOfSync(), reloadUserDataAfterSignIn(); updateRemoteSyncAuthToken removed
 - [x] build `:desktop:compileKotlin` ✓ (BUILD SUCCESSFUL in 9s)
-- commit:
+- commit: 9e814f3
 
 ## Step 5 — Web server (:server) multi-user [S]
 - [ ] `UserSession(username, email)`; password login + WEB_UI_PASSWORD removed
