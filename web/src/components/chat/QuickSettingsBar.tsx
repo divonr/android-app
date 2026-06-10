@@ -39,6 +39,8 @@ export type TextDirectionMode = 'RTL' | 'AUTO' | 'LTR'
 export interface ToolItem {
   id: string
   name: string
+  /** Section header in the dropdown (mirrors ToolToggleDropdown.kt grouping) */
+  integrationTitle: string
 }
 
 // ── Main props ────────────────────────────────────────────────────────────────
@@ -293,6 +295,15 @@ const ToolToggleDropdown: React.FC<{
   const allEnabled = toolItems.length > 0 && toolItems.every(t => enabledToolIds.includes(t.id))
   const noneEnabled = toolItems.length > 0 && toolItems.every(t => !enabledToolIds.includes(t.id))
 
+  // Group by integration title, sorted (mirrors ToolToggleDropdown.kt toSortedMap)
+  const groupedTools = toolItems.reduce<Map<string, ToolItem[]>>((acc, item) => {
+    const list = acc.get(item.integrationTitle) ?? []
+    list.push(item)
+    acc.set(item.integrationTitle, list)
+    return acc
+  }, new Map())
+  const sortedGroups = [...groupedTools.entries()].sort(([a], [b]) => a.localeCompare(b))
+
   return (
     <PopupPortal anchorEl={anchorEl} open={open} onClose={onClose}>
       <div style={{ minWidth: 240, maxHeight: 360, overflowY: 'auto', padding: '4px 0' }}>
@@ -345,37 +356,53 @@ const ToolToggleDropdown: React.FC<{
               />
             </button>
             <div style={{ height: 1, background: 'var(--surface-variant)', margin: '4px 0' }} />
-            {toolItems.map((item) => {
-              const isEnabled = enabledToolIds.includes(item.id)
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onToggle(item.id, !isEnabled)}
-                  style={{
-                    display: 'flex',
-                    width: '100%',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '10px 16px',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--on-surface)',
-                    fontSize: 'var(--fs-body-medium)',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  <span>{item.name}</span>
-                  <input
-                    type="checkbox"
-                    checked={isEnabled}
-                    readOnly
-                    style={{ accentColor: 'var(--primary)', pointerEvents: 'none' }}
-                  />
-                </button>
-              )
-            })}
+            {sortedGroups.map(([integrationTitle, tools], groupIndex) => (
+              <React.Fragment key={integrationTitle}>
+                <div style={{
+                  padding: '8px 16px',
+                  fontSize: 'var(--fs-label-medium)',
+                  fontWeight: 700,
+                  color: 'var(--on-surface-variant)',
+                }}>
+                  {integrationTitle}
+                </div>
+                {tools.map((item) => {
+                  const isEnabled = enabledToolIds.includes(item.id)
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => onToggle(item.id, !isEnabled)}
+                      style={{
+                        display: 'flex',
+                        width: '100%',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 16px',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--on-surface)',
+                        fontSize: 'var(--fs-body-medium)',
+                        fontFamily: 'inherit',
+                        gap: 8,
+                      }}
+                    >
+                      <span>{item.name}</span>
+                      <input
+                        type="checkbox"
+                        checked={isEnabled}
+                        readOnly
+                        style={{ accentColor: 'var(--primary)', pointerEvents: 'none' }}
+                      />
+                    </button>
+                  )
+                })}
+                {groupIndex < sortedGroups.length - 1 && (
+                  <div style={{ height: 1, background: 'var(--surface-variant)', margin: '4px 0', opacity: 0.6 }} />
+                )}
+              </React.Fragment>
+            ))}
           </>
         )}
       </div>

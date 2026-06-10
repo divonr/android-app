@@ -18,19 +18,22 @@ import { useChatStore } from '../stores/chatStore'
 import {
   providers as providersApi,
   branching,
-  skills as skillsApi,
   files as filesApi,
   settings as settingsApi,
   chats as chatsApi,
   apiKeys as apiKeysApi,
   messages as messagesApi,
 } from '../api/client'
+import {
+  getToolName,
+  getIntegrationTitle,
+  GROUP_CONVERSATIONS_TOOL_ID,
+} from '../utils/toolCatalog'
 import { sendStream, resendStream } from '../api/stream'
 import type { StreamCallbacks } from '../api/stream'
 import type {
   Message,
   ProviderModel_Flat,
-  InstalledSkill,
   Attachment,
   ThinkingBudget,
   ProviderDetail,
@@ -147,10 +150,12 @@ const ChatPage: React.FC = () => {
   const [provider, setProvider] = useState('openai')
   const [model, setModel] = useState('gpt-4o')
   const [webSearch, setWebSearch] = useState(false)
-  const [enabledToolIds, setEnabledToolIds] = useState<string[]>([])
+  // Tools enabled in the Integrations screen (AppSettings.enabledTools) and the
+  // per-shortcut exclusions (AppSettings.excludedToolIds) — mirrors ChatViewModel.
+  const [settingsEnabledTools, setSettingsEnabledTools] = useState<string[]>([])
+  const [excludedToolIds, setExcludedToolIds] = useState<string[]>([])
   const [thinkingBudget, setThinkingBudget] = useState<ThinkingBudget>('none')
   const [temperature, setTemperature] = useState<number | null>(null)
-  const [skillsList, setSkillsList] = useState<InstalledSkill[]>([])
 
   // ── Chrome state (R2) ────────────────────────────────────────────────────
   const [searchMode, setSearchMode] = useState(false)
@@ -202,15 +207,13 @@ const ChatPage: React.FC = () => {
     apiKeysApi.list().then((keys) => {
       setActiveKeyProviders([...new Set(keys.filter((k) => k.isActive).map((k) => k.provider))])
     }).catch(() => {})
-    skillsApi.list().then((skills) => {
-      setSkillsList(skills)
-      setEnabledToolIds(skills.filter((s) => s.enabled).map((s) => s.name))
-    }).catch(() => {})
     settingsApi.get().then((s) => {
       if (s.selected_provider) setProvider(s.selected_provider)
       if (s.selected_model) setModel(s.selected_model)
       if (s.starredModels) setStarredModels(s.starredModels)
       setMultiMessageMode(!!s.multiMessageMode)
+      setSettingsEnabledTools(s.enabledTools ?? [])
+      setExcludedToolIds(s.excludedToolIds ?? [])
     }).catch(() => {})
   }, [])
 
@@ -250,6 +253,42 @@ const ChatPage: React.FC = () => {
     el.addEventListener('scroll', handleScroll, { passive: true })
     return () => el.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
+
+  // ── Tools (for QuickSettingsBar dropdown + stream requests) ──────────────
+  // Mirrors ChatViewModel.getEnabledToolIds(): integrations-enabled tools, plus
+  // the group-conversations tool when the chat belongs to a group.
+  const availableToolIds = useMemo(() => {
+    const ids = [...settingsEnabledTools]
+    if (currentChat?.group && !ids.includes(GROUP_CONVERSATIONS_TOOL_ID)) {
+      ids.push(GROUP_CONVERSATIONS_TOOL_ID)
+    }
+    return ids
+  }, [settingsEnabledTools, currentChat?.group])
+
+  const toolItems = useMemo(
+    () =>
+      availableToolIds.map((id) => ({
+        id,
+        name: getToolName(id),
+        integrationTitle: getIntegrationTitle(id),
+      })),
+    [availableToolIds],
+  )
+
+  // Final tool list sent with stream requests = available − excluded (ToolManager.kt)
+  const enabledToolIds = useMemo(
+    () => availableToolIds.filter((id) => !excludedToolIds.includes(id)),
+    [availableToolIds, excludedToolIds],
+  )
+
+  // Toggling persists exclusions in AppSettings (ChatViewModel.toggleToolExclusion)
+  const handleToolToggle = useCallback((toolId: string, enabled: boolean) => {
+    setExcludedToolIds((prev) => {
+      const next = enabled ? prev.filter((x) => x !== toolId) : [...prev.filter((x) => x !== toolId), toolId]
+      settingsApi.update({ excludedToolIds: next }).catch(() => {})
+      return next
+    })
+  }, [])
 
   // ── Send message ─────────────────────────────────────────────────────────
 
@@ -569,12 +608,6 @@ const ChatPage: React.FC = () => {
     messagesRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  // ── toolItems (for QuickSettingsBar) ──────────────────────────────────────
-
-  const toolItems = useMemo(() => {
-    return skillsList.filter((s) => s.enabled).map((s) => ({ id: s.name, name: s.name }))
-  }, [skillsList])
-
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (!currentChat && !stream.streaming) {
@@ -619,11 +652,7 @@ const ChatPage: React.FC = () => {
         onTemperatureChange={setTemperature}
         toolItems={toolItems}
         enabledToolIds={enabledToolIds}
-        onToolToggle={(id, enabled) => {
-          setEnabledToolIds((prev) =>
-            enabled ? [...prev.filter((x) => x !== id), id] : prev.filter((x) => x !== id),
-          )
-        }}
+        onToolToggle={handleToolToggle}
         textDirectionMode={textDirectionMode}
         onTextDirectionChange={setTextDirectionMode}
         onSystemPrompt={() => setShowSystemPromptDialog(true)}

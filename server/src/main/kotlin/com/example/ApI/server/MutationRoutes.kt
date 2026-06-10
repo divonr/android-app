@@ -690,6 +690,12 @@ fun Route.mutationRoutes() {
                 lenientJson.decodeFromJsonElement<List<StarredModel>>(it)
             } ?: current.starredModels,
             skipWelcomeScreen = patch["skipWelcomeScreen"]?.jsonPrimitive?.booleanOrNull ?: current.skipWelcomeScreen,
+            enabledTools = patch["enabledTools"]?.let {
+                lenientJson.decodeFromJsonElement<List<String>>(it)
+            } ?: current.enabledTools,
+            excludedToolIds = patch["excludedToolIds"]?.let {
+                lenientJson.decodeFromJsonElement<List<String>>(it)
+            } ?: current.excludedToolIds,
             titleGenerationSettings = if (patch.containsKey("titleGenerationSettings")) {
                 val tgsJson = patch["titleGenerationSettings"]!!.jsonObject
                 current.titleGenerationSettings.copy(

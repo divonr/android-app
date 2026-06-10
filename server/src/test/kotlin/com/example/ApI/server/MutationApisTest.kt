@@ -660,6 +660,30 @@ class MutationApisTest {
     }
 
     @Test
+    fun `PATCH api settings updates enabledTools and excludedToolIds`() = testApplication {
+        val (storage, repo) = seededStorage()
+        application { module(storage, testAuthConfig) }
+        val c = loggedInClient()
+
+        val response = c.patch("/api/settings") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"enabledTools":["get_date_time","python_interpreter"],"excludedToolIds":["python_interpreter"]}""")
+        }
+        assertEquals(HttpStatusCode.OK, response.status)
+
+        val saved = repo.loadAppSettings()
+        assertEquals(listOf("get_date_time", "python_interpreter"), saved.enabledTools)
+        assertEquals(listOf("python_interpreter"), saved.excludedToolIds)
+
+        // Patching another field must not clobber the tool lists
+        c.patch("/api/settings") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"skipWelcomeScreen":true}""")
+        }
+        assertEquals(listOf("get_date_time", "python_interpreter"), repo.loadAppSettings().enabledTools)
+    }
+
+    @Test
     fun `PATCH api settings does not clobber unset fields`() = testApplication {
         val (storage, repo) = seededStorage()
         application { module(storage, testAuthConfig) }
