@@ -13,21 +13,22 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
 ---
 
 ## Step 0 — Scaffolding [O]
-- [ ] branch `google-auth` created off `web-ui`
-- [ ] plan + progress files committed
-- [ ] sync-server: git init + .gitignore + baseline commit of current code
+- [x] branch `google-auth` created off `web-ui`
+- [x] plan + progress files committed — be693bd
+- [x] sync-server: git init + .gitignore + baseline commit of current code — 3ccee5f (sync-server repo, branch main)
 
 ## Step 1 — Sync server v2 (Python) [S]
-- [ ] `server.py` rewrite: users/tokens/blobs schema, POST /auth/google
+- [x] `server.py` rewrite: users/tokens/blobs schema, POST /auth/google
       (google-auth verify, mocked in tests), opaque tokens (sha256 stored),
-      v2 paths /sync/manifest, /sync/file/{filename} (no {user} segment)
-- [ ] `requirements.txt` + google-auth installed into venv
-- [ ] tests (mocked verifier): 401s, mint, per-user isolation, Fernet round-trip
-- [ ] `sync-server.service` env update (drop SYNC_TOKEN, add GOOGLE_OAUTH_CLIENT_IDS)
-- [ ] orchestrator: wipe sync_data.db (APPROVED), update real env, restart
-      service, curl health + 401 check
-- [ ] commit (sync-server repo)
-- commit:
+      v2 paths /sync/manifest, /sync/file/{filename} (no {user} segment) — 14/14 tests pass
+- [x] `requirements.txt` + google-auth installed into venv — fastapi/uvicorn/cryptography/google-auth/requests/pydantic/pytest/httpx
+- [x] tests (mocked verifier): 401s, mint, per-user isolation, Fernet round-trip — 14/14 tests pass
+- [x] `sync-server.service` env update — file unchanged (EnvironmentFile=.env); orchestrator must update .env (drop SYNC_TOKEN, add GOOGLE_OAUTH_CLIENT_IDS)
+- [x] orchestrator: wiped sync_data.db, .env updated (SYNC_TOKEN→GOOGLE_OAUTH_CLIENT_IDS),
+      service restarted (via kill + Restart=always — no sudo), health OK on
+      localhost AND https://sync.api-divonr.xyz, 401s verified, fresh v2 schema confirmed
+- [x] commit (sync-server repo)
+- commit: f300511 (sync-server repo)
 
 ## Step 2 — Shared module (:shared) [S]
 - [ ] `RemoteSyncSettings` v2 (authToken=minted, accountEmail; back-compat defaults)
