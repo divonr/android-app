@@ -184,6 +184,14 @@
   line-height: 1;
 }
 
+/* Model logo fills the circle (Android: AsyncImage fillMaxSize + ContentScale.Crop) */
+.avatarLogo {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 /* Spinner inside avatar while AI-renaming */
 .avatarSpinner {
   width: 16px;

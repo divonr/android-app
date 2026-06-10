@@ -50,7 +50,7 @@ import {
   MdRemove,
 } from '../ui/icons'
 import styles from './ChatHistoryPage.module.css'
-import { getModelInitial, formatTimestamp } from '../utils/chatUtils'
+import { getModelInitial, getModelLogoPath, formatTimestamp } from '../utils/chatUtils'
 
 // ─── Helpers (ported from ChatUtils.kt + ChatListOrganizer.kt) ────────────────
 // getModelInitial and formatTimestamp are now in utils/chatUtils.ts
@@ -65,11 +65,11 @@ function getLastTimestamp(chat: Chat): number | null {
   return isNaN(ts) ? null : ts
 }
 
-/** Get model from last assistant message (mirrors ChatHistoryItems.kt logic) */
+/** Get model from last assistant message (mirrors ChatHistoryItems.kt logic, incl. Chat.model fallback) */
 function getChatModel(chat: Chat): string {
   const reversed = [...(chat.messages ?? [])].reverse()
   const last = reversed.find((m) => m.role === 'assistant')
-  return last?.model ?? ''
+  return last?.model ?? 'gpt-4o'
 }
 
 // ─── organizeAndSortAllItems (ported from ChatListOrganizer.kt) ───────────────
@@ -178,6 +178,7 @@ const ChatItemCard: React.FC<ChatItemCardProps> = ({
   }
 
   const model = getChatModel(chat)
+  const logoPath = getModelLogoPath(model)
   const initial = getModelInitial(model)
   const ts = getLastTimestamp(chat)
   const msgs = chat.messages ?? []
@@ -199,6 +200,8 @@ const ChatItemCard: React.FC<ChatItemCardProps> = ({
         <div className={styles.avatar}>
           {isAIRenaming ? (
             <div className={styles.avatarSpinner} />
+          ) : logoPath ? (
+            <img src={logoPath} alt="Model Logo" className={styles.avatarLogo} />
           ) : (
             <span className={styles.avatarText}>{initial}</span>
           )}
@@ -760,6 +763,7 @@ const ChatHistoryPage: React.FC = () => {
             searchResults.map((result) => {
               const chat = chatById.get(result.chatId)
               const model = chat ? getChatModel(chat) : ''
+              const logoPath = getModelLogoPath(model)
               const initial = getModelInitial(model)
               return (
                 <div
@@ -776,7 +780,11 @@ const ChatHistoryPage: React.FC = () => {
                 >
                   <div className={styles.chatCardInner}>
                     <div className={styles.avatar}>
-                      <span className={styles.avatarText}>{initial}</span>
+                      {logoPath ? (
+                        <img src={logoPath} alt="Model Logo" className={styles.avatarLogo} />
+                      ) : (
+                        <span className={styles.avatarText}>{initial}</span>
+                      )}
                     </div>
                     <div className={styles.chatContent}>
                       <span className={styles.chatTitle}>{result.chatTitle}</span>

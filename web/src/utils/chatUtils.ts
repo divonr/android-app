@@ -19,6 +19,41 @@ export function getModelInitial(model: string | null | undefined): string {
   return first || '?'
 }
 
+/**
+ * Mirror of ModelLogoUtils.kt getModelLogoPath — maps a model name to the
+ * logo asset under /models_logos (same PNGs as the Android assets dir).
+ * Returns null when no logo mapping exists (caller falls back to the initial).
+ */
+export function getModelLogoPath(model: string | null | undefined): string | null {
+  if (!model) return null
+  const lowerName = model.toLowerCase()
+  const basePath = '/models_logos/'
+
+  // 1. OpenAI: "gpt" or "o{digit}" → gpt.png
+  if (lowerName.includes('gpt') || /.*o\d.*/.test(lowerName)) return `${basePath}gpt.png`
+  // 2. Anthropic
+  if (
+    lowerName.includes('claude') ||
+    lowerName.includes('sonnet') ||
+    lowerName.includes('opus') ||
+    lowerName.includes('haiku')
+  ) return `${basePath}claude.png`
+  // 3. Google
+  if (lowerName.includes('gemini')) return `${basePath}gemini.png`
+  // 4. xAI
+  if (lowerName.includes('grok')) return `${basePath}grok.png`
+  // 5. Cohere
+  if (lowerName.includes('command')) return `${basePath}command.png`
+  // 6. DeepSeek
+  if (lowerName.includes('deep') && lowerName.includes('seek')) return `${basePath}deepseek.png`
+  // 7. GLM
+  if (lowerName.includes('glm')) return `${basePath}glm.png`
+  // 8. MiniMax
+  if (lowerName.includes('minimax')) return `${basePath}minimax.png`
+
+  return null
+}
+
 /** Mirror of ChatUtils.kt formatTimestamp */
 export function formatTimestamp(ts: number): string {
   const d = new Date(ts)

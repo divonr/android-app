@@ -23,7 +23,7 @@ import ThoughtsBubble from './ThoughtsBubble'
 import ToolCallBlock from './ToolCallBlock'
 import BranchNavigator from './BranchNavigator'
 import { MdAttachFile, MdContentCopy, MdEdit, MdRefresh, MdDelete } from '../../ui/icons'
-import { getModelInitial } from '../../utils/chatUtils'
+import { getModelInitial, getModelLogoPath } from '../../utils/chatUtils'
 import { t } from '../../i18n/he'
 import type { Chat, Message, BranchInfo } from '../../api/types'
 import type { TextDirectionMode } from './QuickSettingsBar'
@@ -290,6 +290,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   const dir = resolveDir(msg.text, textDirectionMode)
   const timeStr = formatTime(msg.datetime)
   const modelInitial = getModelInitial(msg.model)
+  const modelLogoPath = getModelLogoPath(msg.model)
 
   // ── Bubble colors & layout ──
 
@@ -365,9 +366,18 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               fontWeight: 700,
               color: 'var(--primary)',
               flexShrink: 0,
+              overflow: 'hidden',
             }}
           >
-            {modelInitial}
+            {modelLogoPath ? (
+              <img
+                src={modelLogoPath}
+                alt="Model Logo"
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : (
+              modelInitial
+            )}
           </div>
         )}
 
