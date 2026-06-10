@@ -15,7 +15,7 @@
  *   - System prompt: prompt !== ''
  */
 
-import React, { useRef, useState, useEffect, useCallback } from 'react'
+import React, { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react'
 import ReactDOM from 'react-dom'
 import IconButton from '../../ui/IconButton'
 import {
@@ -73,12 +73,28 @@ interface PopupPortalProps {
 }
 
 const PopupPortal: React.FC<PopupPortalProps> = ({ anchorEl, open, onClose, children }) => {
+  const popupRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: 0, left: 0 })
 
-  useEffect(() => {
-    if (!open || !anchorEl) return
+  // Position below the anchor, clamped into the viewport (mirrors Android
+  // DropdownMenu, which repositions itself to never overflow the screen).
+  useLayoutEffect(() => {
+    if (!open || !anchorEl || !popupRef.current) return
     const rect = anchorEl.getBoundingClientRect()
-    setPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX })
+    const popup = popupRef.current.getBoundingClientRect()
+    const margin = 8
+
+    let left = rect.left
+    left = Math.min(left, window.innerWidth - popup.width - margin)
+    left = Math.max(left, margin)
+
+    let top = rect.bottom + 4
+    if (top + popup.height > window.innerHeight - margin) {
+      // Not enough room below — open above the anchor (clamped to top edge)
+      top = Math.max(rect.top - popup.height - 4, margin)
+    }
+
+    setPos({ top: top + window.scrollY, left: left + window.scrollX })
   }, [open, anchorEl])
 
   useEffect(() => {
@@ -95,6 +111,7 @@ const PopupPortal: React.FC<PopupPortalProps> = ({ anchorEl, open, onClose, chil
 
   return ReactDOM.createPortal(
     <div
+      ref={popupRef}
       onMouseDown={(e) => e.stopPropagation()}
       style={{
         position: 'absolute',
@@ -105,6 +122,8 @@ const PopupPortal: React.FC<PopupPortalProps> = ({ anchorEl, open, onClose, chil
         boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
         zIndex: 9999,
         minWidth: 200,
+        maxWidth: 'calc(100vw - 16px)',
+        boxSizing: 'border-box',
       }}
     >
       {children}
@@ -187,7 +206,7 @@ const TemperaturePopup: React.FC<{
 
   return (
     <PopupPortal anchorEl={anchorEl} open={open} onClose={onClose}>
-      <div style={{ padding: 16, width: 260 }}>
+      <div style={{ padding: 16, width: 260, maxWidth: '100%', boxSizing: 'border-box' }}>
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -477,7 +496,7 @@ const QuickSettingsBar: React.FC<QuickSettingsBarProps> = ({
                 ref={thinkingRef}
                 type="button"
                 aria-label={t('thinking_budget')}
-                onClick={() => { closeAll(); setShowThinking(v => !v) }}
+                onClick={() => { const wasOpen = showThinking; closeAll(); if (!wasOpen) setShowThinking(true) }}
                 style={{
                   width: 36, height: 36,
                   borderRadius: 'var(--radius-icon-btn)',
@@ -498,7 +517,7 @@ const QuickSettingsBar: React.FC<QuickSettingsBarProps> = ({
                 ref={tempRef}
                 type="button"
                 aria-label={t('temperature_label')}
-                onClick={() => { closeAll(); setShowTemp(v => !v) }}
+                onClick={() => { const wasOpen = showTemp; closeAll(); if (!wasOpen) setShowTemp(true) }}
                 style={{
                   width: 36, height: 36,
                   borderRadius: 'var(--radius-icon-btn)',
@@ -519,7 +538,7 @@ const QuickSettingsBar: React.FC<QuickSettingsBarProps> = ({
                 ref={toolsRef}
                 type="button"
                 aria-label={t('tools_label')}
-                onClick={() => { closeAll(); setShowTools(v => !v) }}
+                onClick={() => { const wasOpen = showTools; closeAll(); if (!wasOpen) setShowTools(true) }}
                 style={{
                   width: 36, height: 36,
                   borderRadius: 'var(--radius-icon-btn)',
@@ -540,7 +559,7 @@ const QuickSettingsBar: React.FC<QuickSettingsBarProps> = ({
                 ref={dirRef}
                 type="button"
                 aria-label={t('text_direction_label')}
-                onClick={() => { closeAll(); setShowDir(v => !v) }}
+                onClick={() => { const wasOpen = showDir; closeAll(); if (!wasOpen) setShowDir(true) }}
                 style={{
                   width: 36, height: 36,
                   borderRadius: 'var(--radius-icon-btn)',
