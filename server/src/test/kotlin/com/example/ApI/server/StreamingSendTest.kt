@@ -41,27 +41,31 @@ class StreamingSendTest {
         sessionSecret = "p3-test-session-secret-that-is-long-enough"
     )
 
-    private fun tempStorage(): ServerPlatformStorage {
-        val dir = File(System.getProperty("java.io.tmpdir"), "p3-test-${System.nanoTime()}")
-        dir.mkdirs()
-        return ServerPlatformStorage(baseDir = dir)
-    }
-
     /**
-     * Seeds the storage with a test user and a chat, returns (storage, repo, chatId).
+     * Seeds the "default" user's data in `users/default/` and returns
+     * (rootStorage, perUserRepo, chatId).
+     *
+     * After Step 5a password login sets username = "default" and routes resolve
+     * data via `registry.context("default")` → `users/default/`.  Seeding there
+     * ensures the HTTP routes can see the test data.
      */
     private fun seededStorage(): Triple<ServerPlatformStorage, DataRepository, String> {
-        val storage = tempStorage()
-        val repo = DataRepository(storage)
+        val baseDir = File(System.getProperty("java.io.tmpdir"), "p3-test-${System.nanoTime()}")
+        baseDir.mkdirs()
+        val rootStorage = ServerPlatformStorage(baseDir = baseDir)
+        val userDir = File(baseDir, "users/default")
+        userDir.mkdirs()
+        val userStorage = ServerPlatformStorage(baseDir = userDir)
+        val repo = DataRepository(userStorage)
         repo.saveAppSettings(
             AppSettings(
-                current_user = "testuser",
+                current_user = "default",
                 selected_provider = "fake",
                 selected_model = "fake-model"
             )
         )
-        val chat = repo.createNewChat("testuser", "Test Chat")
-        return Triple(storage, repo, chat.chat_id)
+        val chat = repo.createNewChat("default", "Test Chat")
+        return Triple(rootStorage, repo, chat.chat_id)
     }
 
     // ── FakeChatEngine implementations ───────────────────────────────────────
@@ -363,7 +367,7 @@ class StreamingSendTest {
         }
 
         // Load chat and verify assistant message was persisted
-        val chat = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val chat = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertNotNull(chat, "Chat should still exist")
         val assistantMessages = chat!!.messages.filter { it.role == "assistant" }
         assertTrue(assistantMessages.isNotEmpty(), "Expected at least one assistant message to be persisted")
@@ -412,7 +416,7 @@ class StreamingSendTest {
         )
 
         // Verify tool messages persisted (onSaveToolMessages was called)
-        val chat = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val chat = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         val allMessages = chat?.messages ?: emptyList()
         // Should have the user message + tool_call message + tool_response + assistant
         assertTrue(allMessages.any { it.role == "tool_call" }, "Expected tool_call message in history")
@@ -459,7 +463,7 @@ class StreamingSendTest {
             setBody(buildSendBody(chatId, userMessage = "Tell me something"))
         }
 
-        val chat = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val chat = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertNotNull(chat)
         val userMessages = chat!!.messages.filter { it.role == "user" }
         assertTrue(userMessages.isNotEmpty(), "Expected user message to be persisted")

@@ -1,10 +1,11 @@
 package com.example.ApI.server
 
-import com.example.ApI.data.repository.DataRepository
+import com.example.ApI.server.auth.GoogleTokenVerifier
+import com.example.ApI.server.auth.RealGoogleTokenVerifier
+import com.example.ApI.server.auth.RealSyncAuthClient
+import com.example.ApI.server.auth.SyncAuthClient
 import com.example.ApI.server.oauth.OAuthTokenExchanger
 import com.example.ApI.server.oauth.RealOAuthTokenExchanger
-import com.example.ApI.server.streaming.ChatEngine
-import com.example.ApI.server.streaming.RepositoryChatEngine
 import io.ktor.server.application.*
 
 /**
@@ -21,28 +22,21 @@ fun interface TitleGenerator {
 /**
  * Application-level dependency holder.
  *
- * A single [DataRepository] is created at startup (with [ServerPlatformStorage])
- * and stored here so all route extensions can access it via
- * `application.appModule.repository`.
+ * A [UserRegistry] maps each authenticated username to its own isolated
+ * [UserContext] (storage + repository + chat engine + title generator).  Route
+ * handlers resolve their context via `call.userContext()` rather than accessing
+ * a single shared repository.
  *
- * A [ChatEngine] is also stored so that the streaming route can be tested with a
- * fake engine that drives [StreamingCallback] deterministically without network calls.
- * In production [chatEngine] is a [RepositoryChatEngine]; tests supply a [FakeChatEngine].
- *
- * An [OAuthTokenExchanger] is stored so that OAuth routes can be tested with a fake
- * exchanger that returns scripted results without making real network calls.
- *
- * A [TitleGenerator] is stored so that the generate-title route can be tested with a
- * fake that returns a deterministic title without real LLM calls.
+ * Injectable dependencies (for testing without real network calls):
+ * - [oauthExchanger] — GitHub / Google Workspace token exchange.
+ * - [googleTokenVerifier] — Google ID token validation (login flow).
+ * - [syncAuthClient] — exchange ID token with the sync server for a bearer token.
  */
 class AppModule(
-    val repository: DataRepository,
-    val chatEngine: ChatEngine = RepositoryChatEngine(repository),
+    val registry: UserRegistry,
     val oauthExchanger: OAuthTokenExchanger = RealOAuthTokenExchanger(),
-    val titleGenerator: TitleGenerator = object : TitleGenerator {
-        override suspend fun generate(username: String, chatId: String, provider: String?): String =
-            repository.generateConversationTitle(username, chatId, provider)
-    }
+    val googleTokenVerifier: GoogleTokenVerifier = RealGoogleTokenVerifier(),
+    val syncAuthClient: SyncAuthClient = RealSyncAuthClient()
 )
 
 // Ktor attribute key for AppModule

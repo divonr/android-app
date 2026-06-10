@@ -6,8 +6,7 @@ import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.ThinkingBudgetValue
 import com.example.ApI.data.model.TitleGenerationSettings
 import com.example.ApI.data.repository.DataRepository
-import com.example.ApI.server.appModule
-import com.example.ApI.server.currentUsername
+import com.example.ApI.server.userContext
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
 import io.ktor.http.*
@@ -342,10 +341,10 @@ fun Route.sendRoute() {
             return@post
         }
 
-        val appModule = call.application.appModule
-        val repo = appModule.repository
-        val engine = appModule.chatEngine
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val engine = ctx.chatEngine
+        val username = ctx.username
 
         val provider = repo.loadProviders().find { it.provider == body.provider }
         if (provider == null) {
@@ -402,10 +401,10 @@ fun Route.resendRoute() {
             return@post
         }
 
-        val appModule = call.application.appModule
-        val repo = appModule.repository
-        val engine = appModule.chatEngine
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val engine = ctx.chatEngine
+        val username = ctx.username
 
         // Verify the chat exists
         val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }

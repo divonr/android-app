@@ -2,6 +2,10 @@ package com.example.ApI.server
 
 import com.example.ApI.data.model.RemoteSyncSettings
 import com.example.ApI.data.repository.DataRepository
+import com.example.ApI.server.auth.GoogleTokenVerifier
+import com.example.ApI.server.auth.RealGoogleTokenVerifier
+import com.example.ApI.server.auth.RealSyncAuthClient
+import com.example.ApI.server.auth.SyncAuthClient
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -30,18 +34,30 @@ private val log = LoggerFactory.getLogger("ServerMain")
  * Signed session data stored in the `llm_web_session` cookie.
  *
  * The cookie is HTTP-only and signed with a secret read from the
- * `WEB_UI_SESSION_SECRET` environment variable.  If that variable is
- * unset, a random per-process secret is generated (everyone is logged
- * out on restart — acceptable for local/dev use).
+ * `WEB_UI_SESSION_SECRET` environment variable.
+ *
+ * **Step 5a additions**: [username] and [email] carry per-user identity.
+ * Password login sets `username = "default"` (no change in session shape for
+ * existing clients; the extra fields have safe defaults).
+ *
+ * [googleLoginState] is the CSRF state token for the **login** OAuth flow
+ * (`/auth/google/start|callback`).  It is stored in a pre-auth session slot so
+ * it survives the Google redirect before the user is authenticated.
  */
 @Serializable
 data class UserSession(
     val authenticated: Boolean = true,
     val issuedAt: Long = System.currentTimeMillis(),
+    /** Canonical username from the sync server, or "default" for password login. */
+    val username: String = "default",
+    /** Google account email; empty for password login. */
+    val email: String = "",
     /** CSRF state token stored during GitHub OAuth flow. Cleared after use. */
     val githubOAuthState: String? = null,
-    /** CSRF state token stored during Google OAuth flow. Cleared after use. */
-    val googleOAuthState: String? = null
+    /** CSRF state token stored during Google Workspace OAuth flow. Cleared after use. */
+    val googleOAuthState: String? = null,
+    /** CSRF state token stored during Google login flow. Cleared after use. */
+    val googleLoginState: String? = null
 ) : Principal
 
 /**
@@ -79,17 +95,18 @@ fun resolvePassword(): String {
 /**
  * Remote-sync configuration injected into [Application.module].
  *
- * Separating it from the module signature lets tests verify config-seeding
- * without relying on real environment variables and without opening live
- * network connections.
+ * In Step 5a this is still used to seed the "default" user's sync config from
+ * environment variables (backward-compatible with the pre-5a deployment).
+ * Step 5b will remove this in favour of per-user sync seeded at login.
  *
- * @param enabled              Whether to activate sync (mirrors SYNC_ENABLED env var).
+ * @param enabled              Whether to activate sync for the "default" user.
  * @param serverBaseUrl        Sync server base URL (mirrors SYNC_SERVER_URL env var).
- * @param authToken            Bearer token (mirrors SYNC_TOKEN env var). NEVER hardcode.
+ * @param authToken            Bearer token (mirrors SYNC_TOKEN env var).
  * @param syncUser             Username whose data to load; null = keep existing current_user.
- * @param pullIntervalSeconds  Seconds between periodic background pulls (mirrors SYNC_PULL_INTERVAL_SECONDS).
- * @param startEngine          When false, config is seeded but startSync()/pullNow() are NOT called.
+ * @param pullIntervalSeconds  Seconds between periodic background pulls.
+ * @param startEngine          When false, config is seeded but no engine is started.
  *                             Used in tests to assert config without opening sockets.
+ * @param syncApiKeys          Whether to sync API keys (mirrors SYNC_API_KEYS env var).
  */
 data class SyncConfig(
     val enabled: Boolean = false,
@@ -122,6 +139,12 @@ fun resolveSyncConfig(): SyncConfig {
     )
 }
 
+/** Reads the allowed Google emails allowlist from the environment. */
+fun resolveAllowedGoogleEmails(): Set<String> {
+    val env = System.getenv("ALLOWED_GOOGLE_EMAILS") ?: return emptySet()
+    return env.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+}
+
 fun main() {
     val port = System.getenv("KTOR_PORT")?.toIntOrNull() ?: 8091
     embeddedServer(Netty, port = port, module = Application::module).start(wait = true)
@@ -130,14 +153,20 @@ fun main() {
 /**
  * Top-level Ktor Application module.
  *
- * Called by [embeddedServer] at startup and also by [testApplication] in tests,
- * so tests can exercise the full stack without network overhead.
+ * Called by [embeddedServer] at startup and also by [testApplication] in tests.
  *
- * The [storage] parameter allows tests to supply an isolated [ServerPlatformStorage]
- * pointing at a temp directory, keeping tests hermetic.
- *
- * The [authConfig] parameter allows tests to inject a known password and secret
- * without depending on the real environment variable.
+ * **Injection surface** (same parameter names as before; new params have defaults):
+ * @param storage               Root [ServerPlatformStorage].  Tests pass a temp dir.
+ * @param authConfig            Auth credentials.  Tests inject a known password.
+ * @param oauthExchanger        GitHub / Google Workspace token exchanger.
+ * @param syncConfig            Legacy env-driven sync config for the "default" user.
+ * @param titleGeneratorFactory Factory for per-user [TitleGenerator].
+ * @param chatEngineFactory     Factory for per-user [ChatEngine].
+ * @param googleTokenVerifier   Google ID token verifier.  Tests pass a fake.
+ * @param syncAuthClient        Sync-server exchanger.  Tests pass a fake.
+ * @param startRegistry         When false, the registry's sync engine is never
+ *                              started (test isolation flag — mirrors [SyncConfig.startEngine]).
+ * @param allowedGoogleEmails   Allowlist for Google login.  Empty = allow all.
  */
 fun Application.module(
     storage: ServerPlatformStorage = ServerPlatformStorage(),
@@ -145,32 +174,58 @@ fun Application.module(
     oauthExchanger: com.example.ApI.server.oauth.OAuthTokenExchanger? = null,
     syncConfig: SyncConfig = resolveSyncConfig(),
     titleGeneratorFactory: ((DataRepository) -> TitleGenerator)? = null,
+    googleTokenVerifier: GoogleTokenVerifier? = null,
+    syncAuthClient: SyncAuthClient? = null,
+    startRegistry: Boolean = true,
+    allowedGoogleEmails: Set<String> = resolveAllowedGoogleEmails(),
+    // Keep last so that `module(storage, authConfig) { repo -> engine }` trailing-lambda syntax works.
     chatEngineFactory: ((DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null
 ) {
-    // ── Dependency wiring ────────────────────────────────────────────────────
-    val repository = DataRepository(storage)
+    // ── Per-user sync params ─────────────────────────────────────────────────
+    val syncServerUrl = System.getenv("SYNC_SERVER_URL")?.takeIf { it.isNotBlank() }
+        ?: "http://localhost:8090"
+    val pullIntervalSeconds = System.getenv("SYNC_PULL_INTERVAL_SECONDS")?.toLongOrNull() ?: 20L
+
+    // ── UserRegistry ─────────────────────────────────────────────────────────
+    val registry = UserRegistry(
+        baseDir = storage.baseDir,
+        syncServerUrl = syncServerUrl,
+        pullIntervalSeconds = pullIntervalSeconds,
+        startEngine = startRegistry,
+        chatEngineFactory = chatEngineFactory ?: { repo ->
+            com.example.ApI.server.streaming.RepositoryChatEngine(repo)
+        },
+        titleGeneratorFactory = titleGeneratorFactory ?: { repo ->
+            TitleGenerator { username, chatId, provider ->
+                repo.generateConversationTitle(username, chatId, provider)
+            }
+        }
+    )
+
+    // Stop all user pull loops on shutdown
+    environment.monitor.subscribe(ApplicationStopping) {
+        registry.stopAll()
+    }
+
+    // ── AppModule ─────────────────────────────────────────────────────────────
     val appModule = AppModule(
-        repository = repository,
-        chatEngine = chatEngineFactory?.invoke(repository)
-            ?: com.example.ApI.server.streaming.RepositoryChatEngine(repository),
+        registry = registry,
         oauthExchanger = oauthExchanger
             ?: com.example.ApI.server.oauth.RealOAuthTokenExchanger(),
-        titleGenerator = titleGeneratorFactory?.invoke(repository)
-            ?: object : TitleGenerator {
-                override suspend fun generate(username: String, chatId: String, provider: String?): String =
-                    repository.generateConversationTitle(username, chatId, provider)
-            }
+        googleTokenVerifier = googleTokenVerifier ?: RealGoogleTokenVerifier(),
+        syncAuthClient = syncAuthClient ?: RealSyncAuthClient(syncServerUrl)
     )
     installAppModule(appModule)
 
-    // ── Remote sync bootstrap ────────────────────────────────────────────────
-    applySyncConfig(repository, syncConfig)
+    // ── Legacy sync bootstrap (seeds the "default" user's AppSettings) ────────
+    applySyncConfig(registry, syncConfig)
 
     // ── Models cache bootstrap ───────────────────────────────────────────────
     // Mirrors the Android app startup: fetch the GitHub-backed models.json into
     // the local cache (no-op while the 24h cache is still valid).
     launch(Dispatchers.IO) {
-        runCatching { repository.refreshModelsIfNeeded() }
+        val defaultRepo = registry.context("default").repository
+        runCatching { defaultRepo.refreshModelsIfNeeded() }
             .onFailure { log.warn("Startup models refresh failed: ${it.message}") }
     }
 
@@ -240,19 +295,23 @@ fun Application.module(
     }
 
     // ── Routes ───────────────────────────────────────────────────────────────
-    configureRouting(authConfig)
+    configureRouting(authConfig, allowedGoogleEmails)
 }
 
-// ── Remote sync bootstrap helper ────────────────────────────────────────────
+// ── Legacy remote sync bootstrap helper ────────────────────────────────────────
 
 /**
- * Applies [syncConfig] to the repository's [AppSettings] and, when enabled,
- * starts the sync engine and a periodic pull loop.
+ * Seeds [syncConfig] into the **"default" user's** AppSettings and, when enabled,
+ * starts the sync engine and a periodic pull loop for that user.
  *
- * When [SyncConfig.startEngine] is false (tests), config is seeded but no
- * network connections are opened.
+ * This function is kept for Step 5a backward compatibility — it allows existing
+ * deployments driven by `SYNC_ENABLED/SYNC_TOKEN/SYNC_USER` env vars to continue
+ * working without any env changes.  It will be removed in Step 5b.
+ *
+ * The "default" user context is created synchronously (via [runBlocking]) so the
+ * config is written before the server begins handling requests.
  */
-private fun Application.applySyncConfig(repository: DataRepository, syncConfig: SyncConfig) {
+private fun Application.applySyncConfig(registry: UserRegistry, syncConfig: SyncConfig) {
     if (!syncConfig.enabled) return
 
     if (syncConfig.authToken.isBlank()) {
@@ -263,9 +322,10 @@ private fun Application.applySyncConfig(repository: DataRepository, syncConfig: 
         return
     }
 
-    // Seed declarative sync config into AppSettings so the engine reads it on start.
-    // This is idempotent: restarting the server re-applies the same env-driven config.
-    val current = repository.loadAppSettings()
+    // Acquire the "default" user's repository synchronously at startup.
+    val defaultRepo = runBlocking { registry.context("default").repository }
+
+    val current = defaultRepo.loadAppSettings()
     val updated = current.copy(
         remoteSync = RemoteSyncSettings(
             enabled = true,
@@ -275,30 +335,32 @@ private fun Application.applySyncConfig(repository: DataRepository, syncConfig: 
         ),
         current_user = syncConfig.syncUser ?: current.current_user
     )
-    repository.saveAppSettings(updated)
+    defaultRepo.saveAppSettings(updated)
     log.info(
-        "Remote sync configured: url=${syncConfig.serverBaseUrl}, " +
+        "Remote sync configured for 'default' user: url=${syncConfig.serverBaseUrl}, " +
         "user=${updated.current_user}, interval=${syncConfig.pullIntervalSeconds}s"
     )
 
     if (!syncConfig.startEngine) return  // test mode: config seeded, engine not started
 
-    repository.startSync()
+    defaultRepo.startSync()
     log.info("Remote sync engine started — triggering initial pull...")
-    repository.pullNow()
+    defaultRepo.pullNow()
 
-    // Periodic pull loop — compensates for the server having no "window focus" event.
-    // Uses its own CoroutineScope so it can be cancelled cleanly on shutdown.
+    // Periodic pull loop for the "default" user (compensates for the server having
+    // no "window focus" event).  Uses its own CoroutineScope so it can be cancelled
+    // cleanly on shutdown.  The registry's stopAll() does NOT cancel this scope; we
+    // subscribe to ApplicationStopping directly to match the pre-5a behaviour.
     val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     environment.monitor.subscribe(ApplicationStopping) {
-        log.info("Stopping periodic sync pull loop")
+        log.info("Stopping legacy default-user sync pull loop")
         syncScope.cancel()
     }
     syncScope.launch {
         while (isActive) {
             delay(syncConfig.pullIntervalSeconds * 1000L)
             try {
-                repository.pullNow()
+                defaultRepo.pullNow()
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Exception) {

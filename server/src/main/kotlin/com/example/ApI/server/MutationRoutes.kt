@@ -137,7 +137,8 @@ fun Route.mutationRoutes() {
 
     // POST /api/providers/refresh — force refresh cached models
     post("/providers/refresh") {
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
         val (changed, _) = repo.forceRefreshModels()
         call.respond(HttpStatusCode.OK, mapOf("ok" to true, "changed" to changed))
     }
@@ -147,8 +148,9 @@ fun Route.mutationRoutes() {
     // POST /api/chats — create a new chat (optionally in a group)
     post("/chats") {
         val body = call.receive<CreateChatRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val chat = if (body.groupId != null) {
             repo.createNewChatInGroup(username, body.previewName, body.groupId, body.systemPrompt)
         } else {
@@ -163,8 +165,9 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
         )
         val body = call.receive<PatchChatRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
 
         // Load current chat
         var chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
@@ -199,8 +202,9 @@ fun Route.mutationRoutes() {
         val chatId = call.parameters["chatId"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val history = repo.loadChatHistory(username)
         val exists = history.chat_history.any { it.chat_id == chatId }
         if (!exists) {
@@ -217,8 +221,9 @@ fun Route.mutationRoutes() {
         val chatId = call.parameters["chatId"] ?: return@get call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val json = repo.getChatJson(username, chatId)
         if (json == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
@@ -230,8 +235,9 @@ fun Route.mutationRoutes() {
     // POST /api/chats/import — import a chat from JSON
     post("/chats/import") {
         val body = call.receive<ImportChatRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         if (!repo.validateChatJson(body.content)) {
             call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid chat JSON"))
             return@post
@@ -252,8 +258,9 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
         )
         val body = call.receive<AddMessageRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val message = Message(
             id = UUID.randomUUID().toString(),
             role = body.role,
@@ -277,8 +284,9 @@ fun Route.mutationRoutes() {
         val messageId = call.parameters["messageId"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing messageId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
             ?: return@delete call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
 
@@ -303,8 +311,9 @@ fun Route.mutationRoutes() {
         } catch (e: Exception) {
             GenerateTitleRequest()
         }
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
 
         // Verify chat exists
         val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
@@ -314,7 +323,7 @@ fun Route.mutationRoutes() {
         }
 
         val providerArg = body.provider.takeIf { it.isNotBlank() && it != "auto" }
-        val titleGenerator = call.application.appModule.titleGenerator
+        val titleGenerator = ctx.titleGenerator
 
         try {
             val title = titleGenerator.generate(username, chatId, providerArg)
@@ -347,8 +356,9 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
         )
         val body = call.receive<CreateBranchRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
 
         // Ensure branching structure exists
         repo.ensureBranchingStructure(username, chatId)
@@ -371,8 +381,9 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing nodeId")
         )
         val body = call.receive<SwitchVariantRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
 
         val updatedChat = repo.switchVariant(username, chatId, nodeId, body.variantIndex)
         if (updatedChat == null) {
@@ -390,8 +401,9 @@ fun Route.mutationRoutes() {
         val nodeId = call.parameters["nodeId"] ?: return@get call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing nodeId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
             ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
 
@@ -419,8 +431,9 @@ fun Route.mutationRoutes() {
         val messageId = call.parameters["messageId"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing messageId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
 
         when (val result = repo.deleteMessageFromBranch(username, chatId, messageId)) {
             is DeleteMessageResult.Success -> call.respond(HttpStatusCode.OK, result.updatedChat)
@@ -436,8 +449,9 @@ fun Route.mutationRoutes() {
     // POST /api/groups — create a new group
     post("/groups") {
         val body = call.receive<CreateGroupRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val group = repo.createNewGroup(username, body.groupName)
         call.respond(HttpStatusCode.Created, group)
     }
@@ -448,8 +462,9 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing groupId")
         )
         val body = call.receive<PatchGroupRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
 
         // Verify group exists
         val history = repo.loadChatHistory(username)
@@ -488,8 +503,9 @@ fun Route.mutationRoutes() {
         val groupId = call.parameters["groupId"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing groupId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val history = repo.loadChatHistory(username)
         if (history.groups.none { it.group_id == groupId }) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found"))
@@ -507,8 +523,9 @@ fun Route.mutationRoutes() {
         val chatId = call.parameters["chatId"] ?: return@post call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val ok = repo.addChatToGroup(username, chatId, groupId)
         if (!ok) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat or group not found"))
@@ -525,8 +542,9 @@ fun Route.mutationRoutes() {
         val chatId = call.parameters["chatId"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         // removeChatFromGroup removes from any group, groupId is validated for correctness
         val history = repo.loadChatHistory(username)
         val chat = history.chat_history.find { it.chat_id == chatId }
@@ -548,8 +566,9 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing groupId")
         )
         val attachment = call.receive<Attachment>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val ok = repo.addAttachmentToGroup(username, groupId, attachment)
         if (!ok) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found"))
@@ -570,8 +589,9 @@ fun Route.mutationRoutes() {
         val index = indexStr.toIntOrNull() ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Invalid attachmentIndex")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val ok = repo.removeAttachmentFromGroup(username, groupId, index)
         if (!ok) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group or attachment not found"))
@@ -590,8 +610,9 @@ fun Route.mutationRoutes() {
     // POST /api/keys — add a new API key (full key value accepted)
     post("/keys") {
         val body = call.receive<AddApiKeyRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val key = ApiKey(
             id = body.id ?: UUID.randomUUID().toString(),
             provider = body.provider,
@@ -609,8 +630,9 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing keyId")
         )
         val body = call.receive<PatchApiKeyRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val keys = repo.loadApiKeys(username)
         val existing = keys.find { it.id == keyId }
         if (existing == null) {
@@ -632,8 +654,9 @@ fun Route.mutationRoutes() {
         val keyId = call.parameters["keyId"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing keyId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val keys = repo.loadApiKeys(username)
         if (keys.none { it.id == keyId }) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Key not found"))
@@ -648,8 +671,9 @@ fun Route.mutationRoutes() {
         val keyId = call.parameters["keyId"] ?: return@post call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing keyId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val keys = repo.loadApiKeys(username)
         if (keys.none { it.id == keyId }) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Key not found"))
@@ -663,8 +687,9 @@ fun Route.mutationRoutes() {
     // POST /api/keys/reorder — reorder keys by fromIndex/toIndex
     post("/keys/reorder") {
         val body = call.receive<ReorderKeysRequest>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val keys = repo.loadApiKeys(username)
         if (body.fromIndex < 0 || body.fromIndex >= keys.size ||
             body.toIndex < 0 || body.toIndex >= keys.size) {
@@ -680,7 +705,8 @@ fun Route.mutationRoutes() {
 
     // PATCH /api/settings — partial settings update (GET-then-PATCH semantics)
     patch("/settings") {
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
         val current = repo.loadAppSettings()
         // Receive as raw JSON so we can merge only supplied fields
         val bodyJson = call.receiveText()
@@ -719,16 +745,18 @@ fun Route.mutationRoutes() {
 
     // GET /api/custom-providers
     get("/custom-providers") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         call.respond(HttpStatusCode.OK, repo.loadCustomProviders(username))
     }
 
     // POST /api/custom-providers
     post("/custom-providers") {
         val body = call.receive<CustomProviderConfig>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         repo.addCustomProvider(username, body)
         call.respond(HttpStatusCode.Created, body)
     }
@@ -739,8 +767,9 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing providerId")
         )
         val body = call.receive<CustomProviderConfig>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val existing = repo.loadCustomProviders(username).find { it.id == providerId }
         if (existing == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Provider not found"))
@@ -756,8 +785,9 @@ fun Route.mutationRoutes() {
         val providerId = call.parameters["providerId"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing providerId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val existing = repo.loadCustomProviders(username).find { it.id == providerId }
         if (existing == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Provider not found"))
@@ -771,16 +801,18 @@ fun Route.mutationRoutes() {
 
     // GET /api/full-custom-providers
     get("/full-custom-providers") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         call.respond(HttpStatusCode.OK, repo.loadFullCustomProviders(username))
     }
 
     // POST /api/full-custom-providers
     post("/full-custom-providers") {
         val body = call.receive<FullCustomProviderConfig>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         repo.addFullCustomProvider(username, body)
         call.respond(HttpStatusCode.Created, body)
     }
@@ -791,8 +823,9 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing providerId")
         )
         val body = call.receive<FullCustomProviderConfig>()
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val existing = repo.loadFullCustomProviders(username).find { it.id == providerId }
         if (existing == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Provider not found"))
@@ -808,8 +841,9 @@ fun Route.mutationRoutes() {
         val providerId = call.parameters["providerId"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing providerId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val existing = repo.loadFullCustomProviders(username).find { it.id == providerId }
         if (existing == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Provider not found"))
@@ -823,7 +857,8 @@ fun Route.mutationRoutes() {
 
     // GET /api/skills
     get("/skills") {
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
         val skills = repo.getInstalledSkills()
         call.respond(HttpStatusCode.OK, skills)
     }
@@ -833,7 +868,8 @@ fun Route.mutationRoutes() {
         val skillName = call.parameters["skillName"] ?: return@get call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing skillName")
         )
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
         val content = repo.getSkillMdContent(skillName)
         if (content == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Skill not found"))
@@ -845,7 +881,8 @@ fun Route.mutationRoutes() {
     // POST /api/skills — create or import a skill
     post("/skills") {
         val body = call.receive<CreateSkillRequest>()
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
         val skill = if (body.importText != null) {
             // Import from full markdown text
             repo.importSkillFromText(body.importText)
@@ -868,7 +905,8 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing skillName")
         )
         val body = call.receive<PatchSkillRequest>()
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
         val skills = repo.getInstalledSkills()
         if (skills.none { it.directoryName == skillName }) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Skill not found"))
@@ -888,7 +926,8 @@ fun Route.mutationRoutes() {
         val skillName = call.parameters["skillName"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing skillName")
         )
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
         val skills = repo.getInstalledSkills()
         if (skills.none { it.directoryName == skillName }) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Skill not found"))
@@ -903,7 +942,8 @@ fun Route.mutationRoutes() {
         val skillName = call.parameters["skillName"] ?: return@get call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing skillName")
         )
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
         val skills = repo.getInstalledSkills()
         if (skills.none { it.directoryName == skillName }) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Skill not found"))
@@ -957,7 +997,8 @@ fun Route.mutationRoutes() {
             return@post
         }
 
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
         val skill = try {
             val zipStream = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes))
             val result = repo.importSkillFromZip(zipStream)

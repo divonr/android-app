@@ -15,6 +15,7 @@ import io.ktor.server.sessions.*
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.net.URLEncoder
 import java.security.MessageDigest
 
 @Serializable
@@ -22,6 +23,9 @@ data class HealthResponse(val status: String)
 
 @Serializable
 data class LoginRequest(val password: String)
+
+@Serializable
+data class MeResponse(val username: String, val email: String)
 
 // ── P2 DTOs ───────────────────────────────────────────────────────────────────
 
@@ -108,14 +112,13 @@ private fun passwordsEqual(submitted: String, expected: String): Boolean =
  *   GET  /health
  *   POST /login
  *   POST /logout
+ *   GET  /auth/google/start       ← Google login start (Step 5a)
+ *   GET  /auth/google/callback    ← Google login callback (Step 5a)
  *
  * Authenticated routes (`authenticate("session") { route("/api") { ... } }`):
  *   GET  /api/session
+ *   GET  /api/me
  *   ... (later phases add routes via [Route.apiRoutes])
- *
- * To add new authenticated API endpoints in later phases, place them inside
- * [Route.apiRoutes] — that function is the single insertion point that future
- * subagents use.
  */
 private val routingLog = LoggerFactory.getLogger("Routing")
 
@@ -151,7 +154,26 @@ object StaticDirTestHook {
     @Volatile var override: File? = null
 }
 
-fun Application.configureRouting(authConfig: AuthConfig = AuthConfig(password = resolvePassword())) {
+// ── Per-user context helper ───────────────────────────────────────────────────
+
+/**
+ * Resolves the [UserContext] for the currently authenticated user.
+ *
+ * Inside `authenticate("session") { }` blocks [principal] holds the validated
+ * [UserSession]; outside (e.g. OAuth callbacks) we fall back to the raw session
+ * cookie.  Both paths return the same [UserContext] for the same username.
+ */
+suspend fun ApplicationCall.userContext(): UserContext {
+    val session = principal<UserSession>()
+        ?: sessions.get<UserSession>()
+        ?: error("No authenticated session found")
+    return application.appModule.registry.context(session.username)
+}
+
+fun Application.configureRouting(
+    authConfig: AuthConfig = AuthConfig(password = resolvePassword()),
+    allowedGoogleEmails: Set<String> = resolveAllowedGoogleEmails()
+) {
     routing {
         // ── Public ───────────────────────────────────────────────────────────
         get("/health") {
@@ -161,7 +183,13 @@ fun Application.configureRouting(authConfig: AuthConfig = AuthConfig(password = 
         post("/login") {
             val body = call.receive<LoginRequest>()
             if (passwordsEqual(body.password, authConfig.password)) {
-                call.sessions.set(UserSession(authenticated = true, issuedAt = System.currentTimeMillis()))
+                call.sessions.set(
+                    UserSession(
+                        authenticated = true,
+                        username = "default",
+                        issuedAt = System.currentTimeMillis()
+                    )
+                )
                 call.respond(HttpStatusCode.OK, mapOf("ok" to true))
             } else {
                 call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid password"))
@@ -172,6 +200,9 @@ fun Application.configureRouting(authConfig: AuthConfig = AuthConfig(password = 
             call.sessions.clear<UserSession>()
             call.respond(HttpStatusCode.OK, mapOf("ok" to true))
         }
+
+        // ── Google login routes (distinct from /oauth/google/start|callback Workspace routes) ──
+        googleLoginRoutes(allowedGoogleEmails)
 
         // ── Public OAuth callbacks (must be outside auth block) ──────────────
         oauthCallbackRoutes()
@@ -184,40 +215,32 @@ fun Application.configureRouting(authConfig: AuthConfig = AuthConfig(password = 
                     call.respond(HttpStatusCode.OK, mapOf("authenticated" to true))
                 }
 
+                // GET /api/me — returns the current user's identity
+                get("/me") {
+                    val session = call.principal<UserSession>()!!
+                    call.respond(HttpStatusCode.OK, MeResponse(username = session.username, email = session.email))
+                }
+
                 // ── Insertion point for future phases ──────────────────────
-                // P2+: call apiRoutes() here to add more authenticated endpoints.
                 apiRoutes()
             }
         }
 
         // ── P8: Static SPA serving ───────────────────────────────────────────
-        // Serve the built React app from WEB_STATIC_DIR (or web/dist by default).
-        // API and auth routes declared above always take precedence because Ktor
-        // evaluates routes in declaration order and these are declared last.
-        //
-        // Strategy: a single tailcard GET handler that
-        //   - Serves real asset files (JS/CSS/images/favicon) from disk when they exist.
-        //   - Falls back to index.html for any unknown path (client-side SPA routes).
-        //   - Never swallows /api paths (defensive guard — those are matched before this).
         val staticDir = resolveStaticDir()
         if (staticDir != null) {
             routingLog.info("Serving SPA from ${staticDir.absolutePath}")
             val indexFile = File(staticDir, "index.html")
-            // Tailcard `{...}` matches zero or more remaining path segments — this is
-            // the last-resort handler for all GET requests not matched by specific routes.
             get("{...}") {
-                val rawPath = call.request.uri.substringBefore('?') // strip query string
-                // Defensive guard: /api paths must not reach this handler.
+                val rawPath = call.request.uri.substringBefore('?')
                 if (rawPath.startsWith("/api/") || rawPath == "/api") {
                     call.respond(HttpStatusCode.NotFound, mapOf("error" to "Not found"))
                     return@get
                 }
-                // Try to serve the requested file from the static dir.
                 val candidate = File(staticDir, rawPath.trimStart('/'))
                 if (candidate.isFile && candidate.canonicalPath.startsWith(staticDir.canonicalPath)) {
                     call.respondFile(candidate)
                 } else {
-                    // SPA fallback: return index.html so the React router handles the path.
                     call.respondFile(indexFile)
                 }
             }
@@ -230,38 +253,136 @@ fun Application.configureRouting(authConfig: AuthConfig = AuthConfig(password = 
     }
 }
 
-/**
- * Extension point for authenticated `/api` routes added in phases P2 and beyond.
- *
- * This function is called inside `authenticate("session") { route("/api") { ... } }`,
- * so every route defined here is automatically protected by session auth.
- *
- * Usage (later phases just add to this function):
- * ```kotlin
- * fun Route.apiRoutes() {
- *     get("/chats") { ... }
- *     post("/chat/send") { ... }
- *     // etc.
- * }
- * ```
- */
-// ── Username helper ──────────────────────────────────────────────────────────
+// ── Google login routes ───────────────────────────────────────────────────────
 
 /**
- * Resolves the "current user" for repository calls.
+ * Registers `GET /auth/google/start` and `GET /auth/google/callback` for the
+ * Google sign-in login flow.
  *
- * The server is single-user: the canonical username comes from
- * [AppSettings.current_user].  An optional `?username=` query param is
- * accepted for callers that know the username explicitly, but in practice
- * the server always uses the stored current user.
+ * These routes are **distinct** from the existing `/oauth/google/start|callback` routes which
+ * handle the Google Workspace integration and MUST stay unchanged.
  *
- * Reusable by P3 (streaming send) and P4 (mutation APIs).
+ * CSRF protection: a random state token is stored in a pre-auth session slot
+ * ([UserSession.googleLoginState]) before the Google redirect and validated in
+ * the callback.  A pre-auth session is used (authenticated=false) so the state
+ * survives the round-trip before the user is formally logged in.
  */
-fun ApplicationCall.currentUsername(): String {
-    val explicit = request.queryParameters["username"]
-    if (!explicit.isNullOrBlank()) return explicit
-    val repo = application.appModule.repository
-    return repo.loadAppSettings().current_user
+private fun Route.googleLoginRoutes(allowedGoogleEmails: Set<String>) {
+
+    // GET /auth/google/start — redirect to Google authorize URL
+    get("/auth/google/start") {
+        val clientId = resolveGoogleClientId()
+        if (clientId.isBlank()) {
+            call.respond(
+                HttpStatusCode.ServiceUnavailable,
+                mapOf("error" to "Google login not configured — set GOOGLE_OAUTH_CLIENT_ID")
+            )
+            return@get
+        }
+
+        val state = generateOAuthState()
+
+        // Store state in a pre-auth session slot so the callback can validate it.
+        val existing = call.sessions.get<UserSession>() ?: UserSession(authenticated = false)
+        call.sessions.set(existing.copy(googleLoginState = state))
+
+        val baseUrl = resolvePublicBaseUrl()
+        val redirectUri = "$baseUrl/auth/google/callback"
+        val scopes = "openid email profile"
+
+        val authorizeUrl = buildString {
+            append("https://accounts.google.com/o/oauth2/v2/auth")
+            append("?client_id=").append(URLEncoder.encode(clientId, "UTF-8"))
+            append("&redirect_uri=").append(URLEncoder.encode(redirectUri, "UTF-8"))
+            append("&response_type=code")
+            append("&scope=").append(URLEncoder.encode(scopes, "UTF-8"))
+            append("&state=").append(state)
+            append("&prompt=select_account")
+        }
+
+        call.respondRedirect(authorizeUrl)
+    }
+
+    // GET /auth/google/callback?code=&state= — complete the login
+    get("/auth/google/callback") {
+        val code = call.request.queryParameters["code"]
+        val state = call.request.queryParameters["state"]
+
+        if (code.isNullOrBlank() || state.isNullOrBlank()) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing code or state"))
+            return@get
+        }
+
+        val session = call.sessions.get<UserSession>()
+        if (session?.googleLoginState == null || session.googleLoginState != state) {
+            call.respondRedirect("/login?error=invalid_state")
+            return@get
+        }
+
+        // Consume state (one-time use)
+        call.sessions.set(session.copy(googleLoginState = null))
+
+        val appModule = call.application.appModule
+        val exchanger = appModule.oauthExchanger
+        val verifier = appModule.googleTokenVerifier
+        val syncAuth = appModule.syncAuthClient
+
+        // Step 1: exchange code → ID token
+        val clientId = resolveGoogleClientId()
+        val clientSecret = resolveGoogleClientSecret()
+        val baseUrl = resolvePublicBaseUrl()
+        val redirectUri = "$baseUrl/auth/google/callback"
+
+        val idTokenResult = exchanger.exchangeGoogleIdToken(code, clientId, clientSecret, redirectUri)
+        if (idTokenResult.isFailure) {
+            routingLog.warn("Google id_token exchange failed: ${idTokenResult.exceptionOrNull()?.message}")
+            call.respondRedirect("/login?error=token_exchange_failed")
+            return@get
+        }
+        val idToken = idTokenResult.getOrThrow()
+
+        // Step 2: verify ID token
+        val claims = verifier.verify(idToken)
+        if (claims == null) {
+            call.respondRedirect("/login?error=token_invalid")
+            return@get
+        }
+
+        // Step 3: optional allowlist check
+        if (allowedGoogleEmails.isNotEmpty() && claims.email !in allowedGoogleEmails) {
+            routingLog.warn("Google login rejected: email '${claims.email}' not in allowlist")
+            call.respondRedirect("/login?error=not_allowed")
+            return@get
+        }
+
+        // Step 4: exchange with sync server to get canonical username + token
+        val syncResult = syncAuth.exchange(idToken)
+        if (syncResult == null) {
+            routingLog.warn("Sync server unavailable during login for '${claims.email}'")
+            call.respondRedirect("/login?error=sync_unavailable")
+            return@get
+        }
+
+        // Step 5: bootstrap user in registry (seeds AppSettings, starts engine)
+        appModule.registry.bootstrapUserSync(
+            username = syncResult.username,
+            email = syncResult.email,
+            syncToken = syncResult.token
+        )
+
+        // Step 6: set authenticated session
+        call.sessions.set(
+            UserSession(
+                authenticated = true,
+                username = syncResult.username,
+                email = syncResult.email,
+                issuedAt = System.currentTimeMillis()
+            )
+        )
+
+        routingLog.info("Google login successful for '${syncResult.email}' → username='${syncResult.username}'")
+        call.respondRedirect("/")
+    }
 }
 
 // ── P2 read routes ────────────────────────────────────────────────────────────
@@ -284,18 +405,17 @@ fun Route.apiRoutes() {
     // ── Sync ─────────────────────────────────────────────────────────────────
 
     // POST /api/sync/pull — trigger an immediate pull from the sync server
-    // Safe no-op when sync is disabled (SyncEngine.pullNow() guards on enabled flag).
     post("/sync/pull") {
-        call.application.appModule.repository.pullNow()
+        val ctx = call.userContext()
+        ctx.repository.pullNow()
         call.respond(HttpStatusCode.OK, mapOf("ok" to true))
     }
 
     // GET /api/sync/status — returns sync enablement state + last change tick + reachability probe.
-    // Auth token is deliberately excluded from the response.
     get("/sync/status") {
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
         val syncSettings = repo.loadAppSettings().remoteSync
-        // Probe the remote sync server if sync is enabled; null if disabled (no network attempt).
         val reachable: Boolean? = if (syncSettings.enabled) {
             try { repo.testSyncConnection() } catch (_: Exception) { false }
         } else {
@@ -316,13 +436,14 @@ fun Route.apiRoutes() {
 
     // GET /api/providers — full list of Provider objects
     get("/providers") {
-        val providers = call.application.appModule.repository.loadProviders()
-        call.respond(HttpStatusCode.OK, providers)
+        val ctx = call.userContext()
+        call.respond(HttpStatusCode.OK, ctx.repository.loadProviders())
     }
 
-    // GET /api/providers/detailed — providers with full model metadata for the model selector
+    // GET /api/providers/detailed — providers with full model metadata
     get("/providers/detailed") {
-        val providers = call.application.appModule.repository.loadProviders()
+        val ctx = call.userContext()
+        val providers = ctx.repository.loadProviders()
         val result = providers.map { p ->
             ProviderDetailDto(
                 provider = p.provider,
@@ -343,7 +464,8 @@ fun Route.apiRoutes() {
 
     // GET /api/providers/models — flat model-picker list grouped by provider
     get("/providers/models") {
-        val providers = call.application.appModule.repository.loadProviders()
+        val ctx = call.userContext()
+        val providers = ctx.repository.loadProviders()
         val items = providers.flatMap { p ->
             p.models.mapNotNull { m -> m.name?.let { name -> ProviderModelItem(p.provider, name) } }
         }
@@ -354,18 +476,16 @@ fun Route.apiRoutes() {
 
     // GET /api/settings — AppSettings for the current user
     get("/settings") {
-        val settings = call.application.appModule.repository.loadAppSettings()
-        call.respond(HttpStatusCode.OK, settings)
+        val ctx = call.userContext()
+        call.respond(HttpStatusCode.OK, ctx.repository.loadAppSettings())
     }
 
     // ── Chat history ─────────────────────────────────────────────────────────
 
     // GET /api/chats — full UserChatHistory for the current user
     get("/chats") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
-        val history = repo.loadChatHistory(username)
-        call.respond(HttpStatusCode.OK, history)
+        val ctx = call.userContext()
+        call.respond(HttpStatusCode.OK, ctx.repository.loadChatHistory(ctx.username))
     }
 
     // GET /api/chats/{chatId} — single Chat by ID; 404 if not found
@@ -373,9 +493,8 @@ fun Route.apiRoutes() {
         val chatId = call.parameters["chatId"] ?: return@get call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
         )
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
-        val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
+        val ctx = call.userContext()
+        val chat = ctx.repository.loadChatHistory(ctx.username).chat_history.find { it.chat_id == chatId }
         if (chat == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
         } else {
@@ -387,20 +506,16 @@ fun Route.apiRoutes() {
 
     // GET /api/groups — groups list from UserChatHistory
     get("/groups") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
-        val groups = repo.loadChatHistory(username).groups
-        call.respond(HttpStatusCode.OK, groups)
+        val ctx = call.userContext()
+        call.respond(HttpStatusCode.OK, ctx.repository.loadChatHistory(ctx.username).groups)
     }
 
     // ── API Keys ─────────────────────────────────────────────────────────────
 
-    // GET /api/keys — list of ApiKey with secret masked (last 4 chars visible)
+    // GET /api/keys — list of ApiKey with secret masked
     get("/keys") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
-        val keys = repo.loadApiKeys(username).map { it.masked() }
-        call.respond(HttpStatusCode.OK, keys)
+        val ctx = call.userContext()
+        call.respond(HttpStatusCode.OK, ctx.repository.loadApiKeys(ctx.username).map { it.masked() })
     }
 
     // ── Search ───────────────────────────────────────────────────────────────
@@ -412,9 +527,8 @@ fun Route.apiRoutes() {
             call.respond(HttpStatusCode.OK, emptyList<SearchResultDto>())
             return@get
         }
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
-        val results = repo.searchChats(username, query).map { sr ->
+        val ctx = call.userContext()
+        val results = ctx.repository.searchChats(ctx.username, query).map { sr ->
             SearchResultDto(
                 chatId = sr.chat.chat_id,
                 chatTitle = sr.chat.preview_name,

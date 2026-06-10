@@ -76,19 +76,34 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
 - [x] build `:desktop:compileKotlin` ✓ (BUILD SUCCESSFUL in 9s)
 - commit: 9e814f3
 
-## Step 5 — Web server (:server) multi-user [S]
-- [ ] `UserSession(username, email)`; password login + WEB_UI_PASSWORD removed
-- [ ] `/auth/google/start|callback` + `GoogleTokenVerifier` (real + test fake)
-      + `ALLOWED_GOOGLE_EMAILS` allowlist
-- [ ] `UserRegistry`: per-user dirs `{data}/users/{username}/`, per-user
-      DataRepository + SyncEngine (token minted at login via sync server,
-      stored in user dir; periodic pull per user; stop on shutdown)
-- [ ] ALL routes resolve username+repo from session (Routing, MutationRoutes,
-      P5Routes, SendRoute); `GET /api/me` added
-- [ ] tests updated + new isolation test (A cannot read B)
-- [ ] API_CONTRACT.md + llm-web.env.example + DEPLOY.md updated
+## Step 5 — Web server (:server) multi-user [S] — split into 5a + 5b
+### 5a (DONE) — multi-user core, password login KEPT temporarily (maps to "default")
+- [x] `UserSession(username="default", email)`; password login still works (5b removes it)
+- [x] `/auth/google/start|callback` login routes + `GoogleTokenVerifier` (tokeninfo
+      endpoint, injectable) + `SyncAuthClient` (mints per-user sync token via live
+      sync server, canonical username from its response) + `ALLOWED_GOOGLE_EMAILS`
+- [x] `UserRegistry`: per-user dirs `{data}/users/{username}/`, per-user
+      DataRepository + SyncEngine seeded at login (token in user's app_settings
+      remoteSync block; periodic pull per user; lazy rehydration; stop on shutdown)
+- [x] ALL routes resolve username+repo from session via registry (Routing,
+      MutationRoutes, P5Routes, SendRoute); `GET /api/me` added
+- [x] existing tests adapted to users/default/ layout — 131 tests, 0 failures
+- [x] build `:server:test :server:installDist` ✓ (orchestrator re-verified)
+- commit (5a):
+### 5b (TODO) — remove password auth, Google-only login, isolation tests, docs
+- [ ] remove password login + WEB_UI_PASSWORD + AuthConfig.password; delete legacy
+      applySyncConfig/SyncConfig env seeding (SYNC_ENABLED/SYNC_USER/SYNC_TOKEN) —
+      superseded by per-user sync; keep SYNC_SERVER_URL + SYNC_PULL_INTERVAL_SECONDS
+- [ ] NEW `GoogleLoginTest.kt` (was deferred from 5a): fake verifier + fake
+      SyncAuthClient; login flow sets session + creates users/{username}/ with
+      seeded settings; allowlist reject; /api/me; sync_unavailable redirect;
+      two users → two dirs
+- [ ] rewrite all tests' login helper: password POST /login → fake-Google login
+      (helper in ONE shared place); AuthTest reworked for new scheme
+- [ ] new isolation test: user A session cannot read user B chats/keys
+- [ ] API_CONTRACT.md auth section + llm-web.env.example + DEPLOY.md updated
 - [ ] build `:server:test :server:installDist`, commit
-- commit:
+- commit (5b):
 
 ## Step 6 — Web frontend (web/) [S]
 - [ ] LoginPage → "Sign in with Google" (navigate /auth/google/start) + error display

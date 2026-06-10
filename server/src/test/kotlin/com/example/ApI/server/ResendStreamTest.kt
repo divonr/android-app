@@ -36,24 +36,23 @@ class ResendStreamTest {
         sessionSecret = "resend-test-session-secret-that-is-long-enough"
     )
 
-    private fun tempStorage(): ServerPlatformStorage {
-        val dir = File(System.getProperty("java.io.tmpdir"), "resend-test-${System.nanoTime()}")
-        dir.mkdirs()
-        return ServerPlatformStorage(baseDir = dir)
-    }
-
     private fun seededStorage(): Triple<ServerPlatformStorage, DataRepository, String> {
-        val storage = tempStorage()
-        val repo = DataRepository(storage)
+        val baseDir = File(System.getProperty("java.io.tmpdir"), "resend-test-${System.nanoTime()}")
+        baseDir.mkdirs()
+        val rootStorage = ServerPlatformStorage(baseDir = baseDir)
+        val userDir = File(baseDir, "users/default")
+        userDir.mkdirs()
+        val userStorage = ServerPlatformStorage(baseDir = userDir)
+        val repo = DataRepository(userStorage)
         repo.saveAppSettings(
             AppSettings(
-                current_user = "testuser",
+                current_user = "default",
                 selected_provider = "fake",
                 selected_model = "fake-model"
             )
         )
-        val chat = repo.createNewChat("testuser", "Test Chat")
-        return Triple(storage, repo, chat.chat_id)
+        val chat = repo.createNewChat("default", "Test Chat")
+        return Triple(rootStorage, repo, chat.chat_id)
     }
 
     private val fakeEngineSimple = object : ChatEngine {
@@ -168,7 +167,7 @@ class ResendStreamTest {
 
         // Seed the chat with a user message so we have something to resend
         val userMsg = Message(id = "msg-user-1", role = "user", text = "Hello again")
-        repo.addMessageToChat("testuser", chatId, userMsg)
+        repo.addMessageToChat("default", chatId, userMsg)
 
         application { module(storage, testAuthConfig) { _ -> fakeEngineSimple } }
         val cookieClient = createClient { install(HttpCookies) }
@@ -205,11 +204,11 @@ class ResendStreamTest {
 
         // Seed: user → assistant → user messages
         val userMsg1 = Message(id = "msg-1", role = "user", text = "Question 1")
-        repo.addMessageToChat("testuser", chatId, userMsg1)
+        repo.addMessageToChat("default", chatId, userMsg1)
         val assistantMsg = Message(id = "msg-2", role = "assistant", text = "Answer 1")
-        repo.addMessageToChat("testuser", chatId, assistantMsg)
+        repo.addMessageToChat("default", chatId, assistantMsg)
         val userMsg2 = Message(id = "msg-3", role = "user", text = "Question 2")
-        repo.addMessageToChat("testuser", chatId, userMsg2)
+        repo.addMessageToChat("default", chatId, userMsg2)
 
         application { module(storage, testAuthConfig) { _ -> fakeEngineSimple } }
         val cookieClient = createClient { install(HttpCookies) }
@@ -226,7 +225,7 @@ class ResendStreamTest {
 
         // After resend: msg-1 (user) should remain; msg-2 (assistant) and msg-3 (user) were
         // deleted; msg-2 was re-added as a new user node; new assistant "Resent" was added
-        val chatAfter = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val chatAfter = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertNotNull(chatAfter)
         val msgs = chatAfter!!.messages
         // msg-1 (user) survives; the resent assistant message ("Resent") is the new assistant

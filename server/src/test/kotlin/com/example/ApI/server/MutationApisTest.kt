@@ -32,36 +32,35 @@ class MutationApisTest {
         sessionSecret = "p4-test-session-secret-that-is-long-enough"
     )
 
-    private fun tempStorage(): ServerPlatformStorage {
-        val dir = File(System.getProperty("java.io.tmpdir"), "p4-test-${System.nanoTime()}")
-        dir.mkdirs()
-        return ServerPlatformStorage(baseDir = dir)
-    }
-
     private fun seededStorage(): Pair<ServerPlatformStorage, DataRepository> {
-        val storage = tempStorage()
-        val repo = DataRepository(storage)
+        val baseDir = File(System.getProperty("java.io.tmpdir"), "p4-test-${System.nanoTime()}")
+        baseDir.mkdirs()
+        val rootStorage = ServerPlatformStorage(baseDir = baseDir)
+        val userDir = File(baseDir, "users/default")
+        userDir.mkdirs()
+        val userStorage = ServerPlatformStorage(baseDir = userDir)
+        val repo = DataRepository(userStorage)
         repo.saveAppSettings(
             AppSettings(
-                current_user = "testuser",
+                current_user = "default",
                 selected_provider = "openai",
                 selected_model = "gpt-4o"
             )
         )
         // Create initial chat
-        val chat = repo.createNewChat("testuser", "Seed Chat")
+        val chat = repo.createNewChat("default", "Seed Chat")
         repo.addMessageToChat(
-            "testuser", chat.chat_id,
+            "default", chat.chat_id,
             Message(role = "user", text = "Initial message")
         )
         // Create a group
-        repo.createNewGroup("testuser", "Seed Group")
+        repo.createNewGroup("default", "Seed Group")
         // Add an API key
         repo.addApiKey(
-            "testuser",
+            "default",
             ApiKey(id = "key-seed", provider = "openai", key = "sk-seedkey1234", isActive = true)
         )
-        return storage to repo
+        return rootStorage to repo
     }
 
     /** Login and return a cookie-carrying client. */
@@ -114,7 +113,7 @@ class MutationApisTest {
         assertEquals("My New Chat", body["preview_name"]?.jsonPrimitive?.content)
 
         // Verify persistence
-        val saved = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val saved = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertNotNull(saved, "Chat should be persisted")
         assertEquals("My New Chat", saved!!.preview_name)
         assertEquals("Be helpful", saved.systemPrompt)
@@ -126,7 +125,7 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val groupId = repo.loadChatHistory("testuser").groups.first().group_id
+        val groupId = repo.loadChatHistory("default").groups.first().group_id
 
         val response = c.post("/api/chats") {
             contentType(ContentType.Application.Json)
@@ -138,7 +137,7 @@ class MutationApisTest {
         assertNotNull(chatId)
 
         // Verify the chat's group field
-        val saved = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val saved = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertEquals(groupId, saved?.group)
     }
 
@@ -148,7 +147,7 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
 
         val response = c.patch("/api/chats/$chatId") {
             contentType(ContentType.Application.Json)
@@ -159,7 +158,7 @@ class MutationApisTest {
         assertEquals("Renamed Chat", body["preview_name"]?.jsonPrimitive?.content)
 
         // Verify persistence
-        val saved = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val saved = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertEquals("Renamed Chat", saved?.preview_name)
     }
 
@@ -169,7 +168,7 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
 
         val response = c.patch("/api/chats/$chatId") {
             contentType(ContentType.Application.Json)
@@ -177,7 +176,7 @@ class MutationApisTest {
         }
         assertEquals(HttpStatusCode.OK, response.status)
 
-        val saved = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val saved = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertEquals("New system prompt", saved?.systemPrompt)
     }
 
@@ -200,13 +199,13 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
 
         val response = c.delete("/api/chats/$chatId")
         assertEquals(HttpStatusCode.NoContent, response.status)
 
         // Verify removed
-        val history = repo.loadChatHistory("testuser")
+        val history = repo.loadChatHistory("default")
         assertNull(history.chat_history.find { it.chat_id == chatId }, "Chat should be deleted")
     }
 
@@ -227,8 +226,8 @@ class MutationApisTest {
         val c = loggedInClient()
 
         // Export an existing chat to use as valid import content
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
-        val exportedJson = repo.getChatJson("testuser", chatId)
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
+        val exportedJson = repo.getChatJson("default", chatId)
         assertNotNull(exportedJson, "Should be able to export seeded chat")
 
         val escaped = exportedJson!!.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -249,8 +248,8 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
-        val beforeCount = repo.loadChatHistory("testuser").chat_history.first { it.chat_id == chatId }.messages.size
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
+        val beforeCount = repo.loadChatHistory("default").chat_history.first { it.chat_id == chatId }.messages.size
 
         val response = c.post("/api/chats/$chatId/messages") {
             contentType(ContentType.Application.Json)
@@ -258,7 +257,7 @@ class MutationApisTest {
         }
         assertEquals(HttpStatusCode.Created, response.status)
 
-        val afterCount = repo.loadChatHistory("testuser").chat_history.first { it.chat_id == chatId }.messages.size
+        val afterCount = repo.loadChatHistory("default").chat_history.first { it.chat_id == chatId }.messages.size
         assertEquals(beforeCount + 1, afterCount, "Message count should increase by 1")
     }
 
@@ -268,17 +267,17 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
         // Add a second message so we have something to delete from
         val msg2 = Message(role = "assistant", text = "Response")
-        repo.addMessageToChat("testuser", chatId, msg2)
-        val messageId = repo.loadChatHistory("testuser").chat_history.first { it.chat_id == chatId }.messages.last().id
+        repo.addMessageToChat("default", chatId, msg2)
+        val messageId = repo.loadChatHistory("default").chat_history.first { it.chat_id == chatId }.messages.last().id
 
         val response = c.delete("/api/chats/$chatId/messages/$messageId")
         assertEquals(HttpStatusCode.OK, response.status)
 
         // Verify message deleted
-        val chat = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val chat = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertFalse(chat!!.messages.any { it.id == messageId }, "Deleted message should not exist")
     }
 
@@ -290,11 +289,11 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
 
         // Ensure branching structure is set up
-        repo.ensureBranchingStructure("testuser", chatId)
-        val chat = repo.loadChatHistory("testuser").chat_history.first { it.chat_id == chatId }
+        repo.ensureBranchingStructure("default", chatId)
+        val chat = repo.loadChatHistory("default").chat_history.first { it.chat_id == chatId }
         assertTrue(chat.messageNodes.isNotEmpty(), "Chat should have message nodes after ensure")
         val nodeId = chat.messageNodes.first().nodeId
 
@@ -314,13 +313,13 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
 
         // Build a branched chat: ensure structure, then create a branch
-        repo.ensureBranchingStructure("testuser", chatId)
-        val chat = repo.loadChatHistory("testuser").chat_history.first { it.chat_id == chatId }
+        repo.ensureBranchingStructure("default", chatId)
+        val chat = repo.loadChatHistory("default").chat_history.first { it.chat_id == chatId }
         val nodeId = chat.messageNodes.first().nodeId
-        val (branchedChat, _) = repo.createBranch("testuser", chatId, nodeId, Message(role = "user", text = "Alt"))!!
+        val (branchedChat, _) = repo.createBranch("default", chatId, nodeId, Message(role = "user", text = "Alt"))!!
 
         // Node now has 2 variants — switch to variant 0
         val response = c.post("/api/chats/$chatId/nodes/$nodeId/switch") {
@@ -338,13 +337,13 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
         // Set up branching structure and create a second branch so the node has >= 2 variants
-        repo.ensureBranchingStructure("testuser", chatId)
-        val chat = repo.loadChatHistory("testuser").chat_history.first { it.chat_id == chatId }
+        repo.ensureBranchingStructure("default", chatId)
+        val chat = repo.loadChatHistory("default").chat_history.first { it.chat_id == chatId }
         val nodeId = chat.messageNodes.first().nodeId
         // Create a branch so the node has > 1 variant (getBranchInfo requires >= 2 variants)
-        repo.createBranch("testuser", chatId, nodeId, Message(role = "user", text = "Branch alt"))
+        repo.createBranch("default", chatId, nodeId, Message(role = "user", text = "Branch alt"))
 
         val response = c.get("/api/chats/$chatId/nodes/$nodeId/branch-info")
         assertEquals(HttpStatusCode.OK, response.status)
@@ -362,7 +361,7 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
         val response = c.get("/api/chats/$chatId/nodes/no-such-node/branch-info")
         assertEquals(HttpStatusCode.NotFound, response.status)
     }
@@ -386,7 +385,7 @@ class MutationApisTest {
         assertEquals("My New Group", body["group_name"]?.jsonPrimitive?.content)
 
         // Verify persistence
-        val saved = repo.loadChatHistory("testuser").groups.find { it.group_id == groupId }
+        val saved = repo.loadChatHistory("default").groups.find { it.group_id == groupId }
         assertNotNull(saved, "Group should be persisted")
         assertEquals("My New Group", saved!!.group_name)
     }
@@ -397,7 +396,7 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val groupId = repo.loadChatHistory("testuser").groups.first().group_id
+        val groupId = repo.loadChatHistory("default").groups.first().group_id
 
         val response = c.patch("/api/groups/$groupId") {
             contentType(ContentType.Application.Json)
@@ -407,7 +406,7 @@ class MutationApisTest {
         val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
         assertEquals("Renamed Group", body["group_name"]?.jsonPrimitive?.content)
 
-        val saved = repo.loadChatHistory("testuser").groups.find { it.group_id == groupId }
+        val saved = repo.loadChatHistory("default").groups.find { it.group_id == groupId }
         assertEquals("Renamed Group", saved?.group_name)
     }
 
@@ -417,8 +416,8 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val groupId = repo.loadChatHistory("testuser").groups.first().group_id
-        val initialStatus = repo.loadChatHistory("testuser").groups.first().is_project
+        val groupId = repo.loadChatHistory("default").groups.first().group_id
+        val initialStatus = repo.loadChatHistory("default").groups.first().is_project
 
         val response = c.patch("/api/groups/$groupId") {
             contentType(ContentType.Application.Json)
@@ -426,7 +425,7 @@ class MutationApisTest {
         }
         assertEquals(HttpStatusCode.OK, response.status)
 
-        val saved = repo.loadChatHistory("testuser").groups.find { it.group_id == groupId }
+        val saved = repo.loadChatHistory("default").groups.find { it.group_id == groupId }
         assertEquals(!initialStatus, saved?.is_project)
     }
 
@@ -436,12 +435,12 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val groupId = repo.loadChatHistory("testuser").groups.first().group_id
+        val groupId = repo.loadChatHistory("default").groups.first().group_id
 
         val response = c.delete("/api/groups/$groupId")
         assertEquals(HttpStatusCode.NoContent, response.status)
 
-        assertNull(repo.loadChatHistory("testuser").groups.find { it.group_id == groupId },
+        assertNull(repo.loadChatHistory("default").groups.find { it.group_id == groupId },
             "Group should be deleted")
     }
 
@@ -451,15 +450,15 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val groupId = repo.loadChatHistory("testuser").groups.first().group_id
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val groupId = repo.loadChatHistory("default").groups.first().group_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
 
         val response = c.post("/api/groups/$groupId/chats/$chatId")
         assertEquals(HttpStatusCode.OK, response.status)
         val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
         assertEquals(true, body["ok"]?.jsonPrimitive?.boolean)
 
-        val saved = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val saved = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertEquals(groupId, saved?.group)
     }
 
@@ -469,16 +468,16 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val groupId = repo.loadChatHistory("testuser").groups.first().group_id
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val groupId = repo.loadChatHistory("default").groups.first().group_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
 
         // First add chat to group
-        repo.addChatToGroup("testuser", chatId, groupId)
+        repo.addChatToGroup("default", chatId, groupId)
 
         val response = c.delete("/api/groups/$groupId/chats/$chatId")
         assertEquals(HttpStatusCode.OK, response.status)
 
-        val saved = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val saved = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertNull(saved?.group, "Chat should have no group after removal")
     }
 
@@ -488,7 +487,7 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val groupId = repo.loadChatHistory("testuser").groups.first().group_id
+        val groupId = repo.loadChatHistory("default").groups.first().group_id
 
         val response = c.post("/api/groups/$groupId/attachments") {
             contentType(ContentType.Application.Json)
@@ -496,7 +495,7 @@ class MutationApisTest {
         }
         assertEquals(HttpStatusCode.Created, response.status)
 
-        val saved = repo.loadChatHistory("testuser").groups.find { it.group_id == groupId }
+        val saved = repo.loadChatHistory("default").groups.find { it.group_id == groupId }
         assertTrue(saved!!.group_attachments.any { it.file_name == "doc.pdf" })
     }
 
@@ -506,15 +505,15 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val groupId = repo.loadChatHistory("testuser").groups.first().group_id
+        val groupId = repo.loadChatHistory("default").groups.first().group_id
 
         // Add an attachment first
-        repo.addAttachmentToGroup("testuser", groupId, Attachment(file_name = "to-remove.pdf", mime_type = "application/pdf"))
+        repo.addAttachmentToGroup("default", groupId, Attachment(file_name = "to-remove.pdf", mime_type = "application/pdf"))
 
         val response = c.delete("/api/groups/$groupId/attachments/0")
         assertEquals(HttpStatusCode.OK, response.status)
 
-        val saved = repo.loadChatHistory("testuser").groups.find { it.group_id == groupId }
+        val saved = repo.loadChatHistory("default").groups.find { it.group_id == groupId }
         assertTrue(saved!!.group_attachments.isEmpty(), "Attachment should be removed")
     }
 
@@ -541,7 +540,7 @@ class MutationApisTest {
         assertNotNull(keyId)
 
         // Verify persistence (stored key is the real key)
-        val saved = repo.loadApiKeys("testuser").find { it.id == keyId }
+        val saved = repo.loadApiKeys("default").find { it.id == keyId }
         assertNotNull(saved)
         assertEquals("sk-ant-secret-key-abcd", saved!!.key)
         assertEquals("anthropic", saved.provider)
@@ -559,7 +558,7 @@ class MutationApisTest {
         }
         assertEquals(HttpStatusCode.OK, response.status)
 
-        val saved = repo.loadApiKeys("testuser").find { it.id == "key-seed" }
+        val saved = repo.loadApiKeys("default").find { it.id == "key-seed" }
         assertEquals(false, saved?.isActive)
     }
 
@@ -585,7 +584,7 @@ class MutationApisTest {
         val response = c.delete("/api/keys/key-seed")
         assertEquals(HttpStatusCode.NoContent, response.status)
 
-        assertNull(repo.loadApiKeys("testuser").find { it.id == "key-seed" }, "Key should be deleted")
+        assertNull(repo.loadApiKeys("default").find { it.id == "key-seed" }, "Key should be deleted")
     }
 
     @Test
@@ -594,12 +593,12 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val initial = repo.loadApiKeys("testuser").find { it.id == "key-seed" }!!.isActive
+        val initial = repo.loadApiKeys("default").find { it.id == "key-seed" }!!.isActive
 
         val response = c.post("/api/keys/key-seed/toggle")
         assertEquals(HttpStatusCode.OK, response.status)
 
-        val saved = repo.loadApiKeys("testuser").find { it.id == "key-seed" }
+        val saved = repo.loadApiKeys("default").find { it.id == "key-seed" }
         assertEquals(!initial, saved?.isActive, "isActive should be flipped")
     }
 
@@ -610,7 +609,7 @@ class MutationApisTest {
         val c = loggedInClient()
 
         // Add a second key so we can reorder
-        repo.addApiKey("testuser", ApiKey(id = "key-second", provider = "anthropic", key = "sk-ant-xyz"))
+        repo.addApiKey("default", ApiKey(id = "key-second", provider = "anthropic", key = "sk-ant-xyz"))
 
         val response = c.post("/api/keys/reorder") {
             contentType(ContentType.Application.Json)
@@ -627,14 +626,14 @@ class MutationApisTest {
         application { module(storage, testAuthConfig) }
         val c = loggedInClient()
 
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
         val response = c.patch("/api/chats/$chatId") {
             contentType(ContentType.Application.Json)
             setBody("""{"shareLink":"https://api-divonr.xyz/viewer/?id=abc#key=deadbeef","shareId":"abc"}""")
         }
         assertEquals(HttpStatusCode.OK, response.status)
 
-        val saved = repo.loadChatHistory("testuser").chat_history.first { it.chat_id == chatId }
+        val saved = repo.loadChatHistory("default").chat_history.first { it.chat_id == chatId }
         assertEquals("https://api-divonr.xyz/viewer/?id=abc#key=deadbeef", saved.shareLink)
         assertEquals("abc", saved.shareId)
 
@@ -643,7 +642,7 @@ class MutationApisTest {
             contentType(ContentType.Application.Json)
             setBody("""{"shareLink":"","shareId":""}""")
         }
-        val cleared = repo.loadChatHistory("testuser").chat_history.first { it.chat_id == chatId }
+        val cleared = repo.loadChatHistory("default").chat_history.first { it.chat_id == chatId }
         assertEquals("", cleared.shareLink)
         assertEquals("", cleared.shareId)
     }
@@ -724,7 +723,7 @@ class MutationApisTest {
 
         val saved = repo.loadAppSettings()
         // current_user, selected_provider, selected_model must all still be intact
-        assertEquals("testuser", saved.current_user)
+        assertEquals("default", saved.current_user)
         assertEquals("openai", saved.selected_provider)
         assertEquals("gpt-4o", saved.selected_model)
         assertEquals(true, saved.skipWelcomeScreen)
@@ -744,7 +743,7 @@ class MutationApisTest {
         }
         assertEquals(HttpStatusCode.Created, response.status)
 
-        val saved = repo.loadCustomProviders("testuser")
+        val saved = repo.loadCustomProviders("default")
         assertTrue(saved.any { it.name == "Local LLM" }, "Custom provider should be persisted")
     }
 
@@ -756,7 +755,7 @@ class MutationApisTest {
 
         val providerId = "cp-test-id"
         repo.addCustomProvider(
-            "testuser",
+            "default",
             CustomProviderConfig(id = providerId, name = "Old Name", providerKey = "custom_old", baseUrl = "http://old:1234", defaultModel = "old-model")
         )
 
@@ -766,7 +765,7 @@ class MutationApisTest {
         }
         assertEquals(HttpStatusCode.OK, response.status)
 
-        val saved = repo.loadCustomProviders("testuser").find { it.id == providerId }
+        val saved = repo.loadCustomProviders("default").find { it.id == providerId }
         assertEquals("New Name", saved?.name)
         assertEquals("http://new:5678", saved?.baseUrl)
     }
@@ -779,14 +778,14 @@ class MutationApisTest {
 
         val providerId = "cp-to-delete"
         repo.addCustomProvider(
-            "testuser",
+            "default",
             CustomProviderConfig(id = providerId, name = "Delete Me", providerKey = "custom_delete_me", baseUrl = "http://localhost", defaultModel = "m")
         )
 
         val response = c.delete("/api/custom-providers/$providerId")
         assertEquals(HttpStatusCode.NoContent, response.status)
 
-        assertNull(repo.loadCustomProviders("testuser").find { it.id == providerId })
+        assertNull(repo.loadCustomProviders("default").find { it.id == providerId })
     }
 
     @Test
@@ -815,7 +814,7 @@ class MutationApisTest {
         }
         assertEquals(HttpStatusCode.Created, response.status)
 
-        val saved = repo.loadFullCustomProviders("testuser")
+        val saved = repo.loadFullCustomProviders("default")
         assertTrue(saved.any { it.name == "Full Custom" }, "Full custom provider should be persisted")
     }
 
@@ -833,12 +832,12 @@ class MutationApisTest {
             defaultModel = "x",
             bodyTemplate = "{}"
         )
-        repo.addFullCustomProvider("testuser", fcp)
+        repo.addFullCustomProvider("default", fcp)
 
         val response = c.delete("/api/full-custom-providers/fcp-to-del")
         assertEquals(HttpStatusCode.NoContent, response.status)
 
-        assertNull(repo.loadFullCustomProviders("testuser").find { it.id == "fcp-to-del" })
+        assertNull(repo.loadFullCustomProviders("default").find { it.id == "fcp-to-del" })
     }
 
     // ── Skills ───────────────────────────────────────────────────────────────

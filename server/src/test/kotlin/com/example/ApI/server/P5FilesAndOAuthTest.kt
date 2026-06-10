@@ -34,23 +34,22 @@ class P5FilesAndOAuthTest {
 
     // ── Infrastructure helpers ────────────────────────────────────────────────
 
-    private fun tempStorage(): ServerPlatformStorage {
-        val dir = File(System.getProperty("java.io.tmpdir"), "p5-test-${System.nanoTime()}")
-        dir.mkdirs()
-        return ServerPlatformStorage(baseDir = dir)
-    }
-
     private fun seededStorage(): Pair<ServerPlatformStorage, DataRepository> {
-        val storage = tempStorage()
-        val repo = DataRepository(storage)
+        val baseDir = File(System.getProperty("java.io.tmpdir"), "p5-test-${System.nanoTime()}")
+        baseDir.mkdirs()
+        val rootStorage = ServerPlatformStorage(baseDir = baseDir)
+        val userDir = File(baseDir, "users/default")
+        userDir.mkdirs()
+        val userStorage = ServerPlatformStorage(baseDir = userDir)
+        val repo = DataRepository(userStorage)
         repo.saveAppSettings(
             AppSettings(
-                current_user = "testuser",
+                current_user = "default",
                 selected_provider = "openai",
                 selected_model = "gpt-4o"
             )
         )
-        return Pair(storage, repo)
+        return Pair(rootStorage, repo)
     }
 
     // ── Fake OAuthTokenExchanger ─────────────────────────────────────────────
@@ -259,7 +258,7 @@ class P5FilesAndOAuthTest {
 
         // Pre-seed a GitHub connection
         repo.saveGitHubConnection(
-            "testuser",
+            "default",
             GitHubConnection(
                 auth = GitHubAuth(accessToken = "pre-seeded-token", scope = "repo"),
                 user = GitHubUser(
@@ -364,7 +363,7 @@ class P5FilesAndOAuthTest {
         assertNotNull(callbackLocation)
         assertTrue(callbackLocation!!.contains("github=connected"))
 
-        val saved = repo.loadGitHubConnection("testuser")
+        val saved = repo.loadGitHubConnection("default")
         assertNotNull(saved)
         assertEquals("fake-gh-token", saved!!.auth.accessToken)
     }
@@ -444,11 +443,11 @@ class P5FilesAndOAuthTest {
         assertTrue(location!!.contains("github=connected"), "Should redirect to integrations with github=connected")
 
         // Verify the connection was actually persisted
-        val saved = repo.loadGitHubConnection("testuser")
+        val saved = repo.loadGitHubConnection("default")
         assertNotNull(saved, "GitHubConnection should be persisted")
         assertEquals("fake-gh-token", saved!!.auth.accessToken)
         assertEquals("testuser-gh", saved.user.login)
-        assertTrue(repo.isGitHubConnected("testuser"))
+        assertTrue(repo.isGitHubConnected("default"))
     }
 
     @Test
@@ -570,11 +569,11 @@ class P5FilesAndOAuthTest {
         assertNotNull(location)
         assertTrue(location!!.contains("google=connected"))
 
-        val saved = repo.loadGoogleWorkspaceConnection("testuser")
+        val saved = repo.loadGoogleWorkspaceConnection("default")
         assertNotNull(saved)
         assertEquals("fake-google-token", saved!!.auth.accessToken)
         assertEquals("testuser@gmail.com", saved.user.email)
-        assertTrue(repo.isGoogleWorkspaceConnected("testuser"))
+        assertTrue(repo.isGoogleWorkspaceConnected("default"))
     }
 
     // ── DELETE /api/integrations/github|google ────────────────────────────────
@@ -587,7 +586,7 @@ class P5FilesAndOAuthTest {
 
         // Pre-seed connection
         repo.saveGitHubConnection(
-            "testuser",
+            "default",
             GitHubConnection(
                 auth = GitHubAuth(accessToken = "tok", scope = "repo"),
                 user = GitHubUser(
@@ -599,7 +598,7 @@ class P5FilesAndOAuthTest {
                 )
             )
         )
-        assertTrue(repo.isGitHubConnected("testuser"))
+        assertTrue(repo.isGitHubConnected("default"))
 
         cookieClient.post("/login") {
             contentType(ContentType.Application.Json)
@@ -609,7 +608,7 @@ class P5FilesAndOAuthTest {
         val deleteResp = cookieClient.delete("/api/integrations/github")
         assertEquals(HttpStatusCode.NoContent, deleteResp.status)
 
-        assertFalse(repo.isGitHubConnected("testuser"))
+        assertFalse(repo.isGitHubConnected("default"))
 
         // Status endpoint also reflects disconnected
         val statusResp = cookieClient.get("/api/integrations")
@@ -627,7 +626,7 @@ class P5FilesAndOAuthTest {
 
         // Pre-seed Google connection
         repo.saveGoogleWorkspaceConnection(
-            "testuser",
+            "default",
             GoogleWorkspaceConnection(
                 auth = GoogleWorkspaceAuth(
                     accessToken = "tok", refreshToken = null,
@@ -655,7 +654,7 @@ class P5FilesAndOAuthTest {
         assertEquals(false, body["drive"]?.jsonPrimitive?.booleanOrNull)
 
         // Verify persistence
-        val saved = repo.loadGoogleWorkspaceConnection("testuser")
+        val saved = repo.loadGoogleWorkspaceConnection("default")
         assertNotNull(saved)
         assertFalse(saved.enabledServices.gmail)
         assertTrue(saved.enabledServices.calendar)

@@ -45,7 +45,8 @@ fun Route.fileRoutes() {
 
     // POST /api/files/upload — multipart/form-data, returns Attachment
     post("/files/upload") {
-        val repo = call.application.appModule.repository
+        val ctx = call.userContext()
+        val repo = ctx.repository
 
         val multipart = call.receiveMultipart()
         var fileName: String? = null
@@ -136,8 +137,9 @@ fun Route.integrationRoutes() {
 
     // GET /api/integrations — combined status for all integrations
     get("/integrations") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val github = repo.loadGitHubConnection(username)
         val google = repo.loadGoogleWorkspaceConnection(username)
         call.respond(
@@ -153,8 +155,9 @@ fun Route.integrationRoutes() {
 
     // GET /api/integrations/github — GitHub connection or null
     get("/integrations/github") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val conn = repo.loadGitHubConnection(username)
         if (conn == null) {
             call.respond(HttpStatusCode.OK, mapOf<String, String>())  // empty object signals "not connected"
@@ -165,8 +168,9 @@ fun Route.integrationRoutes() {
 
     // DELETE /api/integrations/github — disconnect GitHub
     delete("/integrations/github") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         repo.removeGitHubConnection(username)
         call.respond(HttpStatusCode.NoContent)
     }
@@ -175,8 +179,9 @@ fun Route.integrationRoutes() {
 
     // GET /api/integrations/google — Google connection or null
     get("/integrations/google") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val conn = repo.loadGoogleWorkspaceConnection(username)
         if (conn == null) {
             call.respond(HttpStatusCode.OK, mapOf<String, String>())
@@ -187,8 +192,9 @@ fun Route.integrationRoutes() {
 
     // DELETE /api/integrations/google — disconnect Google
     delete("/integrations/google") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         repo.removeGoogleWorkspaceConnection(username)
         call.respond(HttpStatusCode.NoContent)
     }
@@ -197,8 +203,9 @@ fun Route.integrationRoutes() {
 
     // PATCH /api/integrations/google/services — update enabled Google services
     patch("/integrations/google/services") {
-        val repo = call.application.appModule.repository
-        val username = call.currentUsername()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
         val services = call.receive<EnabledGoogleServices>()
         repo.updateGoogleWorkspaceEnabledServices(username, services)
         call.respond(HttpStatusCode.OK, services)
@@ -318,9 +325,10 @@ fun Route.oauthCallbackRoutes() {
         // Consume the state token (one-time use)
         call.sessions.set(session.copy(githubOAuthState = null))
 
-        val repo = call.application.appModule.repository
+        val ctx = call.application.appModule.registry.context(session.username)
+        val repo = ctx.repository
+        val username = ctx.username
         val exchanger = call.application.appModule.oauthExchanger
-        val username = call.currentUsername()
 
         val clientId = resolveGitHubClientId()
         val clientSecret = resolveGitHubClientSecret()
@@ -368,9 +376,10 @@ fun Route.oauthCallbackRoutes() {
         // Consume the state token (one-time use)
         call.sessions.set(session.copy(googleOAuthState = null))
 
-        val repo = call.application.appModule.repository
+        val ctx = call.application.appModule.registry.context(session.username)
+        val repo = ctx.repository
+        val username = ctx.username
         val exchanger = call.application.appModule.oauthExchanger
-        val username = call.currentUsername()
 
         val clientId = resolveGoogleClientId()
         val clientSecret = resolveGoogleClientSecret()

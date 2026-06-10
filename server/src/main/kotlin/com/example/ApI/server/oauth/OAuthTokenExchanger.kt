@@ -34,6 +34,7 @@ private data class GitHubTokenResponse(
 @Serializable
 private data class GoogleTokenResponse(
     val access_token: String? = null,
+    val id_token: String? = null,       // present in authorization-code flows
     val expires_in: Long? = null,
     val refresh_token: String? = null,
     val scope: String? = null,
@@ -64,6 +65,23 @@ interface OAuthTokenExchanger {
         clientSecret: String,
         redirectUri: String
     ): Result<Pair<GoogleWorkspaceAuth, GoogleWorkspaceUser>>
+
+    /**
+     * Exchange a Google authorization code for an **ID token** (used by the
+     * Google login flow — `/auth/google/callback`).
+     *
+     * The Workspace-integration flow uses [exchangeGoogle] instead; this
+     * method only covers the login-specific case.
+     *
+     * Default implementation returns failure so existing fake exchangers
+     * that do not override this method compile without change.
+     */
+    suspend fun exchangeGoogleIdToken(
+        code: String,
+        clientId: String,
+        clientSecret: String,
+        redirectUri: String
+    ): Result<String> = Result.failure(UnsupportedOperationException("exchangeGoogleIdToken not implemented"))
 }
 
 /** Real implementation — makes network calls to GitHub and Google. */
@@ -226,6 +244,53 @@ class RealOAuthTokenExchanger : OAuthTokenExchanger {
             )
 
             Result.success(Pair(googleAuth, googleUser))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun exchangeGoogleIdToken(
+        code: String,
+        clientId: String,
+        clientSecret: String,
+        redirectUri: String
+    ): Result<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val tokenUrl = URL("https://oauth2.googleapis.com/token")
+            val tokenConn = tokenUrl.openConnection() as HttpURLConnection
+            tokenConn.requestMethod = "POST"
+            tokenConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            tokenConn.doOutput = true
+            tokenConn.connectTimeout = 30_000
+            tokenConn.readTimeout = 30_000
+
+            val body = buildString {
+                append("client_id=${URLEncoder.encode(clientId, "UTF-8")}")
+                append("&client_secret=${URLEncoder.encode(clientSecret, "UTF-8")}")
+                append("&code=${URLEncoder.encode(code, "UTF-8")}")
+                append("&redirect_uri=${URLEncoder.encode(redirectUri, "UTF-8")}")
+                append("&grant_type=authorization_code")
+            }
+            OutputStreamWriter(tokenConn.outputStream).use { it.write(body); it.flush() }
+
+            val tokenCode = tokenConn.responseCode
+            val tokenBody = if (tokenCode in 200..299)
+                tokenConn.inputStream.bufferedReader().use { it.readText() }
+            else
+                tokenConn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+
+            if (tokenCode !in 200..299) {
+                return@withContext Result.failure(Exception("Google token exchange failed: HTTP $tokenCode: $tokenBody"))
+            }
+
+            val tokenResp = JsonConfig.standard.decodeFromString<GoogleTokenResponse>(tokenBody)
+            if (tokenResp.error != null) {
+                return@withContext Result.failure(Exception("Google OAuth error: ${tokenResp.error} — ${tokenResp.error_description}"))
+            }
+            val idToken = tokenResp.id_token
+                ?: return@withContext Result.failure(Exception("Google: no id_token in response (is 'openid' scope included?)"))
+
+            Result.success(idToken)
         } catch (e: Exception) {
             Result.failure(e)
         }

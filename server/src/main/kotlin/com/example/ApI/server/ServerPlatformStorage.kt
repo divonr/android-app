@@ -14,9 +14,13 @@ import java.io.File
  *   1. The [baseDir] constructor argument (used by tests).
  *   2. The `LLM_WEB_DATA_DIR` environment variable (used by E2E tests and CI).
  *   3. `~/.llm-api-web` (production default).
+ *
+ * [baseDir] is exposed as a property so [UserRegistry] can compute per-user
+ * subdirectories (e.g. `baseDir/users/alice_gmail_com/`) without duplicating
+ * the resolution logic.
  */
 class ServerPlatformStorage(
-    baseDir: File = resolveBaseDir()
+    val baseDir: File = resolveBaseDir()
 ) : PlatformStorage {
 
     override val filesDir: File = File(baseDir, "files").also { it.mkdirs() }

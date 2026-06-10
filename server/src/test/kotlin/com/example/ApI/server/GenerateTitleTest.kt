@@ -29,30 +29,29 @@ class GenerateTitleTest {
         sessionSecret = "gt-test-session-secret-that-is-long-enough"
     )
 
-    private fun tempStorage(): ServerPlatformStorage {
-        val dir = File(System.getProperty("java.io.tmpdir"), "gt-test-${System.nanoTime()}")
-        dir.mkdirs()
-        return ServerPlatformStorage(baseDir = dir)
-    }
-
     private fun seededStorage(withMessages: Boolean = true): Triple<ServerPlatformStorage, DataRepository, String> {
-        val storage = tempStorage()
-        val repo = DataRepository(storage)
+        val baseDir = File(System.getProperty("java.io.tmpdir"), "gt-test-${System.nanoTime()}")
+        baseDir.mkdirs()
+        val rootStorage = ServerPlatformStorage(baseDir = baseDir)
+        val userDir = File(baseDir, "users/default")
+        userDir.mkdirs()
+        val userStorage = ServerPlatformStorage(baseDir = userDir)
+        val repo = DataRepository(userStorage)
         repo.saveAppSettings(
             AppSettings(
-                current_user = "testuser",
+                current_user = "default",
                 selected_provider = "openai",
                 selected_model = "gpt-4o"
             )
         )
-        val chat = repo.createNewChat("testuser", "Old Title")
+        val chat = repo.createNewChat("default", "Old Title")
         if (withMessages) {
             repo.addMessageToChat(
-                "testuser", chat.chat_id,
+                "default", chat.chat_id,
                 Message(role = "user", text = "What is Kotlin?")
             )
         }
-        return Triple(storage, repo, chat.chat_id)
+        return Triple(rootStorage, repo, chat.chat_id)
     }
 
     /** Fake that returns a deterministic title without LLM calls. */
@@ -115,7 +114,7 @@ class GenerateTitleTest {
         assertEquals("Kotlin Explained", body["title"]?.jsonPrimitive?.content)
 
         // Verify the title was persisted to storage
-        val persistedChat = repo.loadChatHistory("testuser").chat_history.find { it.chat_id == chatId }
+        val persistedChat = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
         assertNotNull(persistedChat)
         assertEquals("Kotlin Explained", persistedChat!!.preview_name)
     }

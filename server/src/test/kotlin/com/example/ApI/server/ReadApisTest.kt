@@ -43,41 +43,51 @@ class ReadApisTest {
     }
 
     /**
-     * Seeds repository with baseline data and returns the storage +
-     * a reference to the repository so tests can query seeded IDs.
+     * Seeds repository with baseline data and returns the root storage (for injection
+     * into [module]) plus a reference to the per-user repository so tests can query
+     * seeded IDs.
+     *
+     * After Step 5a, password login maps to username "default" and routes look up data
+     * via `registry.context("default")` → `users/default/` subdir.  We seed there so
+     * the HTTP routes can see the data.
      *
      * Seeded state:
-     * - AppSettings: current_user = "testuser"
+     * - AppSettings: current_user = "default"
      * - 1 Chat with 1 message
      * - 1 ChatGroup
      * - 1 ApiKey (active)
      */
     private fun seededStorage(): Pair<ServerPlatformStorage, DataRepository> {
-        val storage = tempStorage()
-        val repo = DataRepository(storage)
+        val baseDir = File(System.getProperty("java.io.tmpdir"), "p2-test-${System.nanoTime()}")
+        baseDir.mkdirs()
+        val rootStorage = ServerPlatformStorage(baseDir = baseDir)
+        val userDir = File(baseDir, "users/default")
+        userDir.mkdirs()
+        val userStorage = ServerPlatformStorage(baseDir = userDir)
+        val repo = DataRepository(userStorage)
 
-        // Save settings so current_user is "testuser"
+        // Save settings so current_user is "default"
         repo.saveAppSettings(
             AppSettings(
-                current_user = "testuser",
+                current_user = "default",
                 selected_provider = "openai",
                 selected_model = "gpt-4o"
             )
         )
 
         // Create a chat with a message
-        val chat = repo.createNewChat("testuser", "Hello World Chat")
+        val chat = repo.createNewChat("default", "Hello World Chat")
         repo.addMessageToChat(
-            "testuser", chat.chat_id,
+            "default", chat.chat_id,
             com.example.ApI.data.model.Message(role = "user", text = "Hello!")
         )
 
         // Create a group
-        repo.createNewGroup("testuser", "Test Group")
+        repo.createNewGroup("default", "Test Group")
 
         // Add an API key
         repo.addApiKey(
-            "testuser",
+            "default",
             ApiKey(
                 id = "key-1234",
                 provider = "openai",
@@ -87,7 +97,7 @@ class ReadApisTest {
             )
         )
 
-        return storage to repo
+        return rootStorage to repo
     }
 
     /**
@@ -207,7 +217,7 @@ class ReadApisTest {
         val response = cookieClient.get("/api/settings")
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsText()
-        assertTrue(body.contains("testuser"), "Expected current_user in settings body: $body")
+        assertTrue(body.contains("default"), "Expected current_user in settings body: $body")
         assertTrue(body.contains("openai"), "Expected selected_provider in settings body: $body")
     }
 
@@ -241,7 +251,7 @@ class ReadApisTest {
             setBody("""{"password":"$testPassword"}""")
         }
         // Get the seeded chat ID
-        val chatId = repo.loadChatHistory("testuser").chat_history.first().chat_id
+        val chatId = repo.loadChatHistory("default").chat_history.first().chat_id
         val response = cookieClient.get("/api/chats/$chatId")
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsText()

@@ -39,6 +39,15 @@ class SyncBootstrapTest {
         return ServerPlatformStorage(baseDir = dir)
     }
 
+    /**
+     * Returns the per-"default"-user storage under the given root storage.
+     *
+     * After Step 5a, [applySyncConfig] writes into `users/default/` (via
+     * [UserRegistry.context]), so verifications must read from the same path.
+     */
+    private fun userStorage(root: ServerPlatformStorage): ServerPlatformStorage =
+        ServerPlatformStorage(baseDir = File(root.baseDir, "users/default"))
+
     // ── Config-seeding tests ──────────────────────────────────────────────────
 
     @Test
@@ -56,8 +65,8 @@ class SyncBootstrapTest {
         // Trigger application startup (module() runs on first client access)
         client.get("/health")
 
-        // Verify via a fresh DataRepository reading the same files
-        val repo = DataRepository(storage)
+        // Verify via a fresh DataRepository reading the same files (must use per-user path)
+        val repo = DataRepository(userStorage(storage))
         val settings = repo.loadAppSettings()
         assertTrue(settings.remoteSync.enabled, "remoteSync.enabled should be true")
         assertEquals("http://test-sync:8090", settings.remoteSync.serverBaseUrl)
@@ -79,7 +88,7 @@ class SyncBootstrapTest {
         application { module(storage, testAuthConfig, syncConfig = syncConfig) }
         client.get("/health")
 
-        val repo = DataRepository(storage)
+        val repo = DataRepository(userStorage(storage))
         val settings = repo.loadAppSettings()
         assertTrue(settings.remoteSync.syncApiKeys, "syncApiKeys should be true when SyncConfig.syncApiKeys=true")
     }
@@ -87,8 +96,10 @@ class SyncBootstrapTest {
     @Test
     fun `sync user is not overridden when syncUser is null`() = testApplication {
         val storage = tempStorage()
-        // Pre-seed settings with a specific user
-        DataRepository(storage).saveAppSettings(
+        // Pre-seed the "default" user's settings with a specific current_user value.
+        // After Step 5a, applySyncConfig reads/writes via registry.context("default")
+        // which uses users/default/ — so we must pre-seed there too.
+        DataRepository(userStorage(storage)).saveAppSettings(
             AppSettings(
                 current_user = "existinguser",
                 selected_provider = "openai",
@@ -105,7 +116,7 @@ class SyncBootstrapTest {
         application { module(storage, testAuthConfig, syncConfig = syncConfig) }
         client.get("/health")
 
-        val repo = DataRepository(storage)
+        val repo = DataRepository(userStorage(storage))
         val settings = repo.loadAppSettings()
         assertEquals("existinguser", settings.current_user, "current_user should not be overridden when syncUser is null")
         assertTrue(settings.remoteSync.enabled, "remoteSync should still be enabled")
@@ -118,7 +129,7 @@ class SyncBootstrapTest {
         application { module(storage, testAuthConfig, syncConfig = syncConfig) }
         client.get("/health")
 
-        val repo = DataRepository(storage)
+        val repo = DataRepository(userStorage(storage))
         val settings = repo.loadAppSettings()
         assertFalse(settings.remoteSync.enabled, "remoteSync.enabled should remain false when sync is disabled")
     }
@@ -130,7 +141,7 @@ class SyncBootstrapTest {
         application { module(storage, testAuthConfig, syncConfig = syncConfig) }
         client.get("/health")
 
-        val repo = DataRepository(storage)
+        val repo = DataRepository(userStorage(storage))
         val settings = repo.loadAppSettings()
         // Config must NOT be seeded when the token is missing — guard must fire
         assertFalse(settings.remoteSync.enabled, "remoteSync.enabled must NOT be seeded when SYNC_TOKEN is blank")
