@@ -27,6 +27,12 @@ import java.io.File
  *   - We never compare local wall-clock against server timestamps.
  *   - `sync_state.json` is never uploaded.
  *   - `app_settings.json` uploads strip the `remoteSync` block; pulls MERGE it back from local.
+ *
+ * ### Re-authentication flow
+ * If any authenticated server call returns HTTP 401 (token revoked/expired), [needsReauth] is
+ * set to `true` and further uploads/pulls are skipped to avoid hammering the server.
+ * The UI should observe [needsReauth] and prompt the user to sign in again.
+ * Call [clearReauth] after a successful re-sign-in to resume normal operation.
  */
 class SyncEngine(
     private val internalDir: File,
@@ -49,6 +55,16 @@ class SyncEngine(
      * can observe the flow and reload their data.
      */
     val changeTick: StateFlow<Long> = _changeTick.asStateFlow()
+
+    private val _needsReauth = MutableStateFlow(false)
+
+    /**
+     * `true` when the last authenticated call received HTTP 401.
+     * While `true`, no further uploads or pulls are attempted.
+     * Reset to `false` by [clearReauth] (called after successful re-sign-in) or
+     * after any successful authenticated call.
+     */
+    val needsReauth: StateFlow<Boolean> = _needsReauth.asStateFlow()
 
     // Per-filename debounce jobs
     private val pendingUploads = mutableMapOf<String, Job>()
@@ -102,6 +118,17 @@ class SyncEngine(
         }
     }
 
+    /**
+     * Clear the re-authentication flag.
+     *
+     * Must be called after a successful re-sign-in so that normal upload/pull
+     * scheduling resumes.
+     */
+    fun clearReauth() {
+        _needsReauth.value = false
+        AppLogger.d("[$TAG] clearReauth(): needsReauth reset — resuming sync")
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     private fun buildClient(settings: AppSettings): RemoteStorageClient =
@@ -137,6 +164,9 @@ class SyncEngine(
     // ── Debounced upload scheduling ──────────────────────────────────────────
 
     private fun scheduleUpload(filename: String) {
+        // Skip scheduling when a re-authentication is required
+        if (_needsReauth.value) return
+
         synchronized(pendingLock) {
             pendingUploads[filename]?.cancel()
             pendingUploads[filename] = scope.launch {
@@ -152,8 +182,8 @@ class SyncEngine(
     private suspend fun upload(filename: String) {
         val settings = settingsProvider()
         if (!settings.remoteSync.enabled) return
+        if (_needsReauth.value) return
 
-        val user = settings.current_user
         val localFile = File(internalDir, filename)
         if (!localFile.exists()) return
 
@@ -178,10 +208,14 @@ class SyncEngine(
 
         val client = buildClient(settings)
         try {
-            val meta = client.put(user, filename, content)
+            val meta = client.put(filename, content)
+            _needsReauth.value = false  // Successful call — clear any stale flag
             syncState.markPushed(filename, meta.updated_at)
             syncState.save()
             AppLogger.d("[$TAG] Uploaded $filename (server updated_at=${meta.updated_at})")
+        } catch (e: RemoteSyncException.Unauthorized) {
+            _needsReauth.value = true
+            AppLogger.e("[$TAG] upload($filename): 401 Unauthorized — needsReauth set", e)
         } catch (e: Exception) {
             AppLogger.e("[$TAG] upload($filename): PUT failed — will retry on next pull", e)
             // Leave dirty=true so pull() will trigger another attempt
@@ -193,17 +227,24 @@ class SyncEngine(
     suspend fun pull() {
         val settings = settingsProvider()
         if (!settings.remoteSync.enabled) return
+        if (_needsReauth.value) return
 
-        val user = settings.current_user
         val tracked = trackedFilenames(settings)
         val client = buildClient(settings)
 
         val manifestEntries: List<BlobMeta> = try {
-            client.manifest(user)
+            client.manifest()
+        } catch (e: RemoteSyncException.Unauthorized) {
+            _needsReauth.value = true
+            AppLogger.e("[$TAG] pull(): manifest 401 Unauthorized — needsReauth set", e)
+            return
         } catch (e: Exception) {
             AppLogger.e("[$TAG] pull(): manifest failed", e)
             return
         }
+
+        // Successful manifest call — clear any stale reauth flag
+        _needsReauth.value = false
 
         // Index by filename for O(1) lookup
         val remoteIndex = manifestEntries.associateBy { it.filename }
@@ -240,7 +281,11 @@ class SyncEngine(
             if (!localExists || remoteMeta.updated_at > entry.baseServerVersion) {
                 // Fetch and adopt
                 val blob: RemoteBlob = try {
-                    client.get(user, filename) ?: continue // 404 (race)
+                    client.get(filename) ?: continue // 404 (race)
+                } catch (e: RemoteSyncException.Unauthorized) {
+                    _needsReauth.value = true
+                    AppLogger.e("[$TAG] pull(): GET $filename 401 Unauthorized — needsReauth set", e)
+                    return
                 } catch (e: Exception) {
                     AppLogger.e("[$TAG] pull(): GET $filename failed", e)
                     continue
@@ -290,7 +335,7 @@ class SyncEngine(
     /**
      * Merges the remotely-fetched `app_settings.json` content with the locally-held
      * `remoteSync` block.  The remote blob must never clobber sync configuration
-     * (server URL, token, enabled flag) — those are device-local.
+     * (server URL, minted token, account email, enabled flag) — those are device-local.
      *
      * Returns null if neither parse succeeds.
      */

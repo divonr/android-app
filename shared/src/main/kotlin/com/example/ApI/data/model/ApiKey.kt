@@ -9,13 +9,26 @@ import kotlinx.serialization.Serializable
  * the user's sync credentials never leave the device.  When pulling, we MERGE the local copy
  * back in so the remote blob can never clobber sync settings.
  *
- * Default values make a fresh install behave identically to the pre-sync codebase.
+ * ### v2 semantics (Google Sign-In)
+ * - [authToken] is now the **server-minted opaque token** returned by `POST /auth/google`,
+ *   NOT a user-entered bearer token.  It is obtained via [DataRepository.signInToSync] and
+ *   is never displayed or manually edited.
+ * - [accountEmail] holds the Google account email for display purposes only (not used in
+ *   any API call).
+ * - [enabled] is set to `true` by [DataRepository.signInToSync] and `false` by
+ *   [DataRepository.signOutOfSync].
+ *
+ * Default values make a fresh install or a pre-v2 JSON file behave identically to the
+ * pre-sync codebase (`coerceInputValues = true` handles missing fields on deserialization).
  */
 @Serializable
 data class RemoteSyncSettings(
     val enabled: Boolean = false,
     val serverBaseUrl: String = "https://sync.api-divonr.xyz",
+    /** Server-minted opaque token (NOT user-entered). Cleared on sign-out. */
     val authToken: String = "",
+    /** Google account email — display only. Cleared on sign-out. */
+    val accountEmail: String = "",
     val syncApiKeys: Boolean = false
 )
 

@@ -31,16 +31,17 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
 - commit: f300511 (sync-server repo)
 
 ## Step 2 — Shared module (:shared) [S]
-- [ ] `RemoteSyncSettings` v2 (authToken=minted, accountEmail; back-compat defaults)
-- [ ] `GoogleSignInProvider` / `GoogleIdentity` interfaces
-- [ ] `RemoteStorageClient` v2 paths + `authGoogle(idToken)` + Unauthorized exception
-- [ ] `SyncEngine`: no user path segment; `needsReauth` StateFlow on 401
-- [ ] `UserMigration.migrateToAccount(newUsername)`: rename per-user files
+- [x] `RemoteSyncSettings` v2 (authToken=minted, accountEmail; back-compat defaults)
+- [x] `GoogleSignInProvider` / `GoogleIdentity` interfaces — new file data/sync/GoogleSignInProvider.kt
+- [x] `RemoteStorageClient` v2 paths + `authGoogle(idToken)` + sealed Unauthorized exception
+- [x] `SyncEngine`: no user path segment; `needsReauth` StateFlow on 401; `clearReauth()` method
+- [x] `UserMigration.migrateToAccount(newUsername)`: rename per-user files
       (chat_history, api_keys, custom_providers, full_custom_providers,
       github_auth, google_workspace_auth) + re-key githubConnections /
       googleWorkspaceConnections + set current_user; switch-only if target exists
-- [ ] `DataRepository.signInToSync(identity)` / `signOutOfSync()`
-- [ ] build `:shared:compileKotlin`, commit
+- [x] `DataRepository.signInToSync(identity)` / `signOutOfSync()` + `needsReauth` exposed
+- [x] build `:shared:compileKotlin` ✓  `:app:compileDebugKotlin` ✓  `:desktop:compileKotlin` ✓
+      no compile-fixes needed in :app or :desktop; existing UI still compiles unchanged
 - commit:
 
 ## Step 3 — Android (:app) [S]

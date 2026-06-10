@@ -5,8 +5,11 @@ import com.example.ApI.data.model.*
 import com.example.ApI.data.model.FullCustomProviderConfig
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.network.LLMApiService
+import com.example.ApI.data.sync.GoogleIdentity
+import com.example.ApI.data.sync.RemoteStorageClient
 import com.example.ApI.data.sync.SyncEngine
 import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.AppLogger
 import com.example.ApI.util.JsonConfig
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.*
@@ -95,10 +98,87 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     val syncChangeTick: StateFlow<Long> get() = syncEngine.changeTick
 
     /**
+     * `true` when the last authenticated call received HTTP 401 (token revoked/expired).
+     * The UI should observe this and prompt the user to sign in again.
+     * Cleared by [signInToSync] after a successful re-authentication.
+     */
+    val needsReauth: StateFlow<Boolean> get() = syncEngine.needsReauth
+
+    /**
      * Health-check the sync server using the current settings.
      * Returns true if the server responds with 200 OK.
      */
     suspend fun testSyncConnection(): Boolean = syncEngine.testConnection()
+
+    // ── Google Sign-In orchestration ─────────────────────────────────────────
+
+    /**
+     * Full sign-in-to-sync flow:
+     *
+     * 1. Exchange the Google [identity] for a server-minted token via
+     *    `POST {serverBaseUrl}/auth/google`.
+     * 2. Run [UserMigration.migrateToAccount] to rename local per-user files
+     *    from the current username (typically `"default"`) to the server's
+     *    canonical username.
+     * 3. Persist `RemoteSyncSettings(enabled=true, authToken=<minted>, accountEmail=<email>)`.
+     * 4. Clear [needsReauth], then call [startSync] to kick off the initial pull/push.
+     *
+     * @return [Result.success] with the canonical username on success,
+     *         [Result.failure] with the underlying exception on error.
+     */
+    suspend fun signInToSync(identity: GoogleIdentity): Result<String> {
+        return try {
+            val current = loadAppSettings()
+            val serverUrl = current.remoteSync.serverBaseUrl
+
+            // Step 1 — Exchange Google ID token for server token
+            val authResult = RemoteStorageClient(baseUrl = serverUrl, token = "")
+                .authGoogle(identity.idToken)
+            AppLogger.i("[DataRepository] signInToSync: authGoogle succeeded, username=${authResult.username}")
+
+            // Step 2 — Migrate local files to the canonical username
+            UserMigration.migrateToAccount(internalDir, JsonConfig.prettyPrint, authResult.username)
+
+            // Step 3 — Persist updated sync settings (reload after migration, current_user may have changed)
+            val postMigration = loadAppSettings()
+            val updated = postMigration.copy(
+                remoteSync = postMigration.remoteSync.copy(
+                    enabled = true,
+                    authToken = authResult.token,
+                    accountEmail = authResult.email
+                )
+            )
+            saveAppSettings(updated)
+
+            // Step 4 — Clear reauth flag and start sync
+            syncEngine.clearReauth()
+            startSync()
+
+            AppLogger.i("[DataRepository] signInToSync: complete — user=${authResult.username}")
+            Result.success(authResult.username)
+        } catch (e: Exception) {
+            AppLogger.e("[DataRepository] signInToSync: failed", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Sign out of sync:
+     * - Disables sync and clears the minted token and account email from settings.
+     * - Local data and [AppSettings.current_user] are left unchanged.
+     */
+    fun signOutOfSync() {
+        val current = loadAppSettings()
+        val updated = current.copy(
+            remoteSync = current.remoteSync.copy(
+                enabled = false,
+                authToken = "",
+                accountEmail = ""
+            )
+        )
+        saveAppSettings(updated)
+        AppLogger.i("[DataRepository] signOutOfSync: sync disabled, credentials cleared")
+    }
 
     // ============ Models Cache (delegated to ModelsCacheManager) ============
 
