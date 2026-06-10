@@ -11,6 +11,18 @@ Branch: `web-ui`
 
 ---
 
+## R9 — User-reported web/Android parity bugs (2026-06-10)
+
+All five reported bugs fixed (Android = source of truth):
+
+- [x] **Back arrows mirrored** — web used `MdArrowBack` (always points left); Android uses `Icons.AutoMirrored.Filled.ArrowBack` which flips in RTL. `ui/icons.tsx` now exports an auto-mirrored `MdArrowBack` (scaleX(-1)), fixing every screen at once. commit 1a21049
+- [x] **Model logos in avatar circles** — copied the 8 PNGs from `app/src/main/assets/models_logos/` to `web/public/models_logos/`; added `getModelLogoPath()` to `utils/chatUtils.ts` mirroring `ModelLogoUtils.kt`; rendered in ChatHistoryPage chat cards + search results and MessageBubble assistant avatar (GroupPage intentionally left initial-only, like Android GroupScreen). Also fixed `getChatModel` fallback to `gpt-4o` (Chat.model computed property). commit 8c04fcb
+- [x] **Quick-settings popups** — PopupPortal now measures itself and clamps within the viewport (flips above the anchor when no room below), mirroring Compose DropdownMenu auto-positioning; fixed `closeAll(); setShow(v => !v)` ordering bug so a second click on the thinking/temperature/tools/direction buttons closes the popup. commit 46b4435
+- [x] **Integrations built-in tools** — root cause: server `PATCH /api/settings` silently dropped `enabledTools`/`excludedToolIds`, so the Integrations toggles never persisted. Added both to the merge + test. ChatPage tools dropdown was also wrongly built from skills; now mirrors Android: items = `AppSettings.enabledTools` (+ group-conversations tool when chat is in a group), checkbox state = not-excluded, toggles persist `excludedToolIds` via settings PATCH, stream requests send available−excluded. New `utils/toolCatalog.ts` mirrors ToolRegistry names + ToolToggleDropdown grouping. commit caf02ab
+- [x] **Share button** — top-bar share was a no-op (called export and discarded it) and the context-menu share auto-downloaded. Both now open a new `ChatExportDialog` mirroring `ChatImportExportDialogs.kt`: header "ייצוא שיחה", LTR monospace JSON editor with edit toggle, Share (Web Share API file → download fallback), Link button (AES-CBC WebCrypto encryption, POST/PUT/DELETE to https://api-divonr.xyz/share, viewer link copied to clipboard, copy/update/delete floating menu), "להורדות" download. Share-link persisted via `PATCH /api/chats/{id}` which gained `shareLink`/`shareId` fields (+ test). commit 06707ea
+
+Verified: `:server:test` green, web vitest 114/114, e2e 12/12, `npm run build` + `:server:installDist` clean.
+
 ## R8 — Parity audit + sync fixes (Android = source of truth)
 
 Full two-agent audit (UI parity + capability/REST parity) found and fixed:
