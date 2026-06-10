@@ -89,7 +89,7 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
       MutationRoutes, P5Routes, SendRoute); `GET /api/me` added
 - [x] existing tests adapted to users/default/ layout — 131 tests, 0 failures
 - [x] build `:server:test :server:installDist` ✓ (orchestrator re-verified)
-- commit (5a):
+- commit (5a): 3771fb6
 ### 5b (TODO) — remove password auth, Google-only login, isolation tests, docs
 - [ ] remove password login + WEB_UI_PASSWORD + AuthConfig.password; delete legacy
       applySyncConfig/SyncConfig env seeding (SYNC_ENABLED/SYNC_USER/SYNC_TOKEN) —
