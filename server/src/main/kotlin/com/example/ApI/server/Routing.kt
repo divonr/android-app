@@ -32,6 +32,23 @@ data class LoginRequest(val password: String)
 data class ProviderModelItem(val provider: String, val modelName: String)
 
 /**
+ * Model entry returned by GET /api/providers/detailed.
+ * Exposes the in-memory fields the Android model selector uses (pricing,
+ * release order, web-search support) that the compact [ModelSerializer]
+ * representation drops.
+ */
+@Serializable
+data class ModelDetailDto(
+    val name: String,
+    val pricing: com.example.ApI.data.model.ModelPricing? = null,
+    val releaseOrder: Int? = null,
+    val webSearch: String? = null
+)
+
+@Serializable
+data class ProviderDetailDto(val provider: String, val models: List<ModelDetailDto>)
+
+/**
  * Search result DTO — SearchResult in :shared is NOT @Serializable (contains a Chat),
  * so we map to this flat shape that matches the API contract.
  */
@@ -301,6 +318,27 @@ fun Route.apiRoutes() {
     get("/providers") {
         val providers = call.application.appModule.repository.loadProviders()
         call.respond(HttpStatusCode.OK, providers)
+    }
+
+    // GET /api/providers/detailed — providers with full model metadata for the model selector
+    get("/providers/detailed") {
+        val providers = call.application.appModule.repository.loadProviders()
+        val result = providers.map { p ->
+            ProviderDetailDto(
+                provider = p.provider,
+                models = p.models.mapNotNull { m ->
+                    m.name?.let { name ->
+                        ModelDetailDto(
+                            name = name,
+                            pricing = m.pricing,
+                            releaseOrder = m.releaseOrder,
+                            webSearch = m.webSearch
+                        )
+                    }
+                }
+            )
+        }
+        call.respond(HttpStatusCode.OK, result)
     }
 
     // GET /api/providers/models — flat model-picker list grouped by provider

@@ -28,6 +28,9 @@ export {
   MdFileDownload,
   MdRemove,
   MdStar,
+  MdStarBorder,
+  MdSort,
+  MdAttachMoney,
   // Search
   MdSearch,
   // Settings / config

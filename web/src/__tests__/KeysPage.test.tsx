@@ -51,7 +51,7 @@ const SAMPLE_KEYS: ApiKey[] = [
 ]
 
 const SAMPLE_CUSTOM: CustomProviderConfig[] = [
-  { id: 'cp1', name: 'My Provider', baseUrl: 'https://example.com', apiKey: null, modelNames: ['gpt-x'] },
+  { id: 'cp1', name: 'My Provider', providerKey: 'custom_my_provider', baseUrl: 'https://example.com', defaultModel: 'gpt-x' },
 ]
 
 import * as clientModule from '../api/client'
@@ -280,7 +280,7 @@ describe('KeysPage', () => {
 
   it('add custom provider flow calls customProviders.create', async () => {
     vi.mocked(clientModule.customProviders.create).mockResolvedValue({
-      id: 'cp-new', name: 'New Prov', baseUrl: 'https://newprov.io', apiKey: null, modelNames: ['m1'],
+      id: 'cp-new', name: 'New Prov', providerKey: 'custom_new_prov', baseUrl: 'https://newprov.io', defaultModel: 'm1',
     })
 
     renderPage()
@@ -304,6 +304,10 @@ describe('KeysPage', () => {
     // Fill in base URL
     const urlInput = screen.getByPlaceholderText(/api\.example\.com/i)
     fireEvent.change(urlInput, { target: { value: 'https://newprov.io' } })
+
+    // Fill in default model (required, mirrors CustomProviderDialog.kt)
+    const modelInput = screen.getByPlaceholderText(/e\.g\. gpt-4o/i)
+    fireEvent.change(modelInput, { target: { value: 'm1' } })
 
     // Submit (label t('create') = "צור")
     const submitBtn = screen.getAllByRole('button', { name: t('create') })

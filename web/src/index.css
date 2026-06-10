@@ -69,9 +69,15 @@ body {
 }
 
 #root {
+  /* dvh tracks the visible viewport on mobile (URL bar show/hide); vh fallback */
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 a {

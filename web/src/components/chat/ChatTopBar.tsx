@@ -38,7 +38,23 @@ const PROVIDER_NAMES: Record<string, string> = {
 }
 
 export function getProviderDisplayName(providerKey: string): string {
-  return PROVIDER_NAMES[providerKey] ?? providerKey
+  const builtin = PROVIDER_NAMES[providerKey]
+  if (builtin) return builtin
+  // Custom providers — mirrors getDisplayNameFromProviderKey (CustomProvider.kt)
+  const prefix = providerKey.startsWith('fullcustom_')
+    ? 'fullcustom_'
+    : providerKey.startsWith('custom_')
+      ? 'custom_'
+      : null
+  if (prefix) {
+    return providerKey
+      .slice(prefix.length)
+      .split('_')
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ')
+  }
+  return providerKey
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────

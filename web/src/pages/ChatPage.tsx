@@ -22,17 +22,18 @@ import {
   files as filesApi,
   settings as settingsApi,
   chats as chatsApi,
+  apiKeys as apiKeysApi,
+  messages as messagesApi,
 } from '../api/client'
 import { sendStream, resendStream } from '../api/stream'
 import type { StreamCallbacks } from '../api/stream'
 import type {
-  Chat,
   Message,
   ProviderModel_Flat,
   InstalledSkill,
   Attachment,
   ThinkingBudget,
-  Provider,
+  ProviderDetail,
   StarredModel,
 } from '../api/types'
 import styles from './ChatPage.module.css'
@@ -158,9 +159,14 @@ const ChatPage: React.FC = () => {
   const [showModelSelector, setShowModelSelector] = useState(false)
   const [showSystemPromptDialog, setShowSystemPromptDialog] = useState(false)
   const [textDirectionMode, setTextDirectionMode] = useState<TextDirectionMode>('AUTO')
-  const [providersList, setProvidersList] = useState<Provider[]>([])
+  const [providersDetailed, setProvidersDetailed] = useState<ProviderDetail[]>([])
+  const [activeKeyProviders, setActiveKeyProviders] = useState<string[]>([])
   const [starredModels, setStarredModels] = useState<StarredModel[]>([])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  // ── Multi-message mode (mirrors MessageSendingManager.kt) ────────────────
+  const [multiMessageMode, setMultiMessageMode] = useState(false)
+  const [showReplyButton, setShowReplyButton] = useState(false)
 
   // ── Input state ──────────────────────────────────────────────────────────
   const [inputText, setInputText] = useState('')
@@ -191,7 +197,11 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     providersApi.models().then(setModels).catch(() => {})
-    providersApi.list().then(setProvidersList).catch(() => {})
+    providersApi.detailed().then(setProvidersDetailed).catch(() => {})
+    // Android shows only providers that have an ACTIVE API key
+    apiKeysApi.list().then((keys) => {
+      setActiveKeyProviders([...new Set(keys.filter((k) => k.isActive).map((k) => k.provider))])
+    }).catch(() => {})
     skillsApi.list().then((skills) => {
       setSkillsList(skills)
       setEnabledToolIds(skills.filter((s) => s.enabled).map((s) => s.name))
@@ -200,8 +210,14 @@ const ChatPage: React.FC = () => {
       if (s.selected_provider) setProvider(s.selected_provider)
       if (s.selected_model) setModel(s.selected_model)
       if (s.starredModels) setStarredModels(s.starredModels)
+      setMultiMessageMode(!!s.multiMessageMode)
     }).catch(() => {})
   }, [])
+
+  const availableProviders = useMemo(
+    () => providersDetailed.filter((p) => activeKeyProviders.includes(p.provider)),
+    [providersDetailed, activeKeyProviders],
+  )
 
   // ── Autoscroll while streaming ───────────────────────────────────────────
 
@@ -277,6 +293,60 @@ const ChatPage: React.FC = () => {
     [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, loadChat],
   )
 
+  // Multi-message mode: persist the user message WITHOUT calling the LLM;
+  // the API call happens when the user presses the "השב" (reply) bubble.
+  const bufferMessage = useCallback(
+    async (text: string, atts: Attachment[]) => {
+      if (!chatId) return
+      setError(null)
+      try {
+        await messagesApi.add(chatId, { role: 'user', text, attachments: atts })
+        await loadChat(chatId)
+        setShowReplyButton(true)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to add message')
+      }
+    },
+    [chatId, loadChat],
+  )
+
+  // Mirrors MessageSendingManager.sendBufferedBatch(): stream a reply for the
+  // already-persisted conversation without re-persisting any user message.
+  const sendBufferedBatch = useCallback(() => {
+    if (!chatId || stream.streaming) return
+    setError(null)
+    setShowReplyButton(false)
+
+    const req = {
+      chatId,
+      provider,
+      modelName: model,
+      messages: (currentChat?.messages ?? []).map((m) => ({
+        role: m.role,
+        text: m.text,
+        attachments: m.attachments ?? [],
+      })),
+      systemPrompt: currentChat?.systemPrompt ?? '',
+      webSearchEnabled: webSearch,
+      enabledToolIds,
+      thinkingBudget,
+      temperature,
+      projectAttachments: [],
+      persistUserMessage: false,
+    }
+
+    setStream({ ...EMPTY_STREAM, streaming: true })
+
+    const cbs = makeStreamCallbacks(
+      setStream,
+      () => { if (chatId) loadChat(chatId) },
+      setError,
+      () => { if (chatId) loadChat(chatId) },
+    )
+
+    streamHandleRef.current = sendStream(req, cbs)
+  }, [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, stream.streaming, loadChat])
+
   const handleSubmit = useCallback(() => {
     if (!inputText.trim() || stream.streaming) return
 
@@ -285,10 +355,14 @@ const ChatPage: React.FC = () => {
       return
     }
 
-    doSend(inputText, attachments)
+    if (multiMessageMode) {
+      bufferMessage(inputText, attachments)
+    } else {
+      doSend(inputText, attachments)
+    }
     setInputText('')
     setAttachments([])
-  }, [inputText, attachments, stream.streaming, editingMsg, doSend]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [inputText, attachments, stream.streaming, editingMsg, multiMessageMode, bufferMessage, doSend]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Edit / resend ─────────────────────────────────────────────────────────
 
@@ -433,15 +507,28 @@ const ChatPage: React.FC = () => {
   const handleModelSelect = useCallback((newProvider: string, newModel: string) => {
     setProvider(newProvider)
     setModel(newModel)
+    // Android persists the selection in app settings
+    settingsApi.update({ selected_provider: newProvider, selected_model: newModel }).catch(() => {})
   }, [])
 
   const handleToggleStar = useCallback((prov: string, modelName: string) => {
     setStarredModels((prev) => {
       const already = prev.some((s) => s.provider === prov && s.modelName === modelName)
-      return already
+      const next = already
         ? prev.filter((s) => !(s.provider === prov && s.modelName === modelName))
         : [...prev, { provider: prov, modelName }]
+      settingsApi.update({ starredModels: next }).catch(() => {})
+      return next
     })
+  }, [])
+
+  const handleRefreshModels = useCallback(async () => {
+    try {
+      await providersApi.refresh()
+      setProvidersDetailed(await providersApi.detailed())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh models')
+    }
   }, [])
 
   // ── Abort ─────────────────────────────────────────────────────────────────
@@ -547,12 +634,13 @@ const ChatPage: React.FC = () => {
       <ModelSelectorDialog
         open={showModelSelector}
         onClose={() => setShowModelSelector(false)}
-        providers={providersList}
+        providers={availableProviders}
         currentProvider={provider}
         currentModel={model}
         onSelect={handleModelSelect}
         starredModels={starredModels}
         onToggleStar={handleToggleStar}
+        onRefresh={handleRefreshModels}
       />
 
       <SystemPromptDialog
@@ -607,6 +695,21 @@ const ChatPage: React.FC = () => {
           />
         ))}
 
+        {/* ── Multi-message mode: "השב" reply bubble (ReplyPromptBubble) ─── */}
+        {showReplyButton && !stream.streaming && (
+          <div className={styles.replyPromptWrap}>
+            <div className={styles.replyPromptBubble}>
+              <button
+                type="button"
+                className={styles.replyPromptBtn}
+                onClick={sendBufferedBatch}
+              >
+                {t('reply_now')}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── Streaming partial assistant bubble ─── */}
         {stream.streaming && (
           <div className={styles.streamingBubble}>
@@ -636,7 +739,7 @@ const ChatPage: React.FC = () => {
             {/* Partial markdown text */}
             {stream.partialText ? (
               <div
-                style={{ fontSize: 15, lineHeight: '22px', color: 'var(--color-text)' }}
+                style={{ fontSize: 15, lineHeight: '18px', color: 'var(--color-text)' }}
                 dir="auto"
               >
                 {/* Use plain text for streaming to avoid parsing lag */}

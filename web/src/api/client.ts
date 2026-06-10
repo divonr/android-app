@@ -151,6 +151,9 @@ export const providers = {
   /** GET /api/providers/models — flat model list for the model picker */
   models: () => request<ProviderModel_Flat[]>('/api/providers/models'),
 
+  /** GET /api/providers/detailed — providers with pricing/releaseOrder metadata */
+  detailed: () => request<import('./types').ProviderDetail[]>('/api/providers/detailed'),
+
   /** POST /api/providers/refresh — force-refresh model list */
   refresh: () =>
     request<{ ok: true; changed: boolean }>('/api/providers/refresh', {

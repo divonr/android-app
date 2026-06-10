@@ -686,6 +686,9 @@ fun Route.mutationRoutes() {
             selected_model = patch["selected_model"]?.jsonPrimitive?.contentOrNull ?: current.selected_model,
             temperature = patch["temperature"]?.jsonPrimitive?.doubleOrNull ?: current.temperature,
             multiMessageMode = patch["multiMessageMode"]?.jsonPrimitive?.booleanOrNull ?: current.multiMessageMode,
+            starredModels = patch["starredModels"]?.let {
+                lenientJson.decodeFromJsonElement<List<StarredModel>>(it)
+            } ?: current.starredModels,
             skipWelcomeScreen = patch["skipWelcomeScreen"]?.jsonPrimitive?.booleanOrNull ?: current.skipWelcomeScreen,
             titleGenerationSettings = if (patch.containsKey("titleGenerationSettings")) {
                 val tgsJson = patch["titleGenerationSettings"]!!.jsonObject

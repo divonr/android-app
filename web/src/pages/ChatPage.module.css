@@ -8,8 +8,11 @@
 .page {
   display: flex;
   flex-direction: column;
+  /* dvh tracks the visible viewport on mobile (URL bar show/hide); vh fallback */
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
   overflow: hidden;
   position: relative;
 }
@@ -81,10 +84,10 @@
 .streamingBubble {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;   /* LEFT in RTL → matches assistant alignment */
-  padding: 4px 8px;
+  align-items: stretch;
   max-width: min(320px, 88%);
-  align-self: flex-end;    /* LEFT side in RTL */
+  /* Assistant side = Alignment.Start in the Android RTL layout = RIGHT */
+  align-self: flex-start;
   background: #2A2B3A;
   border-radius: 20px;
   border-top-right-radius: 6px;  /* Matches assistant bubble "notch" */
@@ -92,6 +95,39 @@
   padding: 12px 16px;
   color: var(--color-text);
 }
+
+/* ── Multi-message "reply" bubble (ReplyPromptBubble in MessageBubbles.kt) ── */
+
+.replyPromptWrap {
+  display: flex;
+  flex-direction: column;
+  /* Assistant side = Alignment.Start in the RTL layout = RIGHT */
+  align-items: flex-start;
+  padding: 8px;
+}
+
+.replyPromptBubble {
+  background: var(--assistant-bubble);
+  border-radius: 20px;
+  border-top-right-radius: 6px;
+  max-width: 320px;
+  padding: 12px 16px;
+}
+
+.replyPromptBtn {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 24px;
+  padding: 8px 16px;
+  font-size: var(--fs-body-medium);
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.replyPromptBtn:hover { opacity: 0.88; }
 
 /* ── Streaming typing dots ──────────────────────────────────── */
 

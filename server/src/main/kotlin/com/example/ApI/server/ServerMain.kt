@@ -166,6 +166,14 @@ fun Application.module(
     // ── Remote sync bootstrap ────────────────────────────────────────────────
     applySyncConfig(repository, syncConfig)
 
+    // ── Models cache bootstrap ───────────────────────────────────────────────
+    // Mirrors the Android app startup: fetch the GitHub-backed models.json into
+    // the local cache (no-op while the 24h cache is still valid).
+    launch(Dispatchers.IO) {
+        runCatching { repository.refreshModelsIfNeeded() }
+            .onFailure { log.warn("Startup models refresh failed: ${it.message}") }
+    }
+
     // ── Sessions ─────────────────────────────────────────────────────────────
     install(Sessions) {
         cookie<UserSession>("llm_web_session") {

@@ -51,7 +51,13 @@ data class SendRequest(
     val enabledToolIds: List<String> = emptyList(),
     val thinkingBudget: String = "none",
     val temperature: Float? = null,
-    val projectAttachments: List<Attachment> = emptyList()
+    val projectAttachments: List<Attachment> = emptyList(),
+    /**
+     * When false, the server does NOT persist the trailing user message before streaming.
+     * Used by multi-message mode: the client already persisted the buffered user messages
+     * via POST /api/chats/{id}/messages and only wants the assistant reply now.
+     */
+    val persistUserMessage: Boolean = true
 )
 
 /**
@@ -351,7 +357,7 @@ fun Route.sendRoute() {
             .getEnabledToolsSpecifications(body.enabledToolIds, body.provider)
 
         val userMessage = body.messages.lastOrNull { it.role == "user" }
-        if (userMessage != null) {
+        if (userMessage != null && body.persistUserMessage) {
             repo.addUserMessageAsNewNode(username, body.chatId, userMessage)
         }
 

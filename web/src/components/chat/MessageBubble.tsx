@@ -293,11 +293,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   // ── Bubble colors & layout ──
 
-  // In RTL html context (dir="rtl"):
-  //   flex-start on cross-axis = RIGHT side
-  //   flex-end on cross-axis   = LEFT side
-  // User messages appear on RIGHT (flex-start), assistant on LEFT (flex-end)
-  const wrapAlign: React.CSSProperties['alignItems'] = isUser ? 'flex-start' : 'flex-end'
+  // Mirrors MessageBubbles.kt in the app's RTL layout:
+  //   user      → Alignment.End   = LEFT side  → flex-end in RTL
+  //   assistant → Alignment.Start = RIGHT side → flex-start in RTL
+  const wrapAlign: React.CSSProperties['alignItems'] = isUser ? 'flex-end' : 'flex-start'
 
   const bubbleBg = isSystem
     ? '#3A3B4A'
@@ -310,14 +309,18 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     color: isUser ? '#ffffff' : 'var(--color-text)',
     padding: '12px 16px',
     borderRadius: 20,
-    // Notch corner: user on RIGHT → sharp top-left; assistant on LEFT → sharp top-right
+    // Android: topStart=6 for assistant (RIGHT in RTL → top-right),
+    //          topEnd=6 for user (LEFT in RTL → top-left)
     ...(isUser
       ? { borderTopLeftRadius: 6 }
       : isSystem
         ? {}
         : { borderTopRightRadius: 6 }),
+    // The row below is full-width, so the % here resolves against real space
+    // (a % against a shrink-to-fit parent caused absurdly narrow bubbles).
     maxWidth: 'min(320px, 88%)',
-    wordBreak: 'break-word',
+    overflowWrap: 'break-word',
+    minWidth: 0,
     position: 'relative',
     // Subtle press feedback for long-press affordance
     cursor: 'default',
@@ -334,16 +337,16 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         padding: '4px 8px',
       }}
     >
-      {/* Avatar row + bubble row */}
+      {/* Avatar row + bubble row (full width, like Android's Row(fillMaxWidth)) */}
       <div
         style={{
           display: 'flex',
           flexDirection: 'row',
           alignItems: 'flex-end',
           gap: 8,
-          // Assistant bubbles: avatar to the right of bubble in RTL
-          // (Row in RTL: first child goes right, second goes left)
-          justifyContent: 'flex-end',
+          width: '100%',
+          // Row in RTL: flex-start = RIGHT (assistant side), flex-end = LEFT (user side)
+          justifyContent: isUser ? 'flex-end' : 'flex-start',
         }}
       >
         {/* Model avatar — for assistant, appears to the "start" of bubble (rightward in RTL) */}
@@ -405,7 +408,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           {/* Message content */}
           <div dir={dir}>
             {isUser ? (
-              <span style={{ whiteSpace: 'pre-wrap', fontSize: 15, lineHeight: '22px' }}>
+              /* Android: fontSize 15.sp, lineHeight 18.sp */
+              <span style={{ whiteSpace: 'pre-wrap', fontSize: 15, lineHeight: '18px' }}>
                 {msg.text}
               </span>
             ) : (

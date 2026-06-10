@@ -176,6 +176,22 @@ export interface ProviderModel_Flat {
   modelName: string
 }
 
+/**
+ * GET /api/providers/detailed — model entry with the metadata the
+ * Android model selector uses (pricing, release order, web search).
+ */
+export interface ModelDetail {
+  name: string
+  pricing?: ModelPricing | null
+  releaseOrder?: number | null
+  webSearch?: string | null
+}
+
+export interface ProviderDetail {
+  provider: string
+  models: ModelDetail[]
+}
+
 // ---------------------------------------------------------------------------
 // Skills
 // ---------------------------------------------------------------------------
@@ -191,22 +207,46 @@ export interface InstalledSkill {
 // Custom Providers
 // ---------------------------------------------------------------------------
 
+/**
+ * Mirrors the Android/shared CustomProviderConfig (CustomProvider.kt) — the
+ * exact shape the server stores and returns.
+ */
 export interface CustomProviderConfig {
   id?: string
   name: string
+  providerKey: string
   baseUrl: string
-  apiKey?: string | null
-  modelNames: string[]
+  defaultModel: string
+  authHeaderName?: string
+  authHeaderFormat?: string
+  extraHeaders?: Record<string, string>
+  createdAt?: number
+  isEnabled?: boolean
 }
 
+/**
+ * Mirrors the Android/shared FullCustomProviderConfig (FullCustomProvider.kt).
+ * The streaming-config sub-objects (parserConfig, eventMappings, toolCallConfig)
+ * are passed through as opaque JSON — the server validates them.
+ */
 export interface FullCustomProviderConfig {
   id?: string
   name: string
+  providerKey: string
   baseUrl: string
-  apiKey?: string | null
-  modelNames: string[]
-  requestTemplate?: Record<string, unknown> | null
-  responseMapping?: Record<string, unknown> | null
+  defaultModel: string
+  authHeaderName?: string
+  authHeaderFormat?: string
+  extraHeaders?: Record<string, string>
+  bodyTemplate: string
+  messageFields?: Record<string, unknown> | null
+  parserType?: string
+  parserConfig?: Record<string, unknown>
+  eventMappings?: Record<string, unknown>
+  toolCallConfig?: Record<string, unknown>
+  isOpenAICompatible?: boolean
+  createdAt?: number
+  isEnabled?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +376,11 @@ export interface SendMessageRequest {
   thinkingBudget: ThinkingBudget
   temperature: number | null
   projectAttachments: Attachment[]
+  /**
+   * false → server streams a reply WITHOUT persisting the trailing user message
+   * (multi-message mode: the buffered messages were already persisted).
+   */
+  persistUserMessage?: boolean
 }
 
 export interface ResendMessageRequest {

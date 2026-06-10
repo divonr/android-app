@@ -5,9 +5,10 @@
 
 .markdown {
   color: var(--color-text);
-  line-height: 1.65;
+  /* Android MessageBubbles.kt: fontSize 15.sp, lineHeight 18.sp */
+  line-height: 1.2;
   font-size: 15px;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 /* Headings */

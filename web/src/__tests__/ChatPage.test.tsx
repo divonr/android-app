@@ -39,6 +39,15 @@ vi.mock('../api/client', async () => ({
         response_important_fields: {},
       },
     ]),
+    detailed: () => Promise.resolve([
+      {
+        provider: 'openai',
+        models: [
+          { name: 'gpt-4o', pricing: null, releaseOrder: 1, webSearch: null },
+          { name: 'gpt-3.5-turbo', pricing: null, releaseOrder: 0, webSearch: null },
+        ],
+      },
+    ]),
     refresh: () => Promise.resolve({ ok: true, changed: false }),
   },
   branching: {

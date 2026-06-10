@@ -10,10 +10,9 @@
  *   - Full custom providers list: each with edit/delete + Add button
  *   - Dialogs: AddKeyDialog, DeleteKeyConfirm, SimpleCustomProviderDialog, FullCustomProviderDialog, DeleteProviderConfirm
  *
- * Simplification note for R7:
- *   - FullCustomProviderDialog uses web-API fields (requestTemplate+responseMapping JSON blobs) rather than
- *     the Android bodyTemplate/messageFields/parserType/eventMappings streaming-config sub-editors —
- *     those require backend support for the richer schema first.
+ * Custom provider configs use the Android/shared shape (CustomProvider.kt /
+ * FullCustomProvider.kt) — providerKey/defaultModel/bodyTemplate etc. — which is
+ * exactly what the server stores and returns.
  */
 
 import React, {
@@ -66,6 +65,17 @@ function providerGradient(provider: string): string {
     default:
       return 'var(--surface-variant)'
   }
+}
+
+// ─── Provider key generation (mirrors generateProviderKey in CustomProvider.kt) ──
+
+function generateProviderKey(name: string, prefix: 'custom_' | 'fullcustom_'): string {
+  const sanitized = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  return `${prefix}${sanitized}`
 }
 
 // ─── Built-in providers ───────────────────────────────────────────────────────
@@ -130,9 +140,9 @@ const ProviderDropdown: React.FC<ProviderDropdownProps> = ({
     if (!value) return t('select_provider')
     const builtin = BUILTIN_PROVIDERS.find(p => p.key === value)
     if (builtin) return builtin.label
-    const cp = customList.find(c => c.id === value || c.name === value)
+    const cp = customList.find(c => c.providerKey === value)
     if (cp) return cp.name
-    const fp = fullList.find(f => f.id === value || f.name === value)
+    const fp = fullList.find(f => f.providerKey === value)
     if (fp) return fp.name
     return value
   })()
@@ -184,7 +194,7 @@ const ProviderDropdown: React.FC<ProviderDropdownProps> = ({
                 <div key={cp.id} className={`${styles.dropdownItem} ${styles.dropdownItemCustom}`}>
                   <span
                     style={{ flex: 1, cursor: 'pointer' }}
-                    onClick={() => pick(cp.id ?? cp.name)}
+                    onClick={() => pick(cp.providerKey)}
                   >
                     {cp.name}
                   </span>
@@ -219,7 +229,7 @@ const ProviderDropdown: React.FC<ProviderDropdownProps> = ({
                 <div key={fp.id} className={`${styles.dropdownItem} ${styles.dropdownItemFull}`}>
                   <span
                     style={{ flex: 1, cursor: 'pointer' }}
-                    onClick={() => pick(fp.id ?? fp.name)}
+                    onClick={() => pick(fp.providerKey)}
                   >
                     {fp.name}
                   </span>
@@ -430,7 +440,8 @@ const DeleteProviderDialog: React.FC<DeleteProviderDialogProps> = ({ open, onCon
 )
 
 // ─── Simple Custom Provider Dialog ───────────────────────────────────────────
-// Matches CustomProviderDialog.kt (OpenAI-compatible, web-API shape)
+// Matches CustomProviderDialog.kt: name / baseUrl / defaultModel +
+// advanced section (authHeaderName, authHeaderFormat, extraHeaders).
 
 interface SimpleCustomProviderDialogProps {
   open: boolean
@@ -443,10 +454,13 @@ interface SimpleCustomProviderDialogProps {
 const SimpleCustomProviderDialog: React.FC<SimpleCustomProviderDialogProps> = ({
   open, initial, onConfirm, onDismiss, onSwitchToFull,
 }) => {
-  const [name, setName] = useState(initial?.name ?? '')
-  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '')
-  const [apiKey, setApiKey] = useState(initial?.apiKey ?? '')
-  const [modelNamesText, setModelNamesText] = useState((initial?.modelNames ?? []).join('\n'))
+  const [name, setName] = useState('')
+  const [baseUrl, setBaseUrl] = useState('https://')
+  const [defaultModel, setDefaultModel] = useState('')
+  const [authHeaderName, setAuthHeaderName] = useState('Authorization')
+  const [authHeaderFormat, setAuthHeaderFormat] = useState('Bearer {key}')
+  const [extraHeaders, setExtraHeaders] = useState<Array<[string, string]>>([])
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -457,18 +471,21 @@ const SimpleCustomProviderDialog: React.FC<SimpleCustomProviderDialogProps> = ({
     if (open) {
       setName(initial?.name ?? '')
       setBaseUrl(initial?.baseUrl ?? 'https://')
-      setApiKey(initial?.apiKey ?? '')
-      setModelNamesText((initial?.modelNames ?? []).join('\n'))
+      setDefaultModel(initial?.defaultModel ?? '')
+      setAuthHeaderName(initial?.authHeaderName ?? 'Authorization')
+      setAuthHeaderFormat(initial?.authHeaderFormat ?? 'Bearer {key}')
+      setExtraHeaders(Object.entries(initial?.extraHeaders ?? {}))
+      setShowAdvanced(false)
       setError('')
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  const isValid = name.trim() && baseUrl.trim()
+  const isValid = name.trim() && baseUrl.trim() && defaultModel.trim()
 
   const handleConfirm = async () => {
     if (!isValid) {
-      setError('שם וכתובת API נדרשים')
+      setError('שם, כתובת API ומודל ברירת מחדל נדרשים')
       return
     }
     setBusy(true)
@@ -477,9 +494,16 @@ const SimpleCustomProviderDialog: React.FC<SimpleCustomProviderDialogProps> = ({
       await onConfirm({
         id: initial?.id,
         name: name.trim(),
+        providerKey: initial?.providerKey ?? generateProviderKey(name.trim(), 'custom_'),
         baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim() || null,
-        modelNames: modelNamesText.split('\n').map(s => s.trim()).filter(Boolean),
+        defaultModel: defaultModel.trim(),
+        authHeaderName: authHeaderName.trim() || 'Authorization',
+        authHeaderFormat: authHeaderFormat.trim() || 'Bearer {key}',
+        extraHeaders: Object.fromEntries(
+          extraHeaders.filter(([k]) => k.trim()).map(([k, v]) => [k.trim(), v]),
+        ),
+        createdAt: initial?.createdAt,
+        isEnabled: initial?.isEnabled ?? true,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בשמירת הספק')
@@ -541,31 +565,88 @@ const SimpleCustomProviderDialog: React.FC<SimpleCustomProviderDialogProps> = ({
           />
         </div>
 
-        {/* API Key */}
+        {/* Default model */}
         <div className={styles.dialogField}>
-          <label className={styles.dialogLabel}>{t('provider_api_key')}</label>
+          <label className={styles.dialogLabel}>{t('default_model')}</label>
           <input
             className={styles.dialogInput}
-            type="password"
-            placeholder="sk-…"
-            value={apiKey}
-            onChange={e => setApiKey(e.target.value)}
+            placeholder="e.g. gpt-4o"
+            value={defaultModel}
+            onChange={e => setDefaultModel(e.target.value)}
             dir="ltr"
           />
         </div>
 
-        {/* Model names */}
-        <div className={styles.dialogField}>
-          <label className={styles.dialogLabel}>{t('model_names_label')}</label>
-          <textarea
-            className={styles.dialogTextarea}
-            rows={4}
-            placeholder={'gpt-4o\ngpt-3.5-turbo'}
-            value={modelNamesText}
-            onChange={e => setModelNamesText(e.target.value)}
-            dir="ltr"
-          />
-        </div>
+        {/* Advanced settings toggle */}
+        <button
+          type="button"
+          className={styles.advancedToggle}
+          onClick={() => setShowAdvanced(v => !v)}
+        >
+          {showAdvanced ? t('hide_advanced') : t('show_advanced')}
+          {showAdvanced ? <MdExpandLess size={16} /> : <MdExpandMore size={16} />}
+        </button>
+
+        {showAdvanced && (
+          <>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{t('auth_header_name')}</label>
+              <input
+                className={styles.dialogInput}
+                value={authHeaderName}
+                onChange={e => setAuthHeaderName(e.target.value)}
+                dir="ltr"
+              />
+            </div>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{t('auth_header_format')}</label>
+              <input
+                className={styles.dialogInput}
+                value={authHeaderFormat}
+                onChange={e => setAuthHeaderFormat(e.target.value)}
+                dir="ltr"
+              />
+              <span className={styles.dialogLabel}>{t('auth_format_hint')}</span>
+            </div>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{t('extra_headers')}</label>
+              {extraHeaders.map(([k, v], i) => (
+                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    className={styles.dialogInput}
+                    placeholder="Header"
+                    value={k}
+                    onChange={e => setExtraHeaders(prev => prev.map((h, j) => j === i ? [e.target.value, h[1]] : h))}
+                    dir="ltr"
+                  />
+                  <input
+                    className={styles.dialogInput}
+                    placeholder="Value"
+                    value={v}
+                    onChange={e => setExtraHeaders(prev => prev.map((h, j) => j === i ? [h[0], e.target.value] : h))}
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    className={styles.dropdownActionBtn}
+                    aria-label={t('delete')}
+                    onClick={() => setExtraHeaders(prev => prev.filter((_, j) => j !== i))}
+                  >
+                    <MdDelete size={14} />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className={styles.sectionAddBtn}
+                onClick={() => setExtraHeaders(prev => [...prev, ['', '']])}
+              >
+                <MdAdd size={14} />
+                {t('add_header')}
+              </button>
+            </div>
+          </>
+        )}
 
         {error && <div className={styles.dialogError}>{error}</div>}
       </div>
@@ -574,9 +655,8 @@ const SimpleCustomProviderDialog: React.FC<SimpleCustomProviderDialogProps> = ({
 }
 
 // ─── Full Custom Provider Dialog ──────────────────────────────────────────────
-// Matches FullCustomProviderDialog.kt (3-tab: Request / Response / Model)
-// Simplified: uses web-API requestTemplate/responseMapping JSON blobs instead of
-// the Android bodyTemplate/messageFields/streamingConfig sub-editors (R7 follow-up).
+// Matches FullCustomProviderDialog.kt (3-tab: Request / Response / Model) using
+// the Android config shape: bodyTemplate + parserType/eventMappings + defaultModel.
 
 interface FullCustomProviderDialogProps {
   open: boolean
@@ -586,21 +666,26 @@ interface FullCustomProviderDialogProps {
   onSwitchToSimple: () => void
 }
 
+const DEFAULT_BODY_TEMPLATE = `{
+  "model": "{model}",
+  "stream": true,
+  "messages": [],
+  "max_tokens": 4096
+}`
+
 const FullCustomProviderDialog: React.FC<FullCustomProviderDialogProps> = ({
   open, initial, onConfirm, onDismiss, onSwitchToSimple,
 }) => {
   const [activeTab, setActiveTab] = useState<'request' | 'response' | 'model'>('request')
-  const [name, setName] = useState(initial?.name ?? '')
-  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? 'https://')
-  const [apiKey, setApiKey] = useState(initial?.apiKey ?? '')
-  const [requestTemplate, setRequestTemplate] = useState(
-    initial?.requestTemplate ? JSON.stringify(initial.requestTemplate, null, 2) : '',
-  )
-  const [responseMapping, setResponseMapping] = useState(
-    initial?.responseMapping ? JSON.stringify(initial.responseMapping, null, 2) : '',
-  )
-  const [modelNamesText, setModelNamesText] = useState((initial?.modelNames ?? []).join('\n'))
-  const [streamingConfirmed, setStreamingConfirmed] = useState(!!initial)
+  const [name, setName] = useState('')
+  const [baseUrl, setBaseUrl] = useState('https://')
+  const [authHeaderName, setAuthHeaderName] = useState('Authorization')
+  const [authHeaderFormat, setAuthHeaderFormat] = useState('Bearer {key}')
+  const [bodyTemplate, setBodyTemplate] = useState(DEFAULT_BODY_TEMPLATE)
+  const [parserType, setParserType] = useState('DATA_ONLY')
+  const [eventMappingsText, setEventMappingsText] = useState('')
+  const [defaultModel, setDefaultModel] = useState('')
+  const [streamingConfirmed, setStreamingConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -611,10 +696,16 @@ const FullCustomProviderDialog: React.FC<FullCustomProviderDialogProps> = ({
       setActiveTab('request')
       setName(initial?.name ?? '')
       setBaseUrl(initial?.baseUrl ?? 'https://')
-      setApiKey(initial?.apiKey ?? '')
-      setRequestTemplate(initial?.requestTemplate ? JSON.stringify(initial.requestTemplate, null, 2) : '')
-      setResponseMapping(initial?.responseMapping ? JSON.stringify(initial.responseMapping, null, 2) : '')
-      setModelNamesText((initial?.modelNames ?? []).join('\n'))
+      setAuthHeaderName(initial?.authHeaderName ?? 'Authorization')
+      setAuthHeaderFormat(initial?.authHeaderFormat ?? 'Bearer {key}')
+      setBodyTemplate(initial?.bodyTemplate ?? DEFAULT_BODY_TEMPLATE)
+      setParserType(initial?.parserType ?? 'DATA_ONLY')
+      setEventMappingsText(
+        initial?.eventMappings && Object.keys(initial.eventMappings).length > 0
+          ? JSON.stringify(initial.eventMappings, null, 2)
+          : '',
+      )
+      setDefaultModel(initial?.defaultModel ?? '')
       setStreamingConfirmed(!!initial)
       setError('')
     }
@@ -631,13 +722,14 @@ const FullCustomProviderDialog: React.FC<FullCustomProviderDialogProps> = ({
     }
   }
 
-  const [reqObj, reqValid] = parseJson(requestTemplate)
-  const [resObj, resValid] = parseJson(responseMapping)
-  const isValid = name.trim() && baseUrl.trim() && reqValid && resValid && streamingConfirmed
+  const [, bodyValid] = parseJson(bodyTemplate)
+  const [eventMappingsObj, mappingsValid] = parseJson(eventMappingsText)
+  const isValid = name.trim() && baseUrl.trim() && defaultModel.trim() &&
+    bodyTemplate.trim() && bodyValid && mappingsValid && streamingConfirmed
 
   const handleConfirm = async () => {
     if (!isValid) {
-      setError('שם, כתובת API ו-JSON תקין נדרשים; אשר גם הגדרת סטרימינג')
+      setError('שם, כתובת API, מודל ברירת מחדל ו-JSON תקין נדרשים; אשר גם הגדרת סטרימינג')
       return
     }
     setBusy(true)
@@ -646,11 +738,21 @@ const FullCustomProviderDialog: React.FC<FullCustomProviderDialogProps> = ({
       await onConfirm({
         id: initial?.id,
         name: name.trim(),
+        providerKey: initial?.providerKey ?? generateProviderKey(name.trim(), 'fullcustom_'),
         baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim() || null,
-        modelNames: modelNamesText.split('\n').map(s => s.trim()).filter(Boolean),
-        requestTemplate: reqObj,
-        responseMapping: resObj,
+        defaultModel: defaultModel.trim(),
+        authHeaderName: authHeaderName.trim() || 'Authorization',
+        authHeaderFormat: authHeaderFormat.trim() || 'Bearer {key}',
+        extraHeaders: initial?.extraHeaders ?? { 'Content-Type': 'application/json' },
+        bodyTemplate,
+        messageFields: initial?.messageFields ?? null,
+        parserType,
+        parserConfig: initial?.parserConfig,
+        eventMappings: eventMappingsObj ?? initial?.eventMappings ?? {},
+        toolCallConfig: initial?.toolCallConfig,
+        isOpenAICompatible: false,
+        createdAt: initial?.createdAt,
+        isEnabled: initial?.isEnabled ?? true,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בשמירת הספק')
@@ -658,16 +760,6 @@ const FullCustomProviderDialog: React.FC<FullCustomProviderDialogProps> = ({
       setBusy(false)
     }
   }
-
-  const DEFAULT_BODY = `{
-  "model": "{model}",
-  "stream": true,
-  "messages": [
-    {"role": "system", "content": "{system}"},
-    {"role": "user", "content": "{prompt}"}
-  ],
-  "max_tokens": 4096
-}`
 
   return (
     <Dialog
@@ -736,28 +828,35 @@ const FullCustomProviderDialog: React.FC<FullCustomProviderDialogProps> = ({
               />
             </div>
             <div className={styles.dialogField}>
-              <label className={styles.dialogLabel}>{t('provider_api_key')}</label>
+              <label className={styles.dialogLabel}>{t('auth_header_name')}</label>
               <input
                 className={styles.dialogInput}
-                type="password"
-                placeholder="sk-…"
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
+                value={authHeaderName}
+                onChange={e => setAuthHeaderName(e.target.value)}
                 dir="ltr"
               />
             </div>
             <div className={styles.dialogField}>
-              <label className={styles.dialogLabel}>{t('request_template_label')}</label>
+              <label className={styles.dialogLabel}>{t('auth_header_format')}</label>
+              <input
+                className={styles.dialogInput}
+                value={authHeaderFormat}
+                onChange={e => setAuthHeaderFormat(e.target.value)}
+                dir="ltr"
+              />
+            </div>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{t('body_template_section')}</label>
               <textarea
                 className={styles.dialogTextarea}
                 rows={10}
-                placeholder={DEFAULT_BODY}
-                value={requestTemplate}
-                onChange={e => setRequestTemplate(e.target.value)}
+                placeholder={DEFAULT_BODY_TEMPLATE}
+                value={bodyTemplate}
+                onChange={e => setBodyTemplate(e.target.value)}
                 dir="ltr"
                 style={{ fontFamily: 'monospace', fontSize: 12 }}
               />
-              {requestTemplate && !reqValid && (
+              {bodyTemplate.trim() && !bodyValid && (
                 <div className={styles.dialogError}>{t('invalid_json')}</div>
               )}
             </div>
@@ -777,17 +876,28 @@ const FullCustomProviderDialog: React.FC<FullCustomProviderDialogProps> = ({
         {activeTab === 'response' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div className={styles.dialogField}>
-              <label className={styles.dialogLabel}>{t('response_mapping_label')}</label>
+              <label className={styles.dialogLabel}>{'Parser type'}</label>
+              <select
+                className={styles.dialogInput}
+                value={parserType}
+                onChange={e => setParserType(e.target.value)}
+              >
+                <option value="DATA_ONLY">DATA_ONLY (OpenAI / Google style)</option>
+                <option value="EVENT_DATA">EVENT_DATA (Anthropic / Cohere style)</option>
+              </select>
+            </div>
+            <div className={styles.dialogField}>
+              <label className={styles.dialogLabel}>{'Event mappings (JSON)'}</label>
               <textarea
                 className={styles.dialogTextarea}
-                rows={10}
-                placeholder={'{"text": "choices[0].delta.content"}'}
-                value={responseMapping}
-                onChange={e => setResponseMapping(e.target.value)}
+                rows={8}
+                placeholder={'{"TEXT_CONTENT": {"eventName": "content_block_delta", "fieldPath": "delta.text"}}'}
+                value={eventMappingsText}
+                onChange={e => setEventMappingsText(e.target.value)}
                 dir="ltr"
                 style={{ fontFamily: 'monospace', fontSize: 12 }}
               />
-              {responseMapping && !resValid && (
+              {eventMappingsText.trim() && !mappingsValid && (
                 <div className={styles.dialogError}>{t('invalid_json')}</div>
               )}
             </div>
@@ -798,13 +908,12 @@ const FullCustomProviderDialog: React.FC<FullCustomProviderDialogProps> = ({
         {activeTab === 'model' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div className={styles.dialogField}>
-              <label className={styles.dialogLabel}>{t('model_names_label')}</label>
-              <textarea
-                className={styles.dialogTextarea}
-                rows={6}
-                placeholder={'gpt-4o\nclaude-3-opus\nllama-3.1'}
-                value={modelNamesText}
-                onChange={e => setModelNamesText(e.target.value)}
+              <label className={styles.dialogLabel}>{t('default_model')}</label>
+              <input
+                className={styles.dialogInput}
+                placeholder="gpt-4o"
+                value={defaultModel}
+                onChange={e => setDefaultModel(e.target.value)}
                 dir="ltr"
               />
             </div>
@@ -1165,9 +1274,7 @@ const KeysPage: React.FC = () => {
                 <div className={styles.providerRowInfo}>
                   <span className={styles.providerRowName}>{cp.name}</span>
                   <span className={styles.providerRowUrl}>{cp.baseUrl}</span>
-                  <span className={styles.providerRowMeta}>
-                    {cp.modelNames.length} {'מודלים'}
-                  </span>
+                  <span className={styles.providerRowMeta}>{cp.defaultModel}</span>
                 </div>
                 <div className={styles.providerRowActions}>
                   <IconButton
@@ -1211,9 +1318,7 @@ const KeysPage: React.FC = () => {
                 <div className={styles.providerRowInfo}>
                   <span className={styles.providerRowName}>{fp.name}</span>
                   <span className={styles.providerRowUrl}>{fp.baseUrl}</span>
-                  <span className={styles.providerRowMeta}>
-                    {fp.modelNames.length} {'מודלים'}
-                  </span>
+                  <span className={styles.providerRowMeta}>{fp.defaultModel}</span>
                 </div>
                 <div className={styles.providerRowActions}>
                   <IconButton

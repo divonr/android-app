@@ -76,7 +76,12 @@ vi.mock('../api/client', () => ({
     removeAttachment: vi.fn().mockResolvedValue({ ...mockGroup, is_project: true }),
   },
   search: { query: vi.fn().mockResolvedValue([]) },
-  providers: { models: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue([]) },
+  providers: {
+    models: vi.fn().mockResolvedValue([]),
+    list: vi.fn().mockResolvedValue([]),
+    detailed: vi.fn().mockResolvedValue([]),
+    refresh: vi.fn().mockResolvedValue({ ok: true, changed: false }),
+  },
   branching: { create: vi.fn(), switchVariant: vi.fn() },
   skills: {
     list: vi.fn().mockResolvedValue([]),
@@ -86,7 +91,7 @@ vi.mock('../api/client', () => ({
     delete: vi.fn().mockResolvedValue(undefined),
   },
   files: { upload: vi.fn() },
-  messages: { delete: vi.fn() },
+  messages: { delete: vi.fn(), add: vi.fn().mockResolvedValue({}) },
   apiKeys: {
     list: vi.fn().mockResolvedValue([]),
     create: vi.fn(),
