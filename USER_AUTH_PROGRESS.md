@@ -111,7 +111,7 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
 - [x] account chip (GET /api/me via auth.session→MeResponse) + logout in Settings;
       AuthGuard 401 redirect unchanged; 8 new he.ts i18n keys
 - [x] build `npm --prefix web run build` ✓ + vitest 123/123 ✓ (13 new tests)
-- commit: (next line)
+- commit: 2206f18
 
 ## Step 7 — Deploy & E2E [O]+[U]
 - [ ] [U] Google Cloud Console: add redirect URIs
