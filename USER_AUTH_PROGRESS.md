@@ -103,7 +103,7 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
 - [x] new isolation test: user A session cannot read user B chats/keys
 - [x] API_CONTRACT.md auth section + llm-web.env.example + DEPLOY.md updated
 - [x] build `:server:test :server:installDist`, commit
-- commit (5b):
+- commit (5b): 47f0bb6
 
 ## Step 6 — Web frontend (web/) [S]
 - [ ] LoginPage → "Sign in with Google" (navigate /auth/google/start) + error display
