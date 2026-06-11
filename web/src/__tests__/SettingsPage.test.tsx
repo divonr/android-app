@@ -35,6 +35,9 @@ vi.mock('../api/client', async () => ({
     pull: vi.fn().mockResolvedValue({ ok: true }),
     status: vi.fn().mockResolvedValue({ enabled: false, serverBaseUrl: '', lastChangeTick: 0, reachable: null }),
   },
+  auth: {
+    logout: vi.fn().mockResolvedValue({ ok: true }),
+  },
 }))
 
 // ─── Sample settings ──────────────────────────────────────────────────────────
@@ -69,6 +72,7 @@ const SAMPLE_SETTINGS: AppSettings = {
 }
 
 import * as clientModule from '../api/client'
+import { useAuthStore } from '../stores/authStore'
 
 function renderPage() {
   return render(
@@ -83,6 +87,13 @@ describe('SettingsPage', () => {
     vi.clearAllMocks()
     vi.mocked(clientModule.settings.get).mockResolvedValue(SAMPLE_SETTINGS)
     vi.mocked(clientModule.settings.update).mockResolvedValue(SAMPLE_SETTINGS)
+    vi.mocked(clientModule.auth.logout).mockResolvedValue({ ok: true })
+    // Provide user identity so the account card shows email
+    useAuthStore.setState({
+      authenticated: true,
+      checking: false,
+      userInfo: { username: 'alice', email: 'alice@example.com' },
+    })
   })
 
   // ── Section rendering ───────────────────────────────────────────────────────
@@ -330,6 +341,35 @@ describe('SettingsPage', () => {
     // reachable=false → fail
     await waitFor(() => {
       expect(screen.getByText('נכשל ✗')).toBeInTheDocument()
+    })
+  })
+
+  // ── Account / Logout ────────────────────────────────────────────────────────
+
+  it('shows the logged-in email from userInfo', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('alice@example.com')).toBeInTheDocument()
+    })
+  })
+
+  it('shows a Logout button', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
+    })
+  })
+
+  it('clicking Logout calls auth.logout', async () => {
+    renderPage()
+    await waitFor(() => screen.getByRole('button', { name: /logout/i }))
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /logout/i }))
+    })
+
+    await waitFor(() => {
+      expect(clientModule.auth.logout).toHaveBeenCalled()
     })
   })
 })

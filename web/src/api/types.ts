@@ -401,6 +401,12 @@ export interface OkResponse {
   ok: true
 }
 
+/** GET /api/me — identity of the currently authenticated user. */
+export interface MeResponse {
+  username: string
+  email: string
+}
+
 export interface SessionResponse {
   authenticated: boolean
 }

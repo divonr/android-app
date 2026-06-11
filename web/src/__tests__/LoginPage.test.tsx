@@ -1,15 +1,24 @@
+/**
+ * LoginPage tests — Google-only sign-in flow (Step 6 refactor).
+ *
+ * Covers:
+ *   - Page renders app name + Google sign-in button
+ *   - No error shown when there is no ?error param
+ *   - Clicking the button navigates to /auth/google/start
+ *   - Each of the 5 error codes shows a localized Hebrew message
+ *   - Unknown error codes show no error
+ */
+
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import LoginPage from '../pages/LoginPage'
-import { useAuthStore } from '../stores/authStore'
 
 // ---------------------------------------------------------------------------
-// Stub CSS modules (Vitest handles them via moduleNameMapper or identity proxy)
+// CSS module mock
 // ---------------------------------------------------------------------------
 
-// We use a simple passthrough so className strings don't throw
 vi.mock('../pages/LoginPage.module.css', () => ({
   default: new Proxy(
     {},
@@ -18,83 +27,78 @@ vi.mock('../pages/LoginPage.module.css', () => ({
 }))
 
 // ---------------------------------------------------------------------------
-// Helper: render LoginPage inside a MemoryRouter with a target /home route
+// Helper: render LoginPage inside a MemoryRouter with the given URL
 // ---------------------------------------------------------------------------
-function renderLogin() {
+
+function renderLogin(url = '/login') {
   return render(
-    <MemoryRouter initialEntries={['/login']}>
+    <MemoryRouter initialEntries={[url]}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/" element={<div data-testid="home">Home</div>} />
       </Routes>
     </MemoryRouter>,
   )
 }
 
-describe('LoginPage', () => {
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('LoginPage — Google sign-in', () => {
   beforeEach(() => {
-    // Reset Zustand store between tests
-    useAuthStore.setState({ authenticated: null, checking: false })
     vi.restoreAllMocks()
+    // Replace window.location with a plain object so href assignment can be
+    // captured (jsdom does not implement navigation).
+    vi.stubGlobal('location', { href: '' })
   })
 
-  it('renders a password field and submit button', () => {
-    renderLogin()
-    // Input has aria-label="password" so getByLabelText(/password/i) finds it
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument()
-    // Button shows Hebrew text "כניסה"
-    expect(screen.getByRole('button', { name: /כניסה/ })).toBeInTheDocument()
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
-  it('button is disabled when password field is empty', () => {
+  it('renders app name heading', () => {
     renderLogin()
-    expect(screen.getByRole('button', { name: /כניסה/ })).toBeDisabled()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('ApI')
   })
 
-  it('calls login and navigates on success', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: new Headers({ 'Content-Type': 'application/json' }),
-        json: () => Promise.resolve({ ok: true }),
-      }),
-    )
-
+  it('renders a Google sign-in button', () => {
     renderLogin()
-    const input = screen.getByLabelText(/password/i)
-    const button = screen.getByRole('button', { name: /כניסה/ })
-
-    fireEvent.change(input, { target: { value: 'correct-password' } })
-    expect(button).not.toBeDisabled()
-
-    fireEvent.click(button)
-
-    await waitFor(() => {
-      expect(screen.getByTestId('home')).toBeInTheDocument()
-    })
+    expect(screen.getByRole('button', { name: /google/i })).toBeInTheDocument()
   })
 
-  it('shows error message on wrong password (401)', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 401,
-        headers: new Headers({ 'Content-Type': 'application/json' }),
-        json: () => Promise.resolve({ error: 'Invalid password' }),
-      }),
-    )
-
+  it('does not show an error banner when no ?error param is present', () => {
     renderLogin()
-    const input = screen.getByLabelText(/password/i)
-    fireEvent.change(input, { target: { value: 'wrong' } })
-    fireEvent.click(screen.getByRole('button', { name: /כניסה/ }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
 
-    await waitFor(() => {
-      // Hebrew error message from i18n: 'סיסמה שגויה. אנא נסה שוב.'
-      expect(screen.getByRole('alert')).toBeInTheDocument()
-    })
+  it('clicking the sign-in button navigates to /auth/google/start', () => {
+    renderLogin()
+    fireEvent.click(screen.getByRole('button', { name: /google/i }))
+    expect(window.location.href).toBe('/auth/google/start')
+  })
+
+  // ---------------------------------------------------------------------------
+  // Error-code display
+  // ---------------------------------------------------------------------------
+
+  it.each([
+    ['invalid_state', 'שגיאת אבטחה'],
+    ['token_exchange_failed', 'כשל בהתחברות'],
+    ['token_invalid', 'הטוקן אינו תקין'],
+    ['not_allowed', 'אינה מורשית'],
+    ['sync_unavailable', 'הסנכרון אינו זמין'],
+  ] as const)(
+    'shows error message for ?error=%s',
+    (code, expectedSubstring) => {
+      renderLogin(`/login?error=${code}`)
+      const alert = screen.getByRole('alert')
+      expect(alert).toBeInTheDocument()
+      expect(alert.textContent).toContain(expectedSubstring)
+    },
+  )
+
+  it('shows no error banner for an unrecognised error code', () => {
+    renderLogin('/login?error=completely_unknown')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

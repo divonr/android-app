@@ -151,6 +151,16 @@ const strings = {
   invalid_password: 'סיסמה שגויה. אנא נסה שוב.',
   sign_out: 'התנתקות',
 
+  // Google Sign-In (Step 6)
+  sign_in_with_google: 'כניסה עם Google',
+  google_auth_error_invalid_state: 'שגיאת אבטחה. אנא נסה להתחבר שוב.',
+  google_auth_error_token_exchange_failed: 'כשל בהתחברות ל-Google. אנא נסה שוב.',
+  google_auth_error_token_invalid: 'הטוקן אינו תקין. אנא נסה שוב.',
+  google_auth_error_not_allowed: 'כתובת האימייל שלך אינה מורשית לגשת לאפליקציה.',
+  google_auth_error_sync_unavailable: 'שירות הסנכרון אינו זמין. אנא פנה למנהל המערכת.',
+  account_email_label: 'אימייל',
+  logout: 'התנתק',
+
   // Chat History screen — search (R1)
   search_placeholder: 'חיפוש בשיחות...',
   search_enter_hint: 'הזן מילות חיפוש למציאת שיחות',

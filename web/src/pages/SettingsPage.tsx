@@ -24,6 +24,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { settings as settingsApi, sync as syncApi } from '../api/client'
+import { useAuthStore } from '../stores/authStore'
 import type { AppSettings, ChildLockSettings, RemoteSyncSettings, TitleGenerationSettings } from '../api/types'
 import { sha256 } from '../utils/crypto'
 import { isInLockRange } from '../utils/childLock'
@@ -335,6 +336,7 @@ const ChildLockDisableDialog: React.FC<ChildLockDisableProps> = ({ storedHash, o
 
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate()
+  const { userInfo, logout } = useAuthStore()
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -532,15 +534,28 @@ const SettingsPage: React.FC = () => {
           </div>
         )}
 
-        {/* ── User info ── */}
+        {/* ── Account info ── */}
         <div className={styles.userCard}>
           <div className={styles.userAvatar}>
             <MdPerson size={22} />
           </div>
           <div className={styles.userInfo}>
-            <div className={styles.userName}>{appSettings.current_user}</div>
+            <div className={styles.userName}>
+              {userInfo?.username ?? appSettings.current_user}
+            </div>
+            {userInfo?.email && (
+              <div className={styles.userLabel}>{userInfo.email}</div>
+            )}
             <div className={styles.userLabel}>{t('current_user_label')}</div>
           </div>
+          <button
+            type="button"
+            className={styles.outlineBtn}
+            onClick={logout}
+            aria-label="Logout"
+          >
+            {t('logout')}
+          </button>
         </div>
 
         {/* ── Navigation: Integrations ── */}

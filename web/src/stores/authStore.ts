@@ -1,15 +1,16 @@
 import { create } from 'zustand'
 import { auth } from '../api/client'
+import type { MeResponse } from '../api/types'
 
 interface AuthState {
   authenticated: boolean | null   // null = not yet checked
   checking: boolean
+  /** Identity of the logged-in user; null until check() succeeds. */
+  userInfo: MeResponse | null
 
-  /** Check /api/session and update state */
+  /** Check GET /api/me and update state */
   check: () => Promise<void>
-  /** POST /login */
-  login: (password: string) => Promise<void>
-  /** POST /logout */
+  /** POST /logout — clears session; AuthGuard will redirect to /login */
   logout: () => Promise<void>
   /** Called on 401 events (from the unauthenticated global event) */
   markUnauthenticated: () => void
@@ -18,28 +19,28 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => ({
   authenticated: null,
   checking: false,
+  userInfo: null,
 
   check: async () => {
     set({ checking: true })
     try {
-      const res = await auth.session()
-      set({ authenticated: res.authenticated, checking: false })
+      const me = await auth.session()
+      set({ authenticated: true, checking: false, userInfo: me })
     } catch {
-      set({ authenticated: false, checking: false })
+      set({ authenticated: false, checking: false, userInfo: null })
     }
   },
 
-  login: async (password: string) => {
-    await auth.login(password)
-    set({ authenticated: true })
-  },
-
   logout: async () => {
-    await auth.logout()
-    set({ authenticated: false })
+    try {
+      await auth.logout()
+    } finally {
+      // Always clear local state so AuthGuard redirects to /login
+      set({ authenticated: false, userInfo: null })
+    }
   },
 
   markUnauthenticated: () => {
-    set({ authenticated: false })
+    set({ authenticated: false, userInfo: null })
   },
 }))

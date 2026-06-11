@@ -14,12 +14,12 @@ import type {
   ImportChatResponse,
   InstalledSkill,
   KeyReorderRequest,
+  MeResponse,
   OkResponse,
   Provider,
   ProviderModel_Flat,
   ResendMessageRequest,
   SearchResult,
-  SessionResponse,
   TitleResponse,
   UserChatHistory,
 } from './types'
@@ -124,20 +124,17 @@ export async function request<T>(
 // ---------------------------------------------------------------------------
 
 export const auth = {
-  /** POST /login — sets the session cookie */
-  login: (password: string) =>
-    request<OkResponse>('/login', {
-      method: 'POST',
-      body: JSON.stringify({ password }),
-    }),
-
   /** POST /logout — clears the session cookie */
   logout: () =>
     request<OkResponse>('/logout', { method: 'POST' }),
 
-  /** GET /api/session — check if the session is still valid */
+  /**
+   * GET /api/me — returns the current user's identity.
+   * Throws ApiError(401) when not logged in (no valid session).
+   * Use this both to check auth state and to fetch username/email.
+   */
   session: () =>
-    request<SessionResponse>('/api/session'),
+    request<MeResponse>('/api/me'),
 }
 
 // ---------------------------------------------------------------------------

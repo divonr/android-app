@@ -106,10 +106,12 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
 - commit (5b): 47f0bb6
 
 ## Step 6 — Web frontend (web/) [S]
-- [ ] LoginPage → "Sign in with Google" (navigate /auth/google/start) + error display
-- [ ] account chip (GET /api/me) + logout in Settings; 401 redirect kept
-- [ ] build `npm --prefix web run build` + vitest, commit
-- commit:
+- [x] LoginPage → "Sign in with Google" (navigate /auth/google/start) + error display
+      for all 5 error codes (incl. token_exchange_failed); password login API removed
+- [x] account chip (GET /api/me via auth.session→MeResponse) + logout in Settings;
+      AuthGuard 401 redirect unchanged; 8 new he.ts i18n keys
+- [x] build `npm --prefix web run build` ✓ + vitest 123/123 ✓ (13 new tests)
+- commit: (next line)
 
 ## Step 7 — Deploy & E2E [O]+[U]
 - [ ] [U] Google Cloud Console: add redirect URIs

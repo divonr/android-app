@@ -1,36 +1,42 @@
 /**
- * LoginPage — dark minimal design matching the app palette.
+ * LoginPage — Google-only sign-in (Step 6 refactor).
  *
- * R0 restyle: Hebrew labels, primary action button, centered in the
- * phone-width column. Logic (login(), navigate) is unchanged.
+ * The password form is gone. Login is exclusively via Google Sign-In:
+ *   - A single button does a full-page navigation to GET /auth/google/start
+ *     (cannot be XHR — the OAuth dance requires browser redirects).
+ *   - On callback failure, the server redirects to /login?error={code}.
+ *     This page reads that param and shows a human-readable Hebrew message.
  */
 
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../stores/authStore'
+import React from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { t } from '../i18n/he'
 import styles from './LoginPage.module.css'
 
+function getErrorMessage(code: string | null): string | null {
+  switch (code) {
+    case 'invalid_state':
+      return t('google_auth_error_invalid_state')
+    case 'token_exchange_failed':
+      return t('google_auth_error_token_exchange_failed')
+    case 'token_invalid':
+      return t('google_auth_error_token_invalid')
+    case 'not_allowed':
+      return t('google_auth_error_not_allowed')
+    case 'sync_unavailable':
+      return t('google_auth_error_sync_unavailable')
+    default:
+      return null
+  }
+}
+
 const LoginPage: React.FC = () => {
-  const navigate = useNavigate()
-  const { login } = useAuthStore()
+  const [searchParams] = useSearchParams()
+  const errorCode = searchParams.get('error')
+  const errorMessage = getErrorMessage(errorCode)
 
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError(null)
-    setLoading(true)
-    try {
-      await login(password)
-      navigate('/', { replace: true })
-    } catch {
-      setError(t('invalid_password'))
-    } finally {
-      setLoading(false)
-    }
+  const handleSignIn = () => {
+    window.location.href = '/auth/google/start'
   }
 
   return (
@@ -38,39 +44,19 @@ const LoginPage: React.FC = () => {
       <div className={styles.inner}>
         <h1 className={styles.appName}>{t('app_name')}</h1>
 
-        <form onSubmit={handleSubmit} className={styles.form} noValidate>
-          <div className={styles.field}>
-            {/* Visible Hebrew label associated via htmlFor/id */}
-            <label htmlFor="password-input" className={styles.label}>
-              {t('password')}
-            </label>
-            <input
-              id="password-input"
-              /* aria-label keeps English text so legacy tests / screen readers find it */
-              aria-label="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={styles.input}
-              autoFocus
-              disabled={loading}
-            />
-          </div>
+        {errorMessage && (
+          <p className={styles.error} role="alert">
+            {errorMessage}
+          </p>
+        )}
 
-          {error && (
-            <p className={styles.error} role="alert">
-              {error}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            className={styles.button}
-            disabled={loading || !password}
-          >
-            {loading ? t('sign_in_loading') : t('sign_in')}
-          </button>
-        </form>
+        <button
+          type="button"
+          className={styles.button}
+          onClick={handleSignIn}
+        >
+          {t('sign_in_with_google')}
+        </button>
       </div>
     </div>
   )
