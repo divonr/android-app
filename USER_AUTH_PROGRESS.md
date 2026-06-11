@@ -117,7 +117,12 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
 - [ ] [U] Google Cloud Console: add redirect URIs
       `https://app.api-divonr.xyz/auth/google/callback` and
       `http://127.0.0.1:53682/` to client 926212364522-…; client secret into envs
-- [ ] [O] update llm-web.env, rebuild dist+installDist, restart llm-web.service
+- [x] [O] update llm-web.env (password+legacy sync vars removed; client ID filled;
+      ALLOWED_GOOGLE_EMAILS=haravsihot@gmail.com; GOOGLE_OAUTH_CLIENT_SECRET left
+      EMPTY — [U] must paste it), rebuilt dist+installDist, service restarted;
+      verified: /health ok, /api/* 401 w/o session, POST /login 404,
+      /auth/google/start 302→accounts.google.com w/ correct redirect_uri —
+      locally AND via https://app.api-divonr.xyz
 - [ ] [U] real-device E2E: phone sign-in → migration default→username → upload;
       web sign-in same account → same chats; desktop sign-in → same
 - [ ] [O] isolation spot-check via curl; docs final pass; merge google-auth → web-ui, push
@@ -127,3 +132,11 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
 
 ## Notes / decisions log
 (append datestamped notes here as execution proceeds)
+- 2026-06-11: 5b finished by fix-round subagent (followRedirects=false in 4 tests;
+  docs: API_CONTRACT/DEPLOY/env.example) — 139/139 server tests. Step 6 subagent:
+  Google login page + /api/me account chip + logout — 123/123 vitest, build ok.
+  Step 7 [O] deploy done; login will work once [U] adds redirect URIs in Google
+  Console and pastes GOOGLE_OAUTH_CLIENT_SECRET into server/deploy/llm-web.env
+  (then restart llm-web). Merge google-auth→web-ui deliberately held until real
+  E2E passes. Old single-user files left untouched at ~/.llm-api-web root
+  (new layout is users/{username}/ — old files are simply ignored).
