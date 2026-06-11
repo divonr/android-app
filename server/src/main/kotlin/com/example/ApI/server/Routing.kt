@@ -16,13 +16,9 @@ import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.net.URLEncoder
-import java.security.MessageDigest
 
 @Serializable
 data class HealthResponse(val status: String)
-
-@Serializable
-data class LoginRequest(val password: String)
 
 @Serializable
 data class MeResponse(val username: String, val email: String)
@@ -100,20 +96,27 @@ fun ApiKey.masked(): MaskedApiKey {
 }
 
 /**
- * Constant-time password comparison — prevents timing-oracle attacks.
+ * Test-only hook for injecting a Google OAuth client id without env-var mutation.
+ *
+ * When set, [resolveGoogleClientId] returns this value instead of reading
+ * `GOOGLE_OAUTH_CLIENT_ID` from the environment.  Must be set to a non-blank
+ * value before driving `GET /auth/google/start` in tests, and cleared afterwards
+ * (use a try/finally block).
+ *
+ * Thread-safe: [Volatile] ensures visibility across test threads.
  */
-private fun passwordsEqual(submitted: String, expected: String): Boolean =
-    MessageDigest.isEqual(submitted.toByteArray(Charsets.UTF_8), expected.toByteArray(Charsets.UTF_8))
+object GoogleClientIdTestHook {
+    @Volatile var override: String? = null
+}
 
 /**
  * Wires all routes for the application.
  *
  * Public routes (no auth required):
  *   GET  /health
- *   POST /login
  *   POST /logout
- *   GET  /auth/google/start       ← Google login start (Step 5a)
- *   GET  /auth/google/callback    ← Google login callback (Step 5a)
+ *   GET  /auth/google/start       ← Google login start
+ *   GET  /auth/google/callback    ← Google login callback
  *
  * Authenticated routes (`authenticate("session") { route("/api") { ... } }`):
  *   GET  /api/session
@@ -171,29 +174,12 @@ suspend fun ApplicationCall.userContext(): UserContext {
 }
 
 fun Application.configureRouting(
-    authConfig: AuthConfig = AuthConfig(password = resolvePassword()),
     allowedGoogleEmails: Set<String> = resolveAllowedGoogleEmails()
 ) {
     routing {
         // ── Public ───────────────────────────────────────────────────────────
         get("/health") {
             call.respond(HealthResponse(status = "ok"))
-        }
-
-        post("/login") {
-            val body = call.receive<LoginRequest>()
-            if (passwordsEqual(body.password, authConfig.password)) {
-                call.sessions.set(
-                    UserSession(
-                        authenticated = true,
-                        username = "default",
-                        issuedAt = System.currentTimeMillis()
-                    )
-                )
-                call.respond(HttpStatusCode.OK, mapOf("ok" to true))
-            } else {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid password"))
-            }
         }
 
         post("/logout") {
@@ -271,7 +257,7 @@ private fun Route.googleLoginRoutes(allowedGoogleEmails: Set<String>) {
 
     // GET /auth/google/start — redirect to Google authorize URL
     get("/auth/google/start") {
-        val clientId = resolveGoogleClientId()
+        val clientId = GoogleClientIdTestHook.override ?: resolveGoogleClientId()
         if (clientId.isBlank()) {
             call.respond(
                 HttpStatusCode.ServiceUnavailable,

@@ -1,22 +1,18 @@
 package com.example.ApI.server
 
-import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.Message
 import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.model.ThinkingBudgetValue
-import com.example.ApI.data.model.ThoughtsStatus
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.server.streaming.ChatEngine
 import com.example.ApI.tools.ToolSpecification
-import io.ktor.client.plugins.cookies.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.testing.*
 import kotlinx.serialization.json.*
-import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -26,32 +22,26 @@ import kotlin.test.assertTrue
  * Tests for POST /api/chats/{chatId}/messages/{messageId}/resend SSE endpoint.
  *
  * Uses [FakeChatEngine] instances (same approach as [StreamingSendTest]) so no
- * real LLM network calls are made.
+ * real LLM network calls are made.  Auth uses [googleLogin].
  */
 class ResendStreamTest {
 
-    private val testPassword = "resend-test-password"
-    private val testAuthConfig = AuthConfig(
-        password = testPassword,
-        sessionSecret = "resend-test-session-secret-that-is-long-enough"
-    )
-
     private fun seededStorage(): Triple<ServerPlatformStorage, DataRepository, String> {
-        val baseDir = File(System.getProperty("java.io.tmpdir"), "resend-test-${System.nanoTime()}")
+        val baseDir = java.io.File(System.getProperty("java.io.tmpdir"), "resend-test-${System.nanoTime()}")
         baseDir.mkdirs()
         val rootStorage = ServerPlatformStorage(baseDir = baseDir)
-        val userDir = File(baseDir, "users/default")
+        val userDir = java.io.File(baseDir, "users/$TEST_USERNAME")
         userDir.mkdirs()
         val userStorage = ServerPlatformStorage(baseDir = userDir)
         val repo = DataRepository(userStorage)
         repo.saveAppSettings(
-            AppSettings(
-                current_user = "default",
+            com.example.ApI.data.model.AppSettings(
+                current_user = TEST_USERNAME,
                 selected_provider = "fake",
                 selected_model = "fake-model"
             )
         )
-        val chat = repo.createNewChat("default", "Test Chat")
+        val chat = repo.createNewChat(TEST_USERNAME, "Test Chat")
         return Triple(rootStorage, repo, chat.chat_id)
     }
 
@@ -116,7 +106,7 @@ class ResendStreamTest {
     @Test
     fun `POST resend without auth returns 401`() = testApplication {
         val (storage, _, _) = seededStorage()
-        application { module(storage, testAuthConfig) }
+        startWithFakeGoogleAuth(storage, chatEngineFactory = { _ -> fakeEngineSimple })
 
         val response = client.post("/api/chats/some-chat/messages/some-msg/resend") {
             contentType(ContentType.Application.Json)
@@ -128,14 +118,10 @@ class ResendStreamTest {
     @Test
     fun `POST resend unknown chat returns 404`() = testApplication {
         val (storage, _, _) = seededStorage()
-        application { module(storage, testAuthConfig) { _ -> fakeEngineSimple } }
-        val cookieClient = createClient { install(HttpCookies) }
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage, chatEngineFactory = { _ -> fakeEngineSimple })
+        val c = googleLogin(TEST_USER_EMAIL)
 
-        val response = cookieClient.post("/api/chats/does-not-exist/messages/msg-1/resend") {
+        val response = c.post("/api/chats/does-not-exist/messages/msg-1/resend") {
             contentType(ContentType.Application.Json)
             setBody(buildResendBody())
         }
@@ -146,14 +132,10 @@ class ResendStreamTest {
     @Test
     fun `POST resend unknown message returns 404`() = testApplication {
         val (storage, _, chatId) = seededStorage()
-        application { module(storage, testAuthConfig) { _ -> fakeEngineSimple } }
-        val cookieClient = createClient { install(HttpCookies) }
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage, chatEngineFactory = { _ -> fakeEngineSimple })
+        val c = googleLogin(TEST_USER_EMAIL)
 
-        val response = cookieClient.post("/api/chats/$chatId/messages/non-existent-msg/resend") {
+        val response = c.post("/api/chats/$chatId/messages/non-existent-msg/resend") {
             contentType(ContentType.Application.Json)
             setBody(buildResendBody())
         }
@@ -167,16 +149,12 @@ class ResendStreamTest {
 
         // Seed the chat with a user message so we have something to resend
         val userMsg = Message(id = "msg-user-1", role = "user", text = "Hello again")
-        repo.addMessageToChat("default", chatId, userMsg)
+        repo.addMessageToChat(TEST_USERNAME, chatId, userMsg)
 
-        application { module(storage, testAuthConfig) { _ -> fakeEngineSimple } }
-        val cookieClient = createClient { install(HttpCookies) }
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage, chatEngineFactory = { _ -> fakeEngineSimple })
+        val c = googleLogin(TEST_USER_EMAIL)
 
-        val response = cookieClient.post("/api/chats/$chatId/messages/${userMsg.id}/resend") {
+        val response = c.post("/api/chats/$chatId/messages/${userMsg.id}/resend") {
             contentType(ContentType.Application.Json)
             setBody(buildResendBody())
         }
@@ -204,28 +182,24 @@ class ResendStreamTest {
 
         // Seed: user → assistant → user messages
         val userMsg1 = Message(id = "msg-1", role = "user", text = "Question 1")
-        repo.addMessageToChat("default", chatId, userMsg1)
+        repo.addMessageToChat(TEST_USERNAME, chatId, userMsg1)
         val assistantMsg = Message(id = "msg-2", role = "assistant", text = "Answer 1")
-        repo.addMessageToChat("default", chatId, assistantMsg)
+        repo.addMessageToChat(TEST_USERNAME, chatId, assistantMsg)
         val userMsg2 = Message(id = "msg-3", role = "user", text = "Question 2")
-        repo.addMessageToChat("default", chatId, userMsg2)
+        repo.addMessageToChat(TEST_USERNAME, chatId, userMsg2)
 
-        application { module(storage, testAuthConfig) { _ -> fakeEngineSimple } }
-        val cookieClient = createClient { install(HttpCookies) }
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage, chatEngineFactory = { _ -> fakeEngineSimple })
+        val c = googleLogin(TEST_USER_EMAIL)
 
         // Resend from the assistant message (msg-2)
-        cookieClient.post("/api/chats/$chatId/messages/msg-2/resend") {
+        c.post("/api/chats/$chatId/messages/msg-2/resend") {
             contentType(ContentType.Application.Json)
             setBody(buildResendBody())
         }
 
         // After resend: msg-1 (user) should remain; msg-2 (assistant) and msg-3 (user) were
         // deleted; msg-2 was re-added as a new user node; new assistant "Resent" was added
-        val chatAfter = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
+        val chatAfter = repo.loadChatHistory(TEST_USERNAME).chat_history.find { it.chat_id == chatId }
         assertNotNull(chatAfter)
         val msgs = chatAfter!!.messages
         // msg-1 (user) survives; the resent assistant message ("Resent") is the new assistant

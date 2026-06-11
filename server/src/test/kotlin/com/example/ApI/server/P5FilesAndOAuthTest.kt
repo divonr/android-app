@@ -3,7 +3,6 @@ package com.example.ApI.server
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.server.oauth.OAuthTokenExchanger
-import io.ktor.client.plugins.cookies.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
@@ -21,16 +20,11 @@ import kotlin.test.assertNull
 /**
  * Phase 5 tests: file upload (POST /api/files/upload) and OAuth integrations.
  *
- * OAuth tests inject a [FakeOAuthTokenExchanger] that returns scripted results
- * without making any real network calls.  Nothing touches ~/.llm-api-web.
+ * Auth uses [googleLogin] (fake Google login).  Integration OAuth tests inject a
+ * [CombinedFakeExchanger] that handles GitHub/Google Workspace exchanges in
+ * addition to the primary login exchange — without real network calls.
  */
 class P5FilesAndOAuthTest {
-
-    private val testPassword = "p5-test-password"
-    private val testAuthConfig = AuthConfig(
-        password = testPassword,
-        sessionSecret = "p5-test-session-secret-that-is-long-enough"
-    )
 
     // ── Infrastructure helpers ────────────────────────────────────────────────
 
@@ -38,13 +32,13 @@ class P5FilesAndOAuthTest {
         val baseDir = File(System.getProperty("java.io.tmpdir"), "p5-test-${System.nanoTime()}")
         baseDir.mkdirs()
         val rootStorage = ServerPlatformStorage(baseDir = baseDir)
-        val userDir = File(baseDir, "users/default")
+        val userDir = File(baseDir, "users/$TEST_USERNAME")
         userDir.mkdirs()
         val userStorage = ServerPlatformStorage(baseDir = userDir)
         val repo = DataRepository(userStorage)
         repo.saveAppSettings(
             AppSettings(
-                current_user = "default",
+                current_user = TEST_USERNAME,
                 selected_provider = "openai",
                 selected_model = "gpt-4o"
             )
@@ -52,9 +46,16 @@ class P5FilesAndOAuthTest {
         return Pair(rootStorage, repo)
     }
 
-    // ── Fake OAuthTokenExchanger ─────────────────────────────────────────────
+    // ── Combined fake OAuthTokenExchanger ────────────────────────────────────
 
-    class FakeOAuthTokenExchanger(
+    /**
+     * Handles all three exchange operations:
+     * - [exchangeGoogleIdToken] passes the code through as the id_token (same as
+     *   [FakeGoogleLoginExchanger]), so [googleLogin] works.
+     * - [exchangeGitHub] and [exchangeGoogle] return scripted results for the
+     *   integration OAuth tests.
+     */
+    class CombinedFakeExchanger(
         private val githubResult: Result<Pair<GitHubAuth, GitHubUser>> =
             Result.success(
                 Pair(
@@ -86,7 +87,7 @@ class P5FilesAndOAuthTest {
                     )
                 )
             ),
-        private val googleResult: Result<Pair<GoogleWorkspaceAuth, GoogleWorkspaceUser>> =
+        private val googleWorkspaceResult: Result<Pair<GoogleWorkspaceAuth, GoogleWorkspaceUser>> =
             Result.success(
                 Pair(
                     GoogleWorkspaceAuth(
@@ -116,7 +117,15 @@ class P5FilesAndOAuthTest {
             clientId: String,
             clientSecret: String,
             redirectUri: String
-        ): Result<Pair<GoogleWorkspaceAuth, GoogleWorkspaceUser>> = googleResult
+        ): Result<Pair<GoogleWorkspaceAuth, GoogleWorkspaceUser>> = googleWorkspaceResult
+
+        /** Pass the code through as the id_token so [googleLogin] works. */
+        override suspend fun exchangeGoogleIdToken(
+            code: String,
+            clientId: String,
+            clientSecret: String,
+            redirectUri: String
+        ): Result<String> = Result.success(code)
     }
 
     // ── File upload tests ─────────────────────────────────────────────────────
@@ -124,7 +133,7 @@ class P5FilesAndOAuthTest {
     @Test
     fun `POST api files upload without session returns 401`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig) }
+        startWithFakeGoogleAuth(storage)
 
         val response = client.post("/api/files/upload") {
             setBody(
@@ -144,17 +153,11 @@ class P5FilesAndOAuthTest {
     @Test
     fun `POST api files upload with session returns 201 Attachment`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig) }
-        val cookieClient = createClient { install(HttpCookies) }
-
-        // Login
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin(TEST_USER_EMAIL)
 
         val fileContent = "Hello, world! This is a test file.".toByteArray()
-        val response = cookieClient.post("/api/files/upload") {
+        val response = c.post("/api/files/upload") {
             setBody(
                 MultiPartFormDataContent(
                     formData {
@@ -183,16 +186,11 @@ class P5FilesAndOAuthTest {
     @Test
     fun `POST api files upload with empty body returns 400`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig) }
-        val cookieClient = createClient { install(HttpCookies) }
-
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin(TEST_USER_EMAIL)
 
         // Upload multipart with no file parts — just a form field
-        val response = cookieClient.post("/api/files/upload") {
+        val response = c.post("/api/files/upload") {
             setBody(
                 MultiPartFormDataContent(
                     formData {
@@ -208,20 +206,15 @@ class P5FilesAndOAuthTest {
     @Test
     fun `DELETE api files deletes an uploaded file`() = testApplication {
         val (storage, repo) = seededStorage()
-        application { module(storage, testAuthConfig) }
-        val cookieClient = createClient { install(HttpCookies) }
-
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin(TEST_USER_EMAIL)
 
         // Save a file via the repository directly
         val localPath = repo.saveFileLocally("to-delete.txt", "delete me".toByteArray())
         assertNotNull(localPath, "saveFileLocally should succeed")
         assertTrue(File(localPath).exists(), "File should exist before delete")
 
-        val response = cookieClient.delete("/api/files") {
+        val response = c.delete("/api/files") {
             contentType(ContentType.Application.Json)
             setBody("""{"filePath":"$localPath"}""")
         }
@@ -234,15 +227,10 @@ class P5FilesAndOAuthTest {
     @Test
     fun `GET api integrations returns disconnected state when no connections stored`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig) }
-        val cookieClient = createClient { install(HttpCookies) }
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin(TEST_USER_EMAIL)
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
-
-        val response = cookieClient.get("/api/integrations")
+        val response = c.get("/api/integrations")
         assertEquals(HttpStatusCode.OK, response.status)
 
         val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
@@ -253,12 +241,11 @@ class P5FilesAndOAuthTest {
     @Test
     fun `GET api integrations reflects connected state after saving connection`() = testApplication {
         val (storage, repo) = seededStorage()
-        application { module(storage, testAuthConfig) }
-        val cookieClient = createClient { install(HttpCookies) }
+        startWithFakeGoogleAuth(storage)
 
         // Pre-seed a GitHub connection
         repo.saveGitHubConnection(
-            "default",
+            TEST_USERNAME,
             GitHubConnection(
                 auth = GitHubAuth(accessToken = "pre-seeded-token", scope = "repo"),
                 user = GitHubUser(
@@ -272,12 +259,9 @@ class P5FilesAndOAuthTest {
             )
         )
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        val c = googleLogin(TEST_USER_EMAIL)
 
-        val response = cookieClient.get("/api/integrations")
+        val response = c.get("/api/integrations")
         assertEquals(HttpStatusCode.OK, response.status)
 
         val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
@@ -290,7 +274,7 @@ class P5FilesAndOAuthTest {
     @Test
     fun `GET oauth github start without session redirects to login`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig) }
+        startWithFakeGoogleAuth(storage)
         val noRedirectClient = createClient { followRedirects = false }
 
         val response = noRedirectClient.get("/oauth/github/start")
@@ -304,18 +288,27 @@ class P5FilesAndOAuthTest {
     @Test
     fun `GET oauth github start with session redirects to GitHub authorize URL`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig) }
-        val cookieClient = createClient {
-            install(HttpCookies)
+        startWithFakeGoogleAuth(storage, oauthExchanger = CombinedFakeExchanger())
+        val c = googleLogin(TEST_USER_EMAIL)
+        val noRedirectC = createClient { followRedirects = false }
+        // Manually copy session cookie from c to noRedirectC is not practical;
+        // instead use a combined client that carries cookies and does not follow redirects.
+        // We reuse the googleLogin client with followRedirects=false — create a fresh one.
+        val cookieNoRedirectC = createClient {
+            install(io.ktor.client.plugins.cookies.HttpCookies)
             followRedirects = false
         }
-
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
+        // Login first using the combined exchanger
+        GoogleClientIdTestHook.override = "test-client-id"
+        val startResp = try { cookieNoRedirectC.get("/auth/google/start") } finally { GoogleClientIdTestHook.override = null }
+        val location0 = startResp.headers[HttpHeaders.Location]!!
+        val state0 = location0.split("&", "?").find { it.startsWith("state=") }!!.removePrefix("state=")
+        cookieNoRedirectC.get("/auth/google/callback") {
+            parameter("code", "fake-id-token-$TEST_USER_EMAIL")
+            parameter("state", state0)
         }
 
-        val response = cookieClient.get("/oauth/github/start")
+        val response = cookieNoRedirectC.get("/oauth/github/start")
         assertEquals(HttpStatusCode.Found, response.status)
 
         val location = response.headers[HttpHeaders.Location]
@@ -336,34 +329,41 @@ class P5FilesAndOAuthTest {
     @Test
     fun `GET oauth github start stores state in session so callback succeeds`() = testApplication {
         val (storage, repo) = seededStorage()
-        val fakeExchanger = FakeOAuthTokenExchanger()
-        application { module(storage, testAuthConfig, oauthExchanger = fakeExchanger) }
-        val cookieClient = createClient {
-            install(HttpCookies)
+        val exchanger = CombinedFakeExchanger()
+        startWithFakeGoogleAuth(storage, oauthExchanger = exchanger)
+
+        // Use a single cookie-carrying client that does NOT follow redirects
+        val c = createClient {
+            install(io.ktor.client.plugins.cookies.HttpCookies)
             followRedirects = false
         }
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
+        // Step 1: Google login
+        GoogleClientIdTestHook.override = "test-client-id"
+        val startResp = try { c.get("/auth/google/start") } finally { GoogleClientIdTestHook.override = null }
+        val loginLoc = startResp.headers[HttpHeaders.Location]!!
+        val loginState = loginLoc.split("&", "?").find { it.startsWith("state=") }!!.removePrefix("state=")
+        c.get("/auth/google/callback") {
+            parameter("code", "fake-id-token-$TEST_USER_EMAIL")
+            parameter("state", loginState)
         }
 
-        // Start: stores CSRF state in session and redirects to GitHub
-        val startResp = cookieClient.get("/oauth/github/start")
-        assertEquals(HttpStatusCode.Found, startResp.status)
-        val location = startResp.headers[HttpHeaders.Location]!!
-        val stateParam = location.substringAfter("state=").substringBefore("&").let {
+        // Step 2: Start GitHub flow — stores CSRF state in session
+        val ghStartResp = c.get("/oauth/github/start")
+        assertEquals(HttpStatusCode.Found, ghStartResp.status)
+        val ghLocation = ghStartResp.headers[HttpHeaders.Location]!!
+        val stateParam = ghLocation.substringAfter("state=").substringBefore("&").let {
             java.net.URLDecoder.decode(it, "UTF-8")
         }
 
-        // Callback with the correct state should succeed
-        val callbackResp = cookieClient.get("/oauth/github/callback?code=fake-code&state=$stateParam")
+        // Step 3: Callback with correct state → should persist connection
+        val callbackResp = c.get("/oauth/github/callback?code=fake-code&state=$stateParam")
         assertEquals(HttpStatusCode.Found, callbackResp.status, "Callback should redirect on success")
         val callbackLocation = callbackResp.headers[HttpHeaders.Location]
         assertNotNull(callbackLocation)
         assertTrue(callbackLocation!!.contains("github=connected"))
 
-        val saved = repo.loadGitHubConnection("default")
+        val saved = repo.loadGitHubConnection(TEST_USERNAME)
         assertNotNull(saved)
         assertEquals("fake-gh-token", saved!!.auth.accessToken)
     }
@@ -373,19 +373,21 @@ class P5FilesAndOAuthTest {
     @Test
     fun `github callback with missing state returns 400`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig, oauthExchanger = FakeOAuthTokenExchanger()) }
-        val cookieClient = createClient {
-            install(HttpCookies)
+        startWithFakeGoogleAuth(storage, oauthExchanger = CombinedFakeExchanger())
+
+        val c = createClient {
+            install(io.ktor.client.plugins.cookies.HttpCookies)
             followRedirects = false
         }
+        // Login
+        GoogleClientIdTestHook.override = "test-client-id"
+        val startResp = try { c.get("/auth/google/start") } finally { GoogleClientIdTestHook.override = null }
+        val loc = startResp.headers[HttpHeaders.Location]!!
+        val st = loc.split("&", "?").find { it.startsWith("state=") }!!.removePrefix("state=")
+        c.get("/auth/google/callback") { parameter("code", "fake-id-token-$TEST_USER_EMAIL"); parameter("state", st) }
 
-        // No /start call — session has no state
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
-
-        val response = cookieClient.get("/oauth/github/callback?code=some-code&state=wrong-state")
+        // No /oauth/github/start — session has no GitHub state
+        val response = c.get("/oauth/github/callback?code=some-code&state=wrong-state")
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertTrue(response.bodyAsText().contains("state"))
     }
@@ -393,88 +395,93 @@ class P5FilesAndOAuthTest {
     @Test
     fun `github callback with wrong state returns 400`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig, oauthExchanger = FakeOAuthTokenExchanger()) }
-        val cookieClient = createClient {
-            install(HttpCookies)
+        startWithFakeGoogleAuth(storage, oauthExchanger = CombinedFakeExchanger())
+
+        val c = createClient {
+            install(io.ktor.client.plugins.cookies.HttpCookies)
             followRedirects = false
         }
+        // Login
+        GoogleClientIdTestHook.override = "test-client-id"
+        val startResp = try { c.get("/auth/google/start") } finally { GoogleClientIdTestHook.override = null }
+        val loc = startResp.headers[HttpHeaders.Location]!!
+        val st = loc.split("&", "?").find { it.startsWith("state=") }!!.removePrefix("state=")
+        c.get("/auth/google/callback") { parameter("code", "fake-id-token-$TEST_USER_EMAIL"); parameter("state", st) }
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
-
-        // Start flow via GET /oauth/github/start to get a real state in the session
-        cookieClient.get("/oauth/github/start")
+        // Start GitHub flow to get real state in session
+        c.get("/oauth/github/start")
 
         // Submit a DIFFERENT state — should be rejected
-        val response = cookieClient.get("/oauth/github/callback?code=some-code&state=totally-wrong")
+        val response = c.get("/oauth/github/callback?code=some-code&state=totally-wrong")
         assertEquals(HttpStatusCode.BadRequest, response.status)
     }
 
     @Test
     fun `github callback with correct state persists connection and redirects`() = testApplication {
         val (storage, repo) = seededStorage()
-        val fakeExchanger = FakeOAuthTokenExchanger()
-        application { module(storage, testAuthConfig, oauthExchanger = fakeExchanger) }
-        val cookieClient = createClient {
-            install(HttpCookies)
+        startWithFakeGoogleAuth(storage, oauthExchanger = CombinedFakeExchanger())
+
+        val c = createClient {
+            install(io.ktor.client.plugins.cookies.HttpCookies)
             followRedirects = false
         }
+        // Login
+        GoogleClientIdTestHook.override = "test-client-id"
+        val startResp = try { c.get("/auth/google/start") } finally { GoogleClientIdTestHook.override = null }
+        val loc = startResp.headers[HttpHeaders.Location]!!
+        val st = loc.split("&", "?").find { it.startsWith("state=") }!!.removePrefix("state=")
+        c.get("/auth/google/callback") { parameter("code", "fake-id-token-$TEST_USER_EMAIL"); parameter("state", st) }
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
-
-        // Start the flow via GET — this writes the state into the session and redirects
-        val startResp = cookieClient.get("/oauth/github/start")
-        assertEquals(HttpStatusCode.Found, startResp.status)
-        val authorizeUrl = startResp.headers[HttpHeaders.Location]!!
+        // Start the GitHub flow — writes state into session
+        val ghStartResp = c.get("/oauth/github/start")
+        assertEquals(HttpStatusCode.Found, ghStartResp.status)
+        val authorizeUrl = ghStartResp.headers[HttpHeaders.Location]!!
         val stateParam = authorizeUrl.substringAfter("state=").substringBefore("&").let {
             java.net.URLDecoder.decode(it, "UTF-8")
         }
 
-        // Simulate GitHub redirect — use the correct state
-        val callbackResp = cookieClient.get("/oauth/github/callback?code=fake-code&state=$stateParam")
+        // Simulate GitHub redirect with correct state
+        val callbackResp = c.get("/oauth/github/callback?code=fake-code&state=$stateParam")
         assertEquals(HttpStatusCode.Found, callbackResp.status, "Should redirect on success")
         val location = callbackResp.headers[HttpHeaders.Location]
         assertNotNull(location)
-        assertTrue(location!!.contains("github=connected"), "Should redirect to integrations with github=connected")
+        assertTrue(location!!.contains("github=connected"), "Should redirect with github=connected")
 
-        // Verify the connection was actually persisted
-        val saved = repo.loadGitHubConnection("default")
+        // Verify persistence
+        val saved = repo.loadGitHubConnection(TEST_USERNAME)
         assertNotNull(saved, "GitHubConnection should be persisted")
         assertEquals("fake-gh-token", saved!!.auth.accessToken)
         assertEquals("testuser-gh", saved.user.login)
-        assertTrue(repo.isGitHubConnected("default"))
+        assertTrue(repo.isGitHubConnected(TEST_USERNAME))
     }
 
     @Test
     fun `github callback with failed exchange returns 400`() = testApplication {
         val (storage, _) = seededStorage()
-        val failingExchanger = FakeOAuthTokenExchanger(
+        val failingExchanger = CombinedFakeExchanger(
             githubResult = Result.failure(Exception("Token exchange failed: HTTP 401"))
         )
-        application { module(storage, testAuthConfig, oauthExchanger = failingExchanger) }
-        val cookieClient = createClient {
-            install(HttpCookies)
+        startWithFakeGoogleAuth(storage, oauthExchanger = failingExchanger)
+
+        val c = createClient {
+            install(io.ktor.client.plugins.cookies.HttpCookies)
             followRedirects = false
         }
+        // Login
+        GoogleClientIdTestHook.override = "test-client-id"
+        val startResp = try { c.get("/auth/google/start") } finally { GoogleClientIdTestHook.override = null }
+        val loc = startResp.headers[HttpHeaders.Location]!!
+        val st = loc.split("&", "?").find { it.startsWith("state=") }!!.removePrefix("state=")
+        c.get("/auth/google/callback") { parameter("code", "fake-id-token-$TEST_USER_EMAIL"); parameter("state", st) }
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
-
-        val startResp = cookieClient.get("/oauth/github/start")
-        assertEquals(HttpStatusCode.Found, startResp.status)
-        val authorizeUrl = startResp.headers[HttpHeaders.Location]!!
+        val ghStartResp = c.get("/oauth/github/start")
+        assertEquals(HttpStatusCode.Found, ghStartResp.status)
+        val authorizeUrl = ghStartResp.headers[HttpHeaders.Location]!!
         val stateParam = authorizeUrl.substringAfter("state=").substringBefore("&").let {
             java.net.URLDecoder.decode(it, "UTF-8")
         }
 
-        val callbackResp = cookieClient.get("/oauth/github/callback?code=fake-code&state=$stateParam")
+        val callbackResp = c.get("/oauth/github/callback?code=fake-code&state=$stateParam")
         assertEquals(HttpStatusCode.BadRequest, callbackResp.status)
         assertTrue(callbackResp.bodyAsText().contains("Token exchange failed"))
     }
@@ -484,7 +491,7 @@ class P5FilesAndOAuthTest {
     @Test
     fun `GET oauth google start without session redirects to login`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig) }
+        startWithFakeGoogleAuth(storage)
         val noRedirectClient = createClient { followRedirects = false }
 
         val response = noRedirectClient.get("/oauth/google/start")
@@ -497,19 +504,21 @@ class P5FilesAndOAuthTest {
     @Test
     fun `GET oauth google start with session and no client id returns 503`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig, oauthExchanger = FakeOAuthTokenExchanger()) }
-        val cookieClient = createClient {
-            install(HttpCookies)
+        startWithFakeGoogleAuth(storage, oauthExchanger = CombinedFakeExchanger())
+
+        val c = createClient {
+            install(io.ktor.client.plugins.cookies.HttpCookies)
             followRedirects = false
         }
+        // Login
+        GoogleClientIdTestHook.override = "test-client-id"
+        val startResp = try { c.get("/auth/google/start") } finally { GoogleClientIdTestHook.override = null }
+        val loc = startResp.headers[HttpHeaders.Location]!!
+        val st = loc.split("&", "?").find { it.startsWith("state=") }!!.removePrefix("state=")
+        c.get("/auth/google/callback") { parameter("code", "fake-id-token-$TEST_USER_EMAIL"); parameter("state", st) }
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
-
-        // Without GOOGLE_OAUTH_CLIENT_ID env var, should return 503
-        val response = cookieClient.get("/oauth/google/start")
+        // Without GOOGLE_OAUTH_CLIENT_ID env var, /oauth/google/start returns 503
+        val response = c.get("/oauth/google/start")
         assertTrue(
             response.status == HttpStatusCode.ServiceUnavailable || response.status == HttpStatusCode.Found,
             "Expected 503 (not configured) or 302 (env set), got ${response.status}"
@@ -521,59 +530,61 @@ class P5FilesAndOAuthTest {
     @Test
     fun `google callback with missing state returns 400`() = testApplication {
         val (storage, _) = seededStorage()
-        application { module(storage, testAuthConfig, oauthExchanger = FakeOAuthTokenExchanger()) }
-        val cookieClient = createClient {
-            install(HttpCookies)
+        startWithFakeGoogleAuth(storage, oauthExchanger = CombinedFakeExchanger())
+
+        val c = createClient {
+            install(io.ktor.client.plugins.cookies.HttpCookies)
             followRedirects = false
         }
+        // Login
+        GoogleClientIdTestHook.override = "test-client-id"
+        val startResp = try { c.get("/auth/google/start") } finally { GoogleClientIdTestHook.override = null }
+        val loc = startResp.headers[HttpHeaders.Location]!!
+        val st = loc.split("&", "?").find { it.startsWith("state=") }!!.removePrefix("state=")
+        c.get("/auth/google/callback") { parameter("code", "fake-id-token-$TEST_USER_EMAIL"); parameter("state", st) }
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
-
-        val response = cookieClient.get("/oauth/google/callback?code=code&state=wrong")
+        val response = c.get("/oauth/google/callback?code=code&state=wrong")
         assertEquals(HttpStatusCode.BadRequest, response.status)
     }
 
     @Test
     fun `google callback with correct state persists connection and redirects`() = testApplication {
         val (storage, repo) = seededStorage()
-        val fakeExchanger = FakeOAuthTokenExchanger()
-        application { module(storage, testAuthConfig, oauthExchanger = fakeExchanger) }
-        val cookieClient = createClient {
-            install(HttpCookies)
+        startWithFakeGoogleAuth(storage, oauthExchanger = CombinedFakeExchanger())
+
+        val c = createClient {
+            install(io.ktor.client.plugins.cookies.HttpCookies)
             followRedirects = false
         }
+        // Login
+        GoogleClientIdTestHook.override = "test-client-id"
+        val startResp = try { c.get("/auth/google/start") } finally { GoogleClientIdTestHook.override = null }
+        val loc = startResp.headers[HttpHeaders.Location]!!
+        val st = loc.split("&", "?").find { it.startsWith("state=") }!!.removePrefix("state=")
+        c.get("/auth/google/callback") { parameter("code", "fake-id-token-$TEST_USER_EMAIL"); parameter("state", st) }
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
-
-        // If GOOGLE_OAUTH_CLIENT_ID is unset, /google/start returns 503.
-        // In that case, skip the full flow (same code path as GitHub — proven by github tests).
-        val startResp = cookieClient.get("/oauth/google/start")
-        if (startResp.status == HttpStatusCode.ServiceUnavailable) {
+        // If GOOGLE_OAUTH_CLIENT_ID is unset, /oauth/google/start returns 503 — skip
+        val gStartResp = c.get("/oauth/google/start")
+        if (gStartResp.status == HttpStatusCode.ServiceUnavailable) {
             return@testApplication
         }
-        assertEquals(HttpStatusCode.Found, startResp.status)
-        val authorizeUrl = startResp.headers[HttpHeaders.Location]!!
+        assertEquals(HttpStatusCode.Found, gStartResp.status)
+        val authorizeUrl = gStartResp.headers[HttpHeaders.Location]!!
         val stateParam = authorizeUrl.substringAfter("state=").substringBefore("&").let {
             java.net.URLDecoder.decode(it, "UTF-8")
         }
 
-        val callbackResp = cookieClient.get("/oauth/google/callback?code=fake-code&state=$stateParam")
+        val callbackResp = c.get("/oauth/google/callback?code=fake-code&state=$stateParam")
         assertEquals(HttpStatusCode.Found, callbackResp.status)
         val location = callbackResp.headers[HttpHeaders.Location]
         assertNotNull(location)
         assertTrue(location!!.contains("google=connected"))
 
-        val saved = repo.loadGoogleWorkspaceConnection("default")
+        val saved = repo.loadGoogleWorkspaceConnection(TEST_USERNAME)
         assertNotNull(saved)
         assertEquals("fake-google-token", saved!!.auth.accessToken)
         assertEquals("testuser@gmail.com", saved.user.email)
-        assertTrue(repo.isGoogleWorkspaceConnected("default"))
+        assertTrue(repo.isGoogleWorkspaceConnected(TEST_USERNAME))
     }
 
     // ── DELETE /api/integrations/github|google ────────────────────────────────
@@ -581,12 +592,11 @@ class P5FilesAndOAuthTest {
     @Test
     fun `DELETE integrations github disconnects and status reflects it`() = testApplication {
         val (storage, repo) = seededStorage()
-        application { module(storage, testAuthConfig) }
-        val cookieClient = createClient { install(HttpCookies) }
+        startWithFakeGoogleAuth(storage)
 
         // Pre-seed connection
         repo.saveGitHubConnection(
-            "default",
+            TEST_USERNAME,
             GitHubConnection(
                 auth = GitHubAuth(accessToken = "tok", scope = "repo"),
                 user = GitHubUser(
@@ -598,20 +608,17 @@ class P5FilesAndOAuthTest {
                 )
             )
         )
-        assertTrue(repo.isGitHubConnected("default"))
+        assertTrue(repo.isGitHubConnected(TEST_USERNAME))
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        val c = googleLogin(TEST_USER_EMAIL)
 
-        val deleteResp = cookieClient.delete("/api/integrations/github")
+        val deleteResp = c.delete("/api/integrations/github")
         assertEquals(HttpStatusCode.NoContent, deleteResp.status)
 
-        assertFalse(repo.isGitHubConnected("default"))
+        assertFalse(repo.isGitHubConnected(TEST_USERNAME))
 
         // Status endpoint also reflects disconnected
-        val statusResp = cookieClient.get("/api/integrations")
+        val statusResp = c.get("/api/integrations")
         val body = Json.parseToJsonElement(statusResp.bodyAsText()).jsonObject
         assertEquals(false, body["isGitHubConnected"]?.jsonPrimitive?.booleanOrNull)
     }
@@ -621,12 +628,11 @@ class P5FilesAndOAuthTest {
     @Test
     fun `PATCH integrations google services updates enabled services`() = testApplication {
         val (storage, repo) = seededStorage()
-        application { module(storage, testAuthConfig) }
-        val cookieClient = createClient { install(HttpCookies) }
+        startWithFakeGoogleAuth(storage)
 
         // Pre-seed Google connection
         repo.saveGoogleWorkspaceConnection(
-            "default",
+            TEST_USERNAME,
             GoogleWorkspaceConnection(
                 auth = GoogleWorkspaceAuth(
                     accessToken = "tok", refreshToken = null,
@@ -637,12 +643,9 @@ class P5FilesAndOAuthTest {
             )
         )
 
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        val c = googleLogin(TEST_USER_EMAIL)
 
-        val patchResp = cookieClient.patch("/api/integrations/google/services") {
+        val patchResp = c.patch("/api/integrations/google/services") {
             contentType(ContentType.Application.Json)
             setBody("""{"gmail":false,"calendar":true,"drive":false}""")
         }
@@ -654,7 +657,7 @@ class P5FilesAndOAuthTest {
         assertEquals(false, body["drive"]?.jsonPrimitive?.booleanOrNull)
 
         // Verify persistence
-        val saved = repo.loadGoogleWorkspaceConnection("default")
+        val saved = repo.loadGoogleWorkspaceConnection(TEST_USERNAME)
         assertNotNull(saved)
         assertFalse(saved.enabledServices.gmail)
         assertTrue(saved.enabledServices.calendar)

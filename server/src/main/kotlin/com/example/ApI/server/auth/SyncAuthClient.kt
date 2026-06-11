@@ -102,25 +102,22 @@ class RealSyncAuthClient(
  *
  * Derives a deterministic username by sanitizing the email exactly as the
  * sync server would: lowercase, every character outside `[a-z0-9]` → `_`.
+ * The minted token is `"fake-sync-token-{username}"` so tests can assert on
+ * the exact value stored in AppSettings.
  *
- * @param tokenSuffix  Appended to "fake-token-" to form the minted token.
  * @param alwaysNull   When true, simulates an unavailable sync server.
  */
 class FakeSyncAuthClient(
-    private val tokenSuffix: String = "test",
     private val alwaysNull: Boolean = false
 ) : SyncAuthClient {
 
     override suspend fun exchange(idToken: String): SyncAuthResult? {
         if (alwaysNull) return null
-        // The fake verifier is expected to populate claims before exchange is
-        // called; extract email from the token string by convention in tests.
-        // Here we use a deterministic mapping: return a result for the caller
-        // to identify.  Callers in GoogleLoginTest pass a parseable fake token.
+        // Extract email from the conventional test token format "fake-id-token-{email}".
         val email = parseFakeTokenEmail(idToken)
         val username = sanitizeEmail(email)
         return SyncAuthResult(
-            token = "fake-token-$tokenSuffix",
+            token = "fake-sync-token-$username",
             username = username,
             email = email
         )

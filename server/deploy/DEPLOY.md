@@ -11,8 +11,12 @@ Browser  -->  HTTPS  -->  Cloudflare tunnel (app.api-divonr.xyz)  -->  localhost
                                                         Ktor server (:server module)
                                                         serving React SPA + REST API
                                                                |
-                                                        DataRepository (~/.llm-api-web)
+                                                  UserRegistry (per-user DataRepository)
+                                                  Data: ~/.llm-api-web/users/{username}/
 ```
+
+Login is **Google Sign-In only** — no password.  Each Google account gets its own
+per-user data directory bootstrapped on first login.
 
 ---
 
@@ -29,8 +33,9 @@ nano server/deploy/llm-web.env
 ```
 
 Required fields to set:
-- `WEB_UI_PASSWORD` — the password for the web UI login page
 - `WEB_UI_SESSION_SECRET` — a long random secret for signing session cookies
+- `GOOGLE_OAUTH_CLIENT_ID` — Google OAuth client ID (see Step 5 below)
+- `GOOGLE_OAUTH_CLIENT_SECRET` — Google OAuth client secret
 
 Generate a random secret:
 ```bash
@@ -100,7 +105,33 @@ Verify: `curl https://app.api-divonr.xyz/health` should return `{"status":"ok"}`
 
 ---
 
-## Step 5: GitHub OAuth App configuration
+## Step 5: Google Cloud Console — Sign-In OAuth client
+
+This client is used for both **user login** (`/auth/google/callback`) and
+(optionally) **Google Workspace integration** (`/oauth/google/callback`).
+
+1. Go to **Google Cloud Console → APIs & Services → Credentials**
+2. Create a new **OAuth 2.0 Client ID**:
+   - Application type: **Web application**
+   - Name: "ApI Web"
+   - Authorized redirect URIs (add both):
+     - `https://app.api-divonr.xyz/auth/google/callback`  ← user login
+     - `https://app.api-divonr.xyz/oauth/google/callback` ← Workspace integration
+3. Copy the **Client ID** and **Client Secret**
+4. Add to `server/deploy/llm-web.env`:
+   ```
+   GOOGLE_OAUTH_CLIENT_ID=your-client-id.apps.googleusercontent.com
+   GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
+   ```
+5. Optionally restrict logins to specific accounts:
+   ```
+   ALLOWED_GOOGLE_EMAILS=alice@example.com,bob@example.com
+   ```
+6. Restart the service: `sudo systemctl restart llm-web`
+
+---
+
+## Step 6: GitHub OAuth App configuration (optional)
 
 If you want GitHub integration (connecting your GitHub account to sync files):
 
@@ -115,25 +146,6 @@ separate web OAuth app.
 
 ---
 
-## Step 6: Google OAuth configuration
-
-If you want Google Workspace integration:
-
-1. Go to **Google Cloud Console → APIs & Services → Credentials**
-2. Create a new **OAuth 2.0 Client ID**:
-   - Application type: **Web application**
-   - Name: "ApI Web"
-   - Authorized redirect URIs: `https://app.api-divonr.xyz/oauth/google/callback`
-3. Copy the **Client ID** and **Client Secret**
-4. Add to `server/deploy/llm-web.env`:
-   ```
-   GOOGLE_OAUTH_CLIENT_ID=your-client-id.apps.googleusercontent.com
-   GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
-   ```
-5. Restart the service: `sudo systemctl restart llm-web`
-
----
-
 ## Step 7: Off-box smoke test
 
 From any machine (or your phone):
@@ -145,10 +157,11 @@ curl https://app.api-divonr.xyz/health
 
 # Open in browser
 open https://app.api-divonr.xyz
-# Should show the login page
+# Should show the login page with "Sign in with Google"
 ```
 
-Log in with the password you set in `WEB_UI_PASSWORD`.
+Click **Sign in with Google**, complete the OAuth flow, and verify you land on the
+app home page.  `GET /api/me` should return your username and email.
 
 ---
 
@@ -180,83 +193,32 @@ Or use the convenience script for a full rebuild + run (dev use only):
 Server data is stored in `~/.llm-api-web/` by default.
 Override with `LLM_WEB_DATA_DIR=/path/to/dir` in `llm-web.env`.
 
-This is separate from the phone/desktop data — the web server maintains
-its own independent chat history, settings, and API keys.
+Each logged-in Google account gets its own directory:
+```
+~/.llm-api-web/
+  users/
+    alice_example_com/   ← Alice's chat history, settings, API keys
+    bob_example_com/     ← Bob's data
+```
 
 ---
 
-## Remote sync (share chats with phone/desktop)
+## Remote sync (per-user, automatic)
 
-The web server can pull chat history from the same sync server used by your
-phone/desktop app.  Once enabled, the web UI shows the same chats as your
-other devices without any manual import/export.
+Sync is configured automatically at login: the server exchanges the user's
+Google ID token with the sync server (`POST /auth/google` on the sync server)
+to mint a per-user bearer token, then seeds that token into the user's
+`AppSettings.remoteSync` block.  No manual token configuration is needed.
 
-### How it works
+Set `SYNC_SERVER_URL` to point at your sync server (defaults to
+`http://localhost:8090`).  Set `SYNC_PULL_INTERVAL_SECONDS` to control how
+often background pulls run (default 20 s).
 
-On startup the server:
-1. Seeds `RemoteSyncSettings` into `~/.llm-api-web` from the env vars below.
-2. Calls `startSync()` to bring the engine online.
-3. Does an immediate `pullNow()` so existing chats appear right away.
-4. Runs a background loop that calls `pullNow()` every `SYNC_PULL_INTERVAL_SECONDS`
-   (default 20 s) so changes made on phone/desktop show up automatically.
+### Sync API endpoints (debugging)
 
-Pushes happen automatically whenever the server writes a file (same hook as
-desktop/Android).  The sync server is the source of truth.
-
-### Configuration
-
-Add these lines to `server/deploy/llm-web.env` (already gitignored):
-
-```env
-# Enable remote sync
-SYNC_ENABLED=true
-
-# URL of the sync server — use localhost if it runs on the same box
-SYNC_SERVER_URL=http://localhost:8090
-
-# Bearer token from the sync server's env (KEEP SECRET — env file only)
-SYNC_TOKEN=<the-bearer-token-from-sync-server-env>
-
-# Username whose data to load (matches SYNC_USER on phone/desktop)
-SYNC_USER=default
-
-# Optional: pull interval in seconds (default 20)
-# SYNC_PULL_INTERVAL_SECONDS=20
-
-# Optional: also sync API keys (default false)
-# Keys are encrypted at rest on the sync server.  Enable only if you want
-# the web server to share the same provider API keys as your phone/desktop.
-# SYNC_API_KEYS=false
-```
-
-> **Security note:** `SYNC_TOKEN` is a secret.  It must only ever live in
-> `llm-web.env` (which is gitignored) and in the sync server's env file.
-> The token is never logged, never sent to clients, and never stored in any
-> response body — the server keeps it server-side only.
-
-### Apply changes
-
-After editing `llm-web.env`:
-
-```bash
-sudo systemctl restart llm-web
-journalctl -u llm-web -f
-```
-
-Look for log lines like:
-```
-Remote sync configured: url=http://localhost:8090, user=default, interval=20s
-Remote sync engine started — triggering initial pull...
-Periodic sync pull loop started (interval=20s)
-```
-
-### Sync API endpoints (optional / debugging)
-
-Two authenticated endpoints are available for debugging:
+Both require a valid session cookie.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET`  | `/api/sync/status` | Returns `{enabled, serverBaseUrl, lastChangeTick}`. Token omitted. |
+| `GET`  | `/api/sync/status` | Returns `{enabled, serverBaseUrl, lastChangeTick, reachable}`. Token omitted. |
 | `POST` | `/api/sync/pull`   | Triggers an immediate pull. Returns `{ok:true}`. |
-
-Both require a valid session cookie (same auth as the rest of the API).

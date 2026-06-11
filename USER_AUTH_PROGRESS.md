@@ -90,19 +90,19 @@ Sync server repo: `/home/divonr/ApI/sync-server` (own git repo since Step 0).
 - [x] existing tests adapted to users/default/ layout — 131 tests, 0 failures
 - [x] build `:server:test :server:installDist` ✓ (orchestrator re-verified)
 - commit (5a): 3771fb6
-### 5b (TODO) — remove password auth, Google-only login, isolation tests, docs
-- [ ] remove password login + WEB_UI_PASSWORD + AuthConfig.password; delete legacy
+### 5b (DONE) — remove password auth, Google-only login, isolation tests, docs
+- [x] remove password login + WEB_UI_PASSWORD + AuthConfig.password; delete legacy
       applySyncConfig/SyncConfig env seeding (SYNC_ENABLED/SYNC_USER/SYNC_TOKEN) —
       superseded by per-user sync; keep SYNC_SERVER_URL + SYNC_PULL_INTERVAL_SECONDS
-- [ ] NEW `GoogleLoginTest.kt` (was deferred from 5a): fake verifier + fake
+- [x] NEW `GoogleLoginTest.kt` (was deferred from 5a): fake verifier + fake
       SyncAuthClient; login flow sets session + creates users/{username}/ with
       seeded settings; allowlist reject; /api/me; sync_unavailable redirect;
       two users → two dirs
-- [ ] rewrite all tests' login helper: password POST /login → fake-Google login
+- [x] rewrite all tests' login helper: password POST /login → fake-Google login
       (helper in ONE shared place); AuthTest reworked for new scheme
-- [ ] new isolation test: user A session cannot read user B chats/keys
-- [ ] API_CONTRACT.md auth section + llm-web.env.example + DEPLOY.md updated
-- [ ] build `:server:test :server:installDist`, commit
+- [x] new isolation test: user A session cannot read user B chats/keys
+- [x] API_CONTRACT.md auth section + llm-web.env.example + DEPLOY.md updated
+- [x] build `:server:test :server:installDist`, commit
 - commit (5b):
 
 ## Step 6 — Web frontend (web/) [S]

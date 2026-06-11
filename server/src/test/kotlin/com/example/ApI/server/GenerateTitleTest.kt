@@ -3,7 +3,6 @@ package com.example.ApI.server
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.Message
 import com.example.ApI.data.repository.DataRepository
-import io.ktor.client.plugins.cookies.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -19,35 +18,29 @@ import kotlin.test.assertTrue
  * Tests for POST /api/chats/{chatId}/generate-title.
  *
  * A [FakeTitleGenerator] is injected via [titleGeneratorFactory] so no real
- * LLM network calls are made during tests.
+ * LLM network calls are made during tests.  Auth uses [googleLogin].
  */
 class GenerateTitleTest {
-
-    private val testPassword = "gt-test-password"
-    private val testAuthConfig = AuthConfig(
-        password = testPassword,
-        sessionSecret = "gt-test-session-secret-that-is-long-enough"
-    )
 
     private fun seededStorage(withMessages: Boolean = true): Triple<ServerPlatformStorage, DataRepository, String> {
         val baseDir = File(System.getProperty("java.io.tmpdir"), "gt-test-${System.nanoTime()}")
         baseDir.mkdirs()
         val rootStorage = ServerPlatformStorage(baseDir = baseDir)
-        val userDir = File(baseDir, "users/default")
+        val userDir = File(baseDir, "users/$TEST_USERNAME")
         userDir.mkdirs()
         val userStorage = ServerPlatformStorage(baseDir = userDir)
         val repo = DataRepository(userStorage)
         repo.saveAppSettings(
             AppSettings(
-                current_user = "default",
+                current_user = TEST_USERNAME,
                 selected_provider = "openai",
                 selected_model = "gpt-4o"
             )
         )
-        val chat = repo.createNewChat("default", "Old Title")
+        val chat = repo.createNewChat(TEST_USERNAME, "Old Title")
         if (withMessages) {
             repo.addMessageToChat(
-                "default", chat.chat_id,
+                TEST_USERNAME, chat.chat_id,
                 Message(role = "user", text = "What is Kotlin?")
             )
         }
@@ -67,7 +60,7 @@ class GenerateTitleTest {
     @Test
     fun `POST generate-title without auth returns 401`() = testApplication {
         val (storage, _, chatId) = seededStorage()
-        application { module(storage, testAuthConfig) }
+        startWithFakeGoogleAuth(storage)
 
         val response = client.post("/api/chats/$chatId/generate-title") {
             contentType(ContentType.Application.Json)
@@ -79,14 +72,10 @@ class GenerateTitleTest {
     @Test
     fun `POST generate-title unknown chatId returns 404`() = testApplication {
         val (storage, _, _) = seededStorage()
-        application { module(storage, testAuthConfig, titleGeneratorFactory = { _ -> fakeTitleGenerator }) }
-        val cookieClient = createClient { install(HttpCookies) }
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage, titleGeneratorFactory = { _ -> fakeTitleGenerator })
+        val c = googleLogin(TEST_USER_EMAIL)
 
-        val response = cookieClient.post("/api/chats/non-existent-chat-id/generate-title") {
+        val response = c.post("/api/chats/non-existent-chat-id/generate-title") {
             contentType(ContentType.Application.Json)
             setBody("""{"provider":"auto"}""")
         }
@@ -97,14 +86,10 @@ class GenerateTitleTest {
     @Test
     fun `POST generate-title returns title and persists it`() = testApplication {
         val (storage, repo, chatId) = seededStorage()
-        application { module(storage, testAuthConfig, titleGeneratorFactory = { _ -> fakeTitleGenerator }) }
-        val cookieClient = createClient { install(HttpCookies) }
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage, titleGeneratorFactory = { _ -> fakeTitleGenerator })
+        val c = googleLogin(TEST_USER_EMAIL)
 
-        val response = cookieClient.post("/api/chats/$chatId/generate-title") {
+        val response = c.post("/api/chats/$chatId/generate-title") {
             contentType(ContentType.Application.Json)
             setBody("""{"provider":"auto"}""")
         }
@@ -114,7 +99,7 @@ class GenerateTitleTest {
         assertEquals("Kotlin Explained", body["title"]?.jsonPrimitive?.content)
 
         // Verify the title was persisted to storage
-        val persistedChat = repo.loadChatHistory("default").chat_history.find { it.chat_id == chatId }
+        val persistedChat = repo.loadChatHistory(TEST_USERNAME).chat_history.find { it.chat_id == chatId }
         assertNotNull(persistedChat)
         assertEquals("Kotlin Explained", persistedChat!!.preview_name)
     }
@@ -122,15 +107,11 @@ class GenerateTitleTest {
     @Test
     fun `POST generate-title with body omitted still works (defaults to auto)`() = testApplication {
         val (storage, _, chatId) = seededStorage()
-        application { module(storage, testAuthConfig, titleGeneratorFactory = { _ -> fakeTitleGenerator }) }
-        val cookieClient = createClient { install(HttpCookies) }
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage, titleGeneratorFactory = { _ -> fakeTitleGenerator })
+        val c = googleLogin(TEST_USER_EMAIL)
 
         // Empty/missing body — route defaults to auto
-        val response = cookieClient.post("/api/chats/$chatId/generate-title") {
+        val response = c.post("/api/chats/$chatId/generate-title") {
             contentType(ContentType.Application.Json)
             setBody("{}")
         }
@@ -140,14 +121,10 @@ class GenerateTitleTest {
     @Test
     fun `POST generate-title generation failure returns 500`() = testApplication {
         val (storage, _, chatId) = seededStorage()
-        application { module(storage, testAuthConfig, titleGeneratorFactory = { _ -> failingTitleGenerator }) }
-        val cookieClient = createClient { install(HttpCookies) }
-        cookieClient.post("/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"password":"$testPassword"}""")
-        }
+        startWithFakeGoogleAuth(storage, titleGeneratorFactory = { _ -> failingTitleGenerator })
+        val c = googleLogin(TEST_USER_EMAIL)
 
-        val response = cookieClient.post("/api/chats/$chatId/generate-title") {
+        val response = c.post("/api/chats/$chatId/generate-title") {
             contentType(ContentType.Application.Json)
             setBody("""{"provider":"auto"}""")
         }

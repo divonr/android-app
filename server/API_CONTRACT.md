@@ -9,44 +9,69 @@ Data model class names reference the `:shared` module (`com.example.ApI.data.mod
 ## Base URL
 
 All API endpoints are prefixed with `/api`.
-Auth endpoints (`/login`, `/logout`, `/oauth/*`) live at the root.
+Auth endpoints (`/auth/google/*`, `/logout`, `/oauth/*`) live at the root.
 `/health` lives at the root (unauthenticated).
 
 ```
 GET  /health                        → 200 {"status":"ok"}
-POST /login                         → set session cookie
+GET  /auth/google/start             → redirect to Google sign-in
+GET  /auth/google/callback          → Google sign-in callback (sets session cookie)
 POST /logout                        → clear session cookie
-GET  /oauth/github/callback         → GitHub OAuth callback
-GET  /oauth/google/callback         → Google OAuth callback
+GET  /oauth/github/callback         → GitHub Workspace OAuth callback
+GET  /oauth/google/callback         → Google Workspace OAuth callback
+GET  /api/me                        → current user identity (authenticated)
 GET  /api/**                        → all require valid session
 ```
 
+**Password login (`POST /login`) has been removed.** The only login path is Google Sign-In.
+
 ---
 
-## Authentication (P1)
+## Authentication (Step 5b — Google-only login)
 
 ### Session mechanism
 
-- Password read from environment variable `WEB_UI_PASSWORD` at startup.
+- Login is via Google Sign-In only; no password.
 - Ktor `Sessions` plugin with a signed HTTP-only cookie (`llm_web_session`).
+- Cookie signing secret from `WEB_UI_SESSION_SECRET` environment variable.
 - All `/api/**` routes protected by `authenticate("session") { }`.
+- Each session is scoped to the authenticated user (`username`, `email`); all
+  data reads and writes go to that user's per-user directory
+  (`{LLM_WEB_DATA_DIR}/users/{username}/`).
 
-### POST /login
+### GET /auth/google/start
 
-**Request** (JSON body):
+Generates a CSRF state token, stores it in a pre-auth session cookie, and
+redirects the browser to Google's OAuth 2.0 authorization page.
+
+**Response 302** → `https://accounts.google.com/o/oauth2/v2/auth?...`
+
+**Response 503** — when `GOOGLE_OAUTH_CLIENT_ID` is not configured:
 ```json
-{ "password": "string" }
+{ "error": "Google login not configured — set GOOGLE_OAUTH_CLIENT_ID" }
 ```
 
-**Response 200** — sets `Set-Cookie: llm_web_session=<signed>; HttpOnly; SameSite=Strict`:
-```json
-{ "ok": true }
-```
+### GET /auth/google/callback?code={code}&state={state}
 
-**Response 401**:
-```json
-{ "error": "Invalid password" }
-```
+Completes the Google Sign-In flow: validates CSRF state, exchanges the
+authorization code for an ID token, verifies the token, checks the optional
+email allowlist, then exchanges with the sync server to obtain a canonical
+username and per-user sync token.  On success, sets the authenticated session
+cookie and redirects to `/`.
+
+**Response 302** → `/` (success, session cookie set)
+
+**Error redirects** (302):
+
+| Location | Cause |
+|---|---|
+| `/login?error=invalid_state` | CSRF state missing or mismatch |
+| `/login?error=token_exchange_failed` | Google code→token exchange failed |
+| `/login?error=token_invalid` | ID token failed verification |
+| `/login?error=not_allowed` | Email not in `ALLOWED_GOOGLE_EMAILS` allowlist |
+| `/login?error=sync_unavailable` | Sync server did not return a username/token |
+
+**Response 400** — missing `code` or `state` query parameters.
 
 ### POST /logout
 
@@ -56,6 +81,17 @@ Clears the session cookie.
 ```json
 { "ok": true }
 ```
+
+### GET /api/me
+
+Returns the identity of the currently authenticated user.
+
+**Response 200**:
+```json
+{ "username": "alice_example_com", "email": "alice@example.com" }
+```
+
+**Response 401** — no valid session.
 
 ---
 
@@ -795,8 +831,7 @@ Standard HTTP status codes:
 
 ## Notes for implementers
 
-- The server is **single-user**: all repository calls use `loadAppSettings().current_user` for the `username` parameter. No per-request username routing needed.
-- The `DataRepository` instance is a singleton in `AppModule` (created once at startup). Thread safety for concurrent requests is handled by Ktor's coroutine dispatcher and the fact that `DataRepository` file operations are synchronous (low concurrency expected).
+- The server is **multi-user**: each authenticated session carries a `username`; all repository calls resolve the per-user `DataRepository` via `UserRegistry.context(username)`. Data is stored under `{LLM_WEB_DATA_DIR}/users/{username}/`.
+- `UserRegistry` lazily creates a `DataRepository` (and optionally a `SyncEngine`) per user on first login. Engines are stopped on application shutdown.
 - SSE streaming (`POST /api/chat/send`) uses Ktor's `respondTextWriter` (Ktor 2.x) or `sse { }` (Ktor 3.x). P3 will confirm the approach after evaluating library availability. The event format above is the contract regardless of Ktor version.
-- Password comparison must use constant-time equality to prevent timing attacks.
 - The `ktor-server-sse` artifact is only available in Ktor 3.x. If staying on 2.3.x for P3, implement SSE manually via `respondTextWriter` with appropriate `Content-Type: text/event-stream` header and chunked encoding.

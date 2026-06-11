@@ -1,6 +1,5 @@
 package com.example.ApI.server
 
-import com.example.ApI.data.model.RemoteSyncSettings
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.server.auth.GoogleTokenVerifier
 import com.example.ApI.server.auth.RealGoogleTokenVerifier
@@ -18,7 +17,8 @@ import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
 import io.ktor.server.sessions.*
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
@@ -63,14 +63,9 @@ data class UserSession(
 /**
  * Auth configuration injected into [Application.module].
  *
- * Separating it from the module signature lets tests supply a known password
- * without relying on the real `WEB_UI_PASSWORD` environment variable.
- *
- * @param password  The password that `POST /login` accepts.
  * @param sessionSecret  The signing secret for the session cookie.
  */
 data class AuthConfig(
-    val password: String,
     val sessionSecret: String = resolveSessionSecret()
 )
 
@@ -80,63 +75,6 @@ fun resolveSessionSecret(): String {
     if (!env.isNullOrBlank()) return env
     val random = ByteArray(32).also { SecureRandom().nextBytes(it) }
     return Base64.getEncoder().encodeToString(random)
-}
-
-/** Reads the web-UI password from the environment, with a noisy dev fallback. */
-fun resolvePassword(): String {
-    val pw = System.getenv("WEB_UI_PASSWORD")
-    if (!pw.isNullOrBlank()) return pw
-    log.warn("WEB_UI_PASSWORD is not set — using insecure default password 'changeme'. Set WEB_UI_PASSWORD for production use.")
-    return "changeme"
-}
-
-// ── Remote sync configuration ────────────────────────────────────────────────
-
-/**
- * Remote-sync configuration injected into [Application.module].
- *
- * In Step 5a this is still used to seed the "default" user's sync config from
- * environment variables (backward-compatible with the pre-5a deployment).
- * Step 5b will remove this in favour of per-user sync seeded at login.
- *
- * @param enabled              Whether to activate sync for the "default" user.
- * @param serverBaseUrl        Sync server base URL (mirrors SYNC_SERVER_URL env var).
- * @param authToken            Bearer token (mirrors SYNC_TOKEN env var).
- * @param syncUser             Username whose data to load; null = keep existing current_user.
- * @param pullIntervalSeconds  Seconds between periodic background pulls.
- * @param startEngine          When false, config is seeded but no engine is started.
- *                             Used in tests to assert config without opening sockets.
- * @param syncApiKeys          Whether to sync API keys (mirrors SYNC_API_KEYS env var).
- */
-data class SyncConfig(
-    val enabled: Boolean = false,
-    val serverBaseUrl: String = RemoteSyncSettings().serverBaseUrl,
-    val authToken: String = "",
-    val syncUser: String? = null,
-    val pullIntervalSeconds: Long = 20L,
-    val startEngine: Boolean = true,
-    val syncApiKeys: Boolean = false
-)
-
-/** Reads sync configuration from environment variables. */
-fun resolveSyncConfig(): SyncConfig {
-    val rawEnabled = System.getenv("SYNC_ENABLED")?.trim()?.lowercase()
-    val enabled = rawEnabled == "true" || rawEnabled == "1"
-    val serverBaseUrl = System.getenv("SYNC_SERVER_URL")?.takeIf { it.isNotBlank() }
-        ?: RemoteSyncSettings().serverBaseUrl
-    val authToken = System.getenv("SYNC_TOKEN") ?: ""
-    val syncUser = System.getenv("SYNC_USER")?.takeIf { it.isNotBlank() }
-    val pullIntervalSeconds = System.getenv("SYNC_PULL_INTERVAL_SECONDS")?.toLongOrNull() ?: 20L
-    val rawSyncApiKeys = System.getenv("SYNC_API_KEYS")?.trim()?.lowercase()
-    val syncApiKeys = rawSyncApiKeys == "true" || rawSyncApiKeys == "1"
-    return SyncConfig(
-        enabled = enabled,
-        serverBaseUrl = serverBaseUrl,
-        authToken = authToken,
-        syncUser = syncUser,
-        pullIntervalSeconds = pullIntervalSeconds,
-        syncApiKeys = syncApiKeys
-    )
 }
 
 /** Reads the allowed Google emails allowlist from the environment. */
@@ -155,24 +93,22 @@ fun main() {
  *
  * Called by [embeddedServer] at startup and also by [testApplication] in tests.
  *
- * **Injection surface** (same parameter names as before; new params have defaults):
+ * **Injection surface**:
  * @param storage               Root [ServerPlatformStorage].  Tests pass a temp dir.
- * @param authConfig            Auth credentials.  Tests inject a known password.
+ * @param authConfig            Session signing secret.  Tests may inject a fixed secret.
  * @param oauthExchanger        GitHub / Google Workspace token exchanger.
- * @param syncConfig            Legacy env-driven sync config for the "default" user.
  * @param titleGeneratorFactory Factory for per-user [TitleGenerator].
  * @param chatEngineFactory     Factory for per-user [ChatEngine].
  * @param googleTokenVerifier   Google ID token verifier.  Tests pass a fake.
  * @param syncAuthClient        Sync-server exchanger.  Tests pass a fake.
  * @param startRegistry         When false, the registry's sync engine is never
- *                              started (test isolation flag — mirrors [SyncConfig.startEngine]).
+ *                              started (test isolation flag — suppresses all network calls).
  * @param allowedGoogleEmails   Allowlist for Google login.  Empty = allow all.
  */
 fun Application.module(
     storage: ServerPlatformStorage = ServerPlatformStorage(),
-    authConfig: AuthConfig = AuthConfig(password = resolvePassword()),
+    authConfig: AuthConfig = AuthConfig(),
     oauthExchanger: com.example.ApI.server.oauth.OAuthTokenExchanger? = null,
-    syncConfig: SyncConfig = resolveSyncConfig(),
     titleGeneratorFactory: ((DataRepository) -> TitleGenerator)? = null,
     googleTokenVerifier: GoogleTokenVerifier? = null,
     syncAuthClient: SyncAuthClient? = null,
@@ -216,18 +152,6 @@ fun Application.module(
         syncAuthClient = syncAuthClient ?: RealSyncAuthClient(syncServerUrl)
     )
     installAppModule(appModule)
-
-    // ── Legacy sync bootstrap (seeds the "default" user's AppSettings) ────────
-    applySyncConfig(registry, syncConfig)
-
-    // ── Models cache bootstrap ───────────────────────────────────────────────
-    // Mirrors the Android app startup: fetch the GitHub-backed models.json into
-    // the local cache (no-op while the 24h cache is still valid).
-    launch(Dispatchers.IO) {
-        val defaultRepo = registry.context("default").repository
-        runCatching { defaultRepo.refreshModelsIfNeeded() }
-            .onFailure { log.warn("Startup models refresh failed: ${it.message}") }
-    }
 
     // ── Sessions ─────────────────────────────────────────────────────────────
     install(Sessions) {
@@ -295,80 +219,7 @@ fun Application.module(
     }
 
     // ── Routes ───────────────────────────────────────────────────────────────
-    configureRouting(authConfig, allowedGoogleEmails)
-}
-
-// ── Legacy remote sync bootstrap helper ────────────────────────────────────────
-
-/**
- * Seeds [syncConfig] into the **"default" user's** AppSettings and, when enabled,
- * starts the sync engine and a periodic pull loop for that user.
- *
- * This function is kept for Step 5a backward compatibility — it allows existing
- * deployments driven by `SYNC_ENABLED/SYNC_TOKEN/SYNC_USER` env vars to continue
- * working without any env changes.  It will be removed in Step 5b.
- *
- * The "default" user context is created synchronously (via [runBlocking]) so the
- * config is written before the server begins handling requests.
- */
-private fun Application.applySyncConfig(registry: UserRegistry, syncConfig: SyncConfig) {
-    if (!syncConfig.enabled) return
-
-    if (syncConfig.authToken.isBlank()) {
-        log.warn(
-            "SYNC_ENABLED=true but SYNC_TOKEN is blank — remote sync will NOT start. " +
-            "Set SYNC_TOKEN in server/deploy/llm-web.env to enable sync."
-        )
-        return
-    }
-
-    // Acquire the "default" user's repository synchronously at startup.
-    val defaultRepo = runBlocking { registry.context("default").repository }
-
-    val current = defaultRepo.loadAppSettings()
-    val updated = current.copy(
-        remoteSync = RemoteSyncSettings(
-            enabled = true,
-            serverBaseUrl = syncConfig.serverBaseUrl,
-            authToken = syncConfig.authToken,
-            syncApiKeys = syncConfig.syncApiKeys
-        ),
-        current_user = syncConfig.syncUser ?: current.current_user
-    )
-    defaultRepo.saveAppSettings(updated)
-    log.info(
-        "Remote sync configured for 'default' user: url=${syncConfig.serverBaseUrl}, " +
-        "user=${updated.current_user}, interval=${syncConfig.pullIntervalSeconds}s"
-    )
-
-    if (!syncConfig.startEngine) return  // test mode: config seeded, engine not started
-
-    defaultRepo.startSync()
-    log.info("Remote sync engine started — triggering initial pull...")
-    defaultRepo.pullNow()
-
-    // Periodic pull loop for the "default" user (compensates for the server having
-    // no "window focus" event).  Uses its own CoroutineScope so it can be cancelled
-    // cleanly on shutdown.  The registry's stopAll() does NOT cancel this scope; we
-    // subscribe to ApplicationStopping directly to match the pre-5a behaviour.
-    val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    environment.monitor.subscribe(ApplicationStopping) {
-        log.info("Stopping legacy default-user sync pull loop")
-        syncScope.cancel()
-    }
-    syncScope.launch {
-        while (isActive) {
-            delay(syncConfig.pullIntervalSeconds * 1000L)
-            try {
-                defaultRepo.pullNow()
-            } catch (ce: CancellationException) {
-                throw ce
-            } catch (e: Exception) {
-                log.warn("Periodic sync pull failed: ${e.message}")
-            }
-        }
-    }
-    log.info("Periodic sync pull loop started (interval=${syncConfig.pullIntervalSeconds}s)")
+    configureRouting(allowedGoogleEmails)
 }
 
 // ── OAuth client credentials helpers ────────────────────────────────────────
