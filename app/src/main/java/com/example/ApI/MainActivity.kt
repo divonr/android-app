@@ -35,6 +35,8 @@ import com.example.ApI.ui.screen.SkillsScreen
 import com.example.ApI.ui.screen.SkillEditorScreen
 import com.example.ApI.ui.theme.ApITheme
 import com.example.ApI.ui.theme.Background
+import com.example.ApI.util.AppLogger
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     // State to trigger recomposition when a new intent arrives
@@ -42,6 +44,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Enable crash-persistent logging as early as possible (no Application class exists)
+        AppLogger.initPersistentLog(File(filesDir, "logs"))
+        installUncaughtExceptionHandler()
+
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(
                 android.graphics.Color.parseColor("#0D0E14")
@@ -72,6 +79,23 @@ class MainActivity : ComponentActivity() {
 
         // Increment the state to trigger recomposition and LaunchedEffect
         intentState.value++
+    }
+
+    /**
+     * Persist full stack traces of uncaught exceptions to the log file,
+     * synchronously on the crashing thread, then delegate to the previous handler
+     * to preserve normal crash behavior.
+     */
+    private fun installUncaughtExceptionHandler() {
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                AppLogger.logFatal(thread, throwable)
+            } catch (_: Throwable) {
+                // Never block crash handling
+            }
+            previousHandler?.uncaughtException(thread, throwable)
+        }
     }
 }
 
