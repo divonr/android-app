@@ -10,6 +10,8 @@ kotlin {
 
 dependencies {
     implementation(libs.kotlinx.serialization)
+    // Compose runtime on the compile classpath, required by the compose compiler plugin
+    compileOnly("org.jetbrains.compose.runtime:runtime-desktop:1.7.3")
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
