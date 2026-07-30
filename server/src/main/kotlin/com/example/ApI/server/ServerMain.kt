@@ -161,7 +161,11 @@ fun Application.module(
             // TLS terminates at Cloudflare; the app-level connection is plain HTTP.
             cookie.secure = false
             cookie.maxAgeInSeconds = 30L * 24 * 60 * 60  // 30 days
-            cookie.extensions["SameSite"] = "Strict"
+            // Lax (not Strict): the cookie must be sent on the top-level GET
+            // redirect back from accounts.google.com to /auth/google/callback,
+            // otherwise the OAuth state session slot is lost and login fails
+            // with "invalid_state" in real browsers (curl ignores SameSite).
+            cookie.extensions["SameSite"] = "Lax"
             transform(SessionTransportTransformerMessageAuthentication(authConfig.sessionSecret.toByteArray()))
         }
     }
