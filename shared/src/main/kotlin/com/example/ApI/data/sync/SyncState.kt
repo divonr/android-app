@@ -52,11 +52,11 @@ class SyncState(
         }
     }
 
-    /** Persist current state to disk. */
+    /** Persist current state to disk.  Best-effort: must never throw into callers. */
     fun save() {
         try {
             stateFile.writeText(json.encodeToString(data))
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             // Best-effort; will reconcile on next startup.
         }
     }

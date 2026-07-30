@@ -44,7 +44,15 @@ class SyncEngine(
         private const val UPLOAD_DEBOUNCE_MS = 750L
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // SupervisorJob does NOT swallow uncaught exceptions from `launch` — without a
+    // CoroutineExceptionHandler, any Throwable escaping an upload/pull coroutine is
+    // handed to the thread's default uncaught-exception handler and crashes the app.
+    // Sync is best-effort and must never take the app down.
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        AppLogger.e("[$TAG] Uncaught error in sync coroutine", throwable)
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
 
     private val syncState = SyncState(internalDir, json)
 
@@ -92,19 +100,25 @@ class SyncEngine(
 
     /**
      * Called by each storage manager after every local file write.
-     * Must be fast (runs on the caller's thread).
+     * Must be fast (runs on the caller's thread — often the UI thread, via the
+     * save paths whose callers only catch IOException).  Fire-and-forget:
+     * NOTHING here may throw, or it would escape into the save/UI call stack.
      */
     fun onFileWritten(file: File) {
-        val settings = settingsProvider()
-        if (!settings.remoteSync.enabled) return
+        try {
+            val settings = settingsProvider()
+            if (!settings.remoteSync.enabled) return
 
-        val filename = file.name
-        if (!isTracked(filename, settings)) return
+            val filename = file.name
+            if (!isTracked(filename, settings)) return
 
-        syncState.markDirty(filename)
-        syncState.save()
+            syncState.markDirty(filename)
+            syncState.save()
 
-        scheduleUpload(filename)
+            scheduleUpload(filename)
+        } catch (t: Throwable) {
+            AppLogger.e("[$TAG] onFileWritten(${file.name}) failed — sync skipped", t)
+        }
     }
 
     /** Health-check the remote server with current settings.  Used by UI "Test connection". */
