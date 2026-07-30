@@ -33,6 +33,7 @@ import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.components.*
 import com.example.ApI.ui.components.dialogs.*
 import com.example.ApI.ui.theme.*
+import com.example.ApI.util.AppLogger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -48,6 +49,13 @@ fun ChatScreen(
     val coroutineScope = rememberCoroutineScope()
     val searchFocusRequester = remember { FocusRequester() }
     val appSettings by viewModel.appSettings.collectAsState()
+
+    // Crash-debug breadcrumb: ChatScreen composed for the current chat id
+    LaunchedEffect(uiState.currentChat?.chat_id) {
+        uiState.currentChat?.let {
+            AppLogger.d("[NewChat] ChatScreen composed for chat_id=${it.chat_id}")
+        }
+    }
     
     LaunchedEffect(uiState.snackbarMessage) {
         uiState.snackbarMessage?.let {
