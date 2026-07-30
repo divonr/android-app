@@ -195,18 +195,8 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     fun getChatJson(username: String, chatId: String): String? = chatHistoryManager.getChatJson(username, chatId)
     fun saveChatJsonToDownloads(chatId: String, content: String): String? = chatHistoryManager.saveChatJsonToDownloads(chatId, content)
     fun addMessageToChat(username: String, chatId: String, message: Message): Chat? = chatHistoryManager.addMessageToChat(username, chatId, message)
-    fun createNewChat(username: String, previewName: String, systemPrompt: String = ""): Chat {
-        AppLogger.d("[NewChat] DataRepository.createNewChat entered (user='$username')")
-        val chat = chatHistoryManager.createNewChat(username, previewName, systemPrompt)
-        AppLogger.d("[NewChat] chatHistoryManager.createNewChat returned chat_id=${chat.chat_id}")
-        return chat
-    }
-    fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat {
-        AppLogger.d("[NewChat] DataRepository.createNewChatInGroup entered (user='$username', groupId=$groupId)")
-        val chat = chatHistoryManager.createNewChatInGroup(username, previewName, groupId, systemPrompt)
-        AppLogger.d("[NewChat] chatHistoryManager.createNewChatInGroup returned chat_id=${chat.chat_id}")
-        return chat
-    }
+    fun createNewChat(username: String, previewName: String, systemPrompt: String = ""): Chat = chatHistoryManager.createNewChat(username, previewName, systemPrompt)
+    fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat = chatHistoryManager.createNewChatInGroup(username, previewName, groupId, systemPrompt)
     fun updateChatSystemPrompt(username: String, chatId: String, systemPrompt: String): Chat? = chatHistoryManager.updateChatSystemPrompt(username, chatId, systemPrompt)
     fun updateChatShareLink(username: String, chatId: String, shareLink: String, shareId: String): Chat? = chatHistoryManager.updateChatShareLink(username, chatId, shareLink, shareId)
 

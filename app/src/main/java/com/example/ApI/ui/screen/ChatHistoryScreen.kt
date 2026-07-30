@@ -251,10 +251,7 @@ fun ChatHistoryScreen(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = {
-                    AppLogger.d("[NewChat] FAB tapped: creating new chat")
-                    viewModel.createNewChat("שיחה חדשה")
-                },
+                onClick = { viewModel.createNewChat("שיחה חדשה") },
                 containerColor = Primary,
                 contentColor = Color.White,
                 modifier = Modifier.padding(16.dp)

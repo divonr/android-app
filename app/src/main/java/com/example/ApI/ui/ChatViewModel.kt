@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.provider.OpenableColumns
+import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -25,7 +26,6 @@ import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.DeleteMessageResult
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.ParentalControlManager
-import com.example.ApI.util.AppLogger
 import com.example.ApI.service.StreamingService
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
@@ -266,7 +266,7 @@ class ChatViewModel(
             val localBinder = binder as StreamingService.LocalBinder
             streamingService = localBinder.getService()
             serviceBound = true
-            AppLogger.d("StreamingService connected")
+            Log.d("ChatViewModel", "StreamingService connected")
 
             // Start observing streaming events
             viewModelScope.launch {
@@ -279,7 +279,7 @@ class ChatViewModel(
         override fun onServiceDisconnected(name: ComponentName?) {
             streamingService = null
             serviceBound = false
-            AppLogger.d("StreamingService disconnected")
+            Log.d("ChatViewModel", "StreamingService disconnected")
         }
     }
 
@@ -614,27 +614,21 @@ class ChatViewModel(
     }
 
     fun createNewChat(previewName: String): Chat {
-        AppLogger.d("[NewChat] ViewModel.createNewChat entered (user='${_appSettings.value.current_user}')")
         val currentUser = _appSettings.value.current_user
         val newChat = repository.createNewChat(currentUser, previewName)
-        AppLogger.d("[NewChat] repository.createNewChat returned chat_id=${newChat.chat_id}")
         val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
 
         _uiState.value = _uiState.value.copy(
             currentChat = newChat,
             chatHistory = updatedChatHistory
         )
-        AppLogger.d("[NewChat] uiState updated with new chat, navigating to Chat screen")
         navigateToScreen(Screen.Chat)
-        AppLogger.d("[NewChat] navigateToScreen(Screen.Chat) returned, createNewChat done")
         return newChat
     }
 
     fun createNewChatInGroup(groupId: String) {
-        AppLogger.d("[NewChat] ViewModel.createNewChatInGroup entered (groupId=$groupId, user='${_appSettings.value.current_user}')")
         val currentUser = _appSettings.value.current_user
         val newChat = repository.createNewChatInGroup(currentUser, "שיחה חדשה", groupId, "")
-        AppLogger.d("[NewChat] repository.createNewChatInGroup returned chat_id=${newChat.chat_id}")
         val updatedChatHistory = repository.loadChatHistory(currentUser).chat_history
 
         _uiState.value = _uiState.value.copy(
@@ -642,9 +636,7 @@ class ChatViewModel(
             chatHistory = updatedChatHistory,
             groups = repository.loadChatHistory(currentUser).groups
         )
-        AppLogger.d("[NewChat] uiState updated with new group chat, navigating to Chat screen")
         navigateToScreen(Screen.Chat)
-        AppLogger.d("[NewChat] navigateToScreen(Screen.Chat) returned, createNewChatInGroup done")
     }
 
     // ==================== Provider/Model Selection (delegated to ModelSelectionManager) ====================

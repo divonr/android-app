@@ -96,7 +96,6 @@ class ChatHistoryManager(
     }
 
     fun createNewChat(username: String, previewName: String, systemPrompt: String = ""): Chat {
-        AppLogger.d("[NewChat] ChatHistoryManager.createNewChat entered for user='$username'")
         val chatId = UUID.randomUUID().toString()
         val newChat = Chat(
             chat_id = chatId,
@@ -106,19 +105,15 @@ class ChatHistoryManager(
         )
 
         val chatHistory = loadChatHistory(username)
-        AppLogger.d("[NewChat] history loaded (${chatHistory.chat_history.size} chats), appending $chatId")
         val updatedHistory = chatHistory.copy(
             chat_history = chatHistory.chat_history + newChat
         )
-        AppLogger.d("[NewChat] saving chat history...")
         saveChatHistory(updatedHistory)
-        AppLogger.d("[NewChat] history saved OK for chat_id=$chatId")
 
         return newChat
     }
 
     fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat {
-        AppLogger.d("[NewChat] ChatHistoryManager.createNewChatInGroup entered for user='$username' (groupId=$groupId)")
         val chatId = UUID.randomUUID().toString()
         val newChat = Chat(
             chat_id = chatId,
@@ -129,13 +124,10 @@ class ChatHistoryManager(
         )
 
         val chatHistory = loadChatHistory(username)
-        AppLogger.d("[NewChat] history loaded (${chatHistory.chat_history.size} chats), appending $chatId to group $groupId")
         val updatedHistory = chatHistory.copy(
             chat_history = chatHistory.chat_history + newChat
         )
-        AppLogger.d("[NewChat] saving chat history...")
         saveChatHistory(updatedHistory)
-        AppLogger.d("[NewChat] history saved OK for chat_id=$chatId")
 
         return newChat
     }
