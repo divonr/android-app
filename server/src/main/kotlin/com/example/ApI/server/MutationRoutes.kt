@@ -747,7 +747,16 @@ fun Route.mutationRoutes() {
                     accountEmail = rsJson["accountEmail"]?.jsonPrimitive?.contentOrNull ?: current.remoteSync.accountEmail,
                     syncApiKeys = rsJson["syncApiKeys"]?.jsonPrimitive?.booleanOrNull ?: current.remoteSync.syncApiKeys
                 )
-            } else current.remoteSync
+            } else current.remoteSync,
+            childLockSettings = if (patch.containsKey("childLockSettings")) {
+                val clJson = patch["childLockSettings"]!!.jsonObject
+                current.childLockSettings.copy(
+                    enabled = clJson["enabled"]?.jsonPrimitive?.booleanOrNull ?: current.childLockSettings.enabled,
+                    encryptedPassword = clJson["encryptedPassword"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.encryptedPassword,
+                    startTime = clJson["startTime"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.startTime,
+                    endTime = clJson["endTime"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.endTime
+                )
+            } else current.childLockSettings
         )
         repo.saveAppSettings(merged)
         call.respond(HttpStatusCode.OK, merged)

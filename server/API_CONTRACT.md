@@ -482,11 +482,12 @@ Updates settings fields (partial update).
   "multiMessageMode": false,
   "titleGenerationSettings": { "enabled": true, "provider": "auto", "updateOnExtension": true },
   "skipWelcomeScreen": true,
-  "remoteSync": { "syncApiKeys": true }
+  "remoteSync": { "syncApiKeys": true },
+  "childLockSettings": { "enabled": true, "encryptedPassword": "<sha256>", "startTime": "22:00", "endTime": "06:30" }
 }
 ```
 
-`remoteSync` is merged field-by-field (`enabled`, `serverBaseUrl`, `authToken`, `accountEmail`, `syncApiKeys`) — omitted fields keep their current values, so toggling `syncApiKeys` never clobbers the login-seeded credentials.
+`remoteSync` is merged field-by-field (`enabled`, `serverBaseUrl`, `authToken`, `accountEmail`, `syncApiKeys`) — omitted fields keep their current values, so toggling `syncApiKeys` never clobbers the login-seeded credentials. `childLockSettings` is merged the same way (`enabled`, `encryptedPassword`, `startTime`, `endTime`).
 
 **Response 200** — updated `AppSettings`
 

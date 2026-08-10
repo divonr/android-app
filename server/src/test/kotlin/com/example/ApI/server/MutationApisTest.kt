@@ -710,6 +710,35 @@ class MutationApisTest {
         assertEquals(TEST_USER_EMAIL, saved.accountEmail)
     }
 
+    @Test
+    fun `PATCH api settings updates childLockSettings field-by-field`() = testApplication {
+        val (storage, repo) = seededStorage()
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin(TEST_USER_EMAIL)
+
+        val response = c.patch("/api/settings") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"childLockSettings":{"enabled":true,"encryptedPassword":"abc123hash","startTime":"22:00","endTime":"06:30"}}""")
+        }
+        assertEquals(HttpStatusCode.OK, response.status)
+
+        val saved = repo.loadAppSettings().childLockSettings
+        assertEquals(true, saved.enabled)
+        assertEquals("abc123hash", saved.encryptedPassword)
+        assertEquals("22:00", saved.startTime)
+        assertEquals("06:30", saved.endTime)
+
+        // Partial patch keeps unset fields
+        c.patch("/api/settings") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"childLockSettings":{"enabled":false}}""")
+        }
+        val after = repo.loadAppSettings().childLockSettings
+        assertEquals(false, after.enabled)
+        assertEquals("abc123hash", after.encryptedPassword, "unsent fields must keep their values")
+        assertEquals("22:00", after.startTime)
+    }
+
     // ── Custom Providers ─────────────────────────────────────────────────────
 
     @Test
