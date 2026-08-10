@@ -27,6 +27,10 @@ import java.io.File
  *   - We never compare local wall-clock against server timestamps.
  *   - `sync_state.json` is never uploaded.
  *   - `app_settings.json` uploads strip the `remoteSync` block; pulls MERGE it back from local.
+ *   - A file that exists locally but was never synced (baseServerVersion == 0) is treated
+ *     as dirty when the server also has it (local wins) — except `app_settings.json`,
+ *     which keeps its adopt+merge behavior so reinstalls can recover account settings.
+ *     Identical content (sha match) adopts the server version quietly.
  *
  * ### Re-authentication flow
  * If any authenticated server call returns HTTP 401 (token revoked/expired), [needsReauth] is
@@ -175,6 +179,12 @@ class SyncEngine(
     private fun isTracked(filename: String, settings: AppSettings): Boolean =
         filename in trackedFilenames(settings)
 
+    /** Hex sha256 of [text] — matches the server's manifest `sha` (computed over plaintext). */
+    private fun sha256Hex(text: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        return digest.digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
     // ── Debounced upload scheduling ──────────────────────────────────────────
 
     private fun scheduleUpload(filename: String) {
@@ -291,6 +301,30 @@ class SyncEngine(
 
             val localFile = File(internalDir, filename)
             val localExists = localFile.exists()
+
+            // A file that exists locally but was NEVER synced (baseServerVersion == 0)
+            // — e.g. api_keys right after the syncApiKeys toggle is turned on, when
+            // another device already uploaded it.  Local files are the source of
+            // truth: mark it dirty so it uploads, rather than adopting the remote
+            // blob and silently discarding local data the user just created.
+            // app_settings.json keeps its adopt+merge behavior (reinstall case), and
+            // identical content is adopted quietly to avoid a redundant upload.
+            if (localExists && entry.baseServerVersion == 0L && filename != "app_settings.json") {
+                val localSha = try {
+                    sha256Hex(localFile.readText())
+                } catch (e: Exception) {
+                    AppLogger.e("[$TAG] pull(): could not read local $filename for sha", e)
+                    null
+                }
+                if (localSha != null && localSha == remoteMeta.sha) {
+                    // Same content — just record the server version, no upload needed
+                    syncState.markPulled(filename, remoteMeta.updated_at)
+                } else {
+                    AppLogger.d("[$TAG] pull(): $filename is locally-known but never synced — marking dirty (local wins)")
+                    syncState.markDirty(filename)
+                }
+                continue
+            }
 
             if (!localExists || remoteMeta.updated_at > entry.baseServerVersion) {
                 // Fetch and adopt
