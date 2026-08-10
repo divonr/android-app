@@ -78,6 +78,30 @@ class GoogleLoginTest {
             "email should be $TEST_USER_EMAIL")
     }
 
+    @Test
+    fun `re-login reseeds credentials but preserves syncApiKeys opt-in`() = testApplication {
+        val storage = tempStorage()
+        startWithFakeGoogleAuth(storage)
+        val c1 = googleLogin(TEST_USER_EMAIL)
+
+        // Opt in to syncing API keys via the settings mutation
+        c1.patch("/api/settings") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"remoteSync":{"syncApiKeys":true}}""")
+        }
+
+        // Log in again — bootstrapUserSync reseeds sync credentials
+        googleLogin(TEST_USER_EMAIL)
+
+        val repo = DataRepository(ServerPlatformStorage(File(storage.baseDir, "users/$TEST_USERNAME")))
+        val settings = repo.loadAppSettings().remoteSync
+        assertEquals(true, settings.syncApiKeys,
+            "syncApiKeys opt-in must survive re-login")
+        assertTrue(settings.enabled, "re-login should keep sync enabled")
+        assertEquals("fake-sync-token-$TEST_USERNAME", settings.authToken,
+            "re-login should reseed the auth token")
+    }
+
     // ── Allowlist enforcement ─────────────────────────────────────────────────
 
     @Test

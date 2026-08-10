@@ -138,7 +138,10 @@ class UserRegistry(
                 enabled = true,
                 serverBaseUrl = syncServerUrl,
                 authToken = syncToken,
-                accountEmail = email
+                accountEmail = email,
+                // Preserve the user's per-device opt-in from previous sessions —
+                // reseeding credentials on login must not silently reset it.
+                syncApiKeys = current.remoteSync.syncApiKeys
             ),
             current_user = username
         )

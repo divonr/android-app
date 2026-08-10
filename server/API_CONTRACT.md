@@ -481,9 +481,12 @@ Updates settings fields (partial update).
   "temperature": 0.8,
   "multiMessageMode": false,
   "titleGenerationSettings": { "enabled": true, "provider": "auto", "updateOnExtension": true },
-  "skipWelcomeScreen": true
+  "skipWelcomeScreen": true,
+  "remoteSync": { "syncApiKeys": true }
 }
 ```
+
+`remoteSync` is merged field-by-field (`enabled`, `serverBaseUrl`, `authToken`, `accountEmail`, `syncApiKeys`) — omitted fields keep their current values, so toggling `syncApiKeys` never clobbers the login-seeded credentials.
 
 **Response 200** — updated `AppSettings`
 

@@ -686,6 +686,30 @@ class MutationApisTest {
         assertEquals(true, saved.skipWelcomeScreen)
     }
 
+    @Test
+    fun `PATCH api settings updates remoteSync syncApiKeys without clobbering credentials`() = testApplication {
+        val (storage, repo) = seededStorage()
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin(TEST_USER_EMAIL)
+
+        // Login seeds sync credentials with syncApiKeys = false (opt-in default)
+        val seeded = repo.loadAppSettings().remoteSync
+        assertTrue(seeded.enabled)
+        assertEquals(false, seeded.syncApiKeys)
+
+        val response = c.patch("/api/settings") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"remoteSync":{"syncApiKeys":true}}""")
+        }
+        assertEquals(HttpStatusCode.OK, response.status)
+
+        val saved = repo.loadAppSettings().remoteSync
+        assertEquals(true, saved.syncApiKeys, "syncApiKeys toggle must be persisted")
+        assertEquals("fake-sync-token-$TEST_USERNAME", saved.authToken, "login-seeded token must survive the patch")
+        assertTrue(saved.enabled, "enabled flag must survive the patch")
+        assertEquals(TEST_USER_EMAIL, saved.accountEmail)
+    }
+
     // ── Custom Providers ─────────────────────────────────────────────────────
 
     @Test

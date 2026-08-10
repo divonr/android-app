@@ -735,7 +735,19 @@ fun Route.mutationRoutes() {
                     provider = tgsJson["provider"]?.jsonPrimitive?.contentOrNull ?: current.titleGenerationSettings.provider,
                     updateOnExtension = tgsJson["updateOnExtension"]?.jsonPrimitive?.booleanOrNull ?: current.titleGenerationSettings.updateOnExtension
                 )
-            } else current.titleGenerationSettings
+            } else current.titleGenerationSettings,
+            // remoteSync must be merged field-by-field: dropping it silently here
+            // means the web "sync API keys" toggle never takes effect server-side.
+            remoteSync = if (patch.containsKey("remoteSync")) {
+                val rsJson = patch["remoteSync"]!!.jsonObject
+                current.remoteSync.copy(
+                    enabled = rsJson["enabled"]?.jsonPrimitive?.booleanOrNull ?: current.remoteSync.enabled,
+                    serverBaseUrl = rsJson["serverBaseUrl"]?.jsonPrimitive?.contentOrNull ?: current.remoteSync.serverBaseUrl,
+                    authToken = rsJson["authToken"]?.jsonPrimitive?.contentOrNull ?: current.remoteSync.authToken,
+                    accountEmail = rsJson["accountEmail"]?.jsonPrimitive?.contentOrNull ?: current.remoteSync.accountEmail,
+                    syncApiKeys = rsJson["syncApiKeys"]?.jsonPrimitive?.booleanOrNull ?: current.remoteSync.syncApiKeys
+                )
+            } else current.remoteSync
         )
         repo.saveAppSettings(merged)
         call.respond(HttpStatusCode.OK, merged)
