@@ -27,10 +27,11 @@ import java.io.File
  *   - We never compare local wall-clock against server timestamps.
  *   - `sync_state.json` is never uploaded.
  *   - `app_settings.json` uploads strip the `remoteSync` block; pulls MERGE it back from local.
- *   - A file that exists locally but was never synced (baseServerVersion == 0) is treated
- *     as dirty when the server also has it (local wins) — except `app_settings.json`,
- *     which keeps its adopt+merge behavior so reinstalls can recover account settings.
- *     Identical content (sha match) adopts the server version quietly.
+ *   - A file that exists locally but was never synced (baseServerVersion == 0) is
+ *     resolved once, LAST-WRITE-WINS: local newer than the server version uploads
+ *     (local wins); local older adopts remote.  Identical content (sha match)
+ *     adopts the server version quietly.  `app_settings.json` is exempt — it always
+ *     keeps its adopt+merge behavior so reinstalls can recover account settings.
  *
  * ### Re-authentication flow
  * If any authenticated server call returns HTTP 401 (token revoked/expired), [needsReauth] is
@@ -304,11 +305,15 @@ class SyncEngine(
 
             // A file that exists locally but was NEVER synced (baseServerVersion == 0)
             // — e.g. api_keys right after the syncApiKeys toggle is turned on, when
-            // another device already uploaded it.  Local files are the source of
-            // truth: mark it dirty so it uploads, rather than adopting the remote
-            // blob and silently discarding local data the user just created.
-            // app_settings.json keeps its adopt+merge behavior (reinstall case), and
-            // identical content is adopted quietly to avoid a redundant upload.
+            // another device already uploaded it.  Resolve once, LAST-WRITE-WINS:
+            //   - identical content (sha match) → adopt the server version quietly;
+            //   - local file newer than the server version → local wins: mark dirty
+            //     so it uploads;
+            //   - local file older (e.g. a long-unused device) → fall through and
+            //     adopt the remote blob so stale data never overwrites fresh data.
+            // Clocks are compared ONLY at this never-synced juncture — regular
+            // (already-synced) flow still relies solely on server `updated_at`.
+            // app_settings.json keeps its adopt+merge behavior (reinstall case).
             if (localExists && entry.baseServerVersion == 0L && filename != "app_settings.json") {
                 val localSha = try {
                     sha256Hex(localFile.readText())
@@ -316,14 +321,22 @@ class SyncEngine(
                     AppLogger.e("[$TAG] pull(): could not read local $filename for sha", e)
                     null
                 }
-                if (localSha != null && localSha == remoteMeta.sha) {
-                    // Same content — just record the server version, no upload needed
-                    syncState.markPulled(filename, remoteMeta.updated_at)
-                } else {
-                    AppLogger.d("[$TAG] pull(): $filename is locally-known but never synced — marking dirty (local wins)")
-                    syncState.markDirty(filename)
+                when {
+                    localSha != null && localSha == remoteMeta.sha -> {
+                        // Same content — just record the server version, no upload needed
+                        syncState.markPulled(filename, remoteMeta.updated_at)
+                        continue
+                    }
+                    localFile.lastModified() > remoteMeta.updated_at -> {
+                        AppLogger.d("[$TAG] pull(): $filename local copy is newer — marking dirty (local wins)")
+                        syncState.markDirty(filename)
+                        continue
+                    }
+                    else -> {
+                        AppLogger.d("[$TAG] pull(): $filename local copy is older never-synced — adopting remote")
+                        // fall through to the adopt path below
+                    }
                 }
-                continue
             }
 
             if (!localExists || remoteMeta.updated_at > entry.baseServerVersion) {

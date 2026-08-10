@@ -42,8 +42,8 @@ private class FakeSyncServer {
     private fun nextVersion(): Long =
         clock.updateAndGet { maxOf(it + 1, System.currentTimeMillis()) }
 
-    fun seed(filename: String, content: String) {
-        blobs[filename] = Blob(content, nextVersion(), sha256(content))
+    fun seed(filename: String, content: String, updatedAt: Long? = null) {
+        blobs[filename] = Blob(content, updatedAt ?: nextVersion(), sha256(content))
     }
 
     fun start() {
@@ -138,13 +138,14 @@ class SyncEngineTest {
     private fun keysFile() = File(tempDir, "api_keys_u.json")
 
     // ── The bug: toggling syncApiKeys on a device whose local file was never
-    //    synced must NOT clobber local data with the (older) remote blob. ────
+    //    synced must resolve LAST-WRITE-WINS, never silently discarding data. ──
 
     @Test
-    fun `pull does not clobber a locally-existing never-synced file - local wins and uploads`() = runBlocking {
+    fun `pull does not clobber a newer locally-existing never-synced file - local wins and uploads`() = runBlocking {
         val remoteKeys = """[{"id":"1","provider":"openai","key":"sk-old-remote"}]"""
         val localKeys = """[{"id":"1","provider":"openai","key":"sk-old-remote"},{"id":"2","provider":"google","key":"new-local-key"}]"""
-        fake.seed("api_keys_u.json", remoteKeys)
+        // Server version is old; the local file (written just now) is newer → local wins
+        fake.seed("api_keys_u.json", remoteKeys, updatedAt = 10_000L)
         keysFile().writeText(localKeys)
 
         engine().pull()
@@ -154,6 +155,26 @@ class SyncEngineTest {
         // Dirty flag set → end-of-pull flush uploads local content to the server
         val uploaded = fake.awaitPut("api_keys_u.json")
         assertEquals(localKeys, uploaded, "engine should upload the local (never-synced) version")
+    }
+
+    @Test
+    fun `pull adopts remote when the local never-synced copy is OLDER - stale device does not overwrite fresh remote`() = runBlocking {
+        val remoteKeys = """[{"id":"1","provider":"openai","key":"sk-fresh-remote"}]"""
+        val staleLocalKeys = """[{"id":"0","provider":"openai","key":"sk-stale-local"}]"""
+        val remoteVersion = System.currentTimeMillis() + 3_600_000L
+        fake.seed("api_keys_u.json", remoteKeys, updatedAt = remoteVersion)
+        keysFile().writeText(staleLocalKeys)
+        // Local file is a day older than the server's version
+        keysFile().setLastModified(remoteVersion - 86_400_000L)
+
+        engine().pull()
+
+        assertEquals(remoteKeys, keysFile().readText(), "stale local copy must adopt the fresher remote")
+        assertTrue(fake.putBodies.isEmpty(), "stale local copy must not be uploaded")
+        assertEquals(
+            remoteVersion,
+            SyncState(tempDir, json).apply { load() }.baseServerVersion("api_keys_u.json")
+        )
     }
 
     @Test
@@ -171,7 +192,7 @@ class SyncEngineTest {
     @Test
     fun `pull is a quiet no-op when local content already matches remote sha`() = runBlocking {
         val keys = """[{"id":"1","provider":"openai","key":"sk-same"}]"""
-        fake.seed("api_keys_u.json", keys)
+        fake.seed("api_keys_u.json", keys, updatedAt = 10_000L)
         keysFile().writeText(keys)
 
         engine().pull()
@@ -180,7 +201,7 @@ class SyncEngineTest {
         assertTrue(fake.putBodies.isEmpty(), "identical content must not be re-uploaded")
         // base recorded — next pull skips the sha work entirely
         assertEquals(
-            fake.blobs.getValue("api_keys_u.json").updatedAt,
+            10_000L,
             SyncState(tempDir, json).apply { load() }.baseServerVersion("api_keys_u.json")
         )
     }
@@ -192,7 +213,8 @@ class SyncEngineTest {
             "app_settings.json",
             json.encodeToString(
                 AppSettings(current_user = "u", selected_provider = "google", selected_model = "gemini-2.5-pro")
-            )
+            ),
+            updatedAt = 10_000L
         )
 
         // Local file exists with device-local sync credentials (never synced)
@@ -212,21 +234,21 @@ class SyncEngineTest {
     fun `pull still adopts newer remote versions for previously-synced files`() = runBlocking {
         val oldKeys = """[{"id":"1","provider":"openai","key":"sk-old"}]"""
         val newKeys = """[{"id":"1","provider":"openai","key":"sk-new"}]"""
-        fake.seed("api_keys_u.json", oldKeys)
+        fake.seed("api_keys_u.json", oldKeys, updatedAt = 10_000L)
         keysFile().writeText(oldKeys)
 
         // First pull: identical content just records the base version
         engine().pull()
-        val base = fake.blobs.getValue("api_keys_u.json").updatedAt
 
         // Another device pushes a newer version
-        fake.seed("api_keys_u.json", newKeys)
+        fake.seed("api_keys_u.json", newKeys, updatedAt = 20_000L)
         engine().pull()
 
         assertEquals(newKeys, keysFile().readText(), "newer remote version should be adopted")
-        assertTrue(
-            SyncState(tempDir, json).apply { load() }.baseServerVersion("api_keys_u.json") > base,
-            "base should advance past the previous server version"
+        assertEquals(
+            20_000L,
+            SyncState(tempDir, json).apply { load() }.baseServerVersion("api_keys_u.json"),
+            "base should advance to the new server version"
         )
     }
 }
