@@ -43,6 +43,13 @@ hash when done. Never redo an `[x]` step.
   sign-out keeps the sync state; synced `null` auth file on disconnect; desktop rename blocked while syncing (only the
   unused DesktopChatViewModel has a rename); `serverLacksCas` in both sync UIs; `@EncodeDefault` on time-based model
   defaults; `:shared:test` (172) green, `:app:assembleDebug`, `:desktop:compileKotlin`, `:server:compileKotlin` ok.
+  Review fixes 55c12e9: anchored replies never fall back to the current path — a question/chat deleted elsewhere
+  mid-stream is restored from the anchor's path (`LocalDeletions`: deleted on this device → reply dropped); cleanup
+  honours the kept base while signed out and reads it inside the history lock (engine records a merge's base under
+  the same lock); auth-file merge: `null` = absence without a base, connection beats disconnect when both changed;
+  skills_enabled/skills_sources locked transforms; changeTick reload re-reads when the chat state/settings changed
+  during the read (CAS apply) and re-syncs integration tool registration; review tests enabled + 5 new;
+  `:shared:test` (183) green.
 
 ## T6 — Ktor server + web frontend
 - [ ] implementation + tests
@@ -146,9 +153,26 @@ hash when done. Never redo an `[x]` step.
     this device's content, whatever its id/re-hash); target gone → any variant of the chat ending with that response; no
     match → the target (e.g. another device appended after our message without a fork: reply goes after its content).
     User-message ids are never matched on siblings (edits keep the original id).
+  - T5 review fixes (T6 must follow):
+    - `addAnchoredResponse` never attaches a reply elsewhere: pinned variant gone (no fork match) or chat gone →
+      the request's path (`ReplyAnchor.path()` = messages sent + responses saved since; `ReplyAnchor(v, tail, messages)`)
+      is restored (missing variants re-created with their ids, as a sibling if the node after the previous variant
+      exists; a restored chat gets the first question as title, no system prompt/group) and the reply appended —
+      "modification beats deletion" independent of pull timing. Deleted on THIS device (`LocalDeletions`, per chat
+      history file, process lifetime: `repo.deleteChat(u, id)` and MBM user-message deletions) → reply dropped (null).
+      Plain `addResponseToCurrentVariant(targetVariantId)` keeps the T3 fallback. T6: the web chat delete route must use
+      `repo.deleteChat` (it still saves a filtered snapshot) and SendRoute `ReplyAnchor.forRequest(messagesSent)`.
+    - `EmptyChatCleanup` no longer looks at "sync enabled": empty chats in the base are kept whenever a base exists
+      (sign-out keeps it); the base is read inside the history transform, and the engine records a merge's base inside
+      the merge-write lock (`FileSync`), so a just-pulled chat is always in the base the cleanup sees.
+    - Auth files: `SyncFileMerger.connectionMerge` — no base: `null` = absence (union); both sides changed and one is
+      `null`: the connection wins (matches the per-key settings entry, so file and entry stay consistent).
+    - Sync reload (both VMs): re-reads when `currentChat`/`chatHistory`/`groups`/`currentGroup`/settings changed during
+      the disk read, applies with `compareAndSet`; then `AuthManager.refreshIntegrationToolsAfterSync()` registers or
+      unregisters GitHub/Workspace tools to match the auth files.
   - Sign-out no longer resets the sync state (task decision, plan §4 updated); `prepareForSignIn` resets on an account
     switch. MultiDeviceSyncTest S8e updated, S8g (no resurrection after re-sign-in) / S8h (switch after sign-out) added.
-  - `cleanupEmptyChats` (shared `EmptyChatCleanup`): sync off → every empty chat; sync on → empty chats absent from
+  - `cleanupEmptyChats` (shared `EmptyChatCleanup`; review fix: no base → every empty chat, whether sync is on or off) — as first built: sync off → every empty chat; sync on → empty chats absent from
     `baseContent(chat_history)` plus empty chats created by THIS repository instance (deviation: otherwise every
     uploaded "new chat" left untyped would stay forever; its removal syncs as a deletion that loses against another
     device's writes). Unreadable base → only own chats. Residual: own empty chats uploaded before a process restart stay.
