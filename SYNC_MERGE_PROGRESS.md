@@ -14,7 +14,7 @@ hash when done. Never redo an `[x]` step.
   review tests enabled + 2/3-device random sync loops; 71 tests green.
 
 ## T3 — Storage hardening (atomic writes, FileLocks, updateChatHistory, user_name, deterministic migration, pinned responses)
-- [ ] implementation + tests
+- [x] implementation + tests — c3d439f: util AtomicFiles (temp+fsync+rename, ATOMIC_MOVE→REPLACE→renameTo fallbacks) for every synced-file writer (+ SyncEngine pull write); FileLocks registry; ChatHistoryManager.updateChatHistory/modifyChatHistory and every shared load-modify-save (CHM, GroupProjectManager, MBM single-transform ops, cleanupEmptyChats) on it; user_name normalized; corrupt file kept as .corrupt-<ts>; MBM migration = LegacyChatConverter; pinned targetVariantId; importSingleChat fresh id; 13 new tests, `:shared:test` (84) green, server/desktop/app compile.
 
 ## T4 — SyncEngine rewrite + RemoteStorageClient CAS + SyncState + migration/sign-in fixes + multi-device tests
 - [ ] implementation + tests
@@ -32,6 +32,27 @@ hash when done. Never redo an `[x]` step.
 - [ ] 
 
 ## Notes
+- T3 storage API (for T4/T5/T6):
+  - `AtomicFiles.write(file, text)` / `writeBytes` (throws IOException; holds the file's lock while
+    writing). `FileLocks.withLock(file) { }` (inline, reentrant, canonical-path key, process-wide).
+    T4's "write M only if local is still L": `FileLocks.withLock(f) { if (sha(read) == shaL) AtomicFiles.write(f, M) }`.
+  - `ChatHistoryManager.updateChatHistory(username) { h -> h' }` / `modifyChatHistory(username) { h -> h' to result }`
+    (also `DataRepository`/`DesktopRepository.updateChatHistory`, `saveChatHistory(username, h)`).
+    Transform runs under the lock: keep it quick, no I/O, no other file locks (deadlock risk).
+    Returning an equal history writes nothing and does not call the sync hook; the hook runs after
+    the lock is released. A change made while the file is unreadable overwrites it (copy kept).
+  - `loadChatHistory(u)` always returns `user_name = u`, so the one-arg `saveChatHistory(h)` of a
+    loaded history is safe; files are always written with `user_name` = the target username.
+    The stale-`user_name` rewrite on migration (plan §4) was not needed for routing and is left to T4.
+  - `addResponseToCurrentVariant(u, chatId, msg, targetVariantId = null)` on MBM/DataRepository/
+    DesktopRepository; unknown target → logs + current path's last variant. Callers still pass
+    nothing (T5/T6 must pin).
+  - `LocalStorageManager` api_keys/custom_providers mutators now run under the file lock;
+    app_settings load-modify-save sites (ExternalConnectionsManager, UI code) are NOT locked yet.
+  - `importSingleChat` collision: fresh random chat_id and cleared shareLink/shareId on the copy
+    (the share belongs to the original chat).
+  - `:server:test` was not run in T3: `UserRegistry`/`SyncAuthClient` default to the live
+    `localhost:8090`, so T6 must inject the sync URL before running server tests.
 - T1 API details for client work (T4): PUT body `{"content", "base_version"?}`; base_version
   must be >= 0 (negative → 422). sha-equal PUT returns 200 with stored meta even when the base
   is stale/0. `GET /sync/history/{f}` returns `[{filename, updated_at, sha, current:true}, then
