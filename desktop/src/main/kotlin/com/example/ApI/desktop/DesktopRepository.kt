@@ -36,12 +36,8 @@ class DesktopRepository(private val appDir: File) {
     val skillsStorageManager = SkillsStorageManager(internalDir, JsonConfig.prettyPrint, syncHook)
     private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager, syncHook)
 
-    // ── Sync engine ────────────────────────────────────────────────────────────
-    private val syncEngine = SyncEngine(
-        internalDir = internalDir,
-        json = JsonConfig.prettyPrint,
-        settingsProvider = { localStorageManager.loadAppSettings() }
-    )
+    // ── Sync engine (one per data dir per process, shared with any other repository) ─
+    private val syncEngine = SyncEngine.forDir(internalDir, JsonConfig.prettyPrint) { localStorageManager.loadAppSettings() }
 
     private val titleGenerationService by lazy {
         TitleGenerationService(
@@ -86,26 +82,30 @@ class DesktopRepository(private val appDir: File) {
     /**
      * Full sign-in-to-sync flow (mirrors DataRepository.signInToSync):
      * 1. Exchange Google identity for a server-minted token.
-     * 2. Migrate local per-user files to the canonical username.
-     * 3. Persist updated RemoteSyncSettings.
-     * 4. Clear the needsReauth flag and start sync.
+     * 2. Under the sync lock: migrate the local `default` user's files to the canonical
+     *    username (another account only switches), reset the sync state for the account and
+     *    persist updated RemoteSyncSettings.
+     * 3. Clear the needsReauth flag and start sync.
      */
     suspend fun signInToSync(identity: GoogleIdentity): Result<String> {
         return try {
             val current = loadAppSettings()
             val authResult = RemoteStorageClient(baseUrl = current.remoteSync.serverBaseUrl, token = "")
                 .authGoogle(identity.idToken)
-            UserMigration.migrateToAccount(internalDir, JsonConfig.prettyPrint, authResult.username)
-            val postMigration = loadAppSettings()
-            saveAppSettings(
-                postMigration.copy(
-                    remoteSync = postMigration.remoteSync.copy(
-                        enabled = true,
-                        authToken = authResult.token,
-                        accountEmail = authResult.email
+            syncEngine.runExclusive {
+                val migration = UserMigration.migrateToAccount(internalDir, JsonConfig.prettyPrint, authResult.username)
+                syncEngine.prepareForSignIn(authResult.username, migration)
+                val postMigration = loadAppSettings()
+                saveAppSettings(
+                    postMigration.copy(
+                        remoteSync = postMigration.remoteSync.copy(
+                            enabled = true,
+                            authToken = authResult.token,
+                            accountEmail = authResult.email
+                        )
                     )
                 )
-            )
+            }
             syncEngine.clearReauth()
             startSync()
             Result.success(authResult.username)
@@ -115,7 +115,8 @@ class DesktopRepository(private val appDir: File) {
     }
 
     /**
-     * Sign out of sync: disables sync and clears the minted token and account email.
+     * Sign out of sync: disables sync, clears the minted token and account email and resets
+     * the sync state (the next sign-in starts with 2-way merges).
      * Local data and the current username are preserved.
      */
     fun signOutOfSync() {
@@ -129,6 +130,7 @@ class DesktopRepository(private val appDir: File) {
                 )
             )
         )
+        syncEngine.resetSyncState()
     }
 
     // ==================== Models ====================

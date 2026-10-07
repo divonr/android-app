@@ -80,6 +80,57 @@ object SyncFileMerger {
         }
     }
 
+    /**
+     * True when [a] and [b] hold the same synced content, so neither side needs the other's
+     * copy: equal after decoding through the file's model, ignoring device view state (a chat's
+     * `currentVariantPath` and the `messages` derived from it) and device-local keys
+     * (`app_settings.json`: `remoteSync`, `current_user`). Formatting differences don't count.
+     * Text that doesn't parse is compared verbatim.
+     */
+    fun sameContent(filename: String, a: String, b: String, json: Json): Boolean {
+        if (a == b) return true
+        return try {
+            val ca = comparable(filename, a, json)
+            val cb = comparable(filename, b, json)
+            ca != null && ca == cb
+        } catch (e: Throwable) {
+            false
+        }
+    }
+
+    /** True when [text] parses as [filename]'s model (never upload a file that doesn't). */
+    fun isValid(filename: String, text: String, json: Json): Boolean = try {
+        comparable(filename, text, json) != null
+    } catch (e: Throwable) {
+        false
+    }
+
+    private fun comparable(filename: String, text: String, json: Json): Any? = when (val kind = kindOf(filename)) {
+        FileKind.ChatHistory -> {
+            val element = parseElement(json, text)
+            element?.let { json.decodeFromJsonElement(UserChatHistory.serializer(), fillChatHistoryIds(it)) }?.let { h ->
+                h.copy(chat_history = h.chat_history.map { chat ->
+                    if (chat.messageNodes.isEmpty()) chat.copy(currentVariantPath = emptyList())
+                    else chat.copy(messages = emptyList(), currentVariantPath = emptyList())
+                })
+            }
+        }
+        is FileKind.Typed<*> -> canonicalTyped(kind, filename, text, json)?.let { element ->
+            if (element is JsonObject && kind.policy.deviceLocalKeys.isNotEmpty()) {
+                JsonObject(element.filterKeys { it !in kind.policy.deviceLocalKeys })
+            } else element
+        }
+        FileKind.Generic -> parseElement(json, text)
+    }
+
+    private fun <T> canonicalTyped(kind: FileKind.Typed<T>, filename: String, text: String, json: Json): JsonElement? {
+        val withDefaults = Json(json) { encodeDefaults = true }
+        return parseElement(json, text)
+            ?.let { if (kind.fillIds) fillListIds(filename, it) else it }
+            ?.let { json.decodeFromJsonElement(kind.serializer, it) }
+            ?.let { withDefaults.encodeToJsonElement(kind.serializer, it) }
+    }
+
     // ---------------------------------------------------------------------------------
 
     private fun parseElement(json: Json, text: String?): JsonElement? {

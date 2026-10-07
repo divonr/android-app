@@ -38,11 +38,9 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     val skillsStorageManager = SkillsStorageManager(internalDir, JsonConfig.prettyPrint, syncHook)
 
     // ── Sync engine (after managers so localStorageManager is safe to reference) ─
-    val syncEngine = SyncEngine(
-        internalDir = internalDir,
-        json = JsonConfig.prettyPrint,
-        settingsProvider = { localStorageManager.loadAppSettings() }
-    )
+    // One engine per data dir per process: every DataRepository over this dir (Android's UI
+    // and StreamingService) shares it, so all sync work is serialized by one lock.
+    val syncEngine = SyncEngine.forDir(internalDir, JsonConfig.prettyPrint) { localStorageManager.loadAppSettings() }
     private val chatSearchService = ChatSearchService { username -> loadChatHistory(username) }
     private val titleGenerationService by lazy {
         TitleGenerationService(
@@ -117,11 +115,14 @@ class DataRepository(private val platformStorage: PlatformStorage) {
      *
      * 1. Exchange the Google [identity] for a server-minted token via
      *    `POST {serverBaseUrl}/auth/google`.
-     * 2. Run [UserMigration.migrateToAccount] to rename local per-user files
-     *    from the current username (typically `"default"`) to the server's
-     *    canonical username.
-     * 3. Persist `RemoteSyncSettings(enabled=true, authToken=<minted>, accountEmail=<email>)`.
-     * 4. Clear [needsReauth], then call [startSync] to kick off the initial pull/push.
+     * 2. Under the sync lock: run [UserMigration.migrateToAccount] (moves the local `default`
+     *    user's files into the account; a device on another account only switches), make the
+     *    sync state belong to the account ([SyncEngine.prepareForSignIn]: a fresh state makes the
+     *    first pull a 2-way merge, so the device's chats and the account's are unioned on both
+     *    sides) and persist `RemoteSyncSettings(enabled=true, authToken=<minted>, accountEmail=<email>)`.
+     *    The settings write does not clobber the account's settings: the first sync of
+     *    `app_settings.json` has no base, so the account's values win (device-local keys stay).
+     * 3. Clear [needsReauth], then call [startSync] to kick off the initial pull/push.
      *
      * @return [Result.success] with the canonical username on success,
      *         [Result.failure] with the underlying exception on error.
@@ -136,21 +137,24 @@ class DataRepository(private val platformStorage: PlatformStorage) {
                 .authGoogle(identity.idToken)
             AppLogger.i("[DataRepository] signInToSync: authGoogle succeeded, username=${authResult.username}")
 
-            // Step 2 — Migrate local files to the canonical username
-            UserMigration.migrateToAccount(internalDir, JsonConfig.prettyPrint, authResult.username)
-
-            // Step 3 — Persist updated sync settings (reload after migration, current_user may have changed)
-            val postMigration = loadAppSettings()
-            val updated = postMigration.copy(
-                remoteSync = postMigration.remoteSync.copy(
-                    enabled = true,
-                    authToken = authResult.token,
-                    accountEmail = authResult.email
+            // Step 2 — Migrate local files, reset the sync state, persist credentials
+            syncEngine.runExclusive {
+                val migration = UserMigration.migrateToAccount(internalDir, JsonConfig.prettyPrint, authResult.username)
+                syncEngine.prepareForSignIn(authResult.username, migration)
+                // Reload after migration, current_user may have changed
+                val postMigration = loadAppSettings()
+                saveAppSettings(
+                    postMigration.copy(
+                        remoteSync = postMigration.remoteSync.copy(
+                            enabled = true,
+                            authToken = authResult.token,
+                            accountEmail = authResult.email
+                        )
+                    )
                 )
-            )
-            saveAppSettings(updated)
+            }
 
-            // Step 4 — Clear reauth flag and start sync
+            // Step 3 — Clear reauth flag and start sync
             syncEngine.clearReauth()
             startSync()
 
@@ -165,6 +169,7 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     /**
      * Sign out of sync:
      * - Disables sync and clears the minted token and account email from settings.
+     * - Resets the sync state and base snapshots (the next sign-in starts with 2-way merges).
      * - Local data and [AppSettings.current_user] are left unchanged.
      */
     fun signOutOfSync() {
@@ -177,7 +182,8 @@ class DataRepository(private val platformStorage: PlatformStorage) {
             )
         )
         saveAppSettings(updated)
-        AppLogger.i("[DataRepository] signOutOfSync: sync disabled, credentials cleared")
+        syncEngine.resetSyncState()
+        AppLogger.i("[DataRepository] signOutOfSync: sync disabled, credentials cleared, sync state reset")
     }
 
     // ============ Models Cache (delegated to ModelsCacheManager) ============

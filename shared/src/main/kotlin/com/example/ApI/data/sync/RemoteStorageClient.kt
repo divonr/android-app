@@ -5,6 +5,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -29,8 +33,19 @@ data class RemoteBlob(
     val sha: String
 )
 
+/** One entry of `GET /sync/history/{filename}` (newest first; the current version has `current = true`). */
 @Serializable
-private data class PutRequest(val content: String)
+data class BlobVersion(
+    val filename: String,
+    val updated_at: Long,
+    val sha: String,
+    val current: Boolean = false,
+    val replaced_at: Long? = null
+)
+
+/** `base_version` is omitted when null (legacy unconditional write). */
+@Serializable
+private data class PutRequest(val content: String, val base_version: Long? = null)
 
 @Serializable
 private data class AuthGoogleRequest(val id_token: String)
@@ -62,6 +77,13 @@ sealed class RemoteSyncException(message: String, val statusCode: Int = -1) : IO
     class Unauthorized(message: String = "401 Unauthorized — token revoked or expired") :
         RemoteSyncException(message, 401)
 
+    /**
+     * HTTP 409 `version_conflict` on a conditional PUT: the blob is no longer at the given
+     * `base_version`. [current] is the blob's current metadata (null: the blob does not exist).
+     */
+    class Conflict(val current: BlobMeta?, message: String = "409 version_conflict (current=${current?.updated_at})") :
+        RemoteSyncException(message, 409)
+
     /** Any other non-2xx error. */
     class HttpError(message: String, statusCode: Int) : RemoteSyncException(message, statusCode)
 }
@@ -81,9 +103,14 @@ sealed class RemoteSyncException(message: String, val statusCode: Int = -1) : IO
 class RemoteStorageClient(
     private val baseUrl: String,
     private val token: String,
-    private val client: OkHttpClient = OkHttpClient(),
+    private val client: OkHttpClient = sharedHttpClient,
     private val json: Json = Json { ignoreUnknownKeys = true }
 ) {
+    companion object {
+        /** One connection pool / dispatcher for every client in the process. */
+        val sharedHttpClient: OkHttpClient by lazy { OkHttpClient() }
+    }
+
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     private fun encodedFilename(filename: String): String =
@@ -173,15 +200,17 @@ class RemoteStorageClient(
     /**
      * Fetch a single blob by filename.
      *
-     * `GET {baseUrl}/sync/file/{filename}`
+     * `GET {baseUrl}/sync/file/{filename}[?version=N]`
      *
-     * Returns null on 404 (file not yet on server).
+     * Returns null on 404 (file not yet on server, or [version] unknown / pruned from history).
      *
+     * @param version a specific stored version (`updated_at`), current or from history; null = current.
      * @throws RemoteSyncException.Unauthorized on 401.
      * @throws RemoteSyncException.HttpError on other non-2xx responses.
      */
-    suspend fun get(filename: String): RemoteBlob? = withContext(Dispatchers.IO) {
-        val url = "${baseUrl.trimEnd('/')}/sync/file/${encodedFilename(filename)}"
+    suspend fun get(filename: String, version: Long? = null): RemoteBlob? = withContext(Dispatchers.IO) {
+        val query = if (version != null) "?version=$version" else ""
+        val url = "${baseUrl.trimEnd('/')}/sync/file/${encodedFilename(filename)}$query"
         val request = authedGet(url)
         client.newCall(request).execute().use { resp ->
             if (resp.code == 404) return@withContext null
@@ -192,20 +221,39 @@ class RemoteStorageClient(
         }
     }
 
+    // ── history ──────────────────────────────────────────────────────────────
+
+    /**
+     * List the stored versions of a blob, newest first (metadata only; empty if it does not exist).
+     *
+     * `GET {baseUrl}/sync/history/{filename}`
+     */
+    suspend fun history(filename: String): List<BlobVersion> = withContext(Dispatchers.IO) {
+        val url = "${baseUrl.trimEnd('/')}/sync/history/${encodedFilename(filename)}"
+        client.newCall(authedGet(url)).execute().use { resp ->
+            if (!resp.isSuccessful) throwForStatus(resp.code, "history($filename)")
+            json.decodeFromString<List<BlobVersion>>(resp.body?.string() ?: "[]")
+        }
+    }
+
     // ── put ──────────────────────────────────────────────────────────────────
 
     /**
-     * Upload or overwrite a blob.
+     * Upload a blob, optionally as a compare-and-swap.
      *
-     * `PUT {baseUrl}/sync/file/{filename}`
+     * `PUT {baseUrl}/sync/file/{filename}` with `{"content", "base_version"?}`
      *
+     * @param baseVersion null → unconditional write (legacy); 0 → create only (the blob must not
+     *        exist); N → write only if the blob's current `updated_at` is N. A PUT whose content
+     *        equals the stored content succeeds without a new version, whatever [baseVersion].
+     * @throws RemoteSyncException.Conflict on 409 `version_conflict` (with the current metadata).
      * @throws RemoteSyncException.Unauthorized on 401.
      * @throws RemoteSyncException.HttpError on other non-2xx responses.
      */
-    suspend fun put(filename: String, content: String): BlobMeta =
+    suspend fun put(filename: String, content: String, baseVersion: Long? = null): BlobMeta =
         withContext(Dispatchers.IO) {
             val url = "${baseUrl.trimEnd('/')}/sync/file/${encodedFilename(filename)}"
-            val bodyStr = json.encodeToString(PutRequest(content))
+            val bodyStr = json.encodeToString(PutRequest(content, baseVersion))
             val requestBody = bodyStr.toRequestBody(jsonMediaType)
             val request = Request.Builder()
                 .url(url)
@@ -214,10 +262,32 @@ class RemoteStorageClient(
                 .build()
 
             client.newCall(request).execute().use { resp ->
+                if (resp.code == 409) {
+                    val body = resp.body?.string().orEmpty()
+                    parseConflict(filename, body)?.let { throw it }
+                    throw RemoteSyncException.HttpError("put($filename) returned 409: $body", 409)
+                }
                 if (!resp.isSuccessful) throwForStatus(resp.code, "put($filename)")
                 val respBody = resp.body?.string()
                     ?: throw RemoteSyncException.HttpError("put($filename) empty response body", resp.code)
                 json.decodeFromString<BlobMeta>(respBody)
             }
         }
+
+    /** `{"detail": {"error": "version_conflict", "current": meta | null}}` → [RemoteSyncException.Conflict]. */
+    private fun parseConflict(filename: String, body: String): RemoteSyncException.Conflict? = try {
+        val detail = json.parseToJsonElement(body) as? JsonObject
+        val inner = detail?.get("detail") as? JsonObject
+        val error = (inner?.get("error") as? JsonPrimitive)?.contentOrNull
+        if (error != "version_conflict") {
+            null
+        } else {
+            val current = inner["current"]
+            val meta = if (current == null || current is JsonNull) null
+            else json.decodeFromJsonElement(BlobMeta.serializer(), current)
+            RemoteSyncException.Conflict(meta, "put($filename): 409 version_conflict (current=${meta?.updated_at})")
+        }
+    } catch (e: Exception) {
+        null
+    }
 }
