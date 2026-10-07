@@ -9,18 +9,24 @@
  *   .shell   — full viewport, background outside column (--bg, slightly darkened)
  *   .frame   — max-width 520px centered column, full min-height, bg --bg
  *              (all protected pages render here via <Outlet />)
+ *
+ * Also runs the live sync refresh (useSyncRefresh) for every signed-in page.
  */
 
 import React from 'react'
 import { Outlet } from 'react-router-dom'
 import styles from './AppLayout.module.css'
+import { useSyncRefresh } from '../hooks/useSyncRefresh'
 
-const AppLayout: React.FC = () => (
-  <div className={styles.shell}>
-    <div className={styles.frame}>
-      <Outlet />
+const AppLayout: React.FC = () => {
+  useSyncRefresh()
+  return (
+    <div className={styles.shell}>
+      <div className={styles.frame}>
+        <Outlet />
+      </div>
     </div>
-  </div>
-)
+  )
+}
 
 export default AppLayout

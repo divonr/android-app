@@ -192,14 +192,11 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('toggling remote sync calls settings.update', async () => {
+  it('sync API keys toggle sends only remoteSync.syncApiKeys', async () => {
     renderPage()
     await waitFor(() => screen.getByRole('heading', { name: /remote sync/i }))
 
-    const heading = screen.getByRole('heading', { name: /remote sync/i })
-    const card = heading.closest('div')!.parentElement!
-    const toggle = card.querySelector('input[type="checkbox"]') as HTMLInputElement
-
+    const toggle = screen.getByLabelText('סנכרן גם מפתחות API') as HTMLInputElement
     expect(toggle.checked).toBe(false)
 
     await act(async () => {
@@ -207,12 +204,52 @@ describe('SettingsPage', () => {
     })
 
     await waitFor(() => {
-      expect(clientModule.settings.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          remoteSync: expect.objectContaining({ enabled: true }),
-        }),
-      )
+      expect(clientModule.settings.update).toHaveBeenCalledWith({ remoteSync: { syncApiKeys: true } })
     })
+  })
+
+  it('never shows or edits the sync token, server or enablement (server-managed)', async () => {
+    vi.mocked(clientModule.settings.get).mockResolvedValue({
+      ...SAMPLE_SETTINGS,
+      remoteSync: { ...SAMPLE_SETTINGS.remoteSync, enabled: true, authToken: '' },
+    })
+    renderPage()
+    await waitFor(() => screen.getByRole('heading', { name: /remote sync/i }))
+
+    expect(screen.queryByText('טוקן אימות')).not.toBeInTheDocument()
+    expect(document.querySelector('input[type="password"]')).toBeNull()
+    expect(document.querySelector('input[type="url"]')).toBeNull()
+    // Server URL is displayed read-only
+    expect(screen.getByText('https://sync.example.com')).toBeInTheDocument()
+    // The only checkbox in the sync card is the API-keys opt-in
+    const heading = screen.getByRole('heading', { name: /remote sync/i })
+    const card = heading.closest('div')!.parentElement!.parentElement!
+    expect(card.querySelectorAll('input[type="checkbox"]').length).toBe(1)
+  })
+
+  it('shows sign-in-again and server-update warnings from the sync status', async () => {
+    vi.mocked(clientModule.sync.status).mockResolvedValue({
+      enabled: true, serverBaseUrl: 'https://sync.example.com', lastChangeTick: 0, reachable: null,
+      needsReauth: true, serverLacksCas: true, accountEmail: 'alice@example.com',
+    })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText(/התנתקו והתחברו מחדש/)).toBeInTheDocument()
+      expect(screen.getByText(/שרת הסנכרון צריך עדכון/)).toBeInTheDocument()
+    })
+    expect(clientModule.sync.status).toHaveBeenCalledWith(false)
+  })
+
+  it('shows no sync warnings when sync is healthy', async () => {
+    vi.mocked(clientModule.sync.status).mockResolvedValue({
+      enabled: true, serverBaseUrl: 'https://sync.example.com', lastChangeTick: 0, reachable: null,
+      needsReauth: false, serverLacksCas: false,
+    })
+    renderPage()
+    await waitFor(() => screen.getByRole('heading', { name: /remote sync/i }))
+    await waitFor(() => expect(clientModule.sync.status).toHaveBeenCalled())
+    expect(screen.queryByText(/התנתקו והתחברו מחדש/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/שרת הסנכרון צריך עדכון/)).not.toBeInTheDocument()
   })
 
   // ── Child lock dialog flow ──────────────────────────────────────────────────

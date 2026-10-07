@@ -731,3 +731,13 @@ input[type='checkbox'].appCheck {
   cursor: pointer;
   padding: 4px 8px;
 }
+
+/* Sync problem the user must act on (sign in again / server update) */
+.syncWarning {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-red) 15%, transparent);
+  color: var(--accent-red);
+  font-size: var(--fs-body-small, 13px);
+}

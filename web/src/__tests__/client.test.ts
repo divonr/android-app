@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { request, ApiError, onUnauthenticated } from '../api/client'
+import { request, ApiError, onUnauthenticated, messages, sync } from '../api/client'
+import { apiErrorMessage } from '../utils/apiErrors'
 
 describe('request() helper', () => {
   beforeEach(() => {
@@ -98,5 +99,47 @@ describe('request() helper', () => {
     unregister()
     window.dispatchEvent(new Event('api:unauthenticated'))
     expect(called).toHaveLength(1) // not called again after unregister
+  })
+})
+
+describe('sync-safe endpoints', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  function stubOk(body: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: () => Promise.resolve(body),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('message delete uses the branch-aware route (edits the tree, survives sync merges)', async () => {
+    const fetchMock = stubOk({ chat_id: 'c1' })
+    await messages.delete('c1', 'm9')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/chats/c1/branch/messages/m9',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('sync status can skip the reachability probe', async () => {
+    const fetchMock = stubOk({ enabled: true, serverBaseUrl: '', lastChangeTick: 3, reachable: null })
+    const st = await sync.status(false)
+    expect(st.lastChangeTick).toBe(3)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/sync/status?probe=false')
+    await sync.status()
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/sync/status')
+  })
+
+  it('apiErrorMessage prefers the server error text', () => {
+    expect(apiErrorMessage(new ApiError(400, { error: 'Cannot delete' }), 'x')).toBe('Cannot delete')
+    expect(apiErrorMessage(new Error('boom'), 'x')).toBe('boom')
+    expect(apiErrorMessage('weird', 'fallback')).toBe('fallback')
   })
 })

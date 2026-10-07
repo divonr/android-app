@@ -77,6 +77,10 @@ fun resolveSessionSecret(): String {
     return Base64.getEncoder().encodeToString(random)
 }
 
+/** Seconds between a user's periodic pulls (`SYNC_PULL_INTERVAL_SECONDS`, default 20). */
+fun resolvePullIntervalSeconds(): Long =
+    System.getenv("SYNC_PULL_INTERVAL_SECONDS")?.toLongOrNull()?.takeIf { it > 0 } ?: 20L
+
 /** Reads the allowed Google emails allowlist from the environment. */
 fun resolveAllowedGoogleEmails(): Set<String> {
     val env = System.getenv("ALLOWED_GOOGLE_EMAILS") ?: return emptySet()
@@ -104,6 +108,11 @@ fun main() {
  * @param startRegistry         When false, the registry's sync engine is never
  *                              started (test isolation flag — suppresses all network calls).
  * @param allowedGoogleEmails   Allowlist for Google login.  Empty = allow all.
+ * @param syncServerUrl         Sync server base URL (login exchange + every user's sync).
+ *                              Defaults to `SYNC_SERVER_URL`; tests pass a fake / unreachable URL
+ *                              so they never reach the live sync server.
+ * @param pullIntervalSeconds   Seconds between a user's periodic background pulls.
+ * @param loginPullTimeoutMs    How long the login callback waits for the user's first pull.
  */
 fun Application.module(
     storage: ServerPlatformStorage = ServerPlatformStorage(),
@@ -114,20 +123,19 @@ fun Application.module(
     syncAuthClient: SyncAuthClient? = null,
     startRegistry: Boolean = true,
     allowedGoogleEmails: Set<String> = resolveAllowedGoogleEmails(),
+    syncServerUrl: String = resolveSyncServerUrl(),
+    pullIntervalSeconds: Long = resolvePullIntervalSeconds(),
+    loginPullTimeoutMs: Long = UserRegistry.LOGIN_PULL_TIMEOUT_MS,
     // Keep last so that `module(storage, authConfig) { repo -> engine }` trailing-lambda syntax works.
     chatEngineFactory: ((DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null
 ) {
-    // ── Per-user sync params ─────────────────────────────────────────────────
-    val syncServerUrl = System.getenv("SYNC_SERVER_URL")?.takeIf { it.isNotBlank() }
-        ?: "http://localhost:8090"
-    val pullIntervalSeconds = System.getenv("SYNC_PULL_INTERVAL_SECONDS")?.toLongOrNull() ?: 20L
-
     // ── UserRegistry ─────────────────────────────────────────────────────────
     val registry = UserRegistry(
         baseDir = storage.baseDir,
         syncServerUrl = syncServerUrl,
         pullIntervalSeconds = pullIntervalSeconds,
         startEngine = startRegistry,
+        loginPullTimeoutMs = loginPullTimeoutMs,
         chatEngineFactory = chatEngineFactory ?: { repo ->
             com.example.ApI.server.streaming.RepositoryChatEngine(repo)
         },
@@ -138,7 +146,12 @@ fun Application.module(
         }
     )
 
-    // Stop all user pull loops on shutdown
+    // Keep syncing every signed-in user from startup, before their first request
+    if (startRegistry) {
+        kotlinx.coroutines.runBlocking { registry.rehydrateAll() }
+    }
+
+    // Stop all user pull loops and sync engines on shutdown
     environment.monitor.subscribe(ApplicationStopping) {
         registry.stopAll()
     }

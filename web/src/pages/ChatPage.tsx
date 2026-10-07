@@ -14,7 +14,8 @@ import React, {
   useMemo,
 } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useChatStore } from '../stores/chatStore'
+import { useChatStore, CHAT_NOT_FOUND } from '../stores/chatStore'
+import { apiErrorMessage } from '../utils/apiErrors'
 import {
   providers as providersApi,
   branching,
@@ -145,7 +146,7 @@ function makeStreamCallbacks(
 const ChatPage: React.FC = () => {
   const { id: chatId } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { currentChat, loadChat, updateChat } = useChatStore()
+  const { currentChat, loadChat, updateChat, setStreaming, error: storeError } = useChatStore()
 
   // ── Controls state (unchanged from R2) ────────────────────────────────────
   const [models, setModels] = useState<ProviderModel_Flat[]>([])
@@ -228,6 +229,12 @@ const ChatPage: React.FC = () => {
     () => providersDetailed.filter((p) => activeKeyProviders.includes(p.provider)),
     [providersDetailed, activeKeyProviders],
   )
+
+  // Tell the store a reply is streaming: live sync refreshes wait until it ends
+  useEffect(() => {
+    setStreaming(stream.streaming)
+  }, [stream.streaming, setStreaming])
+  useEffect(() => () => setStreaming(false), [setStreaming])
 
   // ── Autoscroll while streaming ───────────────────────────────────────────
 
@@ -436,14 +443,23 @@ const ChatPage: React.FC = () => {
       setError(null)
 
       try {
+        // Like Android's edit: a new variant (branch) in the message's node holding a copy of
+        // the message (same id and attachments) with the new text; the reply streams into it.
+        // A legacy message has no nodeId: the server resolves the message id to its node.
         const result = await branching.create(chatId, {
           nodeId: originalMsg.nodeId ?? originalMsg.id,
-          newUserMessage: { role: 'user', text: newText },
+          newUserMessage: {
+            id: originalMsg.id,
+            role: 'user',
+            text: newText,
+            attachments: originalMsg.attachments ?? [],
+          },
         })
         updateChat(result.chat)
         setInputText('')
         setAttachments([])
 
+        // The resend route accepts the new variant's id: it replies into that variant
         const newMsgId = result.newVariantId
         setStream({ ...EMPTY_STREAM, streaming: true })
 
@@ -474,6 +490,8 @@ const ChatPage: React.FC = () => {
   )
 
   // ── Regenerate ────────────────────────────────────────────────────────────
+  // The server creates a new variant in the node of the message's question (Android's
+  // resend) and streams the new answer into it; the old answer stays a sibling branch.
 
   const handleRegenerate = useCallback(
     (msg: Message) => {
@@ -506,16 +524,17 @@ const ChatPage: React.FC = () => {
 
   // ── Delete message ────────────────────────────────────────────────────────
 
+  // Branch-aware delete (Android's): only a message with nothing after it in its branch can
+  // be deleted; otherwise the server explains why (shown in the error banner).
   const handleDeleteMessage = useCallback(
     async (msgId: string) => {
       if (!chatId) return
-      if (!window.confirm('Delete this message and everything after it?')) return
+      if (!window.confirm('Delete this message?')) return
       try {
-        const { messages: messagesApi } = await import('../api/client')
         const updatedChat = await messagesApi.delete(chatId, msgId)
         updateChat(updatedChat)
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Delete failed')
+        setError(apiErrorMessage(err, 'Delete failed'))
       }
     },
     [chatId, updateChat],
@@ -637,7 +656,7 @@ const ChatPage: React.FC = () => {
   if (!currentChat && !stream.streaming) {
     return (
       <div className={styles.loading}>
-        {chatId ? 'Loading chat…' : 'Chat not found'}
+        {chatId && storeError !== CHAT_NOT_FOUND ? 'Loading chat…' : 'Chat not found'}
       </div>
     )
   }

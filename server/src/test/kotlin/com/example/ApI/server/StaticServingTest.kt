@@ -45,7 +45,7 @@ class StaticServingTest {
         try {
             testApplication {
                 application {
-                    module(ServerPlatformStorage(makeTempDir("p8-repo")))
+                    module(ServerPlatformStorage(makeTempDir("p8-repo")), syncServerUrl = UNREACHABLE_SYNC_URL)
                 }
                 block()
             }

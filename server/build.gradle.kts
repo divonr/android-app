@@ -38,3 +38,10 @@ dependencies {
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.kotlin.test)
 }
+
+tasks.test {
+    // Tests must never reach the live sync server or the live data dir, even through a
+    // module() default: point both at harmless places (tests inject their own anyway)
+    environment("SYNC_SERVER_URL", "http://127.0.0.1:9")
+    environment("LLM_WEB_DATA_DIR", layout.buildDirectory.dir("test-data-dir").get().asFile.absolutePath)
+}

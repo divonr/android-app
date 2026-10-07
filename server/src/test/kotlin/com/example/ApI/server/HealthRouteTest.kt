@@ -13,7 +13,7 @@ class HealthRouteTest {
     @Test
     fun `GET health returns 200 with status ok`() = testApplication {
         application {
-            module(ServerPlatformStorage(createTempDir("server-test")))
+            module(ServerPlatformStorage(createTempDir("server-test")), syncServerUrl = UNREACHABLE_SYNC_URL)
         }
         val response = client.get("/health")
         assertEquals(HttpStatusCode.OK, response.status)

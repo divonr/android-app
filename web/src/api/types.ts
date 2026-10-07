@@ -107,11 +107,31 @@ export interface ChildLockSettings {
   endTime: string
 }
 
+/**
+ * Sync settings of the web's server-side sync device. Managed by the server (seeded at login):
+ * `authToken` is always '' in responses, and only `syncApiKeys` can be changed from the browser.
+ */
 export interface RemoteSyncSettings {
   enabled: boolean
   serverBaseUrl: string
   authToken: string
+  accountEmail?: string
   syncApiKeys: boolean
+}
+
+/** GET /api/sync/status */
+export interface SyncStatus {
+  enabled: boolean
+  serverBaseUrl: string
+  /** Changes whenever a pull changed this user's files on the server (reload then). */
+  lastChangeTick: number
+  /** null: sync disabled or not probed (`probe=false`). */
+  reachable: boolean | null
+  /** The sync server rejected the login's token: sign in again to resume syncing. */
+  needsReauth?: boolean
+  /** The sync server is too old for safe merging: nothing syncs until it is updated. */
+  serverLacksCas?: boolean
+  accountEmail?: string
 }
 
 export interface StarredModel {

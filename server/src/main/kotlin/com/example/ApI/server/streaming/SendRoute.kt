@@ -5,7 +5,9 @@ import com.example.ApI.data.model.Message
 import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.ThinkingBudgetValue
 import com.example.ApI.data.model.TitleGenerationSettings
+import com.example.ApI.data.model.Chat
 import com.example.ApI.data.repository.DataRepository
+import com.example.ApI.data.repository.ReplyAnchor
 import com.example.ApI.server.userContext
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
@@ -62,8 +64,8 @@ data class SendRequest(
 /**
  * JSON body for POST /api/chats/{chatId}/messages/{messageId}/resend.
  *
- * The server deletes the specified message and all subsequent messages, then
- * re-adds the user message and streams a new assistant response.
+ * Like Android's resend, the server creates a new variant (branch) in the node of the
+ * message and streams a new assistant response into it (see [resendRoute]).
  */
 @Serializable
 data class ResendRequest(
@@ -115,14 +117,16 @@ internal suspend fun maybeGenerateTitle(
     try {
         val providerToUse = if (settings.provider == "auto") null else settings.provider
         val title = repo.generateConversationTitle(username, chatId, providerToUse)
-        if (title.isNotBlank() && title != "New chat") {
-            val history = repo.loadChatHistory(username)
-            val updated = history.copy(
-                chat_history = history.chat_history.map { c ->
-                    if (c.chat_id == chatId) c.copy(preview_name = title) else c
-                }
-            )
-            repo.saveChatHistory(updated)
+        // TitleGenerationService answers "שיחה חדשה" when generation failed (Android skips it too):
+        // never overwrite the chat's name with it
+        if (title.isNotBlank() && title != "New chat" && title != "שיחה חדשה") {
+            repo.updateChatHistory(username) { history ->
+                history.copy(
+                    chat_history = history.chat_history.map { c ->
+                        if (c.chat_id == chatId) c.copy(preview_name = title) else c
+                    }
+                )
+            }
         }
     } catch (e: Exception) {
         // Title generation failure is non-fatal — log and continue.
@@ -148,6 +152,10 @@ private const val COMPLETE_SENTINEL = "__COMPLETE__"
  * channel, launches the [ChatEngine.send] call, drains the channel into
  * the HTTP response, persists the assistant message on completion, and
  * triggers automatic title generation.
+ *
+ * Every save of the request (tool messages, final reply) goes to its [anchor]: the variant
+ * of the user message the request answers, after the last message saved so far — never the
+ * chat's current path at save time (a variant switch or a sync merge may have moved it).
  */
 internal suspend fun ApplicationCall.streamSseResponse(
     chatId: String,
@@ -163,7 +171,8 @@ internal suspend fun ApplicationCall.streamSseResponse(
     thinkingBudget: ThinkingBudgetValue,
     temperature: Float?,
     repo: DataRepository,
-    engine: ChatEngine
+    engine: ChatEngine,
+    anchor: ReplyAnchor
 ) {
     response.headers.append(HttpHeaders.CacheControl, "no-cache")
     response.headers.append(HttpHeaders.Connection, "keep-alive")
@@ -245,10 +254,10 @@ internal suspend fun ApplicationCall.streamSseResponse(
                         model = modelName,
                         datetime = Instant.now().toString()
                     )
-                    repo.addResponseToCurrentVariant(username, chatId, preceding)
+                    repo.addAnchoredResponse(username, chatId, preceding, anchor)
                 }
-                repo.addResponseToCurrentVariant(username, chatId, toolCallMessage)
-                repo.addResponseToCurrentVariant(username, chatId, toolResponseMessage)
+                repo.addAnchoredResponse(username, chatId, toolCallMessage, anchor)
+                repo.addAnchoredResponse(username, chatId, toolResponseMessage, anchor)
                 // Notify the client that new messages were persisted mid-stream so it
                 // can reload the chat history and clear the streaming overlay.
                 sseChannel.trySend(sseFrame("messages_added", "{}"))
@@ -299,9 +308,8 @@ internal suspend fun ApplicationCall.streamSseResponse(
                         model = modelName,
                         datetime = Instant.now().toString()
                     )
-                    val savedChat = repo.addResponseToCurrentVariant(username, chatId, assistantMessage)
-                    val savedMessageId = savedChat?.messages
-                        ?.lastOrNull { it.role == "assistant" }?.id ?: ""
+                    val savedChat = repo.addAnchoredResponse(username, chatId, assistantMessage, anchor)
+                    val savedMessageId = if (savedChat != null) assistantMessage.id else ""
 
                     val titleSettings = repo.loadAppSettings().titleGenerationSettings
                     maybeGenerateTitle(repo, username, chatId, titleSettings)
@@ -356,9 +364,13 @@ fun Route.sendRoute() {
             .getEnabledToolsSpecifications(body.enabledToolIds, body.provider)
 
         val userMessage = body.messages.lastOrNull { it.role == "user" }
-        if (userMessage != null && body.persistUserMessage) {
+        val savedChat: Chat? = if (userMessage != null && body.persistUserMessage) {
             repo.addUserMessageAsNewNode(username, body.chatId, userMessage)
+        } else {
+            repo.loadChatHistory(username).chat_history.find { it.chat_id == body.chatId }
         }
+        // Pin the replies to the saved user message (multi-message mode: the chat's last message)
+        val anchor = anchorAfter(savedChat, userMessage?.takeIf { body.persistUserMessage }?.id)
 
         call.streamSseResponse(
             chatId = body.chatId,
@@ -374,17 +386,35 @@ fun Route.sendRoute() {
             thinkingBudget = parseBudget(body.thinkingBudget),
             temperature = body.temperature,
             repo = repo,
-            engine = engine
+            engine = engine,
+            anchor = anchor
         )
     }
+}
+
+/**
+ * The anchor of a request whose last saved message is [messageId] in [chat] (null: the chat's
+ * last path message): the chat's path up to and including that message.
+ */
+internal fun anchorAfter(chat: Chat?, messageId: String?): ReplyAnchor {
+    val path = chat?.messages ?: return ReplyAnchor(null, null)
+    val end = messageId?.let { id -> path.indexOfLast { it.id == id } } ?: -1
+    return ReplyAnchor.forRequest(if (end >= 0) path.take(end + 1) else path)
 }
 
 /**
  * Registers POST /api/chats/{chatId}/messages/{messageId}/resend inside the
  * authenticated /api route block.
  *
- * Deletes the specified message and all subsequent messages, re-adds the user
- * message as a new node, then delegates SSE streaming to [streamSseResponse].
+ * Mirrors Android's resend (MessageEditingManager.resendFromMessage): nothing is deleted —
+ * a new variant is created in the node of the message (a branch next to the original, so
+ * both answers stay reachable with the branch arrows and every device merges it by id) and
+ * the reply is streamed into it.  [messageId] may be:
+ *  - a user message id → a new variant with a copy of that user message (resend);
+ *  - a response id (assistant / tool message) → a new variant with a copy of the user message
+ *    of the variant holding it (regenerate);
+ *  - a variant id → that variant, when it has no reply yet (web edit: POST …/branch created it
+ *    with the edited message), else a new variant with a copy of its user message.
  */
 fun Route.resendRoute() {
     post("/chats/{chatId}/messages/{messageId}/resend") {
@@ -406,16 +436,20 @@ fun Route.resendRoute() {
         val engine = ctx.chatEngine
         val username = ctx.username
 
-        // Verify the chat exists
-        val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
+        // Verify the chat exists (a legacy chat is migrated, deterministically, to the tree)
+        if (repo.loadChatHistory(username).chat_history.none { it.chat_id == chatId }) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+            return@post
+        }
+        val chat = repo.ensureBranchingStructure(username, chatId)
         if (chat == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
             return@post
         }
 
-        // Find the message to resend
-        val message = chat.messages.find { it.id == messageId }
-        if (message == null) {
+        // Find the message (or variant) to resend
+        val target = findResendTarget(chat, messageId)
+        if (target == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Message not found"))
             return@post
         }
@@ -430,18 +464,37 @@ fun Route.resendRoute() {
         val enabledTools = ToolRegistry.getInstance()
             .getEnabledToolsSpecifications(body.enabledToolIds, body.provider)
 
-        // Delete from that message onwards (inclusive), then re-add as a new node.
-        repo.deleteMessagesFromPoint(username, chatId, message)
-        repo.addUserMessageAsNewNode(username, chatId, message)
+        // The variant the reply goes to, made the chat's current path
+        val prepared: Pair<Chat, String>? = when (target) {
+            is ResendTarget.Existing -> {
+                val switched = if (target.variantId in chat.currentVariantPath) chat
+                else repo.switchVariant(username, chatId, target.nodeId, target.variantIndex)
+                switched?.let { it to target.variantId }
+            }
+            is ResendTarget.NewBranch -> repo.createBranch(
+                username, chatId, target.nodeId,
+                // Same message (id included, like Android's resend), new time
+                target.userMessage.copy(datetime = Instant.now().toString())
+            )
+        }
+        if (prepared == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Message not found"))
+            return@post
+        }
+        val (updatedChat, variantId) = prepared
 
-        // Load the updated message list (includes the re-added user message).
-        val updatedMessages = repo.loadChatHistory(username)
-            .chat_history.find { it.chat_id == chatId }?.messages ?: listOf(message)
+        // The request's messages: the path up to (and including) the variant's user message
+        val end = updatedChat.messages.indexOfFirst { it.variantId == variantId }
+        if (end < 0) {
+            call.respond(HttpStatusCode.Conflict, mapOf("error" to "Branch is not on the current path"))
+            return@post
+        }
+        val requestMessages = updatedChat.messages.take(end + 1)
 
         call.streamSseResponse(
             chatId = chatId,
             username = username,
-            messages = updatedMessages,
+            messages = requestMessages,
             provider = provider,
             modelName = body.modelName,
             systemPrompt = body.systemPrompt,
@@ -452,7 +505,44 @@ fun Route.resendRoute() {
             thinkingBudget = parseBudget(body.thinkingBudget),
             temperature = body.temperature,
             repo = repo,
-            engine = engine
+            engine = engine,
+            anchor = ReplyAnchor.forRequest(requestMessages)
         )
     }
+}
+
+/** Where a resend's reply goes (see [resendRoute]). */
+internal sealed class ResendTarget {
+    /** An existing reply-less variant (created by a web edit). */
+    data class Existing(val nodeId: String, val variantId: String, val variantIndex: Int) : ResendTarget()
+
+    /** A new variant in [nodeId] with a copy of [userMessage]. */
+    data class NewBranch(val nodeId: String, val userMessage: Message) : ResendTarget()
+}
+
+/**
+ * Resolve [id] (variant id, user message id or response id) in [chat]'s tree.  Variants on the
+ * current path are preferred: sibling variants share their user message id by design.
+ */
+internal fun findResendTarget(chat: Chat, id: String): ResendTarget? {
+    for (node in chat.messageNodes) {
+        val index = node.variants.indexOfFirst { it.variantId == id }
+        if (index < 0) continue
+        val variant = node.variants[index]
+        val childExists = variant.childNodeId != null && chat.messageNodes.any { it.nodeId == variant.childNodeId }
+        return if (variant.responses.isEmpty() && !childExists) {
+            ResendTarget.Existing(node.nodeId, variant.variantId, index)
+        } else {
+            ResendTarget.NewBranch(node.nodeId, variant.userMessage)
+        }
+    }
+    val onPath = chat.currentVariantPath.toSet()
+    val candidates = chat.messageNodes.flatMap { node -> node.variants.map { node to it } }
+        .sortedByDescending { (_, v) -> v.variantId in onPath }
+    for ((node, variant) in candidates) {
+        if (variant.userMessage.id == id || variant.responses.any { it.id == id }) {
+            return ResendTarget.NewBranch(node.nodeId, variant.userMessage)
+        }
+    }
+    return null
 }

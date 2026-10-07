@@ -25,6 +25,12 @@ const val TEST_USER_EMAIL = "test@example.com"
 /** Sanitized username derived from [TEST_USER_EMAIL] (mirrors sync-server logic). */
 const val TEST_USERNAME = "test_example_com"
 
+/**
+ * Sync server URL used by tests that don't run a fake sync server: nothing listens there, so
+ * a test can never reach the live sync server (localhost:8090) through the seeded settings.
+ */
+const val UNREACHABLE_SYNC_URL = "http://127.0.0.1:9"
+
 // ── Fake implementations ──────────────────────────────────────────────────────
 
 /**
@@ -86,6 +92,8 @@ class FakeGoogleLoginExchanger : OAuthTokenExchanger {
  *
  * Pass [allowedGoogleEmails] to test allowlist enforcement.
  * Set [startRegistry] = false (default) to suppress all sync engine network calls.
+ * [syncServerUrl] is where login seeds the users' sync (default: [UNREACHABLE_SYNC_URL];
+ * sync tests pass a [FakeCasSyncServer]'s URL) — never the live sync server.
  *
  * Pass a custom [oauthExchanger] when a test also exercises GitHub / Google
  * Workspace integration OAuth (P5 tests).  The exchanger MUST implement
@@ -99,7 +107,10 @@ fun ApplicationTestBuilder.startWithFakeGoogleAuth(
     syncAuthClient: com.example.ApI.server.auth.SyncAuthClient = FakeSyncAuthClient(),
     oauthExchanger: OAuthTokenExchanger = FakeGoogleLoginExchanger(),
     chatEngineFactory: ((com.example.ApI.data.repository.DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null,
-    titleGeneratorFactory: ((com.example.ApI.data.repository.DataRepository) -> TitleGenerator)? = null
+    titleGeneratorFactory: ((com.example.ApI.data.repository.DataRepository) -> TitleGenerator)? = null,
+    syncServerUrl: String = UNREACHABLE_SYNC_URL,
+    pullIntervalSeconds: Long = 20L,
+    loginPullTimeoutMs: Long = UserRegistry.LOGIN_PULL_TIMEOUT_MS
 ) {
     application {
         module(
@@ -109,6 +120,9 @@ fun ApplicationTestBuilder.startWithFakeGoogleAuth(
             syncAuthClient = syncAuthClient,
             startRegistry = startRegistry,
             allowedGoogleEmails = allowedGoogleEmails,
+            syncServerUrl = syncServerUrl,
+            pullIntervalSeconds = pullIntervalSeconds,
+            loginPullTimeoutMs = loginPullTimeoutMs,
             chatEngineFactory = chatEngineFactory,
             titleGeneratorFactory = titleGeneratorFactory
         )

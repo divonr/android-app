@@ -181,14 +181,14 @@ fun Route.mutationRoutes() {
             chat = repo.updateChatSystemPrompt(username, chatId, body.systemPrompt) ?: chat
         }
         if (body.previewName != null) {
-            // Rename: reload, update, save
-            val history = repo.loadChatHistory(username)
-            val updatedHistory = history.copy(
-                chat_history = history.chat_history.map {
-                    if (it.chat_id == chatId) it.copy(preview_name = body.previewName) else it
-                }
-            )
-            repo.saveChatHistory(updatedHistory)
+            // Rename: one locked load-modify-save (nothing written meanwhile is lost)
+            val updatedHistory = repo.updateChatHistory(username) { history ->
+                history.copy(
+                    chat_history = history.chat_history.map {
+                        if (it.chat_id == chatId) it.copy(preview_name = body.previewName) else it
+                    }
+                )
+            }
             chat = updatedHistory.chat_history.find { it.chat_id == chatId } ?: chat
         }
         if (body.shareLink != null && body.shareId != null) {
@@ -205,14 +205,14 @@ fun Route.mutationRoutes() {
         val ctx = call.userContext()
         val repo = ctx.repository
         val username = ctx.username
-        val history = repo.loadChatHistory(username)
-        val exists = history.chat_history.any { it.chat_id == chatId }
+        val exists = repo.loadChatHistory(username).chat_history.any { it.chat_id == chatId }
         if (!exists) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
             return@delete
         }
-        val updated = history.copy(chat_history = history.chat_history.filter { it.chat_id != chatId })
-        repo.saveChatHistory(updated)
+        // Locked delete, recorded as a deletion made on this device (a reply still streaming
+        // into the chat is dropped instead of restoring it)
+        repo.deleteChat(username, chatId)
         call.respond(HttpStatusCode.NoContent)
     }
 
@@ -252,7 +252,10 @@ fun Route.mutationRoutes() {
 
     // ========== Messages ==========
 
-    // POST /api/chats/{chatId}/messages — add a message to a chat
+    // POST /api/chats/{chatId}/messages — add a message to a chat (multi-message mode).
+    // The tree is authoritative (sync merges rebuild `messages` from it): a user message
+    // becomes a new node after the current path, like Android's multi-message send; any
+    // other role is appended to the current path's last variant.
     post("/chats/{chatId}/messages") {
         val chatId = call.parameters["chatId"] ?: return@post call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
@@ -268,15 +271,26 @@ fun Route.mutationRoutes() {
             attachments = body.attachments,
             datetime = java.time.Instant.now().toString()
         )
-        val updatedChat = repo.addMessageToChat(username, chatId, message)
+        val updatedChat = if (message.role == "user") {
+            repo.addUserMessageAsNewNode(username, chatId, message)
+        } else {
+            repo.addResponseToCurrentVariant(username, chatId, message)
+        }
         if (updatedChat == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
         } else {
-            call.respond(HttpStatusCode.Created, message)
+            val saved = updatedChat.messageNodes.asSequence()
+                .flatMap { node -> node.variants.asSequence() }
+                .flatMap { v -> sequenceOf(v.userMessage) + v.responses.asSequence() }
+                .firstOrNull { it.id == message.id }
+            call.respond(HttpStatusCode.Created, saved ?: message)
         }
     }
 
-    // DELETE /api/chats/{chatId}/messages/{messageId} — delete from that message onward
+    // DELETE /api/chats/{chatId}/messages/{messageId} — branch-aware delete (same as
+    // DELETE /api/chats/{chatId}/branch/messages/{messageId}, Android's delete): removes the
+    // message from the tree; a message followed by other messages can't be deleted (400).
+    // Editing only the flat `messages` list would be reverted by the next sync merge.
     delete("/chats/{chatId}/messages/{messageId}") {
         val chatId = call.parameters["chatId"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
@@ -285,20 +299,7 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing messageId")
         )
         val ctx = call.userContext()
-        val repo = ctx.repository
-        val username = ctx.username
-        val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
-            ?: return@delete call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
-
-        val message = chat.messages.find { it.id == messageId }
-            ?: return@delete call.respond(HttpStatusCode.NotFound, mapOf("error" to "Message not found"))
-
-        val updated = repo.deleteMessagesFromPoint(username, chatId, message)
-        if (updated == null) {
-            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
-        } else {
-            call.respond(HttpStatusCode.OK, updated)
-        }
+        call.respondBranchDelete(ctx, chatId, messageId)
     }
 
     // POST /api/chats/{chatId}/generate-title — regenerate title regardless of message count
@@ -330,13 +331,13 @@ fun Route.mutationRoutes() {
 
             // Persist the generated title
             if (title.isNotBlank()) {
-                val history = repo.loadChatHistory(username)
-                val updated = history.copy(
-                    chat_history = history.chat_history.map { c ->
-                        if (c.chat_id == chatId) c.copy(preview_name = title) else c
-                    }
-                )
-                repo.saveChatHistory(updated)
+                repo.updateChatHistory(username) { history ->
+                    history.copy(
+                        chat_history = history.chat_history.map { c ->
+                            if (c.chat_id == chatId) c.copy(preview_name = title) else c
+                        }
+                    )
+                }
             }
 
             call.respond(HttpStatusCode.OK, TitleResponse(title = title))
@@ -360,10 +361,17 @@ fun Route.mutationRoutes() {
         val repo = ctx.repository
         val username = ctx.username
 
-        // Ensure branching structure exists
-        repo.ensureBranchingStructure(username, chatId)
+        // Ensure branching structure exists (a legacy chat is migrated deterministically)
+        val migrated = repo.ensureBranchingStructure(username, chatId)
 
-        val result = repo.createBranch(username, chatId, body.nodeId, body.newUserMessage)
+        // The web sends `message.nodeId ?: message.id`: a legacy message carries no node id,
+        // so a non-node id is looked up as the id of a message in the tree
+        val nodeId = migrated?.let { chat ->
+            if (chat.messageNodes.any { it.nodeId == body.nodeId }) body.nodeId
+            else findNodeOfMessage(chat, body.nodeId)
+        } ?: body.nodeId
+
+        val result = repo.createBranch(username, chatId, nodeId, body.newUserMessage)
         if (result == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat or node not found"))
         } else {
@@ -420,10 +428,8 @@ fun Route.mutationRoutes() {
         }
     }
 
-    // DELETE /api/chats/{chatId}/messages/{messageId} handled above via deleteMessagesFromPoint.
-    // For branch-aware deletion (deleteMessageFromBranch), expose a separate endpoint:
-
-    // DELETE /api/chats/{chatId}/nodes/messages/{messageId} — delete from branching structure
+    // DELETE /api/chats/{chatId}/branch/messages/{messageId} — branch-aware delete (what the
+    // web uses; DELETE /api/chats/{chatId}/messages/{messageId} above is the same)
     delete("/chats/{chatId}/branch/messages/{messageId}") {
         val chatId = call.parameters["chatId"] ?: return@delete call.respond(
             HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
@@ -432,16 +438,7 @@ fun Route.mutationRoutes() {
             HttpStatusCode.BadRequest, mapOf("error" to "Missing messageId")
         )
         val ctx = call.userContext()
-        val repo = ctx.repository
-        val username = ctx.username
-
-        when (val result = repo.deleteMessageFromBranch(username, chatId, messageId)) {
-            is DeleteMessageResult.Success -> call.respond(HttpStatusCode.OK, result.updatedChat)
-            is DeleteMessageResult.CannotDeleteBranchPoint ->
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to result.message))
-            is DeleteMessageResult.Error ->
-                call.respond(HttpStatusCode.NotFound, mapOf("error" to result.message))
-        }
+        call.respondBranchDelete(ctx, chatId, messageId)
     }
 
     // ========== Groups CRUD ==========
@@ -482,12 +479,14 @@ fun Route.mutationRoutes() {
             success = success && repo.updateGroupProjectStatus(username, groupId, body.isProject)
         }
         if (body.systemPrompt != null) {
-            // system_prompt is part of ChatGroup — update it via save
-            val updatedHistory = repo.loadChatHistory(username)
-            val updatedGroups = updatedHistory.groups.map {
-                if (it.group_id == groupId) it.copy(system_prompt = body.systemPrompt) else it
+            // system_prompt is part of ChatGroup — one locked load-modify-save
+            repo.updateChatHistory(username) { history ->
+                history.copy(
+                    groups = history.groups.map {
+                        if (it.group_id == groupId) it.copy(system_prompt = body.systemPrompt) else it
+                    }
+                )
             }
-            repo.saveChatHistory(updatedHistory.copy(groups = updatedGroups))
         }
 
         val updatedGroup = repo.loadChatHistory(username).groups.find { it.group_id == groupId }
@@ -703,63 +702,24 @@ fun Route.mutationRoutes() {
 
     // ========== Settings ==========
 
-    // PATCH /api/settings — partial settings update (GET-then-PATCH semantics)
+    // PATCH /api/settings — partial settings update (GET-then-PATCH semantics).
+    // Applied as a transform of the on-disk settings under their file lock (a sync merge
+    // written meanwhile is kept). `remoteSync` belongs to the server (login seeds it): only
+    // the per-device `syncApiKeys` opt-in can be changed; enabled/URL/token/email are ignored.
     patch("/settings") {
         val ctx = call.userContext()
         val repo = ctx.repository
-        val current = repo.loadAppSettings()
         // Receive as raw JSON so we can merge only supplied fields
         val bodyJson = call.receiveText()
         val patch = lenientJson.parseToJsonElement(bodyJson).jsonObject
+        val before = repo.loadAppSettings().remoteSync.syncApiKeys
 
-        // Build merged AppSettings by overlaying patch fields onto current
-        val merged = current.copy(
-            selected_provider = patch["selected_provider"]?.jsonPrimitive?.contentOrNull ?: current.selected_provider,
-            selected_model = patch["selected_model"]?.jsonPrimitive?.contentOrNull ?: current.selected_model,
-            temperature = patch["temperature"]?.jsonPrimitive?.doubleOrNull ?: current.temperature,
-            multiMessageMode = patch["multiMessageMode"]?.jsonPrimitive?.booleanOrNull ?: current.multiMessageMode,
-            starredModels = patch["starredModels"]?.let {
-                lenientJson.decodeFromJsonElement<List<StarredModel>>(it)
-            } ?: current.starredModels,
-            skipWelcomeScreen = patch["skipWelcomeScreen"]?.jsonPrimitive?.booleanOrNull ?: current.skipWelcomeScreen,
-            enabledTools = patch["enabledTools"]?.let {
-                lenientJson.decodeFromJsonElement<List<String>>(it)
-            } ?: current.enabledTools,
-            excludedToolIds = patch["excludedToolIds"]?.let {
-                lenientJson.decodeFromJsonElement<List<String>>(it)
-            } ?: current.excludedToolIds,
-            titleGenerationSettings = if (patch.containsKey("titleGenerationSettings")) {
-                val tgsJson = patch["titleGenerationSettings"]!!.jsonObject
-                current.titleGenerationSettings.copy(
-                    enabled = tgsJson["enabled"]?.jsonPrimitive?.booleanOrNull ?: current.titleGenerationSettings.enabled,
-                    provider = tgsJson["provider"]?.jsonPrimitive?.contentOrNull ?: current.titleGenerationSettings.provider,
-                    updateOnExtension = tgsJson["updateOnExtension"]?.jsonPrimitive?.booleanOrNull ?: current.titleGenerationSettings.updateOnExtension
-                )
-            } else current.titleGenerationSettings,
-            // remoteSync must be merged field-by-field: dropping it silently here
-            // means the web "sync API keys" toggle never takes effect server-side.
-            remoteSync = if (patch.containsKey("remoteSync")) {
-                val rsJson = patch["remoteSync"]!!.jsonObject
-                current.remoteSync.copy(
-                    enabled = rsJson["enabled"]?.jsonPrimitive?.booleanOrNull ?: current.remoteSync.enabled,
-                    serverBaseUrl = rsJson["serverBaseUrl"]?.jsonPrimitive?.contentOrNull ?: current.remoteSync.serverBaseUrl,
-                    authToken = rsJson["authToken"]?.jsonPrimitive?.contentOrNull ?: current.remoteSync.authToken,
-                    accountEmail = rsJson["accountEmail"]?.jsonPrimitive?.contentOrNull ?: current.remoteSync.accountEmail,
-                    syncApiKeys = rsJson["syncApiKeys"]?.jsonPrimitive?.booleanOrNull ?: current.remoteSync.syncApiKeys
-                )
-            } else current.remoteSync,
-            childLockSettings = if (patch.containsKey("childLockSettings")) {
-                val clJson = patch["childLockSettings"]!!.jsonObject
-                current.childLockSettings.copy(
-                    enabled = clJson["enabled"]?.jsonPrimitive?.booleanOrNull ?: current.childLockSettings.enabled,
-                    encryptedPassword = clJson["encryptedPassword"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.encryptedPassword,
-                    startTime = clJson["startTime"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.startTime,
-                    endTime = clJson["endTime"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.endTime
-                )
-            } else current.childLockSettings
-        )
-        repo.saveAppSettings(merged)
-        call.respond(HttpStatusCode.OK, merged)
+        val merged = repo.updateAppSettings { current -> applySettingsPatch(current, patch) }
+        if (merged.remoteSync.syncApiKeys && !before) {
+            // api_keys_* just became a synced file: fetch the account's keys now
+            repo.pullNow()
+        }
+        call.respond(HttpStatusCode.OK, merged.forClient())
     }
 
     // ========== Custom Providers (OpenAI-compatible) ==========
@@ -1037,3 +997,70 @@ fun Route.mutationRoutes() {
         call.respond(HttpStatusCode.Created, skill)
     }
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** The node holding a message with [messageId] (a user message or a response), or null. */
+internal fun findNodeOfMessage(chat: Chat, messageId: String): String? =
+    chat.messageNodes.firstOrNull { node ->
+        node.variants.any { v -> v.userMessage.id == messageId || v.responses.any { it.id == messageId } }
+    }?.nodeId
+
+/** Branch-aware message delete (Android's delete) answered as the updated chat / 400 / 404. */
+private suspend fun ApplicationCall.respondBranchDelete(ctx: UserContext, chatId: String, messageId: String) {
+    val repo = ctx.repository
+    if (repo.loadChatHistory(ctx.username).chat_history.none { it.chat_id == chatId }) {
+        respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+        return
+    }
+    when (val result = repo.deleteMessageFromBranch(ctx.username, chatId, messageId)) {
+        is DeleteMessageResult.Success -> respond(HttpStatusCode.OK, result.updatedChat)
+        is DeleteMessageResult.CannotDeleteBranchPoint ->
+            respond(HttpStatusCode.BadRequest, mapOf("error" to result.message))
+        is DeleteMessageResult.Error ->
+            respond(HttpStatusCode.NotFound, mapOf("error" to result.message))
+    }
+}
+
+/**
+ * [current] with the fields of a PATCH /api/settings body applied.  `remoteSync` is
+ * server-owned: only `remoteSync.syncApiKeys` is taken from the body.
+ */
+internal fun applySettingsPatch(current: AppSettings, patch: JsonObject): AppSettings = current.copy(
+    selected_provider = patch["selected_provider"]?.jsonPrimitive?.contentOrNull ?: current.selected_provider,
+    selected_model = patch["selected_model"]?.jsonPrimitive?.contentOrNull ?: current.selected_model,
+    temperature = patch["temperature"]?.jsonPrimitive?.doubleOrNull ?: current.temperature,
+    multiMessageMode = patch["multiMessageMode"]?.jsonPrimitive?.booleanOrNull ?: current.multiMessageMode,
+    starredModels = patch["starredModels"]?.let {
+        lenientJson.decodeFromJsonElement<List<StarredModel>>(it)
+    } ?: current.starredModels,
+    skipWelcomeScreen = patch["skipWelcomeScreen"]?.jsonPrimitive?.booleanOrNull ?: current.skipWelcomeScreen,
+    enabledTools = patch["enabledTools"]?.let {
+        lenientJson.decodeFromJsonElement<List<String>>(it)
+    } ?: current.enabledTools,
+    excludedToolIds = patch["excludedToolIds"]?.let {
+        lenientJson.decodeFromJsonElement<List<String>>(it)
+    } ?: current.excludedToolIds,
+    titleGenerationSettings = if (patch.containsKey("titleGenerationSettings")) {
+        val tgsJson = patch["titleGenerationSettings"]!!.jsonObject
+        current.titleGenerationSettings.copy(
+            enabled = tgsJson["enabled"]?.jsonPrimitive?.booleanOrNull ?: current.titleGenerationSettings.enabled,
+            provider = tgsJson["provider"]?.jsonPrimitive?.contentOrNull ?: current.titleGenerationSettings.provider,
+            updateOnExtension = tgsJson["updateOnExtension"]?.jsonPrimitive?.booleanOrNull ?: current.titleGenerationSettings.updateOnExtension
+        )
+    } else current.titleGenerationSettings,
+    // Only the per-device "sync API keys" opt-in; the rest of remoteSync (enabled, server
+    // URL, token, account) is seeded by login and must not be changed from the browser
+    remoteSync = (patch["remoteSync"] as? JsonObject)?.get("syncApiKeys")?.jsonPrimitive?.booleanOrNull
+        ?.let { current.remoteSync.copy(syncApiKeys = it) }
+        ?: current.remoteSync,
+    childLockSettings = if (patch.containsKey("childLockSettings")) {
+        val clJson = patch["childLockSettings"]!!.jsonObject
+        current.childLockSettings.copy(
+            enabled = clJson["enabled"]?.jsonPrimitive?.booleanOrNull ?: current.childLockSettings.enabled,
+            encryptedPassword = clJson["encryptedPassword"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.encryptedPassword,
+            startTime = clJson["startTime"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.startTime,
+            endTime = clJson["endTime"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.endTime
+        )
+    } else current.childLockSettings
+)

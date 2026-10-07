@@ -10,6 +10,7 @@ import type { ChatGroup, Chat } from '../api/types'
 import ScreenTopBar from '../components/ScreenTopBar'
 import { t } from '../i18n/he'
 import styles from './GroupPage.module.css'
+import { SYNC_CHANGED_EVENT } from '../hooks/useSyncRefresh'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -215,9 +216,10 @@ const GroupPage: React.FC = () => {
   const [uploadingFile, setUploadingFile] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const loadGroup = useCallback(async () => {
+  // silent: a background refresh (sync) — no loading state, the page stays as is meanwhile
+  const loadGroup = useCallback(async (silent = false) => {
     if (!groupId) return
-    setLoading(true)
+    if (!silent) setLoading(true)
     try {
       const [allGroups, allChats] = await Promise.all([
         groupsApi.list(),
@@ -238,13 +240,20 @@ const GroupPage: React.FC = () => {
       })
       setGroupChats(sorted)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Load failed')
+      if (!silent) setError(err instanceof Error ? err.message : 'Load failed')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [groupId])
 
   useEffect(() => { loadGroup() }, [loadGroup])
+
+  // Another device changed the account's data (server-side sync pull): reload quietly
+  useEffect(() => {
+    const onSyncChanged = () => { void loadGroup(true) }
+    window.addEventListener(SYNC_CHANGED_EVENT, onSyncChanged)
+    return () => window.removeEventListener(SYNC_CHANGED_EVENT, onSyncChanged)
+  }, [loadGroup])
 
   // ── Project mode toggle ────────────────────────────────────────────────────
 

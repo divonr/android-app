@@ -50,11 +50,11 @@ private data class SyncAuthRequest(val id_token: String)
 /**
  * Real [SyncAuthClient] that posts the Google ID token to the sync server.
  *
- * @param syncServerUrl  Base URL of the sync server (default `http://localhost:8090`).
+ * @param syncServerUrl  Base URL of the sync server (default: `SYNC_SERVER_URL`, else
+ *                       `http://localhost:8090`; [com.example.ApI.server.module] passes its own).
  */
 class RealSyncAuthClient(
-    private val syncServerUrl: String = System.getenv("SYNC_SERVER_URL")
-        ?.takeIf { it.isNotBlank() } ?: "http://localhost:8090"
+    private val syncServerUrl: String = com.example.ApI.server.resolveSyncServerUrl()
 ) : SyncAuthClient {
 
     override suspend fun exchange(idToken: String): SyncAuthResult? =

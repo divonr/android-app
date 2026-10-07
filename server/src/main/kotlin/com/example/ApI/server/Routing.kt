@@ -1,6 +1,7 @@
 package com.example.ApI.server
 
 import com.example.ApI.data.model.ApiKey
+import com.example.ApI.data.model.AppSettings
 import com.example.ApI.server.streaming.resendRoute
 import com.example.ApI.server.streaming.sendRoute
 import io.ktor.http.*
@@ -64,16 +65,25 @@ data class SearchResultDto(
 /**
  * Response body for GET /api/sync/status.
  * The auth token is deliberately omitted — it must never leave the server.
- * [reachable] is null when sync is disabled (no probe attempted);
- * true/false when sync is enabled and the remote health check ran.
+ * [reachable] is null when sync is disabled or not probed (`?probe=false`, the web's
+ * live-refresh poll); true/false when sync is enabled and the remote health check ran.
+ * [lastChangeTick] changes whenever a pull changed the user's local files (the web reloads
+ * its chat list / open chat then). [needsReauth]: the sync server rejected the token (sign in
+ * again). [serverLacksCas]: the sync server is too old for safe merging, nothing syncs.
  */
 @Serializable
 data class SyncStatusResponse(
     val enabled: Boolean,
     val serverBaseUrl: String,
     val lastChangeTick: Long,
-    val reachable: Boolean? = null
+    val reachable: Boolean? = null,
+    val needsReauth: Boolean = false,
+    val serverLacksCas: Boolean = false,
+    val accountEmail: String = ""
 )
+
+/** Settings as sent to the browser: the sync token never leaves the server. */
+fun AppSettings.forClient(): AppSettings = copy(remoteSync = remoteSync.copy(authToken = ""))
 
 /**
  * ApiKey with its secret replaced by a masked form for HTTP read responses.
@@ -349,7 +359,8 @@ private fun Route.googleLoginRoutes(allowedGoogleEmails: Set<String>) {
             return@get
         }
 
-        // Step 5: bootstrap user in registry (seeds AppSettings, starts engine)
+        // Step 5: bootstrap user in registry (seeds AppSettings, waits — bounded — for the
+        // first pull so a returning user's data is there on the first page, starts the pull loop)
         appModule.registry.bootstrapUserSync(
             username = syncResult.username,
             email = syncResult.email,
@@ -397,12 +408,14 @@ fun Route.apiRoutes() {
         call.respond(HttpStatusCode.OK, mapOf("ok" to true))
     }
 
-    // GET /api/sync/status — returns sync enablement state + last change tick + reachability probe.
+    // GET /api/sync/status — sync enablement state + last change tick + flags + reachability
+    // probe (skipped with ?probe=false: the web's live-refresh poll only needs the tick).
     get("/sync/status") {
         val ctx = call.userContext()
         val repo = ctx.repository
         val syncSettings = repo.loadAppSettings().remoteSync
-        val reachable: Boolean? = if (syncSettings.enabled) {
+        val probe = call.request.queryParameters["probe"] != "false"
+        val reachable: Boolean? = if (syncSettings.enabled && probe) {
             try { repo.testSyncConnection() } catch (_: Exception) { false }
         } else {
             null
@@ -413,7 +426,10 @@ fun Route.apiRoutes() {
                 enabled = syncSettings.enabled,
                 serverBaseUrl = syncSettings.serverBaseUrl,
                 lastChangeTick = repo.syncChangeTick.value,
-                reachable = reachable
+                reachable = reachable,
+                needsReauth = repo.needsReauth.value,
+                serverLacksCas = repo.syncServerLacksCas.value,
+                accountEmail = syncSettings.accountEmail
             )
         )
     }
@@ -460,10 +476,10 @@ fun Route.apiRoutes() {
 
     // ── Settings ─────────────────────────────────────────────────────────────
 
-    // GET /api/settings — AppSettings for the current user
+    // GET /api/settings — AppSettings for the current user (sync token blanked)
     get("/settings") {
         val ctx = call.userContext()
-        call.respond(HttpStatusCode.OK, ctx.repository.loadAppSettings())
+        call.respond(HttpStatusCode.OK, ctx.repository.loadAppSettings().forClient())
     }
 
     // ── Chat history ─────────────────────────────────────────────────────────

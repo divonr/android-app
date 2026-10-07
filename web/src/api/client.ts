@@ -20,6 +20,7 @@ import type {
   ProviderModel_Flat,
   ResendMessageRequest,
   SearchResult,
+  SyncStatus,
   TitleResponse,
   UserChatHistory,
 } from './types'
@@ -220,9 +221,13 @@ export const messages = {
       body: JSON.stringify(msg),
     }),
 
-  /** DELETE /api/chats/:chatId/messages/:messageId */
+  /**
+   * DELETE /api/chats/:chatId/branch/messages/:messageId — branch-aware delete (Android's):
+   * removes the message from the chat's tree. A message followed by other messages can't be
+   * deleted (400 with the reason in `body.error`).
+   */
   delete: (chatId: string, messageId: string) =>
-    request<Chat>(`/api/chats/${chatId}/messages/${messageId}`, {
+    request<Chat>(`/api/chats/${chatId}/branch/messages/${messageId}`, {
       method: 'DELETE',
     }),
 
@@ -247,7 +252,10 @@ export const branching = {
   /** POST /api/chats/:chatId/branch */
   create: (
     chatId: string,
-    params: { nodeId: string; newUserMessage: { role: string; text: string } },
+    params: {
+      nodeId: string
+      newUserMessage: { id?: string; role: string; text: string; attachments?: Attachment[] }
+    },
   ) =>
     request<BranchResult>(`/api/chats/${chatId}/branch`, {
       method: 'POST',
@@ -548,11 +556,12 @@ export const sync = {
   /** POST /api/sync/pull — trigger an immediate pull from the remote sync server */
   pull: () => request<OkResponse>('/api/sync/pull', { method: 'POST' }),
 
-  /** GET /api/sync/status — returns current sync enablement state and remote reachability probe */
-  status: () =>
-    request<{ enabled: boolean; serverBaseUrl: string; lastChangeTick: number; reachable: boolean | null }>(
-      '/api/sync/status',
-    ),
+  /**
+   * GET /api/sync/status — sync state, change tick and flags. With `probe` (default) the server
+   * also health-checks the sync server (`reachable`); the live-refresh poll passes false.
+   */
+  status: (probe = true) =>
+    request<SyncStatus>(probe ? '/api/sync/status' : '/api/sync/status?probe=false'),
 }
 
 // ---------------------------------------------------------------------------

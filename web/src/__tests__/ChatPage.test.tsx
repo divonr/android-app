@@ -266,6 +266,30 @@ describe('ChatPage', () => {
     )
   })
 
+  it('tells the store while a reply streams (sync refreshes wait for it)', async () => {
+    let capturedCallbacks: StreamCallbacks | null = null
+    vi.mocked(streamModule.sendStream).mockImplementation((_req, cbs) => {
+      capturedCallbacks = cbs
+      return { abort: vi.fn(), done: Promise.resolve() }
+    })
+    renderChatPage()
+    await waitFor(() => screen.getByPlaceholderText(/הקלד הודעה/i))
+    expect(chatStoreModule.useChatStore.getState().streaming).toBe(false)
+
+    fireEvent.change(screen.getByPlaceholderText(/הקלד הודעה/i), { target: { value: 'Hi' } })
+    fireEvent.click(screen.getByLabelText(/send message/i))
+    await waitFor(() => expect(chatStoreModule.useChatStore.getState().streaming).toBe(true))
+
+    act(() => { capturedCallbacks!.onComplete?.({ text: 'done', messageId: 'x' }) })
+    await waitFor(() => expect(chatStoreModule.useChatStore.getState().streaming).toBe(false))
+  })
+
+  it('shows "Chat not found" when the chat was deleted elsewhere', async () => {
+    setupDefaultStore({ currentChat: null, error: 'Chat not found' })
+    renderChatPage()
+    await waitFor(() => expect(screen.getByText('Chat not found')).toBeInTheDocument())
+  })
+
   it('shows streaming partial text as it arrives', async () => {
     let capturedCallbacks: StreamCallbacks | null = null
     vi.mocked(streamModule.sendStream).mockImplementation((_req, callbacks) => {

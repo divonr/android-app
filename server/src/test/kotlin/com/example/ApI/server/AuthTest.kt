@@ -26,21 +26,21 @@ class AuthTest {
 
     @Test
     fun `GET api session without cookie returns 401`() = testApplication {
-        application { module(tempStorage(), authConfig) }
+        application { module(tempStorage(), authConfig, syncServerUrl = UNREACHABLE_SYNC_URL) }
         val response = client.get("/api/session")
         assertEquals(HttpStatusCode.Unauthorized, response.status)
     }
 
     @Test
     fun `GET api chats without cookie returns 401`() = testApplication {
-        application { module(tempStorage(), authConfig) }
+        application { module(tempStorage(), authConfig, syncServerUrl = UNREACHABLE_SYNC_URL) }
         val response = client.get("/api/chats")
         assertEquals(HttpStatusCode.Unauthorized, response.status)
     }
 
     @Test
     fun `401 on protected route has JSON error body`() = testApplication {
-        application { module(tempStorage(), authConfig) }
+        application { module(tempStorage(), authConfig, syncServerUrl = UNREACHABLE_SYNC_URL) }
         val response = client.get("/api/session")
         assertEquals(HttpStatusCode.Unauthorized, response.status)
         val body = response.bodyAsText()
@@ -52,7 +52,7 @@ class AuthTest {
 
     @Test
     fun `GET health is public and returns 200 without auth`() = testApplication {
-        application { module(tempStorage(), authConfig) }
+        application { module(tempStorage(), authConfig, syncServerUrl = UNREACHABLE_SYNC_URL) }
         val response = client.get("/health")
         assertEquals(HttpStatusCode.OK, response.status)
         assertTrue(response.bodyAsText().contains("ok"), "Body: ${response.bodyAsText()}")
@@ -62,14 +62,14 @@ class AuthTest {
 
     @Test
     fun `GET auth google callback with missing params returns 400`() = testApplication {
-        application { module(tempStorage(), authConfig) }
+        application { module(tempStorage(), authConfig, syncServerUrl = UNREACHABLE_SYNC_URL) }
         val response = client.get("/auth/google/callback")
         assertEquals(HttpStatusCode.BadRequest, response.status)
     }
 
     @Test
     fun `GET auth google callback with blank state returns 400`() = testApplication {
-        application { module(tempStorage(), authConfig) }
+        application { module(tempStorage(), authConfig, syncServerUrl = UNREACHABLE_SYNC_URL) }
         val response = client.get("/auth/google/callback") {
             parameter("code", "some-code")
             // no state
@@ -128,7 +128,7 @@ class AuthTest {
 
     @Test
     fun `POST login route no longer exists`() = testApplication {
-        application { module(tempStorage(), authConfig) }
+        application { module(tempStorage(), authConfig, syncServerUrl = UNREACHABLE_SYNC_URL) }
         val response = client.post("/login") {
             contentType(ContentType.Application.Json)
             setBody("""{"password":"any-password"}""")

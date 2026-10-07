@@ -7,25 +7,31 @@
  *   - TitleGenerationSettingsSection: enable toggle + provider selector + update-on-extension
  *   - Multi-message mode: toggle with explainer
  *   - ChildLockSettingsSection: enable toggle → setup/disable dialogs → time display when enabled
- *   - RemoteSyncSection: enable toggle + server URL + auth token (show/hide) + sync-api-keys
- *       toggle with warning + Sync-Now button + Test-Connection with live status
+ *   - RemoteSyncSection: status + account + server URL (read-only: the server's sync is
+ *       managed by the Google sign-in, the token never reaches the browser) + sync-api-keys
+ *       toggle with warning + "sign in again" / "sync server needs update" warnings +
+ *       Sync-Now button + Test-Connection with live status
  *
  * Auto-save strategy (matches Android immediate-save):
  *   - Toggle switches: save immediately via settings.update({ field })
- *   - Text inputs (serverUrl, authToken): debounced 800ms auto-save
  *   - Child lock dialogs: save on confirm
  *
  * Remote sync note:
  *   - "Sync Now" → POST /api/sync/pull (wired)
- *   - "Test Connection" → display-only visual stub; no server test endpoint exists.
- *     R6/R7 can add POST /api/sync/test-connection to the server.
+ *   - "Test Connection" → GET /api/sync/status (server probes the sync server)
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { settings as settingsApi, sync as syncApi } from '../api/client'
 import { useAuthStore } from '../stores/authStore'
-import type { AppSettings, ChildLockSettings, RemoteSyncSettings, TitleGenerationSettings } from '../api/types'
+import type {
+  AppSettings,
+  ChildLockSettings,
+  RemoteSyncSettings,
+  SyncStatus,
+  TitleGenerationSettings,
+} from '../api/types'
 import { sha256 } from '../utils/crypto'
 import { isInLockRange } from '../utils/childLock'
 import { t } from '../i18n/he'
@@ -348,30 +354,27 @@ const SettingsPage: React.FC = () => {
   const [showChildLockSetup, setShowChildLockSetup] = useState(false)
   const [showChildLockDisable, setShowChildLockDisable] = useState(false)
 
-  // Remote sync local text state (debounced save)
-  const [syncServerUrl, setSyncServerUrl] = useState('')
-  const [syncAuthToken, setSyncAuthToken] = useState('')
-  const [tokenVisible, setTokenVisible] = useState(false)
+  // Remote sync state (server-managed; flags from GET /api/sync/status)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [syncNowDone, setSyncNowDone] = useState(false)
   const [testResult, setTestResult] = useState<'ok' | 'fail' | null>(null)
   const [testInProgress, setTestInProgress] = useState(false)
-
-  const syncUrlDebounce = useRef<ReturnType<typeof setTimeout>>()
-  const syncTokenDebounce = useRef<ReturnType<typeof setTimeout>>()
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     settingsApi.get().then((s) => {
       setAppSettings(s)
-      const remSync = s.remoteSync ?? DEFAULT_REMOTE_SYNC
-      setSyncServerUrl(remSync.serverBaseUrl)
-      setSyncAuthToken(remSync.authToken)
       setLoading(false)
     }).catch((err) => {
       setError(err instanceof Error ? err.message : 'Failed to load settings')
       setLoading(false)
     })
+    // needsReauth / serverLacksCas / account (no reachability probe on load)
+    Promise.resolve()
+      .then(() => syncApi.status(false))
+      .then((st) => { if (st) setSyncStatus(st) })
+      .catch(() => {})
   }, [])
 
   // ── Auto-save helper ──────────────────────────────────────────────────────
@@ -441,41 +444,18 @@ const SettingsPage: React.FC = () => {
     autoSave({ childLockSettings: updatedCl })
   }
 
-  // ── Remote sync text fields (debounced) ───────────────────────────────────
+  // ── Remote sync ───────────────────────────────────────────────────────────
+  // The server's sync (enabled, server, token, account) is set up by the Google sign-in and
+  // can't be changed here; the server only accepts the per-device "sync API keys" opt-in.
 
-  const updateSyncUrl = (url: string) => {
-    setSyncServerUrl(url)
-    clearTimeout(syncUrlDebounce.current)
-    syncUrlDebounce.current = setTimeout(() => {
-      if (!appSettings) return
-      const updated: RemoteSyncSettings = {
-        ...(appSettings.remoteSync ?? DEFAULT_REMOTE_SYNC),
-        serverBaseUrl: url,
-      }
-      autoSave({ remoteSync: updated })
-    }, 800)
-  }
-
-  const updateSyncToken = (token: string) => {
-    setSyncAuthToken(token)
-    clearTimeout(syncTokenDebounce.current)
-    syncTokenDebounce.current = setTimeout(() => {
-      if (!appSettings) return
-      const updated: RemoteSyncSettings = {
-        ...(appSettings.remoteSync ?? DEFAULT_REMOTE_SYNC),
-        authToken: token,
-      }
-      autoSave({ remoteSync: updated })
-    }, 800)
-  }
-
-  const updateSyncField = (patch: Partial<RemoteSyncSettings>) => {
+  const updateSyncApiKeys = (syncApiKeys: boolean) => {
     if (!appSettings) return
-    const updated: RemoteSyncSettings = {
-      ...(appSettings.remoteSync ?? DEFAULT_REMOTE_SYNC),
-      ...patch,
-    }
-    autoSave({ remoteSync: updated })
+    setAppSettings((prev) => prev
+      ? { ...prev, remoteSync: { ...(prev.remoteSync ?? DEFAULT_REMOTE_SYNC), syncApiKeys } }
+      : prev)
+    settingsApi.update({ remoteSync: { syncApiKeys } as RemoteSyncSettings }).catch((err) => {
+      setError(err instanceof Error ? err.message : 'Save failed')
+    })
   }
 
   const handleSyncNow = async () => {
@@ -495,6 +475,7 @@ const SettingsPage: React.FC = () => {
     setTestInProgress(true)
     try {
       const status = await syncApi.status()
+      setSyncStatus(status)
       // reachable=null means sync is disabled (no probe); treat as ok (config retrieved).
       // reachable=true → remote is reachable; reachable=false → remote probe failed.
       if (status.reachable === false) {
@@ -717,49 +698,35 @@ const SettingsPage: React.FC = () => {
                 {remoteSync.enabled ? t('remote_sync_status_enabled') : t('remote_sync_status_off')}
               </span>
             </div>
-            <label className={styles.toggle}>
-              <input
-                type="checkbox"
-                checked={remoteSync.enabled}
-                onChange={(e) => updateSyncField({ enabled: e.target.checked })}
-              />
-              <span className={styles.toggleSlider} />
-            </label>
           </div>
+
+          <span className={styles.sectionHint}>{t('remote_sync_managed')}</span>
+
+          {syncStatus?.needsReauth && (
+            <div className={styles.syncWarning} role="alert">{t('remote_sync_needs_reauth')}</div>
+          )}
+          {syncStatus?.serverLacksCas && (
+            <div className={styles.syncWarning} role="alert">{t('remote_sync_server_lacks_cas')}</div>
+          )}
 
           <div className={styles.spacer} />
 
-          {/* Server URL */}
+          {/* Account + server (read-only) */}
+          {(syncStatus?.accountEmail || remoteSync.accountEmail) && (
+            <div className={styles.textField}>
+              <div className={styles.fieldLabel}>{t('remote_sync_account')}</div>
+              <div className={styles.fieldInputWrap}>
+                <span className={styles.fieldInput} dir="ltr">
+                  {syncStatus?.accountEmail || remoteSync.accountEmail}
+                </span>
+              </div>
+            </div>
+          )}
+          <div className={styles.spacerSmall} />
           <div className={styles.textField}>
             <div className={styles.fieldLabel}>{t('remote_sync_server_url')}</div>
             <div className={styles.fieldInputWrap}>
-              <input
-                type="url"
-                className={styles.fieldInput}
-                value={syncServerUrl}
-                onChange={(e) => updateSyncUrl(e.target.value)}
-                placeholder="https://sync.example.com"
-              />
-            </div>
-          </div>
-
-          <div className={styles.spacerSmall} />
-
-          {/* Auth token */}
-          <div className={styles.textField}>
-            <div className={styles.fieldLabel}>{t('remote_sync_auth_token')}</div>
-            <div className={styles.fieldInputWrap}>
-              <input
-                type={tokenVisible ? 'text' : 'password'}
-                className={[styles.fieldInput, styles.hasTrailing].join(' ')}
-                value={syncAuthToken}
-                onChange={(e) => updateSyncToken(e.target.value)}
-                placeholder="••••••••"
-                style={{ paddingInlineEnd: 40 }}
-              />
-              <button className={styles.trailingBtn} onClick={() => setTokenVisible((v) => !v)} type="button">
-                {tokenVisible ? <MdVisibilityOff size={18} /> : <MdVisibility size={18} />}
-              </button>
+              <span className={styles.fieldInput} dir="ltr">{remoteSync.serverBaseUrl}</span>
             </div>
           </div>
 
@@ -776,8 +743,9 @@ const SettingsPage: React.FC = () => {
             <label className={styles.toggle}>
               <input
                 type="checkbox"
+                aria-label={t('remote_sync_api_keys')}
                 checked={remoteSync.syncApiKeys}
-                onChange={(e) => updateSyncField({ syncApiKeys: e.target.checked })}
+                onChange={(e) => updateSyncApiKeys(e.target.checked)}
               />
               <span className={styles.toggleSlider} />
             </label>

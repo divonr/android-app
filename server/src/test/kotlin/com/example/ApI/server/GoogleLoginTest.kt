@@ -256,7 +256,7 @@ class GoogleLoginTest {
     @Test
     fun `GET auth google start without GOOGLE_OAUTH_CLIENT_ID returns 503`() = testApplication {
         // No GoogleClientIdTestHook set, env var not set in test → 503
-        application { module(tempStorage(), authConfig) }
+        application { module(tempStorage(), authConfig, syncServerUrl = UNREACHABLE_SYNC_URL) }
         val response = client.get("/auth/google/start")
         assertEquals(HttpStatusCode.ServiceUnavailable, response.status,
             "Should be 503 when GOOGLE_OAUTH_CLIENT_ID is not configured")
