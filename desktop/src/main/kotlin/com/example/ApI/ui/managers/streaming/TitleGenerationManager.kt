@@ -15,9 +15,10 @@ class TitleGenerationManager(
 ) {
 
     fun updateTitleGenerationSettings(newSettings: TitleGenerationSettings) {
-        val currentSettings = deps.appSettings.value
-        val updatedSettings = currentSettings.copy(titleGenerationSettings = newSettings)
-        deps.repository.saveAppSettings(updatedSettings)
+        val currentSettings = deps.repository.loadAppSettings()
+        val updatedSettings = deps.repository.updateAppSettings { fresh ->
+            fresh.copy(titleGenerationSettings = newSettings)
+        }
         updateAppSettings(updatedSettings)
     }
 
@@ -60,14 +61,18 @@ class TitleGenerationManager(
 
     suspend fun updateChatPreviewName(chatId: String, newTitle: String) {
         val currentUser = deps.appSettings.value.current_user
-        val chatHistory = deps.repository.loadChatHistory(currentUser)
-        val updatedChats = chatHistory.chat_history.map { chat ->
-            if (chat.chat_id == chatId) chat.copy(preview_name = newTitle) else chat
-        }
-        deps.repository.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-        val finalChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
-        val updatedCurrentChat = finalChatHistory.find { it.chat_id == chatId }
-        deps.updateUiState(deps.uiState.value.copy(currentChat = updatedCurrentChat, chatHistory = finalChatHistory))
+        // Locked load-modify-save
+        val finalChatHistory = deps.repository.updateChatHistory(currentUser) { history ->
+            history.copy(chat_history = history.chat_history.map { chat ->
+                if (chat.chat_id == chatId) chat.copy(preview_name = newTitle) else chat
+            })
+        }.chat_history
+        // The current chat only changes if it is the renamed one
+        val state = deps.uiState.value
+        val updatedCurrentChat = if (state.currentChat?.chat_id == chatId) {
+            finalChatHistory.find { it.chat_id == chatId } ?: state.currentChat
+        } else state.currentChat
+        deps.updateUiState(state.copy(currentChat = updatedCurrentChat, chatHistory = finalChatHistory))
     }
 
     fun renameChatWithAI(chat: Chat) {

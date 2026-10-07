@@ -1,5 +1,8 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package com.example.ApI.data.model
 
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 
 /**
@@ -166,7 +169,8 @@ data class FullCustomProviderConfig(
 
     // Metadata
     val isOpenAICompatible: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis(),
+    // Always written: a default evaluated at decode time would differ on every read (and per device)
+    @EncodeDefault val createdAt: Long = System.currentTimeMillis(),
     val isEnabled: Boolean = true
 )
 

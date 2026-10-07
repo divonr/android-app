@@ -64,11 +64,11 @@ class AuthManager(
                                 val toolRegistry = ToolRegistry.getInstance()
                                 toolRegistry.registerGitHubTools(apiService, auth.accessToken, user.login)
 
-                                val freshSettings = deps.repository.loadAppSettings()
-                                val githubToolIds = toolRegistry.getGitHubToolIds()
-                                val updatedEnabledTools = (freshSettings.enabledTools + githubToolIds).distinct()
-                                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                                deps.repository.saveAppSettings(updatedSettings)
+                                val updatedSettings = deps.repository.updateAppSettings { freshSettings ->
+                                    val githubToolIds = toolRegistry.getGitHubToolIds()
+                                    val updatedEnabledTools = (freshSettings.enabledTools + githubToolIds).distinct()
+                                    freshSettings.copy(enabledTools = updatedEnabledTools)
+                                }
                                 updateAppSettings(updatedSettings)
                                 showSnackbar("GitHub connected as ${user.login}")
                             },
@@ -96,11 +96,11 @@ class AuthManager(
                 deps.repository.removeGitHubConnection(username)
                 val toolRegistry = ToolRegistry.getInstance()
                 toolRegistry.unregisterGitHubTools()
-                val freshSettings = deps.repository.loadAppSettings()
-                val githubToolIds = toolRegistry.getGitHubToolIds()
-                val updatedEnabledTools = freshSettings.enabledTools.filter { it !in githubToolIds }
-                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                deps.repository.saveAppSettings(updatedSettings)
+                val updatedSettings = deps.repository.updateAppSettings { freshSettings ->
+                    val githubToolIds = toolRegistry.getGitHubToolIds()
+                    val updatedEnabledTools = freshSettings.enabledTools.filter { it !in githubToolIds }
+                    freshSettings.copy(enabledTools = updatedEnabledTools)
+                }
                 updateAppSettings(updatedSettings)
             } catch (e: Exception) {
                 showSnackbar("Error disconnecting GitHub: ${e.message}")
@@ -129,12 +129,13 @@ class AuthManager(
                     if (connection != null) {
                         val toolRegistry = ToolRegistry.getInstance()
                         toolRegistry.registerGitHubTools(apiService, accessToken, connection.user.login)
-                        val currentSettings = deps.appSettings.value
+                        val currentSettings = deps.repository.loadAppSettings()
                         val githubToolIds = toolRegistry.getGitHubToolIds()
                         if (!currentSettings.enabledTools.containsAll(githubToolIds)) {
-                            val updatedEnabledTools = (currentSettings.enabledTools + githubToolIds).distinct()
-                            val updatedSettings = currentSettings.copy(enabledTools = updatedEnabledTools)
-                            deps.repository.saveAppSettings(updatedSettings)
+                            val updatedSettings = deps.repository.updateAppSettings { fresh ->
+                                val updatedEnabledTools = (fresh.enabledTools + githubToolIds).distinct()
+                                fresh.copy(enabledTools = updatedEnabledTools)
+                            }
                             updateAppSettings(updatedSettings)
                         }
                     }
@@ -173,11 +174,11 @@ class AuthManager(
                 val toolRegistry = ToolRegistry.getInstance()
                 toolRegistry.unregisterGoogleWorkspaceTools()
 
-                val freshSettings = deps.repository.loadAppSettings()
-                val googleToolIds = toolRegistry.getGoogleWorkspaceToolIds()
-                val updatedEnabledTools = freshSettings.enabledTools.filter { it !in googleToolIds }
-                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                deps.repository.saveAppSettings(updatedSettings)
+                val updatedSettings = deps.repository.updateAppSettings { freshSettings ->
+                    val googleToolIds = toolRegistry.getGoogleWorkspaceToolIds()
+                    val updatedEnabledTools = freshSettings.enabledTools.filter { it !in googleToolIds }
+                    freshSettings.copy(enabledTools = updatedEnabledTools)
+                }
                 updateAppSettings(updatedSettings)
             } catch (e: Exception) {
                 showSnackbar("Error disconnecting Google Workspace: ${e.message}")
@@ -223,11 +224,11 @@ class AuthManager(
                 if (connection.enabledServices.drive) enabledGoogleToolIds.addAll(toolRegistry.getDriveToolIds())
 
                 val allGoogleToolIds = toolRegistry.getGoogleWorkspaceToolIds()
-                val freshSettings = deps.repository.loadAppSettings()
-                val cleanedTools = freshSettings.enabledTools.filter { it !in allGoogleToolIds }
-                val updatedEnabledTools = (cleanedTools + enabledGoogleToolIds).distinct()
-                val updatedSettings = freshSettings.copy(enabledTools = updatedEnabledTools)
-                deps.repository.saveAppSettings(updatedSettings)
+                val updatedSettings = deps.repository.updateAppSettings { freshSettings ->
+                    val cleanedTools = freshSettings.enabledTools.filter { it !in allGoogleToolIds }
+                    val updatedEnabledTools = (cleanedTools + enabledGoogleToolIds).distinct()
+                    freshSettings.copy(enabledTools = updatedEnabledTools)
+                }
                 updateAppSettings(updatedSettings)
             } catch (e: Exception) {
                 e.printStackTrace()

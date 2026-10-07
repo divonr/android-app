@@ -1,5 +1,8 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package com.example.ApI.data.model
 
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 
 /**
@@ -16,7 +19,8 @@ data class CustomProviderConfig(
     val authHeaderName: String = "Authorization",            // Header name for API key
     val authHeaderFormat: String = "Bearer {key}",           // Format string ({key} placeholder)
     val extraHeaders: Map<String, String> = emptyMap(),      // Additional headers
-    val createdAt: Long = System.currentTimeMillis(),
+    // Always written: a default evaluated at decode time would differ on every read (and per device)
+    @EncodeDefault val createdAt: Long = System.currentTimeMillis(),
     val isEnabled: Boolean = true
 )
 

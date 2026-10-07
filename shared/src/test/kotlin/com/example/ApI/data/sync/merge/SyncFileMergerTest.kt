@@ -112,6 +112,27 @@ class SyncFileMergerTest {
         assertTrue("\"l\"" in m && "\"r\"" !in m)
     }
 
+    @Test
+    fun `a disconnected auth file merges 3-way like any value`() {
+        val conn = """{"auth":{"accessToken":"b","scope":"s","createdAt":1},"user":${user("b")},"connectedAt":1}"""
+        val other = """{"auth":{"accessToken":"n","scope":"s","createdAt":5},"user":${user("n")},"connectedAt":5}"""
+        for (name in listOf("github_auth_u.json")) {
+            assertTrue(SyncFileMerger.isValid(name, "null", json), "the disconnected marker is a valid copy")
+            // Disconnected on one side, untouched on the other → disconnected (both directions)
+            assertEquals("null", SyncFileMerger.mergeFile(name, conn, "null", conn, json).trim())
+            assertEquals("null", SyncFileMerger.mergeFile(name, conn, conn, "null", json).trim())
+            assertEquals("null", SyncFileMerger.tryMergeFile(name, conn, conn, "null", json)?.trim())
+            // Reconnected on one side after the other disconnected → the new connection
+            assertTrue("\"n\"" in SyncFileMerger.mergeFile(name, conn, other, "null", json))
+            assertTrue("\"n\"" in SyncFileMerger.mergeFile(name, "null", "null", other, json))
+            assertTrue(SyncFileMerger.sameContent(name, "null", " null\n", json))
+            assertFalse(SyncFileMerger.sameContent(name, "null", conn, json))
+        }
+        val ws = "google_workspace_auth_u.json"
+        assertTrue(SyncFileMerger.isValid(ws, "null", json))
+        assertEquals("null", SyncFileMerger.mergeFile(ws, null, "null", "null", json).trim())
+    }
+
     private fun user(login: String) = """{"login":"$login","id":1,"node_id":"n","avatar_url":"a","gravatar_id":null,"url":"u",
         "html_url":"h","name":null,"company":null,"blog":null,"location":null,"email":null,"bio":null,
         "public_repos":0,"public_gists":0,"followers":0,"following":0,"created_at":"c","updated_at":"u"}"""

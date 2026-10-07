@@ -178,7 +178,9 @@ Sign-in/out and migration (`DataRepository`/`DesktopRepository`/`UserMigration`)
   the account's server chats are unioned and the union is uploaded (S1 requirement).
 - Sign-in `saveAppSettings` must not clobber the account's settings: handled by the
   app_settings JSON policy (no base → remote wins for non-device-local keys).
-- Sign-out → reset sync state + base snapshots (next sign-in starts 2-way).
+- Sign-out → keep the sync state + base snapshots (T5 change): content-based detection still
+  catches edits made while signed out, and re-signing into the SAME account keeps 3-way deletion
+  semantics (no resurrection). Signing into another account resets them (`prepareForSignIn`).
 
 ## 5. Android / desktop
 
@@ -191,6 +193,10 @@ Sign-in/out and migration (`DataRepository`/`DesktopRepository`/`UserMigration`)
 - Foreground periodic pull (e.g. every 30 s while resumed) in addition to resume.
 - `cleanupEmptyChats` only removes empty chats that are NOT in the sync base (i.e. local
   junk), so it never deletes an empty chat another device just created.
+- app_settings writes are transforms on the on-disk settings (`updateAppSettings`), never a
+  ViewModel's stale copy. GitHub / Google Workspace disconnect writes a synced `null` auth file
+  instead of deleting it (deletions don't sync). Desktop: no local-user rename while sync is on.
+  Sync settings UI shows `serverLacksCas` ("sync server needs update").
 
 ## 6. Ktor server / web
 

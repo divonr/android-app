@@ -43,6 +43,7 @@ fun UserSettingsScreen(
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         val syncNeedsReauth by viewModel.syncNeedsReauth.collectAsState()
+        val syncServerLacksCas by viewModel.syncServerLacksCas.collectAsState()
         val syncSignInInProgress by viewModel.syncSignInInProgress.collectAsState()
 
                 var showImportWarning by remember { mutableStateOf(false) }
@@ -242,6 +243,7 @@ fun UserSettingsScreen(
                 RemoteSyncSection(
                     settings = appSettings.remoteSync,
                     needsReauth = syncNeedsReauth,
+                    serverLacksCas = syncServerLacksCas,
                     isSignInInProgress = syncSignInInProgress,
                     onEnabledChange = { viewModel.updateRemoteSyncEnabled(it) },
                     onServerUrlChange = { viewModel.updateRemoteSyncServerUrl(it) },

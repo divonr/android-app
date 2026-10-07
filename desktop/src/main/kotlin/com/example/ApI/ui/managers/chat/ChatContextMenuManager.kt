@@ -52,11 +52,11 @@ class ChatContextMenuManager(
     fun deleteChat(chat: Chat) {
         deps.scope.launch {
             val currentUser = deps.appSettings.value.current_user
-            val chatHistory = deps.repository.loadChatHistory(currentUser)
-            val updatedChats = chatHistory.chat_history.filter { it.chat_id != chat.chat_id }
-            val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-            deps.repository.saveChatHistory(updatedHistory)
-            val finalChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
+            // Locked load-modify-save
+            val chatHistory = deps.repository.updateChatHistory(currentUser) { history ->
+                history.copy(chat_history = history.chat_history.filter { it.chat_id != chat.chat_id })
+            }
+            val finalChatHistory = chatHistory.chat_history
             val newCurrentChat = if (deps.uiState.value.currentChat?.chat_id == chat.chat_id) {
                 finalChatHistory.lastOrNull()
             } else {
@@ -83,11 +83,10 @@ class ChatContextMenuManager(
         val currentChat = deps.uiState.value.currentChat ?: return
         val currentUser = deps.appSettings.value.current_user
         deps.scope.launch {
-            val chatHistory = deps.repository.loadChatHistory(currentUser)
-            val updatedChats = chatHistory.chat_history.filter { it.chat_id != currentChat.chat_id }
-            val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-            deps.repository.saveChatHistory(updatedHistory)
-            val finalChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
+            // Locked load-modify-save
+            val finalChatHistory = deps.repository.updateChatHistory(currentUser) { history ->
+                history.copy(chat_history = history.chat_history.filter { it.chat_id != currentChat.chat_id })
+            }.chat_history
             deps.updateUiState(deps.uiState.value.copy(
                 chatHistory = finalChatHistory,
                 currentChat = null,

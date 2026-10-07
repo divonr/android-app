@@ -12,11 +12,18 @@ import com.example.ApI.data.network.GoogleDriveApiService
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import com.example.ApI.util.AtomicFiles
+import com.example.ApI.util.FileLocks
 import java.io.File
 
 /**
  * Manages external service connections (GitHub, Google Workspace).
  * Handles loading, saving, and managing connection state.
+ *
+ * Disconnecting does not delete the auth file: sync does not propagate file deletions (a pull
+ * would bring the server's copy back), so the file is overwritten with [DISCONNECTED] (JSON
+ * `null`) through the normal synced write path. Loaders treat it like a missing file, and the
+ * merge policy treats it as an ordinary value (disconnect on one device vs. an untouched
+ * connection elsewhere → disconnected).
  */
 class ExternalConnectionsManager(
     private val internalDir: File,
@@ -24,9 +31,29 @@ class ExternalConnectionsManager(
     private val localStorageManager: LocalStorageManager,
     private val onFileWritten: (java.io.File) -> Unit = {}
 ) {
+    companion object {
+        /** Content of an auth file whose connection was removed (see the class comment). */
+        const val DISCONNECTED = "null"
+
+        /** True when [text] (an auth file's content) holds no connection. */
+        fun isDisconnected(text: String): Boolean = text.isBlank() || text.trim() == DISCONNECTED
+    }
+
     /** Atomically write [content] to [file], then notify the sync engine. */
     private fun writeAndNotify(file: File, content: String) {
         AtomicFiles.write(file, content)
+        onFileWritten(file)
+    }
+
+    private fun gitHubFile(username: String) = File(internalDir, "github_auth_${username}.json")
+    private fun googleWorkspaceFile(username: String) = File(internalDir, "google_workspace_auth_${username}.json")
+
+    /** Mark the connection stored in [file] as removed (synced like any other change). */
+    private fun writeDisconnected(file: File) {
+        FileLocks.withLock(file) {
+            if (!file.exists() || isDisconnected(file.readText())) return
+            AtomicFiles.write(file, DISCONNECTED)
+        }
         onFileWritten(file)
     }
 
@@ -39,10 +66,11 @@ class ExternalConnectionsManager(
      */
     fun loadGitHubConnection(username: String): GitHubConnection? {
         return try {
-            val file = File(internalDir, "github_auth_${username}.json")
+            val file = gitHubFile(username)
             if (!file.exists()) return null
 
             val jsonString = file.readText()
+            if (isDisconnected(jsonString)) return null
             json.decodeFromString<GitHubConnection>(jsonString)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -57,21 +85,20 @@ class ExternalConnectionsManager(
      */
     fun saveGitHubConnection(username: String, connection: GitHubConnection) {
         try {
-            val file = File(internalDir, "github_auth_${username}.json")
+            val file = gitHubFile(username)
             val jsonString = json.encodeToString(connection)
             writeAndNotify(file, jsonString)
 
             // Update app settings to track connection
-            val settings = localStorageManager.loadAppSettings()
-            val updatedConnections = settings.githubConnections.toMutableMap()
-            updatedConnections[username] = GitHubConnectionInfo(
+            val info = GitHubConnectionInfo(
                 username = username,
                 githubUsername = connection.user.login,
                 connectedAt = connection.connectedAt,
                 lastUsed = System.currentTimeMillis()
             )
-            val updatedSettings = settings.copy(githubConnections = updatedConnections)
-            localStorageManager.saveAppSettings(updatedSettings)
+            localStorageManager.updateAppSettings { settings ->
+                settings.copy(githubConnections = settings.githubConnections + (username to info))
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -83,18 +110,13 @@ class ExternalConnectionsManager(
      */
     fun removeGitHubConnection(username: String) {
         try {
-            // Delete the auth file
-            val file = File(internalDir, "github_auth_${username}.json")
-            if (file.exists()) {
-                file.delete()
-            }
+            // Mark the auth file disconnected (a deletion would not sync)
+            writeDisconnected(gitHubFile(username))
 
             // Update app settings
-            val settings = localStorageManager.loadAppSettings()
-            val updatedConnections = settings.githubConnections.toMutableMap()
-            updatedConnections.remove(username)
-            val updatedSettings = settings.copy(githubConnections = updatedConnections)
-            localStorageManager.saveAppSettings(updatedSettings)
+            localStorageManager.updateAppSettings { settings ->
+                settings.copy(githubConnections = settings.githubConnections - username)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -130,14 +152,11 @@ class ExternalConnectionsManager(
      */
     fun updateGitHubLastUsed(username: String) {
         try {
-            val settings = localStorageManager.loadAppSettings()
-            val connectionInfo = settings.githubConnections[username] ?: return
-
-            val updatedConnections = settings.githubConnections.toMutableMap()
-            updatedConnections[username] = connectionInfo.copy(lastUsed = System.currentTimeMillis())
-
-            val updatedSettings = settings.copy(githubConnections = updatedConnections)
-            localStorageManager.saveAppSettings(updatedSettings)
+            val now = System.currentTimeMillis()
+            localStorageManager.updateAppSettings { settings ->
+                val connectionInfo = settings.githubConnections[username] ?: return@updateAppSettings settings
+                settings.copy(githubConnections = settings.githubConnections + (username to connectionInfo.copy(lastUsed = now)))
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -152,10 +171,11 @@ class ExternalConnectionsManager(
      */
     fun loadGoogleWorkspaceConnection(username: String): GoogleWorkspaceConnection? {
         return try {
-            val file = File(internalDir, "google_workspace_auth_${username}.json")
+            val file = googleWorkspaceFile(username)
             if (!file.exists()) return null
 
             val jsonString = file.readText()
+            if (isDisconnected(jsonString)) return null
             json.decodeFromString<GoogleWorkspaceConnection>(jsonString)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -170,21 +190,10 @@ class ExternalConnectionsManager(
      */
     fun saveGoogleWorkspaceConnection(username: String, connection: GoogleWorkspaceConnection) {
         try {
-            val file = File(internalDir, "google_workspace_auth_${username}.json")
+            val file = googleWorkspaceFile(username)
             val jsonString = json.encodeToString(connection)
             writeAndNotify(file, jsonString)
-
-            // Update app settings to track connection
-            val settings = localStorageManager.loadAppSettings()
-            val updatedConnections = settings.googleWorkspaceConnections.toMutableMap()
-            updatedConnections[username] = GoogleWorkspaceConnectionInfo(
-                username = username,
-                googleEmail = connection.user.email,
-                connectedAt = connection.connectedAt,
-                lastUsed = System.currentTimeMillis()
-            )
-            val updatedSettings = settings.copy(googleWorkspaceConnections = updatedConnections)
-            localStorageManager.saveAppSettings(updatedSettings)
+            trackGoogleWorkspaceConnection(username, connection)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -196,18 +205,13 @@ class ExternalConnectionsManager(
      */
     fun removeGoogleWorkspaceConnection(username: String) {
         try {
-            // Delete the auth file
-            val file = File(internalDir, "google_workspace_auth_${username}.json")
-            if (file.exists()) {
-                file.delete()
-            }
+            // Mark the auth file disconnected (a deletion would not sync)
+            writeDisconnected(googleWorkspaceFile(username))
 
             // Update app settings
-            val settings = localStorageManager.loadAppSettings()
-            val updatedConnections = settings.googleWorkspaceConnections.toMutableMap()
-            updatedConnections.remove(username)
-            val updatedSettings = settings.copy(googleWorkspaceConnections = updatedConnections)
-            localStorageManager.saveAppSettings(updatedSettings)
+            localStorageManager.updateAppSettings { settings ->
+                settings.copy(googleWorkspaceConnections = settings.googleWorkspaceConnections - username)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -231,9 +235,16 @@ class ExternalConnectionsManager(
      */
     fun updateGoogleWorkspaceEnabledServices(username: String, services: EnabledGoogleServices) {
         try {
-            val connection = loadGoogleWorkspaceConnection(username) ?: return
-            val updatedConnection = connection.copy(enabledServices = services)
-            saveGoogleWorkspaceConnection(username, updatedConnection)
+            // Load-modify-save under the auth file's lock (a pull may be merging it)
+            val file = googleWorkspaceFile(username)
+            val updatedConnection = FileLocks.withLock(file) {
+                val connection = loadGoogleWorkspaceConnection(username) ?: return
+                connection.copy(enabledServices = services).also {
+                    AtomicFiles.write(file, json.encodeToString(it))
+                }
+            }
+            onFileWritten(file)
+            trackGoogleWorkspaceConnection(username, updatedConnection)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -272,16 +283,28 @@ class ExternalConnectionsManager(
      */
     fun updateGoogleWorkspaceLastUsed(username: String) {
         try {
-            val settings = localStorageManager.loadAppSettings()
-            val connectionInfo = settings.googleWorkspaceConnections[username] ?: return
-
-            val updatedConnections = settings.googleWorkspaceConnections.toMutableMap()
-            updatedConnections[username] = connectionInfo.copy(lastUsed = System.currentTimeMillis())
-
-            val updatedSettings = settings.copy(googleWorkspaceConnections = updatedConnections)
-            localStorageManager.saveAppSettings(updatedSettings)
+            val now = System.currentTimeMillis()
+            localStorageManager.updateAppSettings { settings ->
+                val connectionInfo = settings.googleWorkspaceConnections[username] ?: return@updateAppSettings settings
+                settings.copy(
+                    googleWorkspaceConnections = settings.googleWorkspaceConnections + (username to connectionInfo.copy(lastUsed = now))
+                )
+            }
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    /** Record [connection] in the app settings' connection list. */
+    private fun trackGoogleWorkspaceConnection(username: String, connection: GoogleWorkspaceConnection) {
+        val info = GoogleWorkspaceConnectionInfo(
+            username = username,
+            googleEmail = connection.user.email,
+            connectedAt = connection.connectedAt,
+            lastUsed = System.currentTimeMillis()
+        )
+        localStorageManager.updateAppSettings { settings ->
+            settings.copy(googleWorkspaceConnections = settings.googleWorkspaceConnections + (username to info))
         }
     }
 }

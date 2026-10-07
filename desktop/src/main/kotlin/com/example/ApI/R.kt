@@ -118,6 +118,9 @@ object R {
         const val remote_sync_server_url_advanced = 106
         const val remote_sync_sign_in_success = 107
         const val remote_sync_sign_in_error = 108
+        const val remote_sync_status_server_outdated = 109
+        const val remote_sync_server_outdated_detail = 110
+        const val remote_sync_username_locked = 111
     }
 }
 
@@ -231,7 +234,10 @@ private val stringValues = mapOf(
     R.string.remote_sync_session_expired to "Session expired — sign in again to resume sync",
     R.string.remote_sync_server_url_advanced to "Server URL (advanced)",
     R.string.remote_sync_sign_in_success to "Signed in as %s",
-    R.string.remote_sync_sign_in_error to "Sign-in failed"
+    R.string.remote_sync_sign_in_error to "Sign-in failed",
+    R.string.remote_sync_status_server_outdated to "Sync server needs an update",
+    R.string.remote_sync_server_outdated_detail to "The sync server is too old to merge devices safely. Sync is paused until the server is updated; local data is kept.",
+    R.string.remote_sync_username_locked to "The username can't be changed while sync is on — sign out of sync first"
 )
 
 /** Desktop replacement for Android's stringResource(). */

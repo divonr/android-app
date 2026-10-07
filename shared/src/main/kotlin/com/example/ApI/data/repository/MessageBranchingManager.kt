@@ -128,12 +128,21 @@ class MessageBranchingManager(
      *        variant wherever it is in the tree, even if the current path moved elsewhere in the
      *        meantime (variant switch, sync merge). If it no longer exists, falls back to the
      *        last variant of the current path. Null: the last variant of the current path.
+     * @param expectedTailId The id of the message the caller expects at the end of the target
+     *        variant (its last response, or its user message when it has none), i.e. the message
+     *        the response follows. A sync merge that found this device's responses diverging from
+     *        another device's keeps the other device's content under the variant id and moves this
+     *        device's content to a fork in the same node (ChatHistoryMerger); when the target's
+     *        last response is not [expectedTailId], the response goes to the sibling variant whose
+     *        responses end with it (the fork), so it still follows this device's content. When the
+     *        target is gone, any variant of the chat whose responses end with it is used.
      */
     fun addResponseToCurrentVariant(
         username: String,
         chatId: String,
         response: Message,
-        targetVariantId: String? = null
+        targetVariantId: String? = null,
+        expectedTailId: String? = null
     ): Chat? = chatHistoryManager.modifyChatHistory(username) { history ->
         val original = history.chat_history.find { it.chat_id == chatId }
             ?: return@modifyChatHistory history to null
@@ -148,6 +157,9 @@ class MessageBranchingManager(
         }
 
         var target = targetVariantId?.let { locate(it) }
+        if (expectedTailId != null) {
+            target = resolveAnchoredTarget(chat, target, expectedTailId)
+        }
         if (targetVariantId != null && target == null) {
             AppLogger.w("[$TAG] addResponseToCurrentVariant: variant $targetVariantId not found in chat $chatId, using the current path")
         }
@@ -195,6 +207,53 @@ class MessageBranchingManager(
         )
 
         replaceChat(history, chatId, original, updatedChat) to updatedChat
+    }
+
+    /** The id of the message a new response of [variant] follows. */
+    private fun tailId(variant: MessageVariant): String = variant.responses.lastOrNull()?.id ?: variant.userMessage.id
+
+    /**
+     * Where a response that must follow message [expectedTailId] goes, given the pinned
+     * [target] (node index, variant index; null: the pinned variant is gone): the target if its
+     * tail is that message, else a variant whose RESPONSES end with it — a sibling in the
+     * target's node (a merge fork of this device's content), or any variant of the chat when
+     * the target is gone. Only response ids are matched for other variants: sibling variants
+     * share user message ids by design (an edit keeps the original's id). No match → [target].
+     */
+    private fun resolveAnchoredTarget(chat: Chat, target: Pair<Int, Int>?, expectedTailId: String): Pair<Int, Int>? {
+        fun endsWithResponse(v: MessageVariant) = v.responses.lastOrNull()?.id == expectedTailId
+        if (target != null) {
+            val (nodeIndex, variantIndex) = target
+            val node = chat.messageNodes[nodeIndex]
+            if (tailId(node.variants[variantIndex]) == expectedTailId) return target
+            val sibling = node.variants.indexOfFirst(::endsWithResponse)
+            if (sibling >= 0) {
+                AppLogger.i("[$TAG] addResponseToCurrentVariant: variant ${node.variants[variantIndex].variantId} no longer ends with " +
+                    "$expectedTailId (sync merge); using its sibling ${node.variants[sibling].variantId}")
+                return nodeIndex to sibling
+            }
+            return target
+        }
+        for ((nodeIndex, node) in chat.messageNodes.withIndex()) {
+            val variantIndex = node.variants.indexOfFirst(::endsWithResponse)
+            if (variantIndex >= 0) return nodeIndex to variantIndex
+        }
+        return null
+    }
+
+    /**
+     * Save a response of a streamed request at its [anchor] (see [ReplyAnchor]) and move the
+     * anchor to the saved message, so the request's next response (after a tool call, say)
+     * follows it in the same variant — the fork, if a merge moved this device's content there.
+     */
+    fun addAnchoredResponse(username: String, chatId: String, response: Message, anchor: ReplyAnchor): Chat? {
+        val withId = if (response.id.isBlank()) response.copy(id = UUID.randomUUID().toString()) else response
+        val (variantId, tail) = anchor.current()
+        val chat = addResponseToCurrentVariant(username, chatId, withId, variantId, tail) ?: return null
+        val savedIn = chat.messageNodes.asSequence().flatMap { it.variants.asSequence() }
+            .firstOrNull { v -> v.responses.any { it.id == withId.id } }
+        anchor.moveTo(savedIn?.variantId ?: variantId, withId.id)
+        return chat
     }
 
     /**

@@ -409,8 +409,8 @@ class MultiDeviceSyncTest {
         app.sync(); web.sync()
 
         app.signOut()
-        assertFalse(app.file("sync_base").exists(), "sign-out drops the base snapshots")
-        assertEquals("", app.engine.syncStateAccount())
+        assertTrue(app.file("sync_base").exists(), "sign-out keeps the base snapshots")
+        assertEquals("acct", app.engine.syncStateAccount(), "sign-out keeps the account's sync state")
         app.send(c, "edited while signed out")
         app.sync()  // sync is off: nothing happens
         web.send(d, "web meanwhile")
@@ -423,6 +423,44 @@ class MultiDeviceSyncTest {
         quiesce(listOf(app, web), "S8e")
         for (dev in listOf(app, web)) assertHas(dev, "edited while signed out", "web meanwhile")
         assertConverged(listOf(app, web), "S8e")
+    }
+
+    @Test
+    fun `S8g re-signing into the same account keeps 3-way deletions - no resurrection`(): Unit = runBlocking {
+        val (app, web) = pair()
+        val gone = app.newChatWith("gone", "q-gone")
+        val kept = app.newChatWith("kept", "q-kept")
+        app.sync(); web.sync()
+
+        app.signOut()
+        web.deleteChat(gone)
+        web.send(kept, "web meanwhile")
+        web.sync()
+        app.send(kept, "app while signed out")
+
+        app.signIn("acct")
+        app.pull()
+        web.sync()
+        quiesce(listOf(app, web), "S8g")
+        for (dev in listOf(app, web)) {
+            assertNull(dev.chatOrNull(gone), "${dev.name}: a chat deleted elsewhere while signed out must not come back")
+            assertHas(dev, "web meanwhile", "app while signed out")
+        }
+        assertConverged(listOf(app, web), "S8g")
+    }
+
+    @Test
+    fun `S8h signing into another account after sign-out still resets the sync state`(): Unit = runBlocking {
+        val app = device("app").apply { signIn("alice"); pull() }
+        app.newChatWith("alice chat", "qa")
+        app.sync()
+        app.signOut()
+        assertEquals("alice", app.engine.syncStateAccount())
+        app.signIn("bob")
+        assertEquals("bob", app.engine.syncStateAccount(), "an account switch resets the state")
+        app.pull()
+        assertNull(server.content("chat_history_alice.json", "bob"), "nothing of alice reaches bob's account")
+        assertFalse(server.content("chat_history_bob.json", "bob")?.contains("qa") ?: false)
     }
 
     @Test

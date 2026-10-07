@@ -154,6 +154,36 @@ class LocalStorageManager(
         }
     }
 
+    /**
+     * Load + [transform] + save `app_settings.json` under its file lock (the lock the sync engine
+     * holds while writing a merge), and return the settings now on disk.
+     *
+     * Use this instead of saving a settings object kept in memory (e.g. a ViewModel's copy): a
+     * stale copy would silently revert changes made meanwhile by sync / another device / another
+     * component, and the next 3-way merge would read that revert as a deliberate change.
+     * [transform] runs under the lock: keep it quick, no I/O. Returning equal settings writes
+     * nothing. The sync hook runs after the lock is released.
+     */
+    fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings {
+        val file = File(internalDir, "app_settings.json")
+        var written = false
+        val result = FileLocks.withLock(file) {
+            val current = loadAppSettings()
+            val updated = transform(current)
+            if (updated != current) {
+                try {
+                    AtomicFiles.write(file, json.encodeToString(updated))
+                    written = true
+                } catch (e: IOException) {
+                    // Handle error (like saveAppSettings): the caller still gets the intended state
+                }
+            }
+            updated
+        }
+        if (written) onFileWritten(file)
+        return result
+    }
+
     // ============ Custom Providers ============
 
     fun loadCustomProviders(username: String): List<CustomProviderConfig> {

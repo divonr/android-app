@@ -17,6 +17,7 @@ import com.example.ApI.data.AndroidPlatformStorage
 import com.example.ApI.data.model.*
 import com.example.ApI.data.network.LLMApiService
 import com.example.ApI.data.repository.DataRepository
+import com.example.ApI.data.repository.ReplyAnchor
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolSpecification
@@ -70,6 +71,10 @@ class StreamingService : Service() {
         const val EXTRA_TOOL_RESULT_JSON = "tool_result_json"
         const val EXTRA_THINKING_BUDGET_JSON = "thinking_budget_json"
         const val EXTRA_TEMPERATURE = "temperature"
+        /** The variant the reply belongs to (the variant of the last message sent). */
+        const val EXTRA_TARGET_VARIANT_ID = "target_variant_id"
+        /** The id of the message the reply follows (the last message sent). */
+        const val EXTRA_EXPECTED_TAIL_ID = "expected_tail_id"
     }
 
     // Binder for local binding
@@ -92,6 +97,9 @@ class StreamingService : Service() {
     // Active jobs mapped by requestId (for cancellation)
     private val activeJobs = ConcurrentHashMap<String, Job>()
 
+    // Where each request's responses are saved (pinned variant + the message they follow)
+    private val replyAnchors = ConcurrentHashMap<String, ReplyAnchor>()
+
     // Pending tool results (for tool execution flow)
     private val pendingToolResults = ConcurrentHashMap<String, CompletableDeferred<ToolExecutionResult>>()
 
@@ -109,6 +117,8 @@ class StreamingService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "StreamingService created")
+        // Same data dir as the UI's repository, hence the same process-wide SyncEngine
+        // (SyncEngine.forDir): one lock and one sync state for both
         repository = DataRepository(AndroidPlatformStorage(applicationContext))
         apiService = LLMApiService()
         createNotificationChannel()
@@ -188,6 +198,13 @@ class StreamingService : Service() {
             createdAt = Instant.now().toString()
         )
         activeRequests[requestId] = request
+        // Pin the replies: explicit extras from the ViewModel, else the last message sent
+        val fallbackAnchor = ReplyAnchor.forRequest(messages)
+        val (fallbackVariant, fallbackTail) = fallbackAnchor.current()
+        replyAnchors[requestId] = ReplyAnchor(
+            intent.getStringExtra(EXTRA_TARGET_VARIANT_ID) ?: fallbackVariant,
+            intent.getStringExtra(EXTRA_EXPECTED_TAIL_ID) ?: fallbackTail
+        )
 
         // Start foreground with notification
         startForeground(NOTIFICATION_ID, buildNotification())
@@ -227,6 +244,8 @@ class StreamingService : Service() {
         activeJobs.remove(requestId)
 
         val request = activeRequests.remove(requestId)
+
+        replyAnchors.remove(requestId)
         if (request != null) {
             serviceScope.launch {
                 _streamingEvents.emit(StreamingEvent.StatusChange(requestId, request.chatId, RequestStatus.CANCELLED))
@@ -268,6 +287,8 @@ class StreamingService : Service() {
         activeJobs.remove(requestId)
 
         val request = activeRequests.remove(requestId)
+
+        replyAnchors.remove(requestId)
         if (request != null) {
             serviceScope.launch {
                 _streamingEvents.emit(StreamingEvent.StatusChange(requestId, request.chatId, RequestStatus.CANCELLED))
@@ -294,6 +315,7 @@ class StreamingService : Service() {
         // Remove from active requests without emitting events
         // (ViewModel handles the UI state change)
         activeRequests.remove(requestId)
+        replyAnchors.remove(requestId)
 
         // Update notification and possibly stop service
         serviceScope.launch {
@@ -307,6 +329,19 @@ class StreamingService : Service() {
      * Get all active requests (for UI display)
      */
     fun getActiveRequests(): Map<String, StreamingRequest> = activeRequests.toMap()
+
+    /** Where [requestId]'s next response belongs (for the ViewModel's partial save on stop). */
+    fun replyAnchor(requestId: String): ReplyAnchor? = replyAnchors[requestId]
+
+    /** Save a response of [requestId] at its pinned place (falls back to the current path). */
+    private fun saveResponse(requestId: String, username: String, chatId: String, message: Message) {
+        val anchor = replyAnchors[requestId]
+        if (anchor != null) {
+            repository.addAnchoredResponse(username, chatId, message, anchor)
+        } else {
+            repository.addResponseToCurrentVariant(username, chatId, message)
+        }
+    }
 
     private suspend fun executeStreamingRequest(
         requestId: String,
@@ -376,7 +411,7 @@ class StreamingService : Service() {
                             thinkingDurationSeconds = thoughtsData?.second,
                             thoughtsStatus = thoughtsData?.third ?: ThoughtsStatus.NONE
                         )
-                        repository.addResponseToCurrentVariant(username, chatId, assistantMessage)
+                        saveResponse(requestId, username, chatId, assistantMessage)
                         if (pendingToolOutputAttachments.isNotEmpty()) {
                             pendingToolOutputAttachments.clear()
                         }
@@ -390,6 +425,7 @@ class StreamingService : Service() {
                     } finally {
                         // Cleanup
                         activeRequests.remove(requestId)
+                        replyAnchors.remove(requestId)
                         activeJobs.remove(requestId)
                         _activeRequestCount.emit(activeRequests.size)
                         updateNotification()
@@ -407,6 +443,7 @@ class StreamingService : Service() {
 
                     // Cleanup
                     activeRequests.remove(requestId)
+                    replyAnchors.remove(requestId)
                     activeJobs.remove(requestId)
                     _activeRequestCount.emit(activeRequests.size)
                     updateNotification()
@@ -451,15 +488,15 @@ class StreamingService : Service() {
                             thinkingDurationSeconds = thoughtsData?.second,
                             thoughtsStatus = thoughtsData?.third ?: ThoughtsStatus.NONE
                         )
-                        repository.addResponseToCurrentVariant(username, chatId, precedingMessage)
+                        saveResponse(requestId, username, chatId, precedingMessage)
                         // Clear thoughts after using - they belong to this message, not the final response
                         thoughtsData = null
                         if (pendingToolOutputAttachments.isNotEmpty()) {
                             pendingToolOutputAttachments.clear()
                         }
                     }
-                    repository.addResponseToCurrentVariant(username, chatId, toolCallMessage)
-                    repository.addResponseToCurrentVariant(username, chatId, toolResponseMessage)
+                    saveResponse(requestId, username, chatId, toolCallMessage)
+                    saveResponse(requestId, username, chatId, toolResponseMessage)
 
                     // Extract output files from tool result and queue them for the NEXT text message
                     val toolResult = toolCallMessage.toolCall?.result
@@ -542,6 +579,7 @@ class StreamingService : Service() {
             Log.d(TAG, "Request was cancelled: requestId=$requestId")
             // Just clean up without emitting error
             activeRequests.remove(requestId)
+            replyAnchors.remove(requestId)
             activeJobs.remove(requestId)
             serviceScope.launch {
                 _activeRequestCount.emit(activeRequests.size)

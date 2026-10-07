@@ -20,10 +20,7 @@ class TitleGenerationManager(
      * Update title generation settings.
      */
     fun updateTitleGenerationSettings(newSettings: TitleGenerationSettings) {
-        val currentSettings = deps.appSettings.value
-        val updatedSettings = currentSettings.copy(titleGenerationSettings = newSettings)
-
-        deps.repository.saveAppSettings(updatedSettings)
+        val updatedSettings = deps.repository.updateAppSettings { it.copy(titleGenerationSettings = newSettings) }
         updateAppSettings(updatedSettings)
     }
 
@@ -92,26 +89,24 @@ class TitleGenerationManager(
      */
     suspend fun updateChatPreviewName(chatId: String, newTitle: String) {
         val currentUser = deps.appSettings.value.current_user
-        val chatHistory = deps.repository.loadChatHistory(currentUser)
 
-        // Update the chat with the new preview name
-        val updatedChats = chatHistory.chat_history.map { chat ->
-            if (chat.chat_id == chatId) {
-                chat.copy(preview_name = newTitle)
-            } else {
-                chat
-            }
+        // Update the chat with the new preview name (locked load-modify-save)
+        val finalChatHistory = deps.repository.updateChatHistory(currentUser) { history ->
+            history.copy(chat_history = history.chat_history.map { chat ->
+                if (chat.chat_id == chatId) chat.copy(preview_name = newTitle) else chat
+            })
+        }.chat_history
+
+        // Update UI state (the current chat only if it is the renamed one)
+        val state = deps.uiState.value
+        val updatedCurrentChat = if (state.currentChat?.chat_id == chatId) {
+            finalChatHistory.find { it.chat_id == chatId } ?: state.currentChat
+        } else {
+            state.currentChat
         }
 
-        val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-        deps.repository.saveChatHistory(updatedHistory)
-
-        // Update UI state
-        val finalChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
-        val updatedCurrentChat = finalChatHistory.find { it.chat_id == chatId }
-
         deps.updateUiState(
-            deps.uiState.value.copy(
+            state.copy(
                 currentChat = updatedCurrentChat,
                 chatHistory = finalChatHistory
             )

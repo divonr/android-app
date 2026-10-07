@@ -1,5 +1,8 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package com.example.ApI.data.model
 
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 
 /**
@@ -11,7 +14,8 @@ data class GoogleWorkspaceAuth(
     val refreshToken: String?,
     val expiresAt: Long,  // Unix timestamp in milliseconds
     val scopes: List<String>,
-    val createdAt: Long = System.currentTimeMillis()
+    // Always written: a default evaluated at decode time would differ on every read (and per device)
+    @EncodeDefault val createdAt: Long = System.currentTimeMillis()
 ) {
     /**
      * Check if the access token is expired
@@ -72,7 +76,8 @@ data class EnabledGoogleServices(
 data class GoogleWorkspaceConnection(
     val auth: GoogleWorkspaceAuth,
     val user: GoogleWorkspaceUser,
-    val connectedAt: Long = System.currentTimeMillis(),
+    // Always written: a default evaluated at decode time would differ on every read (and per device)
+    @EncodeDefault val connectedAt: Long = System.currentTimeMillis(),
     val enabledServices: EnabledGoogleServices = EnabledGoogleServices()
 )
 
@@ -84,5 +89,6 @@ data class GoogleWorkspaceConnectionInfo(
     val username: String,        // App username (not Google email)
     val googleEmail: String,      // Google account email
     val connectedAt: Long,
-    val lastUsed: Long = System.currentTimeMillis()
+    // Always written: a default evaluated at decode time would differ on every read (and per device)
+    @EncodeDefault val lastUsed: Long = System.currentTimeMillis()
 )

@@ -26,6 +26,7 @@ fun RemoteSyncSection(
     settings: RemoteSyncSettings,
     needsReauth: Boolean,
     isSignInInProgress: Boolean,
+    serverLacksCas: Boolean = false,
     onEnabledChange: (Boolean) -> Unit,
     onServerUrlChange: (String) -> Unit,
     onSyncApiKeysChange: (Boolean) -> Unit,
@@ -74,12 +75,14 @@ fun RemoteSyncSection(
                     Text(
                         text = when {
                             needsReauth -> stringResource(R.string.remote_sync_status_needs_reauth)
+                            serverLacksCas && settings.enabled -> stringResource(R.string.remote_sync_status_server_outdated)
                             settings.enabled && isSignedIn -> stringResource(R.string.remote_sync_status_signed_in)
                             else -> stringResource(R.string.remote_sync_status_off)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = when {
                             needsReauth -> MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                            serverLacksCas && settings.enabled -> MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
                             settings.enabled && isSignedIn -> Primary.copy(alpha = 0.9f)
                             else -> OnSurface.copy(alpha = 0.5f)
                         },
@@ -107,6 +110,34 @@ fun RemoteSyncSection(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // ── Sync server too old (no compare-and-swap): nothing is synced ─────
+            if (serverLacksCas && settings.enabled) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.remote_sync_server_outdated_detail),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
 
             // ── Account area ─────────────────────────────────────────────────────
 

@@ -128,6 +128,8 @@
     <string name="remote_sync_server_url_advanced">כתובת שרת (מתקדם)</string>
     <string name="remote_sync_sign_in_success">נרשמת בהצלחה כ: %1$s</string>
     <string name="remote_sync_sign_in_error">שגיאת התחברות לסנכרון</string>
+    <string name="remote_sync_status_server_outdated">שרת הסנכרון צריך עדכון</string>
+    <string name="remote_sync_server_outdated_detail">שרת הסנכרון ישן מדי למיזוג בטוח בין מכשירים. הסנכרון מושהה עד שהשרת יעודכן; הנתונים המקומיים נשמרים.</string>
 
     <!-- Full Custom Provider Feature -->
     <!-- Note: The following UI components use hardcoded Hebrew strings and do not reference string resources:

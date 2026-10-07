@@ -24,12 +24,12 @@ class ModelSelectionManager(
     fun selectProvider(provider: Provider) {
         val firstModel = provider.models.firstOrNull()?.name ?: "Unknown Model"
 
-        val updatedSettings = deps.appSettings.value.copy(
-            selected_provider = provider.provider,
-            selected_model = firstModel
-        )
-
-        deps.repository.saveAppSettings(updatedSettings)
+        val updatedSettings = deps.repository.updateAppSettings {
+            it.copy(
+                selected_provider = provider.provider,
+                selected_model = firstModel
+            )
+        }
         updateAppSettings(updatedSettings)
 
         val webSearchSupport = getWebSearchSupport(provider.provider, firstModel)
@@ -54,8 +54,7 @@ class ModelSelectionManager(
      * Updates settings and handles web search support.
      */
     fun selectModel(modelName: String) {
-        val newSettings = deps.appSettings.value.copy(selected_model = modelName)
-        deps.repository.saveAppSettings(newSettings)
+        val newSettings = deps.repository.updateAppSettings { it.copy(selected_model = modelName) }
         updateAppSettings(newSettings)
 
         val webSearchSupport = getWebSearchSupport(deps.uiState.value.currentProvider?.provider ?: "", modelName)
@@ -81,12 +80,12 @@ class ModelSelectionManager(
      * This ensures we use the exact provider shown in the tab, not a guess based on model name.
      */
     fun selectModelWithProvider(provider: Provider, modelName: String) {
-        val updatedSettings = deps.appSettings.value.copy(
-            selected_provider = provider.provider,
-            selected_model = modelName
-        )
-
-        deps.repository.saveAppSettings(updatedSettings)
+        val updatedSettings = deps.repository.updateAppSettings {
+            it.copy(
+                selected_provider = provider.provider,
+                selected_model = modelName
+            )
+        }
         updateAppSettings(updatedSettings)
 
         val webSearchSupport = getWebSearchSupport(provider.provider, modelName)
@@ -127,23 +126,23 @@ class ModelSelectionManager(
      * If not starred, add it to favorites.
      */
     fun toggleStarredModel(providerKey: String, modelName: String) {
-        val currentSettings = deps.appSettings.value
         val starred = StarredModel(provider = providerKey, modelName = modelName)
 
-        val newStarredModels = if (currentSettings.starredModels.any {
-                it.provider == providerKey && it.modelName == modelName
-            }) {
-            // Remove from starred
-            currentSettings.starredModels.filter {
-                !(it.provider == providerKey && it.modelName == modelName)
+        // Toggle on the stored settings (an in-memory copy may predate a sync)
+        val updatedSettings = deps.repository.updateAppSettings { currentSettings ->
+            val newStarredModels = if (currentSettings.starredModels.any {
+                    it.provider == providerKey && it.modelName == modelName
+                }) {
+                // Remove from starred
+                currentSettings.starredModels.filter {
+                    !(it.provider == providerKey && it.modelName == modelName)
+                }
+            } else {
+                // Add to starred
+                currentSettings.starredModels + starred
             }
-        } else {
-            // Add to starred
-            currentSettings.starredModels + starred
+            currentSettings.copy(starredModels = newStarredModels)
         }
-
-        val updatedSettings = currentSettings.copy(starredModels = newStarredModels)
-        deps.repository.saveAppSettings(updatedSettings)
         updateAppSettings(updatedSettings)
     }
 
@@ -271,11 +270,12 @@ class ModelSelectionManager(
             // Update app settings if provider/model changed
             if (newCurrentProvider?.provider != deps.appSettings.value.selected_provider ||
                 newCurrentModel != deps.appSettings.value.selected_model) {
-                val updatedSettings = deps.appSettings.value.copy(
-                    selected_provider = newCurrentProvider?.provider ?: "",
-                    selected_model = newCurrentModel
-                )
-                deps.repository.saveAppSettings(updatedSettings)
+                val updatedSettings = deps.repository.updateAppSettings {
+                    it.copy(
+                        selected_provider = newCurrentProvider?.provider ?: "",
+                        selected_model = newCurrentModel
+                    )
+                }
                 updateAppSettings(updatedSettings)
             }
         }

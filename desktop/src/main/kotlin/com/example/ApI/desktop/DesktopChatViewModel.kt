@@ -194,20 +194,18 @@ class DesktopChatViewModel(
 
     fun deleteCurrentChat() {
         val chat = state.currentChat ?: return
-        val history = repository.loadChatHistory(state.settings.current_user)
-        repository.saveChatHistory(
+        repository.updateChatHistory(state.settings.current_user) { history ->
             history.copy(chat_history = history.chat_history.filterNot { it.chat_id == chat.chat_id })
-        )
+        }
         reload()
     }
 
     fun selectProvider(provider: Provider) {
         val model = provider.models.firstOrNull()?.name ?: state.currentModel
-        val settings = state.settings.copy(
+        val settings = repository.updateAppSettings { it.copy(
             selected_provider = provider.provider,
             selected_model = model
-        )
-        repository.saveAppSettings(settings)
+        ) }
         state = state.copy(
             settings = settings,
             currentProvider = provider,
@@ -220,8 +218,7 @@ class DesktopChatViewModel(
 
     fun selectModel(modelName: String) {
         val provider = state.currentProvider ?: return
-        val settings = state.settings.copy(selected_model = modelName)
-        repository.saveAppSettings(settings)
+        val settings = repository.updateAppSettings { it.copy(selected_model = modelName) }
         state = state.copy(
             settings = settings,
             currentModel = modelName,
@@ -244,8 +241,7 @@ class DesktopChatViewModel(
     }
 
     fun setTemperature(value: Float?) {
-        val settings = state.settings.copy(temperature = (value ?: -1f).toDouble())
-        repository.saveAppSettings(settings)
+        val settings = repository.updateAppSettings { it.copy(temperature = (value ?: -1f).toDouble()) }
         state = state.copy(settings = settings, temperatureValue = value)
     }
 
@@ -324,22 +320,23 @@ class DesktopChatViewModel(
 
     fun updateUsername(username: String) {
         val cleaned = username.trim().ifBlank { "default" }
-        val settings = state.settings.copy(current_user = cleaned)
-        repository.saveAppSettings(settings)
+        if (repository.loadAppSettings().remoteSync.enabled) {
+            state = state.copy(snackbarMessage = com.example.ApI.getString(com.example.ApI.R.string.remote_sync_username_locked))
+            return
+        }
+        val settings = repository.updateAppSettings { it.copy(current_user = cleaned) }
         reload()
     }
 
     fun toggleTitleGeneration(enabled: Boolean) {
-        val settings = state.settings.copy(
-            titleGenerationSettings = state.settings.titleGenerationSettings.copy(enabled = enabled)
-        )
-        repository.saveAppSettings(settings)
+        val settings = repository.updateAppSettings { it.copy(
+            titleGenerationSettings = it.titleGenerationSettings.copy(enabled = enabled)
+        ) }
         state = state.copy(settings = settings)
     }
 
     fun toggleMultiMessage(enabled: Boolean) {
-        val settings = state.settings.copy(multiMessageMode = enabled)
-        repository.saveAppSettings(settings)
+        val settings = repository.updateAppSettings { it.copy(multiMessageMode = enabled) }
         state = state.copy(settings = settings)
     }
 
@@ -562,13 +559,13 @@ class DesktopChatViewModel(
     }
 
     fun renameChat(chatId: String, title: String) {
-        val history = repository.loadChatHistory(state.settings.current_user)
-        val updated = history.copy(
-            chat_history = history.chat_history.map { chat ->
-                if (chat.chat_id == chatId) chat.copy(preview_name = title.trim()) else chat
-            }
-        )
-        repository.saveChatHistory(updated)
+        repository.updateChatHistory(state.settings.current_user) { history ->
+            history.copy(
+                chat_history = history.chat_history.map { chat ->
+                    if (chat.chat_id == chatId) chat.copy(preview_name = title.trim()) else chat
+                }
+            )
+        }
         reload()
     }
 

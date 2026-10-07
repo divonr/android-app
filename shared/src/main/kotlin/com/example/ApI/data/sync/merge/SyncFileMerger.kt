@@ -11,6 +11,7 @@ import com.example.ApI.util.AppLogger
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.nullable
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -58,8 +59,10 @@ object SyncFileMerger {
             FileKind.Typed(ListSerializer(FullCustomProviderConfig.serializer()), KEYED_LIST_POLICY, fillIds = true)
         filename.startsWith("custom_providers_") ->
             FileKind.Typed(ListSerializer(CustomProviderConfig.serializer()), KEYED_LIST_POLICY, fillIds = true)
-        filename.startsWith("github_auth_") -> FileKind.Typed(GitHubConnection.serializer(), ATOMIC_POLICY)
-        filename.startsWith("google_workspace_auth_") -> FileKind.Typed(GoogleWorkspaceConnection.serializer(), ATOMIC_POLICY)
+        // JSON `null` = disconnected (ExternalConnectionsManager.DISCONNECTED: file deletions don't
+        // sync, so a disconnect is an ordinary value that wins 3-way against an untouched connection)
+        filename.startsWith("github_auth_") -> FileKind.Typed(GitHubConnection.serializer().nullable, ATOMIC_POLICY)
+        filename.startsWith("google_workspace_auth_") -> FileKind.Typed(GoogleWorkspaceConnection.serializer().nullable, ATOMIC_POLICY)
         filename == "skills_enabled.json" ->
             FileKind.Typed(MapSerializer(String.serializer(), Boolean.serializer()), JsonMergePolicy())
         filename == "skills_sources.json" ->
@@ -144,10 +147,11 @@ object SyncFileMerger {
 
     private fun <T> canonicalTyped(kind: FileKind.Typed<T>, filename: String, text: String, json: Json): JsonElement? {
         val withDefaults = Json(json) { encodeDefaults = true }
-        return parseElement(json, text)
+        val element = parseElement(json, text)
             ?.let { if (kind.fillIds) fillListIds(filename, it) else it }
-            ?.let { json.decodeFromJsonElement(kind.serializer, it) }
-            ?.let { withDefaults.encodeToJsonElement(kind.serializer, it) }
+            ?: return null
+        // Not `?.let`: a nullable model (auth files) legitimately decodes JSON null to null
+        return withDefaults.encodeToJsonElement(kind.serializer, json.decodeFromJsonElement(kind.serializer, element))
     }
 
     // ---------------------------------------------------------------------------------
@@ -182,13 +186,9 @@ object SyncFileMerger {
         remote: String,
         json: Json
     ): String {
-        // Explicit defaults: a value reset to its default is a value, not a missing key
-        val withDefaults = Json(json) { encodeDefaults = true }
+        // Explicit defaults (canonicalTyped): a value reset to its default is a value, not a missing key
         fun canonical(text: String?): JsonElement? = try {
-            parseElement(json, text)
-                ?.let { if (kind.fillIds) fillListIds(filename, it) else it }
-                ?.let { json.decodeFromJsonElement(kind.serializer, it) }
-                ?.let { withDefaults.encodeToJsonElement(kind.serializer, it) }
+            canonicalTyped(kind, filename, text ?: "", json)
         } catch (e: Exception) {
             null
         }

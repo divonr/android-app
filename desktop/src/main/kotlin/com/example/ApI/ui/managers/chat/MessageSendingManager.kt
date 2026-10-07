@@ -110,15 +110,12 @@ class MessageSendingManager(
                                 uploadedAttachments.add(uploadedAttachment ?: attachment)
                             }
                         }
-                        finalUserMessage = userMessage.copy(attachments = uploadedAttachments)
-                        val allMessages = updatedChat!!.messages.dropLast(1) + finalUserMessage
-                        val updatedChatWithFiles = updatedChat.copy(messages = allMessages)
-                        val chatHistory = deps.repository.loadChatHistory(currentUser)
-                        val updatedHistoryChats = chatHistory.chat_history.map { chat ->
-                            if (chat.chat_id == updatedChatWithFiles.chat_id) updatedChatWithFiles else chat
-                        }
-                        deps.repository.saveChatHistory(chatHistory.copy(chat_history = updatedHistoryChats))
-                        updatedChat = updatedChatWithFiles
+                        // The saved user message (with its node/variant refs), now with the file IDs,
+                        // stored by message id in the tree and messages (no chat snapshot written back)
+                        finalUserMessage = updatedChat!!.messages.last().copy(attachments = uploadedAttachments)
+                        deps.repository.updateChatWithNewAttachments(currentUser, chatId, listOf(finalUserMessage))
+                        val allMessages = updatedChat.messages.dropLast(1) + finalUserMessage
+                        updatedChat = updatedChat.copy(messages = allMessages)
                     }
 
                     val projectAttachments = getCurrentChatProjectGroup()?.group_attachments ?: emptyList()

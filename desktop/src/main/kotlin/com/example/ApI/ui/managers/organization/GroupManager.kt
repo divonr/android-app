@@ -88,16 +88,13 @@ class GroupManager(
     fun toggleGroupProjectStatus(groupId: String) {
         deps.scope.launch {
             val currentUser = deps.appSettings.value.current_user
-            val currentGroup = deps.uiState.value.groups.find { it.group_id == groupId }
-            val newProjectStatus = !(currentGroup?.is_project ?: false)
-            deps.repository.updateGroupProjectStatus(currentUser, groupId, newProjectStatus)
-            val updatedGroups = deps.uiState.value.groups.map { group ->
-                if (group.group_id == groupId) group.copy(is_project = newProjectStatus) else group
+            // Toggle the stored status (the UI copy may be stale after a sync)
+            val history = deps.repository.updateChatHistory(currentUser) { h ->
+                h.copy(groups = h.groups.map { group ->
+                    if (group.group_id == groupId) group.copy(is_project = !group.is_project) else group
+                })
             }
-            deps.updateUiState(deps.uiState.value.copy(groups = updatedGroups))
-            if (deps.uiState.value.currentGroup?.group_id == groupId) {
-                deps.updateUiState(deps.uiState.value.copy(currentGroup = updatedGroups.find { it.group_id == groupId }))
-            }
+            showGroupsFrom(history)
         }
     }
 
@@ -111,13 +108,7 @@ class GroupManager(
                 if (localPath != null) {
                     val attachment = Attachment(local_file_path = localPath, file_name = file.name, mime_type = mimeType)
                     deps.repository.addAttachmentToGroup(currentUser, groupId, attachment)
-                    val updatedGroups = deps.uiState.value.groups.map { group ->
-                        if (group.group_id == groupId) group.copy(group_attachments = group.group_attachments + attachment) else group
-                    }
-                    deps.updateUiState(deps.uiState.value.copy(groups = updatedGroups))
-                    if (deps.uiState.value.currentGroup?.group_id == groupId) {
-                        deps.updateUiState(deps.uiState.value.copy(currentGroup = updatedGroups.find { it.group_id == groupId }))
-                    }
+                    showGroupsFrom(deps.repository.loadChatHistory(currentUser))
                 }
             } catch (e: Exception) {
                 deps.updateUiState(deps.uiState.value.copy(snackbarMessage = "Error uploading file: ${e.message}"))
@@ -133,17 +124,7 @@ class GroupManager(
             val attachmentToRemove = group?.group_attachments?.getOrNull(attachmentIndex)
             deps.repository.removeAttachmentFromGroup(currentUser, groupId, attachmentIndex)
             attachmentToRemove?.local_file_path?.let { path -> deps.repository.deleteFile(path) }
-            val updatedGroups = deps.uiState.value.groups.map { groupItem ->
-                if (groupItem.group_id == groupId) {
-                    val updatedAttachments = groupItem.group_attachments.toMutableList()
-                    if (attachmentIndex >= 0 && attachmentIndex < updatedAttachments.size) updatedAttachments.removeAt(attachmentIndex)
-                    groupItem.copy(group_attachments = updatedAttachments)
-                } else groupItem
-            }
-            deps.updateUiState(deps.uiState.value.copy(groups = updatedGroups))
-            if (deps.uiState.value.currentGroup?.group_id == groupId) {
-                deps.updateUiState(deps.uiState.value.copy(currentGroup = updatedGroups.find { it.group_id == groupId }))
-            }
+            showGroupsFrom(deps.repository.loadChatHistory(currentUser))
         }
     }
 
@@ -158,11 +139,12 @@ class GroupManager(
     fun updateGroupSystemPrompt(systemPrompt: String) {
         val currentGroup = deps.uiState.value.currentGroup ?: return
         val currentUser = deps.appSettings.value.current_user
-        val updatedGroups = deps.uiState.value.groups.map { group ->
-            if (group.group_id == currentGroup.group_id) group.copy(system_prompt = systemPrompt) else group
-        }
-        val chatHistory = deps.repository.loadChatHistory(currentUser)
-        deps.repository.saveChatHistory(chatHistory.copy(groups = updatedGroups))
+        // Locked load-modify-save of the stored groups (never the UI's copy, which may predate a sync)
+        val updatedGroups = deps.repository.updateChatHistory(currentUser) { history ->
+            history.copy(groups = history.groups.map { group ->
+                if (group.group_id == currentGroup.group_id) group.copy(system_prompt = systemPrompt) else group
+            })
+        }.groups
         deps.updateUiState(deps.uiState.value.copy(
             groups = updatedGroups,
             currentGroup = updatedGroups.find { it.group_id == currentGroup.group_id },
@@ -192,12 +174,8 @@ class GroupManager(
         val currentUser = deps.appSettings.value.current_user
         val success = deps.repository.renameGroup(currentUser, group.group_id, newName.trim())
         if (success) {
-            val updatedGroups = deps.uiState.value.groups.map { if (it.group_id == group.group_id) it.copy(group_name = newName.trim()) else it }
-            deps.updateUiState(deps.uiState.value.copy(
-                groups = updatedGroups,
-                currentGroup = if (deps.uiState.value.currentGroup?.group_id == group.group_id) deps.uiState.value.currentGroup?.copy(group_name = newName.trim()) else deps.uiState.value.currentGroup,
-                showGroupRenameDialog = null
-            ))
+            showGroupsFrom(deps.repository.loadChatHistory(currentUser))
+            deps.updateUiState(deps.uiState.value.copy(showGroupRenameDialog = null))
         } else {
             deps.updateUiState(deps.uiState.value.copy(showGroupRenameDialog = null))
         }
@@ -207,11 +185,7 @@ class GroupManager(
         val currentUser = deps.appSettings.value.current_user
         val success = deps.repository.updateGroupProjectStatus(currentUser, group.group_id, true)
         if (success) {
-            val updatedGroups = deps.uiState.value.groups.map { if (it.group_id == group.group_id) it.copy(is_project = true) else it }
-            deps.updateUiState(deps.uiState.value.copy(
-                groups = updatedGroups,
-                currentGroup = if (deps.uiState.value.currentGroup?.group_id == group.group_id) deps.uiState.value.currentGroup?.copy(is_project = true) else deps.uiState.value.currentGroup
-            ))
+            showGroupsFrom(deps.repository.loadChatHistory(currentUser))
             navigateToGroup(group.group_id)
         }
     }
@@ -219,8 +193,7 @@ class GroupManager(
     fun createNewConversationInGroup(group: ChatGroup) {
         val currentUser = deps.appSettings.value.current_user
         val newChat = deps.repository.createNewChatInGroup(currentUser, "New chat", group.group_id)
-        val updatedChatHistory = deps.uiState.value.chatHistory + newChat
-        deps.updateUiState(deps.uiState.value.copy(chatHistory = updatedChatHistory, currentChat = newChat))
+        deps.updateUiState(deps.uiState.value.copy(chatHistory = deps.repository.loadChatHistory(currentUser).chat_history, currentChat = newChat))
         navigateToScreen(Screen.Chat)
     }
 
@@ -236,19 +209,26 @@ class GroupManager(
         val currentUser = deps.appSettings.value.current_user
         val success = deps.repository.deleteGroup(currentUser, group.group_id)
         if (success) {
-            val updatedGroups = deps.uiState.value.groups.filter { it.group_id != group.group_id }
-            val updatedChatHistory = deps.uiState.value.chatHistory.map { chat ->
-                if (chat.group == group.group_id) chat.copy(group = null) else chat
-            }
+            val history = deps.repository.loadChatHistory(currentUser)
             deps.updateUiState(deps.uiState.value.copy(
-                groups = updatedGroups,
-                chatHistory = updatedChatHistory,
+                groups = history.groups,
+                chatHistory = history.chat_history,
                 currentGroup = if (deps.uiState.value.currentGroup?.group_id == group.group_id) null else deps.uiState.value.currentGroup,
                 showDeleteGroupConfirmation = null
             ))
         } else {
             deps.updateUiState(deps.uiState.value.copy(showDeleteGroupConfirmation = null))
         }
+    }
+
+    /** Show the groups (and chats) of [history], keeping the current group in step. */
+    private fun showGroupsFrom(history: UserChatHistory) {
+        val state = deps.uiState.value
+        deps.updateUiState(state.copy(
+            groups = history.groups,
+            chatHistory = history.chat_history,
+            currentGroup = state.currentGroup?.let { current -> history.groups.find { it.group_id == current.group_id } ?: current }
+        ))
     }
 
     private fun hideChatContextMenu() {

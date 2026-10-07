@@ -115,6 +115,8 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.onAppResume()
+            } else if (event == Lifecycle.Event.ON_PAUSE) {
+                viewModel.onAppPause()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

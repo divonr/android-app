@@ -59,6 +59,7 @@ fun UserSettingsScreen(
         }
 
         val syncNeedsReauth by viewModel.syncNeedsReauth.collectAsState()
+        val syncServerLacksCas by viewModel.syncServerLacksCas.collectAsState()
         val syncSignInInProgress by viewModel.syncSignInInProgress.collectAsState()
 
         // Child lock state
@@ -253,6 +254,7 @@ fun UserSettingsScreen(
                 RemoteSyncSection(
                     settings = appSettings.remoteSync,
                     needsReauth = syncNeedsReauth,
+                    serverLacksCas = syncServerLacksCas,
                     isSignInInProgress = syncSignInInProgress,
                     onEnabledChange = { viewModel.updateRemoteSyncEnabled(it) },
                     onServerUrlChange = { viewModel.updateRemoteSyncServerUrl(it) },

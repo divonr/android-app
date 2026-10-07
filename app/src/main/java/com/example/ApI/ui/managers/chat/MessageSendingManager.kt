@@ -142,25 +142,16 @@ class MessageSendingManager(
                             }
                         }
 
-                        finalUserMessage = userMessage.copy(attachments = uploadedAttachments)
+                        // The saved user message (with its node/variant refs), now with the file IDs
+                        val savedUserMessage = updatedChat!!.messages.last()
+                        finalUserMessage = savedUserMessage.copy(attachments = uploadedAttachments)
 
-                        // Update the message in the chat with the uploaded attachments
-                        val allMessages = updatedChat!!.messages.dropLast(1) + finalUserMessage
-                        val updatedChatWithFiles = updatedChat.copy(messages = allMessages)
+                        // Store the file IDs on that message in the tree and messages (by message id,
+                        // under the file lock: no snapshot of the chat is written back)
+                        deps.repository.updateChatWithNewAttachments(currentUser, chatId, listOf(finalUserMessage))
 
-                        // Save the chat with the updated file IDs
-                        val chatHistory = deps.repository.loadChatHistory(currentUser)
-                        val updatedHistoryChats = chatHistory.chat_history.map { chat ->
-                            if (chat.chat_id == updatedChatWithFiles.chat_id) {
-                                updatedChatWithFiles
-                            } else {
-                                chat
-                            }
-                        }
-                        val finalChatHistory = chatHistory.copy(chat_history = updatedHistoryChats)
-                        deps.repository.saveChatHistory(finalChatHistory)
-
-                        updatedChat = updatedChatWithFiles
+                        val allMessages = updatedChat.messages.dropLast(1) + finalUserMessage
+                        updatedChat = updatedChat.copy(messages = allMessages)
                     }
 
                     // Get project attachments if this chat belongs to a project

@@ -42,6 +42,10 @@ fun main() = application {
                 override fun windowGainedFocus(e: WindowEvent?) {
                     viewModel.onWindowFocused()
                 }
+
+                override fun windowLostFocus(e: WindowEvent?) {
+                    viewModel.onWindowFocusLost()
+                }
             }
             window.addWindowFocusListener(focusListener)
             onDispose { window.removeWindowFocusListener(focusListener) }

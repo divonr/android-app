@@ -112,17 +112,14 @@ class ChatContextMenuManager(
     fun deleteChat(chat: Chat) {
         deps.scope.launch {
             val currentUser = deps.appSettings.value.current_user
-            val chatHistory = deps.repository.loadChatHistory(currentUser)
 
-            // Remove the chat from history
-            val updatedChats = chatHistory.chat_history.filter { it.chat_id != chat.chat_id }
-            val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-
-            // Save updated history
-            deps.repository.saveChatHistory(updatedHistory)
+            // Remove the chat from history (locked load-modify-save)
+            val chatHistory = deps.repository.updateChatHistory(currentUser) { history ->
+                history.copy(chat_history = history.chat_history.filter { it.chat_id != chat.chat_id })
+            }
 
             // Update UI
-            val finalChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
+            val finalChatHistory = chatHistory.chat_history
 
             // If we're deleting the current chat, switch to the most recent one or null
             val newCurrentChat = if (deps.uiState.value.currentChat?.chat_id == chat.chat_id) {
@@ -174,17 +171,12 @@ class ChatContextMenuManager(
         val currentUser = deps.appSettings.value.current_user
 
         deps.scope.launch {
-            val chatHistory = deps.repository.loadChatHistory(currentUser)
-
-            // Remove the chat from history
-            val updatedChats = chatHistory.chat_history.filter { it.chat_id != currentChat.chat_id }
-            val updatedHistory = chatHistory.copy(chat_history = updatedChats)
-
-            // Save updated history
-            deps.repository.saveChatHistory(updatedHistory)
+            // Remove the chat from history (locked load-modify-save)
+            val finalChatHistory = deps.repository.updateChatHistory(currentUser) { history ->
+                history.copy(chat_history = history.chat_history.filter { it.chat_id != currentChat.chat_id })
+            }.chat_history
 
             // Update UI
-            val finalChatHistory = deps.repository.loadChatHistory(currentUser).chat_history
 
             deps.updateUiState(
                 deps.uiState.value.copy(

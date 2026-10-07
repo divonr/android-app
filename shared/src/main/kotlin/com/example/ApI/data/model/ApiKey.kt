@@ -1,5 +1,8 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package com.example.ApI.data.model
 
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 
 /**
@@ -67,7 +70,8 @@ data class GitHubConnectionInfo(
     val username: String, // App username (not GitHub username)
     val githubUsername: String, // GitHub username
     val connectedAt: Long,
-    val lastUsed: Long = System.currentTimeMillis()
+    // Always written: a default evaluated at decode time would differ on every read (and per device)
+    @EncodeDefault val lastUsed: Long = System.currentTimeMillis()
 )
 
 @Serializable

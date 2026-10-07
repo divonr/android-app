@@ -71,6 +71,16 @@ class SyncEngineTest {
     private fun keyIds(text: String) = keys(text).map { it.id }.toSet()
     private fun state() = SyncState(tempDir, json).apply { load() }
 
+    /** The server records a PUT before its response reaches the engine: wait for the engine's record. */
+    private fun awaitState(timeoutMs: Long = 5000, condition: (SyncState) -> Boolean): SyncState {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (true) {
+            val s = state()
+            if (condition(s) || System.currentTimeMillis() > deadline) return s
+            Thread.sleep(10)
+        }
+    }
+
     // ── Never-synced local copies: merged with the account's copy (2-way union), never
     //    resolved by file mtime / last-write-wins any more. ──
 
@@ -271,7 +281,7 @@ class SyncEngineTest {
         val first = fake.awaitPut("chat_history_u.json")
         assertNotNull(first)
         val v1 = fake.blob("chat_history_u.json")!!.updatedAt
-        assertEquals(v1, state().baseServerVersion("chat_history_u.json"))
+        assertEquals(v1, awaitState { it.baseServerVersion("chat_history_u.json") == v1 }.baseServerVersion("chat_history_u.json"))
 
         fake.putBodies.clear()
         m.createNewChat("u", "second")
@@ -279,6 +289,10 @@ class SyncEngineTest {
         val versions = fake.versions("chat_history_u.json")
         assertEquals(2, versions.size)
         assertTrue(versions[0].updatedAt > v1, "versions strictly increase")
+        awaitState {
+            it.baseServerVersion("chat_history_u.json") == versions[0].updatedAt &&
+                File(tempDir, "sync_base/chat_history_u.json").let { f -> f.exists() && f.readText() == File(tempDir, "chat_history_u.json").readText() }
+        }
         assertEquals(sha256Hex(File(tempDir, "chat_history_u.json").readText()), state().entry("chat_history_u.json")!!.baseLocalSha)
         assertEquals(File(tempDir, "chat_history_u.json").readText(), File(tempDir, "sync_base/chat_history_u.json").readText(),
             "base snapshot = the uploaded content")

@@ -37,7 +37,8 @@ class DesktopRepository(private val appDir: File) {
     private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager, syncHook)
 
     // ── Sync engine (one per data dir per process, shared with any other repository) ─
-    private val syncEngine = SyncEngine.forDir(internalDir, JsonConfig.prettyPrint) { localStorageManager.loadAppSettings() }
+    val syncEngine = SyncEngine.forDir(internalDir, JsonConfig.prettyPrint) { localStorageManager.loadAppSettings() }
+    private val emptyChatCleanup = EmptyChatCleanup(chatHistoryManager, syncEngine) { loadAppSettings().remoteSync.enabled }
 
     private val titleGenerationService by lazy {
         TitleGenerationService(
@@ -76,6 +77,9 @@ class DesktopRepository(private val appDir: File) {
     /** True when the last authenticated call received 401; UI should prompt re-authentication. */
     val needsReauth: StateFlow<Boolean> get() = syncEngine.needsReauth
 
+    /** True when the sync server lacks compare-and-swap uploads (too old): nothing syncs until it is updated. */
+    val syncServerLacksCas: StateFlow<Boolean> get() = syncEngine.serverLacksCas
+
     /** Health-check the sync server with current settings. Returns true on success. */
     suspend fun testSyncConnection(): Boolean = syncEngine.testConnection()
 
@@ -95,8 +99,8 @@ class DesktopRepository(private val appDir: File) {
             syncEngine.runExclusive {
                 val migration = UserMigration.migrateToAccount(internalDir, JsonConfig.prettyPrint, authResult.username)
                 syncEngine.prepareForSignIn(authResult.username, migration)
-                val postMigration = loadAppSettings()
-                saveAppSettings(
+                // Applied after migration (current_user may have changed), under the settings file lock
+                updateAppSettings { postMigration ->
                     postMigration.copy(
                         remoteSync = postMigration.remoteSync.copy(
                             enabled = true,
@@ -104,7 +108,7 @@ class DesktopRepository(private val appDir: File) {
                             accountEmail = authResult.email
                         )
                     )
-                )
+                }
             }
             syncEngine.clearReauth()
             startSync()
@@ -115,13 +119,14 @@ class DesktopRepository(private val appDir: File) {
     }
 
     /**
-     * Sign out of sync: disables sync, clears the minted token and account email and resets
-     * the sync state (the next sign-in starts with 2-way merges).
+     * Sign out of sync: disables sync and clears the minted token and account email. The sync
+     * state is kept (mirrors DataRepository.signOutOfSync): edits made while signed out are found
+     * by content on the next sign-in, and re-signing into the same account keeps 3-way deletion
+     * semantics; another account resets it at sign-in.
      * Local data and the current username are preserved.
      */
     fun signOutOfSync() {
-        val current = loadAppSettings()
-        saveAppSettings(
+        updateAppSettings { current ->
             current.copy(
                 remoteSync = current.remoteSync.copy(
                     enabled = false,
@@ -129,8 +134,7 @@ class DesktopRepository(private val appDir: File) {
                     accountEmail = ""
                 )
             )
-        )
-        syncEngine.resetSyncState()
+        }
     }
 
     // ==================== Models ====================
@@ -145,11 +149,16 @@ class DesktopRepository(private val appDir: File) {
     /** Load + [transform] + save under the chat history file lock (use for every read-modify-write). */
     fun updateChatHistory(username: String, transform: (UserChatHistory) -> UserChatHistory): UserChatHistory =
         chatHistoryManager.updateChatHistory(username, transform)
+    /** Like [updateChatHistory], with a result computed from the same locked load. */
+    fun <R> modifyChatHistory(username: String, block: (UserChatHistory) -> Pair<UserChatHistory, R>): R =
+        chatHistoryManager.modifyChatHistory(username, block)
     fun getChatJson(username: String, chatId: String): String? = chatHistoryManager.getChatJson(username, chatId)
     fun saveChatJsonToDownloads(chatId: String, content: String): String? = chatHistoryManager.saveChatJsonToDownloads(chatId, content)
     fun addMessageToChat(username: String, chatId: String, message: Message): Chat? = chatHistoryManager.addMessageToChat(username, chatId, message)
-    fun createNewChat(username: String, previewName: String, systemPrompt: String = ""): Chat = chatHistoryManager.createNewChat(username, previewName, systemPrompt)
-    fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat = chatHistoryManager.createNewChatInGroup(username, previewName, groupId, systemPrompt)
+    fun createNewChat(username: String, previewName: String, systemPrompt: String = ""): Chat =
+        chatHistoryManager.createNewChat(username, previewName, systemPrompt).also { emptyChatCleanup.createdHere(it.chat_id) }
+    fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat =
+        chatHistoryManager.createNewChatInGroup(username, previewName, groupId, systemPrompt).also { emptyChatCleanup.createdHere(it.chat_id) }
     fun updateChatSystemPrompt(username: String, chatId: String, systemPrompt: String): Chat? = chatHistoryManager.updateChatSystemPrompt(username, chatId, systemPrompt)
     fun updateChatShareLink(username: String, chatId: String, shareLink: String, shareId: String): Chat? = chatHistoryManager.updateChatShareLink(username, chatId, shareLink, shareId)
     fun replaceMessageInChat(username: String, chatId: String, oldMessage: Message, newMessage: Message): Chat? = chatHistoryManager.replaceMessageInChat(username, chatId, oldMessage, newMessage)
@@ -160,15 +169,8 @@ class DesktopRepository(private val appDir: File) {
     fun importChatHistoryJson(raw: ByteArray, targetUsername: String) = chatHistoryManager.importChatHistoryJson(raw, targetUsername)
     fun validateChatJson(jsonContent: String): Boolean = chatHistoryManager.validateChatJson(jsonContent)
 
-    fun cleanupEmptyChats(username: String): Int {
-        var removedCount = 0
-        updateChatHistory(username) { chatHistory ->
-            val nonEmptyChats = chatHistory.chat_history.filter { it.messages.isNotEmpty() || it.messageNodes.isNotEmpty() }
-            removedCount = chatHistory.chat_history.size - nonEmptyChats.size
-            if (removedCount > 0) chatHistory.copy(chat_history = nonEmptyChats) else chatHistory
-        }
-        return removedCount
-    }
+    /** Remove empty chats; with sync on, keeps empty chats from the synced base not created here (see [EmptyChatCleanup]). */
+    fun cleanupEmptyChats(username: String): Int = emptyChatCleanup.cleanup(username)
 
     // ==================== Groups ====================
     fun createNewGroup(username: String, groupName: String): ChatGroup = groupProjectManager.createNewGroup(username, groupName)
@@ -189,6 +191,8 @@ class DesktopRepository(private val appDir: File) {
     fun reorderApiKeys(username: String, fromIndex: Int, toIndex: Int) = localStorageManager.reorderApiKeys(username, fromIndex, toIndex)
     fun loadAppSettings(): AppSettings = localStorageManager.loadAppSettings()
     fun saveAppSettings(settings: AppSettings) = localStorageManager.saveAppSettings(settings)
+    /** Change the on-disk settings with [transform] under the file lock (never save a stale in-memory copy). */
+    fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings = localStorageManager.updateAppSettings(transform)
     fun saveFileLocally(fileName: String, data: ByteArray): String? = localStorageManager.saveFileLocally(fileName, data)
     fun deleteFile(filePath: String): Boolean = localStorageManager.deleteFile(filePath)
 
@@ -241,7 +245,10 @@ class DesktopRepository(private val appDir: File) {
     fun migrateChatToBranchingStructure(chat: Chat): Chat = messageBranchingManager.migrateChatToBranchingStructure(chat)
     fun ensureBranchingStructure(username: String, chatId: String): Chat? = messageBranchingManager.ensureBranchingStructure(username, chatId)
     fun createBranch(username: String, chatId: String, nodeId: String, newUserMessage: Message): Pair<Chat, String>? = messageBranchingManager.createBranch(username, chatId, nodeId, newUserMessage)
-    fun addResponseToCurrentVariant(username: String, chatId: String, response: Message, targetVariantId: String? = null): Chat? = messageBranchingManager.addResponseToCurrentVariant(username, chatId, response, targetVariantId)
+    fun addResponseToCurrentVariant(username: String, chatId: String, response: Message, targetVariantId: String? = null, expectedTailId: String? = null): Chat? =
+        messageBranchingManager.addResponseToCurrentVariant(username, chatId, response, targetVariantId, expectedTailId)
+    fun addAnchoredResponse(username: String, chatId: String, response: Message, anchor: ReplyAnchor): Chat? =
+        messageBranchingManager.addAnchoredResponse(username, chatId, response, anchor)
     fun switchVariant(username: String, chatId: String, nodeId: String, variantIndex: Int): Chat? = messageBranchingManager.switchVariant(username, chatId, nodeId, variantIndex)
     fun getBranchInfo(chat: Chat, nodeId: String): BranchInfo? = messageBranchingManager.getBranchInfo(chat, nodeId)
     fun getBranchInfoForMessage(chat: Chat, messageId: String): BranchInfo? = messageBranchingManager.getBranchInfoForMessage(chat, messageId)

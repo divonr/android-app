@@ -1,5 +1,8 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package com.example.ApI.data.model
 
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 
@@ -14,7 +17,8 @@ data class GitHubAuth(
     val expiresIn: Long? = null,
     val refreshToken: String? = null,
     val refreshTokenExpiresIn: Long? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    // Always written: a default evaluated at decode time would differ on every read (and per device)
+    @EncodeDefault val createdAt: Long = System.currentTimeMillis()
 ) {
     /**
      * Check if the access token is expired
@@ -68,7 +72,8 @@ data class GitHubUser(
 data class GitHubConnection(
     val auth: GitHubAuth,
     val user: GitHubUser,
-    val connectedAt: Long = System.currentTimeMillis()
+    // Always written: a default evaluated at decode time would differ on every read (and per device)
+    @EncodeDefault val connectedAt: Long = System.currentTimeMillis()
 )
 
 /**

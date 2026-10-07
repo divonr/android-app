@@ -146,12 +146,11 @@ class ToolManager(
      * Enable a tool by its ID.
      */
     fun enableTool(toolId: String) {
-        val currentSettings = deps.appSettings.value
+        val currentSettings = deps.repository.loadAppSettings()
         if (!currentSettings.enabledTools.contains(toolId)) {
-            val updatedSettings = currentSettings.copy(
-                enabledTools = currentSettings.enabledTools + toolId
-            )
-            deps.repository.saveAppSettings(updatedSettings)
+            val updatedSettings = deps.repository.updateAppSettings { fresh ->
+                if (toolId in fresh.enabledTools) fresh else fresh.copy(enabledTools = fresh.enabledTools + toolId)
+            }
             updateAppSettings(updatedSettings)
         }
     }
@@ -160,11 +159,9 @@ class ToolManager(
      * Disable a tool by its ID.
      */
     fun disableTool(toolId: String) {
-        val currentSettings = deps.appSettings.value
-        val updatedSettings = currentSettings.copy(
-            enabledTools = currentSettings.enabledTools - toolId
-        )
-        deps.repository.saveAppSettings(updatedSettings)
+        val updatedSettings = deps.repository.updateAppSettings { fresh ->
+            fresh.copy(enabledTools = fresh.enabledTools - toolId)
+        }
         updateAppSettings(updatedSettings)
     }
 }
