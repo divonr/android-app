@@ -35,7 +35,14 @@ hash when done. Never redo an `[x]` step.
   `runBlocking` return) now run; review tests enabled + 3 new; `:shared:test` (148) green.
 
 ## T5 — Android + desktop integration
-- [ ] implementation + build
+- [x] implementation + build — 1d169f3: app/desktop chat-history load-modify-saves → `updateChatHistory` (deletes, titles,
+  group prompt/project toggle, attachment re-upload via `updateChatWithNewAttachments`), UI refreshed from disk not snapshots;
+  `LocalStorageManager.updateAppSettings` (+ repos) and every VM/manager/ExternalConnections settings write is a transform;
+  streamed replies pinned with `ReplyAnchor` (variant + expected tail; MBM resolves a merge fork), StreamingService extras,
+  Android/desktop stop-and-save; `SyncReload` changeTick reload; `ForegroundSyncTicker` 30 s pulls; `EmptyChatCleanup`;
+  sign-out keeps the sync state; synced `null` auth file on disconnect; desktop rename blocked while syncing (only the
+  unused DesktopChatViewModel has a rename); `serverLacksCas` in both sync UIs; `@EncodeDefault` on time-based model
+  defaults; `:shared:test` (172) green, `:app:assembleDebug`, `:desktop:compileKotlin`, `:server:compileKotlin` ok.
 
 ## T6 — Ktor server + web frontend
 - [ ] implementation + tests
@@ -126,6 +133,45 @@ hash when done. Never redo an `[x]` step.
     - `SyncFileMerger`: unreadable local app_settings (files with device-local keys) → local text is
       returned unchanged (remote's stripped remoteSync / other device's current_user are never
       adopted). T4 must not upload a merge result that does not parse.
+- T5 client integration (for T6/T7):
+  - New shared APIs: `DataRepository/DesktopRepository.updateAppSettings { }` (= `LocalStorageManager.updateAppSettings`,
+    load+transform+save under the app_settings FileLocks lock — the engine's merge-write lock; equal result writes nothing;
+    hook after the lock), `modifyChatHistory`, `syncServerLacksCas`, `addResponseToCurrentVariant(..., expectedTailId)`,
+    `addAnchoredResponse(u, chatId, msg, ReplyAnchor)`. T6: server `MutationRoutes` PATCH /api/settings and `UserRegistry`
+    still `saveAppSettings` a merged/stale copy — switch them to `updateAppSettings`; SendRoute should pin with
+    `ReplyAnchor.forRequest(messagesSent)` + `addAnchoredResponse` for every save of the request.
+  - Pinning + fork orientation: `ReplyAnchor` = (variantId, id of the message the next response follows), created from the
+    last message sent and advanced after every save. MBM: target variant whose tail (last response, else user message)
+    is the expected id → it; else a sibling in the same node whose LAST RESPONSE id is the expected id (the merge fork of
+    this device's content, whatever its id/re-hash); target gone → any variant of the chat ending with that response; no
+    match → the target (e.g. another device appended after our message without a fork: reply goes after its content).
+    User-message ids are never matched on siblings (edits keep the original id).
+  - Sign-out no longer resets the sync state (task decision, plan §4 updated); `prepareForSignIn` resets on an account
+    switch. MultiDeviceSyncTest S8e updated, S8g (no resurrection after re-sign-in) / S8h (switch after sign-out) added.
+  - `cleanupEmptyChats` (shared `EmptyChatCleanup`): sync off → every empty chat; sync on → empty chats absent from
+    `baseContent(chat_history)` plus empty chats created by THIS repository instance (deviation: otherwise every
+    uploaded "new chat" left untyped would stay forever; its removal syncs as a deletion that loses against another
+    device's writes). Unreadable base → only own chats. Residual: own empty chats uploaded before a process restart stay.
+  - Disconnect: `github_auth_*` / `google_workspace_auth_*` hold JSON `null` (`ExternalConnectionsManager.DISCONNECTED`)
+    instead of being deleted; loaders return null; SyncFileMerger decodes these files with nullable serializers (atomic
+    3-way: disconnect vs untouched → null; reconnect after a disconnect → the new connection; no base → remote).
+    `canonicalTyped` no longer drops a legitimately-null decode. Old clients read "null" as not connected.
+  - Found by the T5 tests: kotlinx omits a property equal to its default, and defaults like `System.currentTimeMillis()`
+    (GitHubConnectionInfo/GoogleWorkspaceConnectionInfo.lastUsed, auth createdAt/connectedAt, custom provider createdAt)
+    equal the value set in the same millisecond → the field vanished from the file and every decode invented a new
+    timestamp, so merges saw phantom modifications (a removed GitHub entry came back). Fixed with `@EncodeDefault`.
+    Files already written without the field still decode to "now" until rewritten.
+  - changeTick reload (`SyncReload`, both VMs): settings, chats, groups, current chat (vanished → kept while a request for
+    it is loading/streaming; with an unsent draft → no current chat so the draft starts a new chat; else the newest chat),
+    current group (vanished on the group screen → chat history), system prompt (not while its dialog is open), selected
+    provider/model if the synced settings name an available one, excludedToolIds; stream state/draft untouched.
+    Providers/API-key lists are not re-filtered on a tick (that path writes settings → could ping-pong between devices).
+  - Foreground pulls: `ForegroundSyncTicker` (30 s) started on Activity ON_RESUME / desktop window focus, stopped on
+    ON_PAUSE / focus lost, plus the existing immediate pull.
+  - Desktop stop-and-save now marks the coordinator request stopped (its later output is no longer saved/emitted — it used
+    to duplicate the partial reply); the HTTP stream itself still runs to its end in the background (pre-existing).
+  - SyncEngineTest "debounced upload ... records the new base" waited only for the server's PUT, not the engine's record
+    (flaky under load); it now polls the state.
 - T4 sync engine (for T5/T6/T7):
   - API: `SyncEngine.forDir(internalDir, json[, uploadDebounceMs, retryDelayMs]) { settings }` (one engine per dir per
     process; first caller's params win; DataRepository/DesktopRepository use it, so Android's StreamingService repo
