@@ -52,7 +52,17 @@ hash when done. Never redo an `[x]` step.
   `:shared:test` (183) green.
 
 ## T6 — Ktor server + web frontend
-- [ ] implementation + tests
+- [x] implementation + tests — 53d4c6a: `module(syncServerUrl, pullIntervalSeconds, loginPullTimeoutMs)` +
+  `resolveSyncServerUrl()` (tests: unreachable URL / in-process `FakeCasSyncServer`; gradle test env pins SYNC_SERVER_URL +
+  LLM_WEB_DATA_DIR); every server chat-history/settings write is a locked transform (rename, title, group prompt,
+  `repo.deleteChat`, PATCH settings via `updateAppSettings`); SendRoute pins every save with `ReplyAnchor` +
+  `addAnchoredResponse`; web delete = branch-aware delete, resend/regenerate/edit = new variant in the same node (resend
+  route resolves variant / user message / response ids), multi-message POST = `addUserMessageAsNewNode`; login seeds via
+  transform, `clearReauth`, one pull awaited ≤8 s; `current_user`/sync URL pinned per user dir; startup `rehydrateAll`,
+  `stopAll` flushes + closes engines; token never returned, PATCH remoteSync = `syncApiKeys` only; `/api/sync/status`
+  (+`?probe=false`) has needsReauth/serverLacksCas/accountEmail; web `useSyncRefresh` (10 s poll while visible + focus /
+  visibility, reload list + open chat, waits for a stream) and server-managed sync settings card. `:server:test` (160)
+  and web vitest (139) green, `tsc` + `vite build` ok.
 
 ## T7 — Adversarial verification, E2E, fixes
 - [ ] 
@@ -196,6 +206,30 @@ hash when done. Never redo an `[x]` step.
     to duplicate the partial reply); the HTTP stream itself still runs to its end in the background (pre-existing).
   - SyncEngineTest "debounced upload ... records the new base" waited only for the server's PUT, not the engine's record
     (flaky under load); it now polls the state.
+- T6 server / web (for T7/T8):
+  - Web `POST /chats/{id}/messages/{mid}/resend`: `mid` = variant id (reply-less variant → reply into it, e.g. after
+    `POST /branch`; switched onto the path if needed), user message id (new sibling variant with a copy, same id, like
+    Android's resend), response id (new sibling variant with the copy of its variant's question = "regenerate"); nothing
+    is deleted any more. `POST /branch` accepts a message id as `nodeId` (legacy messages carry no node id; the chat is
+    migrated first). `DELETE /chats/{id}/messages/{mid}` is now the branch-aware delete too (400 when not a leaf).
+  - `POST /chats/{id}/messages`: role user → `addUserMessageAsNewNode`, other roles → current path's last variant;
+    responds with the saved (tree-stamped) message.
+  - Send: replies anchored at the saved user message (`anchorAfter(savedChat, userMessage.id)`; multi-message mode
+    `persistUserMessage=false` → the chat's last path message). The LLM still gets the browser's `messages` list.
+  - `maybeGenerateTitle` no longer writes the failure fallback "שיחה חדשה" over the chat name (Android skips it too).
+  - `bootstrapUserSync` is NOT under `engine.runExclusive` (that waits unbounded for an in-flight pull; the web has no
+    migration); `prepareForSignIn(u, NoOp)` + settings transform + `clearReauth`; first pull launched in the user's
+    scope and awaited with `withTimeoutOrNull` (never cancelled). Registry: `pinDeviceSettings` rewrites an existing
+    app_settings' `current_user` (and an enabled sync's server URL) to the dir's user / configured URL on context
+    creation; `rehydrateAll()` runs synchronously in `module()` when `startRegistry`; `syncingUsers()` for tests.
+  - `stopAll` closes every context's engine (also with `startRegistry=false`), so a test's own `DataRepository` over a
+    user dir has a closed engine after the app stops (writes are then not synced; reads fine).
+  - Deploy caveat (T8): llm-web serves `web/dist` straight from disk (`WEB_STATIC_DIR`), so `npm --prefix web run build`
+    deploys the frontend immediately. T6 verified its build into the scratchpad and rebuilt `web/dist` from HEAD's
+    sources after an accidental build there. Likewise `:server:installDist` writes into the running service's install
+    dir — T8 only. New frontend vs old server is compatible (old server ignores `probe=false`, i.e. probes every poll).
+  - Not done: live refresh of settings-driven UI other than chats/groups (e.g. provider/model pickers re-read on
+    navigation only); a chat open in a tab that another device deleted shows "Chat not found".
 - T4 sync engine (for T5/T6/T7):
   - API: `SyncEngine.forDir(internalDir, json[, uploadDebounceMs, retryDelayMs]) { settings }` (one engine per dir per
     process; first caller's params win; DataRepository/DesktopRepository use it, so Android's StreamingService repo
