@@ -27,7 +27,7 @@ hash when done. Never redo an `[x]` step.
   only if local unchanged under FileLocks, ≤5 restarts, 30 s retry pull), Mutex, `SyncEngine.forDir` registry used by
   DataRepository/DesktopRepository; UserMigration default-only/no overwrite/user_name rewrite; sign-in/out reset;
   FakeSyncServer with full CAS + faults; 18 S1–S9 multi-device scenarios + seeded 3-device fuzz (20 seeds in CI, 200
-  extra seeds pass); `:shared:test` (135) green, server/desktop/app compile. Review fixes (see commit after c64381f):
+  extra seeds pass); `:shared:test` (135) green, server/desktop/app compile. Review fixes d9a56ec:
   no sync at all with a server lacking `"cas": true` (health checked every pull, PUT response verified,
   `serverLacksCas` flag, testConnection false); remote older than the base (DB restore) → 2-way union; undecodable
   remote / failed merge → both copies untouched + retry; adopt-remote keeps the switch-time copy as base (later local
