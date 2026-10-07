@@ -4,10 +4,10 @@ Read `SYNC_MERGE_PLAN.md` first. Mark `[~]` when starting, `[x]` + one-line note
 hash when done. Never redo an `[x]` step.
 
 ## T1 — Sync server CAS + history (sync-server repo)
-- [ ] implementation + tests
+- [x] implementation + tests — sync-server 9bde608: base_version CAS/409, sha-equal no-op, BEGIN IMMEDIATE + max(now,prev+1), WAL, last_used throttle, blob_history (30/file), ?version=N, /sync/history; 47 pytest pass.
 
 ## T2 — Merge engine (ChatHistoryMerger, JsonMerger) + unit/fuzz tests
-- [ ] implementation + tests
+- [~] implementation + tests
 
 ## T3 — Storage hardening (atomic writes, FileLocks, updateChatHistory, user_name, deterministic migration, pinned responses)
 - [ ] implementation + tests
@@ -28,3 +28,9 @@ hash when done. Never redo an `[x]` step.
 - [ ] 
 
 ## Notes
+- T1 API details for client work (T4): PUT body `{"content", "base_version"?}`; base_version
+  must be >= 0 (negative → 422). sha-equal PUT returns 200 with stored meta even when the base
+  is stale/0. `GET /sync/history/{f}` returns `[{filename, updated_at, sha, current:true}, then
+  {..., current:false, replaced_at}]` newest first, `[]` for a missing blob (not 404).
+  `GET /sync/file/{f}?version=N` → 404 if unknown/pruned. `init_db()` (run at startup) switches
+  the DB to WAL and adds `blob_history`; `/auth/google` now also runs in BEGIN IMMEDIATE.
