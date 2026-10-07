@@ -4,7 +4,7 @@ Read `SYNC_MERGE_PLAN.md` first. Mark `[~]` when starting, `[x]` + one-line note
 hash when done. Never redo an `[x]` step.
 
 ## T1 — Sync server CAS + history (sync-server repo)
-- [x] implementation + tests — sync-server 9bde608: base_version CAS/409, sha-equal no-op, BEGIN IMMEDIATE + max(now,prev+1), WAL, last_used throttle, blob_history (30/file), ?version=N, /sync/history; 47 pytest pass.
+- [x] implementation + tests — sync-server 9bde608: base_version CAS/409, sha-equal no-op, BEGIN IMMEDIATE + max(now,prev+1), WAL, last_used throttle, blob_history (30/file), ?version=N, /sync/history; 47 pytest pass. Review fixes sync-server cce036b: /sync/history + ?version reads use one snapshot (BEGIN), ?version bounded 0..2^63-1 (422 not 500), .gitignore *.db-wal/*.db-shm; 54 pytest pass.
 
 ## T2 — Merge engine (ChatHistoryMerger, JsonMerger) + unit/fuzz tests
 - [~] implementation + tests
@@ -32,5 +32,5 @@ hash when done. Never redo an `[x]` step.
   must be >= 0 (negative → 422). sha-equal PUT returns 200 with stored meta even when the base
   is stale/0. `GET /sync/history/{f}` returns `[{filename, updated_at, sha, current:true}, then
   {..., current:false, replaced_at}]` newest first, `[]` for a missing blob (not 404).
-  `GET /sync/file/{f}?version=N` → 404 if unknown/pruned. `init_db()` (run at startup) switches
+  `GET /sync/file/{f}?version=N` → 404 if unknown/pruned, 422 if N < 0 or > 2^63-1. `init_db()` (run at startup) switches
   the DB to WAL and adds `blob_history`; `/auth/google` now also runs in BEGIN IMMEDIATE.
