@@ -69,6 +69,8 @@ class FakeSyncServer {
     @Volatile var getDelayMs = 0L
     @Volatile var beforeGet: ((user: String, filename: String) -> Unit)? = null
     @Volatile var beforePut: ((user: String, filename: String) -> Unit)? = null
+    /** Behave like the pre-T1 server: `base_version` ignored (last write wins), no `"cas"` in responses. */
+    @Volatile var legacyNoCas = false
 
     private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     private val executor: ExecutorService = Executors.newFixedThreadPool(8)
@@ -154,7 +156,7 @@ class FakeSyncServer {
         val path = exchange.requestURI.path
         val method = exchange.requestMethod
         requests.add("$method $path")
-        if (path == "/sync/health") return respond(exchange, 200, """{"status":"ok","cas":true}""")
+        if (path == "/sync/health") return respond(exchange, 200, if (legacyNoCas) """{"status":"ok"}""" else """{"status":"ok","cas":true}""")
         if (path == "/auth/google" && method == "POST") {
             val body = json.parseToJsonElement(exchange.requestBody.readBytes().decodeToString()).jsonObject
             val idToken = body["id_token"]?.jsonPrimitive?.content ?: return respond(exchange, 422, "{}")
@@ -205,7 +207,7 @@ class FakeSyncServer {
                 val name = URLDecoder.decode(path.removePrefix("/sync/file/"), "UTF-8")
                 val body = json.parseToJsonElement(exchange.requestBody.readBytes().decodeToString()).jsonObject
                 val content = body["content"]?.jsonPrimitive?.content ?: return respond(exchange, 422, "{}")
-                val baseVersion = (body["base_version"] as? JsonPrimitive)?.longOrNull
+                val baseVersion = if (legacyNoCas) null else (body["base_version"] as? JsonPrimitive)?.longOrNull
                 beforePut?.invoke(user, name)
                 if (failNextPuts.getAndUpdate { maxOf(0, it - 1) } > 0) return respond(exchange, 503, """{"detail":"unavailable"}""")
                 val sha = sha256(content)
@@ -213,7 +215,7 @@ class FakeSyncServer {
                 val (code, response) = synchronized(lock) {
                     val files = blobs.getOrPut(user) { HashMap() }
                     val cur = files[name]
-                    if (cur != null && cur.sha == sha) return@synchronized 200 to metaJson(name, cur).dropLast(1) + ""","cas":true}"""
+                    if (!legacyNoCas && cur != null && cur.sha == sha) return@synchronized 200 to metaJson(name, cur).dropLast(1) + ""","cas":true}"""
                     val spurious = baseVersion != null && conflictNextPuts.getAndUpdate { maxOf(0, it - 1) } > 0
                     val conflict = spurious || when {
                         baseVersion == null -> false
@@ -230,7 +232,7 @@ class FakeSyncServer {
                     putBodies[name] = content
                     putCount.incrementAndGet()
                     lostResponse = loseNextPutResponses.getAndUpdate { maxOf(0, it - 1) } > 0
-                    200 to metaJson(name, b).dropLast(1) + ""","cas":true}"""
+                    200 to (if (legacyNoCas) metaJson(name, b) else metaJson(name, b).dropLast(1) + ""","cas":true}""")
                 }
                 if (lostResponse) respond(exchange, 500, """{"detail":"lost"}""") else respond(exchange, code, response)
             }
