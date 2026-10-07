@@ -7,7 +7,7 @@ hash when done. Never redo an `[x]` step.
 - [x] implementation + tests — sync-server 9bde608: base_version CAS/409, sha-equal no-op, BEGIN IMMEDIATE + max(now,prev+1), WAL, last_used throttle, blob_history (30/file), ?version=N, /sync/history; 47 pytest pass. Review fixes sync-server cce036b: /sync/history + ?version reads use one snapshot (BEGIN), ?version bounded 0..2^63-1 (422 not 500), .gitignore *.db-wal/*.db-shm; 54 pytest pass.
 
 ## T2 — Merge engine (ChatHistoryMerger, JsonMerger) + unit/fuzz tests
-- [~] implementation + tests
+- [x] implementation + tests — 4a1f845: `data/sync/merge/` ChatHistoryMerger, LegacyChatConverter, JsonMerger(+Policy), SyncFileMerger, ChatTreeRepair; 49 tests incl. 250-seed 2-replica fuzz + 60-seed 3-device convergence fuzz through the real MessageBranchingManager; `:shared:test` green.
 
 ## T3 — Storage hardening (atomic writes, FileLocks, updateChatHistory, user_name, deterministic migration, pinned responses)
 - [ ] implementation + tests
@@ -34,3 +34,26 @@ hash when done. Never redo an `[x]` step.
   {..., current:false, replaced_at}]` newest first, `[]` for a missing blob (not 404).
   `GET /sync/file/{f}?version=N` → 404 if unknown/pruned, 422 if N < 0 or > 2^63-1. `init_db()` (run at startup) switches
   the DB to WAL and adds `blob_history`; `/auth/google` now also runs in BEGIN IMMEDIATE.
+- T2 merge engine (for T3/T4/T5/T6):
+  - Entry point for the engine: `SyncFileMerger.mergeFile(filename, base, local, remote, json)`
+    (pure, never throws; unparseable local → remote, unparseable remote → local, bad base →
+    2-way; unexpected failure → local). Pass `JsonConfig.prettyPrint`.
+  - T3: `migrateChatToBranchingStructure` must delegate to `LegacyChatConverter.toBranching(chat)`
+    (same grouping rules; ids: node `nameUUID("$chatId:node:$index:$msgId")`, variant
+    `nameUUID("$chatId:variant:$index:$msgId")`, blank message id → `nameUUID("$chatId:msg:$index")`,
+    index = position in `chat.messages`). Like today it drops messages before the first user
+    message and unknown roles.
+  - `messages` of branching chats is recomputed from the tree on every merge: messages-only
+    writes (MessageSendingManager attachment-id rewrite, addMessageToChat/replaceMessageInChat/
+    deleteMessagesFromPoint, web Delete/Regenerate truncation) are undone by a merge — T5/T6 must
+    make those edit the tree.
+  - Deviations/choices: keyed-list/chat/group order adopts remote order when local order equals
+    base (else local order + remote-only); a chat counts as "modified" (beats deletion) on
+    tree/name/systemPrompt/share changes, not on `group` or view state; typed JSON files are
+    canonicalized through their model with `encodeDefaults=true` before merging (a value reset
+    to default is a change, not a missing key) and re-encoded through the model (unknown keys
+    dropped, same as the app's own save); app_settings arrays merge as sets; github/google
+    workspace auth files merge atomically (whole document as one value, tokens stay consistent);
+    missing ids in stored JSON (legacy messages, api keys, providers) are filled deterministically
+    before decoding; fork ids `nameUUID(remoteVariantId+":fork")` re-hashed on collision; folded
+    node survivor = present in base, else smallest nodeId (symmetric).
