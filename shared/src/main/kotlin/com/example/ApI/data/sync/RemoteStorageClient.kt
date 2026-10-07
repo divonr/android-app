@@ -8,6 +8,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -83,6 +84,14 @@ sealed class RemoteSyncException(message: String, val statusCode: Int = -1) : IO
      */
     class Conflict(val current: BlobMeta?, message: String = "409 version_conflict (current=${current?.updated_at})") :
         RemoteSyncException(message, 409)
+
+    /**
+     * The server does not do compare-and-swap uploads (it predates `base_version`: no `"cas": true`
+     * in `/sync/health` or in a PUT response).  Such a server silently ignores the base of a
+     * conditional PUT, so a client relying on CAS must stop uploading to it.
+     */
+    class CasUnsupported(message: String = "sync server does not support base_version (no \"cas\": true)") :
+        RemoteSyncException(message, -1)
 
     /** Any other non-2xx error. */
     class HttpError(message: String, statusCode: Int) : RemoteSyncException(message, statusCode)
@@ -175,6 +184,31 @@ class RemoteStorageClient(
         }
     }
 
+    /**
+     * Whether the server does compare-and-swap uploads (`"cas": true` in `/sync/health`).
+     * null: the server could not be reached or answered with an error.
+     */
+    suspend fun casSupported(): Boolean? = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/sync/health")
+            .get()
+            .build()
+        return@withContext try {
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) null else hasCasMarker(resp.body?.string().orEmpty())
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** True when [body] is a JSON object with `"cas": true`. */
+    private fun hasCasMarker(body: String): Boolean = try {
+        ((json.parseToJsonElement(body) as? JsonObject)?.get("cas") as? JsonPrimitive)?.booleanOrNull == true
+    } catch (e: Exception) {
+        false
+    }
+
     // ── manifest ─────────────────────────────────────────────────────────────
 
     /**
@@ -247,6 +281,8 @@ class RemoteStorageClient(
      *        exist); N → write only if the blob's current `updated_at` is N. A PUT whose content
      *        equals the stored content succeeds without a new version, whatever [baseVersion].
      * @throws RemoteSyncException.Conflict on 409 `version_conflict` (with the current metadata).
+     * @throws RemoteSyncException.CasUnsupported when [baseVersion] is set but the response lacks
+     *         `"cas": true`: the server ignored the base and wrote unconditionally.
      * @throws RemoteSyncException.Unauthorized on 401.
      * @throws RemoteSyncException.HttpError on other non-2xx responses.
      */
@@ -270,6 +306,9 @@ class RemoteStorageClient(
                 if (!resp.isSuccessful) throwForStatus(resp.code, "put($filename)")
                 val respBody = resp.body?.string()
                     ?: throw RemoteSyncException.HttpError("put($filename) empty response body", resp.code)
+                if (baseVersion != null && !hasCasMarker(respBody)) {
+                    throw RemoteSyncException.CasUnsupported("put($filename): the server ignored base_version (no \"cas\": true)")
+                }
                 json.decodeFromString<BlobMeta>(respBody)
             }
         }

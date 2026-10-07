@@ -41,7 +41,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  *     via [SyncFileMerger].  Change detection is content based, so lost flags, edits made while
  *     sync was off or by another process, and failed uploads are all picked up by the next sync.
  *   - Uploads are compare-and-swap PUTs (`base_version`); a 409 restarts the file's sync (merge
- *     with the newer remote copy).  The server never loses a version it didn't merge.
+ *     with the newer remote copy).  The server never loses a version it didn't merge.  A server
+ *     without CAS (no `"cas": true` in `/sync/health` / the PUT response) is not synced with at
+ *     all ([serverLacksCas]): it would silently apply stale uploads, which the next 3-way merge
+ *     elsewhere would read as deletions.
+ *   - A remote copy OLDER than the base (server restored from a backup) or one this client can't
+ *     decode is never merged as "the remote deleted it" / overwritten: the first is merged 2-way
+ *     (union), the second leaves both copies untouched.
  *   - A merge result is written locally only if the local file is still what was merged (checked
  *     under the file's [FileLocks] lock, the one every local read-modify-write holds); otherwise
  *     the file's sync restarts.  A local write is never overwritten.
@@ -52,9 +58,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  *     use the stripped (upload) form.
  *   - A file under a [SyncHolds] hold (rebuilt locally from an unreadable copy) is never
  *     uploaded as is: pull merges it into the remote copy with an empty base, then releases it.
- *   - The sync state belongs to one account; when `current_user` differs the state and base
- *     snapshots are reset (switching between two accounts also adopts the new account's copies
- *     of the account-global files instead of merging the old account's into them).
+ *   - The sync state belongs to the signed-in account (set at sign-in, [prepareForSignIn]);
+ *     signing into another account resets the state and base snapshots and adopts the new
+ *     account's copies of the account-global files instead of merging the old account's into
+ *     them (only the switch-time copies: later local changes are merged).  Renaming the local
+ *     user while signed in is not an account switch.
  *
  * ### Re-authentication flow
  * If any authenticated server call returns HTTP 401 (token revoked/expired), [needsReauth] is
@@ -149,6 +157,18 @@ class SyncEngine(
      */
     val needsReauth: StateFlow<Boolean> = _needsReauth.asStateFlow()
 
+    private val _serverLacksCas = MutableStateFlow(false)
+
+    /**
+     * `true` when the sync server does not support compare-and-swap uploads (it predates
+     * `base_version`).  Nothing is synced with such a server; checked again on every pull.
+     */
+    val serverLacksCas: StateFlow<Boolean> = _serverLacksCas.asStateFlow()
+
+    /** The server URL whose CAS support was last confirmed (null: not confirmed). */
+    @Volatile
+    private var casConfirmedFor: String? = null
+
     // Per-filename debounce jobs
     private class PendingUpload(val job: Job) {
         /** Past the debounce: never cancelled any more (its PUT may already be on the wire). */
@@ -209,7 +229,9 @@ class SyncEngine(
         val settings = settingsProvider()
         if (!settings.remoteSync.enabled) return false
         return try {
-            buildClient(settings).health()
+            val client = buildClient(settings)
+            // Reachable is not enough: this engine refuses to sync with a server without CAS
+            client.health() && checkCas(client, settings, recheck = true) == true
         } catch (e: Exception) {
             false
         }
@@ -271,7 +293,7 @@ class SyncEngine(
             retryJob?.cancel()
             retryJob = null
         }
-        syncState.reset(accountUsername, if (adoptRemoteGlobals) ACCOUNT_GLOBAL_FILES else emptySet()) { baseStore.clear() }
+        resetState(accountUsername, adoptRemoteGlobals)
         AppLogger.i("[$TAG] Sync state reset (account='$accountUsername', adoptRemoteGlobals=$adoptRemoteGlobals)")
     }
 
@@ -284,7 +306,9 @@ class SyncEngine(
      */
     fun prepareForSignIn(username: String, migration: MigrationResult) {
         when (migration) {
-            is MigrationResult.Switched -> resetSyncState(username, adoptRemoteGlobals = true)
+            // The state already belongs to this account (the local user was renamed meanwhile):
+            // its bases still describe this account's copies
+            is MigrationResult.Switched -> if (syncStateAccount() != username) resetSyncState(username, adoptRemoteGlobals = true)
             is MigrationResult.Migrated -> resetSyncState(username)
             MigrationResult.NoOp -> {
                 val account = syncStateAccount()
@@ -351,19 +375,74 @@ class SyncEngine(
         filename in trackedFilenames(settings)
 
     /**
-     * Make the sync state belong to [user]: a legacy state (no account recorded) is adopted with
-     * its bases; a reset state starts fresh; another account's state is reset and the
-     * account-global files adopt this account's copies (no cross-account merge).
+     * Make sure the sync state belongs to an account: a legacy state (no account recorded) is
+     * adopted for [user] with its bases; a reset state starts fresh for [user].  A state of
+     * another account is kept: the account is set at sign-in ([prepareForSignIn], which resets on
+     * a real switch), so `current_user` differing from it means the local user was renamed while
+     * signed in — still the same server account, whose bases (keyed by filename) stay valid.
      */
     private fun ensureAccount(user: String) {
         when (val account = syncState.accountUsername()) {
             user -> {}
             null -> syncState.adoptAccount(user)
-            "" -> syncState.reset(user) { baseStore.clear() }
-            else -> {
-                AppLogger.i("[$TAG] Account changed ($account → $user): resetting sync state")
-                syncState.reset(user, ACCOUNT_GLOBAL_FILES) { baseStore.clear() }
+            "" -> resetState(user, adoptGlobals = false)
+            else -> AppLogger.d("[$TAG] current_user '$user' differs from the signed-in account '$account'; keeping the sync state")
+        }
+    }
+
+    /**
+     * Reset the state to [account] and drop the base snapshots.  With [adoptGlobals] the
+     * account-global files are marked "adopt remote"; their current local copies are kept as
+     * their base snapshots, so only those switch-time copies give way to the account's.
+     */
+    private fun resetState(account: String, adoptGlobals: Boolean) {
+        syncState.reset(
+            account,
+            if (adoptGlobals) ACCOUNT_GLOBAL_FILES else emptySet(),
+            adoptRemoteBase = {
+                ACCOUNT_GLOBAL_FILES.associateWith { filename ->
+                    val local = try {
+                        File(internalDir, filename).takeIf { it.exists() }?.readText(Charsets.UTF_8)
+                    } catch (e: IOException) {
+                        null
+                    }
+                    val form = local?.let { uploadForm(filename, it) }
+                    if (form == null) "" else sha256Hex(form).also { baseStore.write(filename, form) }
+                }
             }
+        ) { baseStore.clear() }
+    }
+
+    /**
+     * Whether the server at [settings]' URL does CAS (null: unreachable).  A confirmation is
+     * cached per URL; [recheck] asks the server again (every pull, so a server rolled back to a
+     * version without CAS is noticed).
+     */
+    private suspend fun checkCas(client: RemoteStorageClient, settings: AppSettings, recheck: Boolean): Boolean? {
+        val url = settings.remoteSync.serverBaseUrl
+        if (!recheck && casConfirmedFor == url) return true
+        val cas = client.casSupported() ?: return null
+        onCasResult(url, cas)
+        return cas
+    }
+
+    private fun onCasResult(url: String, cas: Boolean) {
+        casConfirmedFor = if (cas) url else null
+        if (!cas && !_serverLacksCas.value) {
+            AppLogger.e("[$TAG] Sync server $url does not support compare-and-swap uploads (\"cas\"); not syncing with it")
+        }
+        _serverLacksCas.value = !cas
+    }
+
+    /** What is uploaded / compared for the local [text] of [filename] (null: unreadable app_settings). */
+    private fun uploadForm(filename: String, text: String): String? {
+        if (filename != APP_SETTINGS) return text
+        return try {
+            // Strip the remoteSync block so tokens/config stay device-local
+            val parsed = json.decodeFromString<AppSettings>(text)
+            json.encodeToString(parsed.copy(remoteSync = RemoteSyncSettings()))
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -434,19 +513,32 @@ class SyncEngine(
         if (_needsReauth.value) return
         if (!isTracked(filename, settings)) return
         ensureAccount(settings.current_user)
+        val client = buildClient(settings)
+        when (checkCas(client, settings, recheck = false)) {
+            true -> {}
+            false -> return  // never upload to a server that would ignore the base
+            null -> {
+                AppLogger.w("[$TAG] upload($filename): sync server unreachable — will retry")
+                scheduleRetry()
+                return
+            }
+        }
 
         // Optimistic: assume the server is still at our base; the CAS PUT verifies it and a 409
         // hands us the current version (no base yet → create-only PUT, same)
         val entry = syncState.entry(filename)
         val assumed = entry?.takeIf { it.baseServerVersion > 0 }
             ?.let { BlobMeta(filename, it.baseServerVersion, it.baseServerSha ?: "") }
-        val sync = FileSync(buildClient(settings), settings, filename, uploadOnly = true, generation = syncState.generation)
+        val sync = FileSync(client, settings, filename, uploadOnly = true, generation = syncState.generation)
         try {
             if (!sync.run(assumed)) scheduleRetry()
             _needsReauth.value = false  // Successful calls — clear any stale flag
         } catch (e: RemoteSyncException.Unauthorized) {
             _needsReauth.value = true
             AppLogger.e("[$TAG] upload($filename): 401 Unauthorized — needsReauth set", e)
+        } catch (e: RemoteSyncException.CasUnsupported) {
+            onCasResult(settings.remoteSync.serverBaseUrl, cas = false)
+            AppLogger.e("[$TAG] upload($filename): the server ignored base_version", e)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -468,6 +560,16 @@ class SyncEngine(
 
         val tracked = trackedFilenames(settings)
         val client = buildClient(settings)
+
+        when (checkCas(client, settings, recheck = true)) {
+            true -> {}
+            false -> return
+            null -> {
+                AppLogger.w("[$TAG] pull(): sync server unreachable")
+                scheduleRetry()
+                return
+            }
+        }
 
         val manifestEntries: List<BlobMeta> = try {
             client.manifest()
@@ -498,6 +600,8 @@ class SyncEngine(
                     if (!sync.run(remoteIndex[filename])) incomplete = true
                 } catch (e: RemoteSyncException.Unauthorized) {
                     throw e
+                } catch (e: RemoteSyncException.CasUnsupported) {
+                    throw e
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -510,6 +614,10 @@ class SyncEngine(
         } catch (e: RemoteSyncException.Unauthorized) {
             _needsReauth.value = true
             AppLogger.e("[$TAG] pull(): 401 Unauthorized — needsReauth set", e)
+        } catch (e: RemoteSyncException.CasUnsupported) {
+            onCasResult(settings.remoteSync.serverBaseUrl, cas = false)
+            AppLogger.e("[$TAG] pull(): the server ignored base_version; stopping", e)
+            return
         } finally {
             // Even after a 401 mid-pull: files already rewritten must be reloaded by the UI
             if (anythingChanged) bumpChangeTick()
@@ -543,11 +651,14 @@ class SyncEngine(
         var wroteLocal = false
             private set
 
-        /** @return false if the file is left unsynced for now (too many restarts). */
+        /** Set when the file was deliberately left unsynced for now (retried later). */
+        private var skipped = false
+
+        /** @return false if the file is left unsynced for now (too many restarts, unmergeable remote). */
         suspend fun run(initialMeta: BlobMeta?): Boolean {
             var meta = initialMeta
             repeat(MAX_ATTEMPTS) {
-                val restart = attempt(meta) ?: return true
+                val restart = attempt(meta) ?: return !skipped
                 meta = restart.meta
             }
             AppLogger.w("[$TAG] $filename: still conflicting after $MAX_ATTEMPTS attempts; leaving it for the next sync")
@@ -565,7 +676,7 @@ class SyncEngine(
             }
             val local = readLocal()
             if (local == null && uploadOnly) return null
-            val localForm = local?.let { uploadForm(it) }
+            val localForm = local?.let { uploadForm(filename, it) }
             if (local != null && localForm == null) {
                 AppLogger.e("[$TAG] $filename: local copy unreadable; not syncing it", IOException(file.path))
                 return null
@@ -591,7 +702,11 @@ class SyncEngine(
             }
 
             val adoptRemote = syncState.shouldAdoptRemote(filename)
-            val remoteChanged = held || adoptRemote || local == null || entry == null ||
+            // Versions only grow, so a remote copy older than the base means the server lost
+            // versions (restored from a backup): our base is newer than anything it has
+            val rolledBack = entry != null && meta.updated_at < entry.baseServerVersion &&
+                (entry.baseServerSha == null || meta.sha != entry.baseServerSha)
+            val remoteChanged = held || adoptRemote || local == null || entry == null || rolledBack ||
                 entry.baseServerVersion == 0L ||
                 (meta.updated_at != entry.baseServerVersion && (entry.baseServerSha == null || meta.sha != entry.baseServerSha))
 
@@ -619,9 +734,27 @@ class SyncEngine(
             cachedBlob = blob
             val blobMeta = BlobMeta(filename, blob.updated_at, blob.sha)
 
+            // A remote copy this client can't decode is neither adopted nor overwritten
+            if (!SyncFileMerger.isValid(filename, blob.content, json)) {
+                AppLogger.e("[$TAG] $filename: remote copy (version ${blob.updated_at}) does not parse; leaving both copies untouched")
+                skipped = true
+                return null
+            }
+
             val base: String? = when {
                 held -> null  // the rebuilt copy is not a descendant of any base: union
-                adoptRemote -> localForm  // local counts as unchanged → the account's copy wins
+                // Everything the server lost would read as "deleted remotely": union instead
+                rolledBack || (entry != null && blob.updated_at < entry.baseServerVersion && blob.sha != entry.baseServerSha) -> {
+                    AppLogger.w("[$TAG] $filename: server copy (version ${blob.updated_at}) is older than our base (${entry?.baseServerVersion}); merging without a base")
+                    null
+                }
+                // Account switch: the switch-time local copy is the base, so it gives way to the
+                // account's copy while changes made since the switch are merged
+                adoptRemote -> when (val switchSha = syncState.adoptRemoteBaseSha(filename)) {
+                    null -> localForm  // mark from before switch-time copies were kept
+                    "" -> null  // no local copy at the switch: whatever is here now is newer
+                    else -> baseStore.read(filename, switchSha) ?: localForm?.takeIf { sha256Hex(it) == switchSha }
+                }
                 else -> baseStore.read(filename, entry?.baseLocalSha)
                     // Snapshot lost but the local copy is unchanged since the base: it IS the base
                     ?: localForm?.takeIf { entry?.baseLocalSha != null && sha256Hex(it) == entry.baseLocalSha }
@@ -629,8 +762,12 @@ class SyncEngine(
                     ?: blob.content.takeIf { entry != null && entry.baseServerVersion == blob.updated_at }
             }
             val merged = if (local == null) remoteForLocal(blob.content)
-            else SyncFileMerger.mergeFile(filename, base, local, blob.content, json)
-            val mergedForm = uploadForm(merged) ?: run {
+            else SyncFileMerger.tryMergeFile(filename, base, local, blob.content, json) ?: run {
+                AppLogger.e("[$TAG] $filename: merge failed; leaving both copies untouched")
+                skipped = true
+                return null
+            }
+            val mergedForm = uploadForm(filename, merged) ?: run {
                 AppLogger.e("[$TAG] $filename: merge result unreadable; not syncing it", IOException(file.path))
                 return null
             }
@@ -691,18 +828,6 @@ class SyncEngine(
         }
 
         private fun readLocal(): String? = if (file.exists()) file.readText(Charsets.UTF_8) else null
-
-        /** What is uploaded / compared for the local [text] (null: unreadable app_settings). */
-        private fun uploadForm(text: String): String? {
-            if (filename != APP_SETTINGS) return text
-            return try {
-                // Strip the remoteSync block so tokens/config stay device-local
-                val parsed = json.decodeFromString<AppSettings>(text)
-                json.encodeToString(parsed.copy(remoteSync = RemoteSyncSettings()))
-            } catch (e: Exception) {
-                null
-            }
-        }
 
         /** The remote copy as a local file (app_settings: with this device's local keys). */
         private fun remoteForLocal(remote: String): String {

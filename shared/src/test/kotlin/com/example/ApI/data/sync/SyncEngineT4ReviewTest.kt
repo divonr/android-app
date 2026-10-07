@@ -6,11 +6,11 @@ import com.example.ApI.data.sync.merge.FakeClock
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -53,13 +53,15 @@ class SyncEngineT4ReviewTest {
 
     /**
      * A sync server that predates T1 ignores `base_version` (pydantic drops the unknown field) and
-     * writes unconditionally.  The client never checks the `"cas": true` marker, so a CAS upload on
-     * a stale base silently clobbers the other device's version, and the other device's next 3-way
-     * merge then reads the clobbered chat as a deliberate deletion and drops it locally too.
+     * writes unconditionally.  A CAS upload on a stale base would silently clobber the other
+     * device's version, and the other device's next 3-way merge would read the clobbered chat as a
+     * deliberate deletion and drop it locally too.  The engine stops syncing as soon as it sees a
+     * response without `"cas": true` (here: the server is swapped under engines that already
+     * confirmed CAS, so each device's first PUT still lands), and no device loses its data; once
+     * the server supports CAS again everything converges.
      */
-    @Disabled("T4 review: fails — client never checks the server's \"cas\" marker")
     @Test
-    fun `a server without CAS must not turn a stale upload into a silent deletion`() = runBlocking {
+    fun `a server without CAS must not turn a stale upload into a silent deletion`(): Unit = runBlocking {
         val (app, web) = pair()
         server.legacyNoCas = true
         web.newChatWith("from web", "w-q1", "w-a1")
@@ -71,8 +73,36 @@ class SyncEngineT4ReviewTest {
         app.pull()
         web.pull()
 
+        assertHas(web, "w-q1")
+        assertHas(app, "a-q1")
+        assertTrue(web.engine.serverLacksCas.value && app.engine.serverLacksCas.value)
+        val puts = server.putCount.get()
+        app.updateSettings { it.copy(temperature = 0.4) }
+        app.sync()
+        assertEquals(puts, server.putCount.get(), "uploaded to a server without CAS")
+
+        // The server is upgraded: nothing was lost, both chats reach both devices
+        server.legacyNoCas = false
+        web.pull(); app.pull(); web.pull()
+        assertFalse(web.engine.serverLacksCas.value)
         assertHas(web, "w-q1", "a-q1")
         assertHas(app, "w-q1", "a-q1")
+        assertConverged(listOf(app, web), "after the upgrade")
+    }
+
+    @Test
+    fun `nothing is uploaded to a server that never supported CAS`(): Unit = runBlocking {
+        server.legacyNoCas = true
+        val app = device("app")
+        app.newChatWith("local", "q1", "a1")
+        app.signIn("acct")
+        app.pull()
+        app.newChatWith("more", "q2", "a2")
+        app.sync()
+        assertEquals(0, server.putCount.get())
+        assertTrue(app.engine.serverLacksCas.value)
+        assertFalse(app.engine.testConnection())
+        assertHas(app, "q1", "q2")
     }
 
     /**
@@ -81,9 +111,8 @@ class SyncEngineT4ReviewTest {
      * and 3-way merges it against the newer base, so everything added after the backup is read as
      * deleted on the server and removed from every device — the devices hold the only copies.
      */
-    @Disabled("T4 review: fails — an older server version is merged as remote deletions")
     @Test
-    fun `a server restored from an older backup does not delete the devices' newer data`() = runBlocking {
+    fun `a server restored from an older backup does not delete the devices' newer data`(): Unit = runBlocking {
         val (app, web) = pair()
         web.newChatWith("old", "old-q", "old-a")
         web.sync(); app.pull()
@@ -105,14 +134,34 @@ class SyncEngineT4ReviewTest {
         assertConverged(listOf(app, web), "restore")
     }
 
+    /** The same, met by a debounced upload: its CAS PUT gets a 409 carrying the older version. */
+    @Test
+    fun `an upload that meets a server restored from a backup merges without a base`(): Unit = runBlocking {
+        val (app, web) = pair()
+        web.newChatWith("old", "old-q", "old-a")
+        web.sync(); app.pull()
+        val backup = server.blob("chat_history_acct.json", "acct")!!
+        app.newChatWith("new", "new-q", "new-a")
+        app.sync(); web.pull()
+
+        server.seed("chat_history_acct.json", backup.content, updatedAt = backup.updatedAt, user = "acct")
+        web.newChatWith("later", "later-q", "later-a")
+        web.flush()
+
+        val onServer = server.content("chat_history_acct.json", "acct")!!
+        for (t in listOf("old-q", "new-q", "later-q")) assertTrue(t in onServer, "server copy lacks $t")
+        app.pull()
+        assertHas(app, "old-q", "new-q", "new-a", "later-q")
+        assertHas(web, "old-q", "new-q", "new-a", "later-q")
+    }
+
     /**
      * Renaming the local user while signed in (desktop `updateUsername`) is taken for an account
      * switch: the state is reset and app_settings "adopts" the server copy, reverting a settings
      * change the device had not uploaded yet.
      */
-    @Disabled("T4 review: fails — a local rename is treated as an account switch")
     @Test
-    fun `renaming the local user while signed in does not revert an unsynced settings change`() = runBlocking {
+    fun `renaming the local user while signed in does not revert an unsynced settings change`(): Unit = runBlocking {
         val (app, _) = pair()
         app.updateSettings { it.copy(temperature = 0.5) }
         app.sync()
@@ -120,6 +169,12 @@ class SyncEngineT4ReviewTest {
         app.updateSettings { it.copy(current_user = "renamed") }
         app.pull()
         assertEquals(1.7, app.settings().temperature, "the local settings change was reverted by the adopt-remote reset")
+
+        // Signing back into the same account switches the local user back, keeping the bases
+        app.signIn("acct")
+        assertEquals("acct", app.user)
+        assertEquals("acct", app.engine.syncStateAccount())
+        assertTrue(app.engine.baseContent("app_settings.json") != null, "bases dropped on re-sign-in to the same account")
     }
 
     /**
@@ -128,18 +183,19 @@ class SyncEngineT4ReviewTest {
      * local text, and the engine then CAS-uploads that over the remote copy (base_version = R's
      * version, so the PUT succeeds): last-write-wins over content it could not read.
      */
-    @Disabled("T4 review: fails — an unreadable remote is overwritten by local")
     @Test
-    fun `an undecodable remote copy is not overwritten by the local copy`() = runBlocking {
+    fun `an undecodable remote copy is not overwritten by the local copy`(): Unit = runBlocking {
         val (app, web) = pair()
         web.newChatWith("c", "q1", "a1")
         web.sync(); app.pull()
         val unreadable = """{"user_name":"acct","chat_history":"written by a client this version can't read"}"""
         server.seed("chat_history_acct.json", unreadable, user = "acct")
 
+        val localBefore = app.chatFile().readText()
         app.pull()
 
         assertEquals(unreadable, server.content("chat_history_acct.json", "acct"), "the remote copy was overwritten without being merged")
+        assertEquals(localBefore, app.chatFile().readText(), "the local copy was changed by a failed merge")
     }
 
     /**
@@ -147,9 +203,8 @@ class SyncEngineT4ReviewTest {
      * yet.  A change the user makes to that file later (long after the switch) is then discarded
      * wholesale as soon as the account's copy shows up.
      */
-    @Disabled("T4 review: fails — the adopt-remote mark outlives the switch")
     @Test
-    fun `a stale adopt-remote mark does not discard a local change made after the switch`() = runBlocking {
+    fun `a stale adopt-remote mark does not discard a local change made after the switch`(): Unit = runBlocking {
         val webB = device("webB").apply { signIn("bob"); pull() }
         val app = device("app")
         app.signIn("alice"); app.pull()
@@ -167,5 +222,32 @@ class SyncEngineT4ReviewTest {
 
         val local = appFile.readText()
         assertTrue("\"y\"" in local, "app's own change after the switch was discarded: $local")
+    }
+
+    /**
+     * A settings change made between the account switch and the switch's first sync is merged
+     * into the new account's settings; only what the device had at the switch gives way.
+     */
+    @Test
+    fun `an account switch adopts the account's settings but keeps changes made after it`(): Unit = runBlocking {
+        val webB = device("webB").apply { signIn("bob"); pull() }
+        webB.updateSettings { it.copy(temperature = 0.3) }
+        webB.sync()
+        val app = device("app")
+        app.signIn("alice"); app.pull()
+        app.updateSettings { it.copy(temperature = 0.9) }
+        app.sync()
+
+        server.failNextManifests.set(1_000)                   // the switch's first syncs fail
+        app.signIn("bob"); app.pull()
+        app.updateSettings { it.copy(multiMessageMode = true) }   // changed after the switch
+        server.failNextManifests.set(0)
+        app.pull()
+
+        assertEquals(0.3, app.settings().temperature, "the old account's settings leaked into the new one")
+        assertTrue(app.settings().multiMessageMode, "a change made after the switch was discarded")
+        webB.pull()
+        assertTrue(webB.settings().multiMessageMode)
+        assertEquals(0.3, webB.settings().temperature)
     }
 }

@@ -198,7 +198,7 @@ class MultiDeviceSyncFuzzTest {
 
     /** Deeper sweeps: SYNC_FUZZ_SEEDS=500 [SYNC_FUZZ_START=n] ./gradlew :shared:test --tests '*MultiDeviceSyncFuzzTest' */
     @Test
-    fun `random multi-device ops, syncs and faults converge without losing messages`() = runBlocking {
+    fun `random multi-device ops, syncs and faults converge without losing messages`(): Unit = runBlocking {
         val seeds = System.getenv("SYNC_FUZZ_SEEDS")?.toIntOrNull() ?: 20
         val start = System.getenv("SYNC_FUZZ_START")?.toIntOrNull() ?: 20_000
         repeat(seeds) { runSeed(start + it) }

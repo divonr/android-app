@@ -23,7 +23,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * Merges one synced file (local vs remote against the last synced base), dispatching by
  * filename to [ChatHistoryMerger] or [JsonMerger] with a per-file policy.
  *
- * Never throws: unparseable local → remote (except files with device-local keys, see
+ * [mergeFile] never throws: unparseable local → remote (except files with device-local keys, see
  * [mergeTyped]), unparseable remote → local, unparseable base → treated as absent (2-way). Output is encoded with the given [Json] (the app's storage
  * format), so it is exactly what the app itself would write.
  */
@@ -69,16 +69,35 @@ object SyncFileMerger {
 
     fun mergeFile(filename: String, base: String?, local: String, remote: String, json: Json): String {
         return try {
-            when (val kind = kindOf(filename)) {
-                FileKind.ChatHistory -> mergeChatHistory(base, local, remote, json)
-                is FileKind.Typed<*> -> mergeTyped(kind, filename, base, local, remote, json)
-                FileKind.Generic -> mergeGeneric(base, local, remote, json)
-            }
+            mergeUnchecked(filename, base, local, remote, json)
         } catch (e: Throwable) {
             AppLogger.e("[$TAG] Unexpected failure merging $filename; keeping local", e)
             local
         }
     }
+
+    /**
+     * Like [mergeFile], but null instead of a fallback when the merge can't really be done: the
+     * remote copy does not parse as the file's model, or the merge failed unexpectedly.  The sync
+     * engine then leaves both copies untouched (the fallback "keep local" would otherwise be
+     * uploaded over a remote copy nobody merged).
+     */
+    fun tryMergeFile(filename: String, base: String?, local: String, remote: String, json: Json): String? {
+        if (!isValid(filename, remote, json)) return null
+        return try {
+            mergeUnchecked(filename, base, local, remote, json)
+        } catch (e: Throwable) {
+            AppLogger.e("[$TAG] Unexpected failure merging $filename", e)
+            null
+        }
+    }
+
+    private fun mergeUnchecked(filename: String, base: String?, local: String, remote: String, json: Json): String =
+        when (val kind = kindOf(filename)) {
+            FileKind.ChatHistory -> mergeChatHistory(base, local, remote, json)
+            is FileKind.Typed<*> -> mergeTyped(kind, filename, base, local, remote, json)
+            FileKind.Generic -> mergeGeneric(base, local, remote, json)
+        }
 
     /**
      * True when [a] and [b] hold the same synced content, so neither side needs the other's

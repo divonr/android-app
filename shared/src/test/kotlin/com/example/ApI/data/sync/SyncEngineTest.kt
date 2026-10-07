@@ -1,10 +1,12 @@
 package com.example.ApI.data.sync
 
+
 import com.example.ApI.data.model.ApiKey
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.Chat
 import com.example.ApI.data.model.UserChatHistory
 import com.example.ApI.data.repository.ChatHistoryManager
+import com.example.ApI.data.repository.MigrationResult
 import com.example.ApI.util.SyncHolds
 import com.example.ApI.data.model.RemoteSyncSettings
 import com.example.ApI.util.JsonConfig
@@ -73,7 +75,7 @@ class SyncEngineTest {
     //    resolved by file mtime / last-write-wins any more. ──
 
     @Test
-    fun `never-synced local and remote copies are merged and the union is uploaded`() = runBlocking {
+    fun `never-synced local and remote copies are merged and the union is uploaded`(): Unit = runBlocking {
         val remoteKeys = """[{"id":"1","provider":"openai","key":"sk-old-remote"}]"""
         val localKeys = """[{"id":"1","provider":"openai","key":"sk-old-remote"},{"id":"2","provider":"google","key":"new-local-key"}]"""
         fake.seed("api_keys_u.json", remoteKeys, updatedAt = 10_000L)
@@ -88,7 +90,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `a never-synced local copy is merged whatever its mtime - an older device does not lose its keys`() = runBlocking {
+    fun `a never-synced local copy is merged whatever its mtime - an older device does not lose its keys`(): Unit = runBlocking {
         val remoteKeys = """[{"id":"1","provider":"openai","key":"sk-fresh-remote"}]"""
         val staleLocalKeys = """[{"id":"0","provider":"openai","key":"sk-stale-local"}]"""
         val remoteVersion = System.currentTimeMillis() + 3_600_000L
@@ -106,7 +108,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `pull adopts remote blob when the file does not exist locally`() = runBlocking {
+    fun `pull adopts remote blob when the file does not exist locally`(): Unit = runBlocking {
         val remoteKeys = """[{"id":"1","provider":"openai","key":"sk-remote"}]"""
         fake.seed("api_keys_u.json", remoteKeys)
         assertFalse(keysFile().exists())
@@ -118,7 +120,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `pull is a quiet no-op when local content already matches remote sha`() = runBlocking {
+    fun `pull is a quiet no-op when local content already matches remote sha`(): Unit = runBlocking {
         val keys = """[{"id":"1","provider":"openai","key":"sk-same"}]"""
         fake.seed("api_keys_u.json", keys, updatedAt = 10_000L)
         keysFile().writeText(keys)
@@ -133,7 +135,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `app_settings - the account's settings win on a first sync and device-local keys survive`() = runBlocking {
+    fun `app_settings - the account's settings win on a first sync and device-local keys survive`(): Unit = runBlocking {
         // Server has account-level settings the fresh device should recover
         fake.seed(
             "app_settings.json",
@@ -160,7 +162,7 @@ class SyncEngineTest {
         json.decodeFromString(AppSettings.serializer(), File(tempDir, "app_settings.json").readText())
 
     @Test
-    fun `pull still adopts newer remote versions for previously-synced files`() = runBlocking {
+    fun `pull still adopts newer remote versions for previously-synced files`(): Unit = runBlocking {
         val oldKeys = """[{"id":"1","provider":"openai","key":"sk-old"}]"""
         val newKeys = """[{"id":"1","provider":"openai","key":"sk-new"}]"""
         fake.seed("api_keys_u.json", oldKeys, updatedAt = 10_000L)
@@ -186,7 +188,7 @@ class SyncEngineTest {
         UserChatHistory("u", names.map { Chat(chat_id = it, preview_name = it, messages = emptyList()) })
 
     @Test
-    fun `a held chat history is never uploaded as is - pull merges it into the remote copy`() = runBlocking {
+    fun `a held chat history is never uploaded as is - pull merges it into the remote copy`(): Unit = runBlocking {
         val remote = json.encodeToString(chats("c0", "c1", "c2"))
         fake.seed("chat_history_u.json", remote, updatedAt = 10_000L)
         // Previously synced, with an upload still pending, then the local file got corrupted
@@ -214,7 +216,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `a held file that is still unreadable adopts the remote copy`() = runBlocking {
+    fun `a held file that is still unreadable adopts the remote copy`(): Unit = runBlocking {
         val remote = json.encodeToString(chats("c0"))
         fake.seed("chat_history_u.json", remote, updatedAt = 10_000L)
         val file = File(tempDir, "chat_history_u.json")
@@ -231,7 +233,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `a held file with no remote copy is released and uploaded`() = runBlocking {
+    fun `a held file with no remote copy is released and uploaded`(): Unit = runBlocking {
         val file = File(tempDir, "chat_history_u.json")
         file.writeText("{garbage")
         val m = ChatHistoryManager(tempDir, json)
@@ -246,7 +248,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `an unreadable local file without a hold is kept as a corrupt copy before the remote replaces it`() = runBlocking {
+    fun `an unreadable local file without a hold is kept as a corrupt copy before the remote replaces it`(): Unit = runBlocking {
         val remote = """[{"id":"1","provider":"openai","key":"sk-remote"}]"""
         fake.seed("api_keys_u.json", remote)
         keysFile().writeText("[{broken")
@@ -262,7 +264,7 @@ class SyncEngineTest {
     // ── Content-based change detection, uploads and failures ─────────────────
 
     @Test
-    fun `a debounced upload is a CAS put on the base version and records the new base`() = runBlocking {
+    fun `a debounced upload is a CAS put on the base version and records the new base`(): Unit = runBlocking {
         val e = engine(debounceMs = 50)
         val m = ChatHistoryManager(tempDir, json, onFileWritten = e::onFileWritten)
         m.createNewChat("u", "first")
@@ -283,7 +285,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `edits made while sync was off are uploaded by the next pull`() = runBlocking {
+    fun `edits made while sync was off are uploaded by the next pull`(): Unit = runBlocking {
         var settings = syncApiKeysOn.copy(remoteSync = syncApiKeysOn.remoteSync.copy(enabled = false))
         val e = engine { settings }
         val m = ChatHistoryManager(tempDir, json, onFileWritten = e::onFileWritten)
@@ -299,7 +301,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `a failed upload keeps the change - the next pull uploads it`() = runBlocking {
+    fun `a failed upload keeps the change - the next pull uploads it`(): Unit = runBlocking {
         val e = engine(debounceMs = SimDevice.MANUAL)
         val m = ChatHistoryManager(tempDir, json, onFileWritten = e::onFileWritten)
         m.createNewChat("u", "a")
@@ -316,7 +318,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `a lost PUT response is recovered without a duplicate version`() = runBlocking {
+    fun `a lost PUT response is recovered without a duplicate version`(): Unit = runBlocking {
         val e = engine(debounceMs = SimDevice.MANUAL)
         val m = ChatHistoryManager(tempDir, json, onFileWritten = e::onFileWritten)
         m.createNewChat("u", "a")
@@ -335,7 +337,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `repeated conflicts stop after the attempt limit and the next sync completes`() = runBlocking {
+    fun `repeated conflicts stop after the attempt limit and the next sync completes`(): Unit = runBlocking {
         val e = engine(debounceMs = SimDevice.MANUAL)
         val m = ChatHistoryManager(tempDir, json, onFileWritten = e::onFileWritten)
         m.createNewChat("u", "a")
@@ -351,7 +353,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `app_settings - device-local changes are not uploaded and the stripped upload is not a perpetual change`() = runBlocking {
+    fun `app_settings - device-local changes are not uploaded and the stripped upload is not a perpetual change`(): Unit = runBlocking {
         File(tempDir, "app_settings.json").writeText(json.encodeToString(syncApiKeysOn))
         val e = engine(debounceMs = SimDevice.MANUAL) { readSettings() }
         e.pull()
@@ -381,7 +383,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `changeTick only moves when a local file's content changed`() = runBlocking {
+    fun `changeTick only moves when a local file's content changed`(): Unit = runBlocking {
         val e = engine(debounceMs = SimDevice.MANUAL)
         val m = ChatHistoryManager(tempDir, json, onFileWritten = e::onFileWritten)
         m.createNewChat("u", "a")
@@ -396,7 +398,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `401 sets needsReauth, stops syncing, and clearReauth resumes`() = runBlocking {
+    fun `401 sets needsReauth, stops syncing, and clearReauth resumes`(): Unit = runBlocking {
         val token = fake.tokenFor("u")
         var settings = syncApiKeysOn.copy(remoteSync = syncApiKeysOn.remoteSync.copy(authToken = token))
         val e = engine(debounceMs = SimDevice.MANUAL) { settings }
@@ -417,7 +419,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `a failed sync schedules a retry pull`() = runBlocking {
+    fun `a failed sync schedules a retry pull`(): Unit = runBlocking {
         val e = engine(debounceMs = SimDevice.MANUAL, retryMs = 200)
         val m = ChatHistoryManager(tempDir, json, onFileWritten = e::onFileWritten)
         m.createNewChat("u", "a")
@@ -430,7 +432,7 @@ class SyncEngineTest {
     // ── Accounts ──────────────────────────────────────────────────────────────
 
     @Test
-    fun `a state of another account is reset with its snapshots`() = runBlocking {
+    fun `a renamed local user keeps the signed-in account's sync state`(): Unit = runBlocking {
         var settings = syncApiKeysOn
         val e = engine(debounceMs = SimDevice.MANUAL) { settings }
         ChatHistoryManager(tempDir, json).createNewChat("u", "a")
@@ -438,11 +440,27 @@ class SyncEngineTest {
         assertTrue(File(tempDir, "sync_base/chat_history_u.json").exists())
         assertEquals("u", e.syncStateAccount())
 
+        // Same token, same server account: not a switch (a real switch goes through prepareForSignIn)
         settings = settings.copy(current_user = "other")
         e.pull()
+        assertEquals("u", e.syncStateAccount())
+        assertNotNull(state().entry("chat_history_u.json"), "bases dropped by a rename")
+        assertTrue(File(tempDir, "sync_base/chat_history_u.json").exists())
+    }
+
+    @Test
+    fun `signing into another account resets the state with its snapshots`(): Unit = runBlocking {
+        val e = engine(debounceMs = SimDevice.MANUAL) { syncApiKeysOn }
+        ChatHistoryManager(tempDir, json).createNewChat("u", "a")
+        e.pull()
+        assertTrue(File(tempDir, "sync_base/chat_history_u.json").exists())
+
+        e.prepareForSignIn("other", MigrationResult.Switched("other", previousUsername = "u"))
         assertEquals("other", e.syncStateAccount())
         assertNull(state().entry("chat_history_u.json"), "old account's bases dropped")
         assertFalse(File(tempDir, "sync_base/chat_history_u.json").exists())
+        assertTrue(state().shouldAdoptRemote("app_settings.json"))
+        assertNotNull(state().adoptRemoteBaseSha("app_settings.json"))
     }
 
     @Test
@@ -457,7 +475,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `the legacy sync_state format still loads and is upgraded`() = runBlocking {
+    fun `the legacy sync_state format still loads and is upgraded`(): Unit = runBlocking {
         File(tempDir, "sync_state.json").writeText(
             """{"files":{"api_keys_u.json":{"baseServerVersion":10000,"dirty":false,"lastLocalWriteAt":5}}}"""
         )
@@ -477,7 +495,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `the legacy state with a stale version and no snapshot merges 2-way`() = runBlocking {
+    fun `the legacy state with a stale version and no snapshot merges 2-way`(): Unit = runBlocking {
         File(tempDir, "sync_state.json").writeText("""{"files":{"api_keys_u.json":{"baseServerVersion":10000}}}""")
         fake.seed("api_keys_u.json", """[{"id":"1","provider":"openai","key":"sk-a"},{"id":"3","provider":"openai","key":"sk-c"}]""", updatedAt = 20_000L)
         keysFile().writeText("""[{"id":"1","provider":"openai","key":"sk-a"},{"id":"2","provider":"openai","key":"sk-b"}]""")
@@ -503,7 +521,7 @@ class SyncEngineTest {
     // ── RemoteStorageClient CAS surface ───────────────────────────────────────
 
     @Test
-    fun `client - conditional put, typed conflict, versioned get and history`() = runBlocking {
+    fun `client - conditional put, typed conflict, versioned get and history`(): Unit = runBlocking {
         val client = RemoteStorageClient(fake.baseUrl, "test-token")
         val m1 = client.put("f.json", "{\"a\":1}", baseVersion = 0)
         val conflict = assertFailsWith<RemoteSyncException.Conflict> { client.put("f.json", "{\"a\":2}", baseVersion = 0) }
@@ -526,5 +544,16 @@ class SyncEngineTest {
         assertEquals(3, history.size)
         assertTrue(history.first().current)
         assertEquals(listOf(m2.updated_at, m1.updated_at), history.drop(1).map { it.updated_at })
+    }
+
+    @Test
+    fun `client - CAS support is detected and a conditional put the server ignored throws`(): Unit = runBlocking {
+        val client = RemoteStorageClient(fake.baseUrl, "test-token")
+        assertEquals(true, client.casSupported())
+        fake.legacyNoCas = true
+        assertEquals(false, client.casSupported())
+        assertFailsWith<RemoteSyncException.CasUnsupported> { client.put("f.json", "{\"a\":1}", baseVersion = 0) }
+        client.put("f.json", "{\"a\":2}")  // unconditional: nothing to verify
+        assertNull(RemoteStorageClient("http://127.0.0.1:1", "t").casSupported(), "unreachable")
     }
 }

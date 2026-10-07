@@ -199,7 +199,7 @@ class MultiDeviceSyncChaosReviewTest {
     }
 
     @Test
-    fun `chaos - background uploads, concurrent devices, sign-out cycles and restarts converge without loss`() = runBlocking {
+    fun `chaos - background uploads, concurrent devices, sign-out cycles and restarts converge without loss`(): Unit = runBlocking {
         val seeds = System.getenv("SYNC_CHAOS_SEEDS")?.toIntOrNull() ?: 6
         val start = System.getenv("SYNC_CHAOS_START")?.toIntOrNull() ?: 40_000
         val failures = ArrayList<String>()

@@ -42,7 +42,14 @@ data class SyncStateData(
     val accountUsername: String? = null,
     val files: Map<String, FileSyncEntry> = emptyMap(),
     /** Files whose next sync takes the remote copy as is (account switch: no cross-account leak). */
-    val adoptRemote: Set<String> = emptySet()
+    val adoptRemote: Set<String> = emptySet(),
+    /**
+     * For each [adoptRemote] file: sha of the local copy (upload form) at the switch, whose content
+     * is kept as the file's base snapshot; "" if the file did not exist locally then.  Only that
+     * switch-time copy is replaced by the account's: changes made after the switch are merged.
+     * A mark without an entry here was written before this existed (local counts as unchanged).
+     */
+    val adoptRemoteBase: Map<String, String> = emptyMap()
 )
 
 /**
@@ -138,7 +145,8 @@ class SyncState(
                 baseLocalSha = localSha,
                 dirty = false
             )),
-            adoptRemote = data.adoptRemote - filename
+            adoptRemote = data.adoptRemote - filename,
+            adoptRemoteBase = data.adoptRemoteBase - filename
         )
         save()
         return true
@@ -156,23 +164,34 @@ class SyncState(
     @Synchronized
     fun shouldAdoptRemote(filename: String): Boolean = filename in data.adoptRemote
 
+    /** See [SyncStateData.adoptRemoteBase]: the switch-time local sha, "" (absent), or null (unknown). */
+    @Synchronized
+    fun adoptRemoteBaseSha(filename: String): String? = data.adoptRemoteBase[filename]
+
     @Synchronized
     fun clearAdoptRemote(filename: String, expectedGeneration: Long) {
         if (expectedGeneration != generation || filename !in data.adoptRemote) return
-        data = data.copy(adoptRemote = data.adoptRemote - filename)
+        data = data.copy(adoptRemote = data.adoptRemote - filename, adoptRemoteBase = data.adoptRemoteBase - filename)
         save()
     }
 
     /**
      * Forget every base (account switch, sign-out, sign-in to another account).
-     * [onReset] runs inside the critical section (used to delete the base snapshots).
-     * Persists the state.
+     * [onReset] runs inside the critical section (used to delete the base snapshots), then
+     * [adoptRemoteBase] (store the switch-time copies of the [adoptRemote] files, return their
+     * shas, see [SyncStateData.adoptRemoteBase]).  Persists the state.
      */
     @Synchronized
-    fun reset(accountUsername: String, adoptRemote: Set<String> = emptySet(), onReset: () -> Unit = {}) {
+    fun reset(
+        accountUsername: String,
+        adoptRemote: Set<String> = emptySet(),
+        adoptRemoteBase: () -> Map<String, String> = { emptyMap() },
+        onReset: () -> Unit = {}
+    ) {
         generation++
         onReset()
-        data = SyncStateData(accountUsername = accountUsername, adoptRemote = adoptRemote)
+        val bases = if (adoptRemote.isEmpty()) emptyMap() else adoptRemoteBase().filterKeys { it in adoptRemote }
+        data = SyncStateData(accountUsername = accountUsername, adoptRemote = adoptRemote, adoptRemoteBase = bases)
         save()
     }
 

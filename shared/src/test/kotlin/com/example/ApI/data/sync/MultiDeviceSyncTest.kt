@@ -79,7 +79,7 @@ class MultiDeviceSyncTest {
     // ── S1 / §0.1: web-first account, then the app signs in with local chats ──
 
     @Test
-    fun `S1 web-first account then app sign-in with local default chats - union on both sides`() = runBlocking {
+    fun `S1 web-first account then app sign-in with local default chats - union on both sides`(): Unit = runBlocking {
         val web = device("web")
         web.signIn("acct")
         web.pull()
@@ -116,7 +116,7 @@ class MultiDeviceSyncTest {
     }
 
     @Test
-    fun `S1b app chats reach a web account that has none yet`() = runBlocking {
+    fun `S1b app chats reach a web account that has none yet`(): Unit = runBlocking {
         val web = device("web").apply { signIn("acct"); pull() }
         val app = device("app")
         app.newChatWith("app chat", "a-q1", "a-a1")
@@ -130,7 +130,7 @@ class MultiDeviceSyncTest {
     // ── S2 / §0.2: one side extends the other ─────────────────────────────────
 
     @Test
-    fun `S2 one-sided extension wins in both directions`() = runBlocking {
+    fun `S2 one-sided extension wins in both directions`(): Unit = runBlocking {
         val (app, web) = pair()
         val c = web.newChatWith("c", "q1", "a1")
         web.sync()
@@ -158,7 +158,7 @@ class MultiDeviceSyncTest {
     // ── S3: different chats added concurrently ────────────────────────────────
 
     @Test
-    fun `S3 concurrent different chats are unioned`() = runBlocking {
+    fun `S3 concurrent different chats are unioned`(): Unit = runBlocking {
         val (app, web) = pair()
         val desktop = device("desktop").apply { signIn("acct"); pull() }
         app.newChatWith("from app", "x1", "x2")
@@ -177,7 +177,7 @@ class MultiDeviceSyncTest {
     // ── S4 / §0.2: same chat, same point → sibling variants ──────────────────
 
     @Test
-    fun `S4 different continuations of the same chat become sibling variants on every device`() = runBlocking {
+    fun `S4 different continuations of the same chat become sibling variants on every device`(): Unit = runBlocking {
         val (app, web) = pair()
         val desktop = device("desktop").apply { signIn("acct"); pull() }
         val c = app.newChatWith("c", "q1", "a1")
@@ -205,7 +205,7 @@ class MultiDeviceSyncTest {
     }
 
     @Test
-    fun `S4b different replies to the same question are both kept`() = runBlocking {
+    fun `S4b different replies to the same question are both kept`(): Unit = runBlocking {
         val (app, web) = pair()
         val c = app.newChatWith("c", "q1")
         app.sync(); web.sync()
@@ -223,7 +223,7 @@ class MultiDeviceSyncTest {
     // ── S5: deletions ─────────────────────────────────────────────────────────
 
     @Test
-    fun `S5 deletions - unchanged elsewhere wins, modification beats deletion`() = runBlocking {
+    fun `S5 deletions - unchanged elsewhere wins, modification beats deletion`(): Unit = runBlocking {
         val (app, web) = pair()
         val x = app.newChatWith("x", "x1")
         val y = app.newChatWith("y", "y1")
@@ -257,7 +257,7 @@ class MultiDeviceSyncTest {
     // ── S6: long offline on both sides ────────────────────────────────────────
 
     @Test
-    fun `S6 long offline on both sides, with failing uploads, loses nothing`() = runBlocking {
+    fun `S6 long offline on both sides, with failing uploads, loses nothing`(): Unit = runBlocking {
         val (app, web) = pair()
         val shared = app.newChatWith("shared", "s1", "s2")
         app.sync(); web.sync()
@@ -294,7 +294,7 @@ class MultiDeviceSyncTest {
     // ── S7: titles, groups, system prompts, settings ──────────────────────────
 
     @Test
-    fun `S7 titles groups system prompts and settings edited on different sides all survive`() = runBlocking {
+    fun `S7 titles groups system prompts and settings edited on different sides all survive`(): Unit = runBlocking {
         val (app, web) = pair()
         val c = app.newChatWith("c", "c1")
         val d = app.newChatWith("d", "d1")
@@ -334,7 +334,7 @@ class MultiDeviceSyncTest {
     // ── S8: restarts, reinstall, sign-out/in, account switch ─────────────────
 
     @Test
-    fun `S8a a pending upload lost by a restart is uploaded after it`() = runBlocking {
+    fun `S8a a pending upload lost by a restart is uploaded after it`(): Unit = runBlocking {
         val (app, web) = pair()
         val c = app.newChatWith("c", "q1")
         app.sync()
@@ -346,7 +346,7 @@ class MultiDeviceSyncTest {
     }
 
     @Test
-    fun `S8b sync state lost with local changes - nothing is lost`() = runBlocking {
+    fun `S8b sync state lost with local changes - nothing is lost`(): Unit = runBlocking {
         val (app, web) = pair()
         val x = app.newChatWith("x", "x1")
         val y = app.newChatWith("y", "y1")
@@ -369,7 +369,7 @@ class MultiDeviceSyncTest {
     }
 
     @Test
-    fun `S8c base snapshots lost but the state kept - a remote deletion still applies`() = runBlocking {
+    fun `S8c base snapshots lost but the state kept - a remote deletion still applies`(): Unit = runBlocking {
         val (app, web) = pair()
         val x = app.newChatWith("x", "x1")
         app.newChatWith("y", "y1")
@@ -383,7 +383,7 @@ class MultiDeviceSyncTest {
     }
 
     @Test
-    fun `S8d reinstall without local data gets everything and uploads nothing destructive`() = runBlocking {
+    fun `S8d reinstall without local data gets everything and uploads nothing destructive`(): Unit = runBlocking {
         val (app, web) = pair()
         app.newChatWith("c", "q1", "a1")
         web.newChatWith("d", "q2")
@@ -402,7 +402,7 @@ class MultiDeviceSyncTest {
     }
 
     @Test
-    fun `S8e sign-out, local edits, sign-in again - both sides' edits merge`() = runBlocking {
+    fun `S8e sign-out, local edits, sign-in again - both sides' edits merge`(): Unit = runBlocking {
         val (app, web) = pair()
         val c = app.newChatWith("c", "q1")
         val d = app.newChatWith("d", "q2")
@@ -426,7 +426,7 @@ class MultiDeviceSyncTest {
     }
 
     @Test
-    fun `S8f account switch never leaks one account's data into the other`() = runBlocking {
+    fun `S8f account switch never leaks one account's data into the other`(): Unit = runBlocking {
         val webA = device("webA").apply { signIn("alice"); pull() }
         webA.newChatWith("alice chat", "alice-q")
         webA.updateSettings { it.copy(temperature = 0.1, selected_model = "alice-model") }
@@ -472,7 +472,7 @@ class MultiDeviceSyncTest {
     // ── S9: a local write racing a pull ───────────────────────────────────────
 
     @Test
-    fun `S9 a local write landing while a pull fetches the remote copy is not lost`() = runBlocking {
+    fun `S9 a local write landing while a pull fetches the remote copy is not lost`(): Unit = runBlocking {
         val (app, web) = pair()
         val c = app.newChatWith("c", "q1", "a1")
         app.sync(); web.sync()
@@ -494,7 +494,7 @@ class MultiDeviceSyncTest {
     }
 
     @Test
-    fun `S9b a pinned streaming reply lands in its variant although a merge arrived meanwhile`() = runBlocking {
+    fun `S9b a pinned streaming reply lands in its variant although a merge arrived meanwhile`(): Unit = runBlocking {
         val (app, web) = pair()
         val c = app.newChatWith("c", "q1", "a1")
         app.sync(); web.sync()
@@ -513,7 +513,7 @@ class MultiDeviceSyncTest {
     }
 
     @Test
-    fun `S9c concurrent local writes, automatic uploads and pulls on several devices lose nothing`() = runBlocking {
+    fun `S9c concurrent local writes, automatic uploads and pulls on several devices lose nothing`(): Unit = runBlocking {
         val app = device("app", debounceMs = 20).apply { signIn("acct"); pull() }
         val web = device("web", debounceMs = 20).apply { signIn("acct"); pull() }
         val c = app.newChatWith("c", "q0")

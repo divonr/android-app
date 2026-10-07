@@ -27,7 +27,12 @@ hash when done. Never redo an `[x]` step.
   only if local unchanged under FileLocks, ≤5 restarts, 30 s retry pull), Mutex, `SyncEngine.forDir` registry used by
   DataRepository/DesktopRepository; UserMigration default-only/no overwrite/user_name rewrite; sign-in/out reset;
   FakeSyncServer with full CAS + faults; 18 S1–S9 multi-device scenarios + seeded 3-device fuzz (20 seeds in CI, 200
-  extra seeds pass); `:shared:test` (135) green, server/desktop/app compile.
+  extra seeds pass); `:shared:test` (135) green, server/desktop/app compile. Review fixes (see commit after c64381f):
+  no sync at all with a server lacking `"cas": true` (health checked every pull, PUT response verified,
+  `serverLacksCas` flag, testConnection false); remote older than the base (DB restore) → 2-way union; undecodable
+  remote / failed merge → both copies untouched + retry; adopt-remote keeps the switch-time copy as base (later local
+  changes merge); a local rename while signed in is not an account switch; 3 tests JUnit silently skipped (non-Unit
+  `runBlocking` return) now run; review tests enabled + 3 new; `:shared:test` (148) green.
 
 ## T5 — Android + desktop integration
 - [ ] implementation + build
@@ -155,6 +160,26 @@ hash when done. Never redo an `[x]` step.
     (a 3-way merge reads a stale snapshot as reverting the remote changes); `cleanupEmptyChats` must use
     `baseContent`; UserRegistry's `startSync()+pullNow()` is now harmless (coalesced) but redundant; `:server:test`
     still not run (live sync URL default).
+  - T4 review fixes (deviations / choices):
+    - CAS required: a server without `"cas": true` (pre-T1) is not synced with at all (no merge, no upload) — the
+      engine can't make a stale upload safe there. `/sync/health` is checked on every pull (confirmation cached per
+      URL for debounced uploads); a conditional PUT whose response lacks `cas` throws
+      `RemoteSyncException.CasUnsupported` (that write is never recorded as a base). New: `SyncEngine.serverLacksCas`
+      (T5/T6 may show it), `RemoteStorageClient.casSupported()`. testConnection() is false for such a server.
+      Consequence for T8: deploy the sync server first (as planned) or new clients don't sync until it is deployed.
+    - Remote version < base version (and other sha) = server lost versions (backup restore) → base dropped, 2-way
+      union (also on the 409 path). Residual: if another device already re-uploaded after the restore, the version
+      is newer again and can't be told apart; data that only reached the server (not that device) before the
+      restore can then still be merged as a remote deletion.
+    - `SyncFileMerger.tryMergeFile` (null when remote doesn't parse / merge throws): the engine then leaves both
+      copies untouched and schedules a retry; a missing local file is not replaced by an unparseable remote either.
+    - Adopt-remote marks store the switch-time local sha (`SyncStateData.adoptRemoteBase`, "" = absent) and that
+      copy as the base snapshot: unchanged → the account's copy wins; changed after the switch → 3-way against
+      the switch-time copy; absent at the switch → 2-way. Old marks without a sha behave as before.
+    - The state account follows the signed-in account (set by `prepareForSignIn`), not `current_user`: a differing
+      `current_user` (desktop rename while signed in) keeps the state; `Switched` into the account the state
+      already belongs to keeps the bases. T5: the desktop rename still makes the app sync
+      `chat_history_<newname>.json` into the same server account — block renaming while sync is on.
   - Tests: `FakeSyncServer` (CAS, per-token accounts, `/auth/google` with id_token `google:<user>`, fault injection,
     `sun.net.httpserver.nodelay`), `SimDevice` (real DataRepository on a temp dir, test-configured engine registered
     first), `SimAssert.quiesce/assertConverged`. Deeper fuzz: `SYNC_FUZZ_SEEDS=500 SYNC_FUZZ_START=n ./gradlew
