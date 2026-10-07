@@ -44,6 +44,10 @@ class FakeCasSyncServer {
     private val revoked = ConcurrentHashMap.newKeySet<String>()
     private val mintCounter = AtomicInteger()
 
+    /** Delay (ms) before answering any authenticated sync request (a hanging sync server). */
+    @Volatile
+    var syncDelayMs: Long = 0L
+
     /** Every request as "METHOD path" (for assertions about traffic). */
     val requests = CopyOnWriteArrayList<String>()
 
@@ -140,6 +144,7 @@ class FakeCasSyncServer {
             return respond(exchange, 200, """{"token":"$token","username":"$user","email":${JsonPrimitive(email)}}""")
         }
         val user = userOf(exchange) ?: return respond(exchange, 401, """{"detail":"Unauthorized"}""")
+        if (syncDelayMs > 0) Thread.sleep(syncDelayMs)
         when {
             path == "/sync/manifest" -> {
                 val body = synchronized(lock) {
