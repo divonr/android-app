@@ -12,7 +12,6 @@ import com.example.ApI.util.JsonConfig
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -26,9 +25,8 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * T5 review: client integration cases the implementation gets wrong. Failing tests are
- * @Disabled with the defect in the reason so the suite stays green; remove the annotation to
- * reproduce / to check a fix.
+ * T5 review: client integration cases the first T5 implementation got wrong (regression tests
+ * for the review fixes).
  */
 class ClientIntegrationT5ReviewTest {
 
@@ -65,11 +63,6 @@ class ClientIntegrationT5ReviewTest {
     )
 
     @Test
-    @Disabled(
-        "T5 bug: with sync off EmptyChatCleanup removes every empty chat, but sign-out now keeps the sync base, so " +
-            "the removal of another device's empty chat (still in the base) is uploaded as a deletion on the next " +
-            "sign-in and deletes it on every device (plan §5: never delete an empty chat another device created)"
-    )
     fun `cleanup while signed out does not delete another device's empty chat after re-sign-in`(): Unit = runBlocking {
         val (app, web) = pair()
         app.newChatWith("content", "q")
@@ -85,11 +78,6 @@ class ClientIntegrationT5ReviewTest {
     }
 
     @Test
-    @Disabled(
-        "T5 bug: a 2-way (no base) merge of an auth file takes the remote, so a JSON-null disconnect marker on the " +
-            "server wipes a connection the device made before its first sync (null should count as absence there, " +
-            "like a missing remote file, which keeps the local connection)"
-    )
     fun `a disconnect marker on the server does not wipe a connection made on a device that never synced the file`(): Unit = runBlocking {
         val web = device("web").apply { signIn("acct"); pull() }
         web.repo.saveGitHubConnection(web.user, gitHubConnection("tok-web"))
@@ -111,12 +99,6 @@ class ClientIntegrationT5ReviewTest {
     }
 
     @Test
-    @Disabled(
-        "T5 bug: a disconnect racing a reconnect on another device converges to an inconsistent state: the auth " +
-            "file merges atomically (both changed → local wins → null) while the settings' githubConnections entry " +
-            "merges per key (modified beats deleted → kept), so the Integrations screen (which reads the map) shows " +
-            "GitHub connected while isGitHubConnected/tools see no connection"
-    )
     fun `a disconnect racing a reconnect leaves the auth file and the settings entry consistent`(): Unit = runBlocking {
         val (app, web) = pair()
         app.repo.saveGitHubConnection(app.user, gitHubConnection("tok1"))
@@ -139,11 +121,6 @@ class ClientIntegrationT5ReviewTest {
     }
 
     @Test
-    @Disabled(
-        "T5 bug: a streamed reply whose question was deleted elsewhere mid-stream is appended to the last variant " +
-            "of the current path (a different question): the anchor's tail is the user message, which is never " +
-            "matched, so resolveAnchoredTarget falls back to the current path"
-    )
     fun `a reply whose question was deleted elsewhere is not attached to another question`(): Unit = runBlocking {
         val (app, web) = pair()
         val c = app.newChatWith("c", "q0", "a0")
@@ -164,11 +141,6 @@ class ClientIntegrationT5ReviewTest {
     }
 
     @Test
-    @Disabled(
-        "T5 gap: a reply streamed into a chat that another device deleted mid-stream is silently dropped " +
-            "(addAnchoredResponse returns null); SyncReload keeps the chat on screen while it streams, so the user " +
-            "watches an answer that is never saved anywhere"
-    )
     fun `a reply streamed into a chat deleted elsewhere mid-stream is not silently dropped`(): Unit = runBlocking {
         val (app, web) = pair()
         val c = app.newChatWith("c", "q0", "a0")
@@ -183,13 +155,105 @@ class ClientIntegrationT5ReviewTest {
         assertNotNull(saved, "the streamed answer was dropped")
     }
 
+    // ── Review-fix follow-ups ────────────────────────────────────────────────
+
+    private fun responsesOf(d: SimDevice, chatId: String, question: String): List<String> =
+        d.chat(chatId).messageNodes.flatMap { it.variants }.filter { it.userMessage.text == question }
+            .flatMap { v -> v.responses.map { it.text } }
+
     @Test
-    @Disabled(
-        "Remaining unlocked load-modify-save of a synced file: SkillsStorageManager.setSkillEnabled/deleteSkill/" +
-            "saveSkillSourceUrl load skills_enabled.json / skills_sources.json and save outside FileLocks, so a " +
-            "concurrent write (another writer or a sync merge write) is reverted and the next 3-way merge reads the " +
-            "revert as a local change"
-    )
+    fun `a reply whose question was deleted elsewhere restores the question on every device`(): Unit = runBlocking {
+        val (app, web) = pair()
+        val c = app.newChatWith("c", "q0", "a0")
+        app.send(c, "q1")
+        app.sync(); web.sync()
+
+        val anchor = ReplyAnchor.forRequest(app.chat(c).messages)
+        assertTrue(web.deleteLast(c))
+        web.sync(); app.pull()
+
+        assertNotNull(app.repo.addAnchoredResponse(app.user, c, Message(role = "assistant", text = "part 1"), anchor))
+        // The request's next save (after a tool call, say) follows the first one
+        assertNotNull(app.repo.addAnchoredResponse(app.user, c, Message(role = "assistant", text = "part 2"), anchor))
+        assertEquals(listOf("part 1", "part 2"), responsesOf(app, c, "q1"))
+        assertEquals(listOf("q0", "a0", "q1", "part 1", "part 2"), app.chat(c).messages.map { it.text })
+
+        quiesce(listOf(app, web), "restored question")
+        SimAssert.assertConverged(listOf(app, web), "restored question")
+        assertEquals(listOf("part 1", "part 2"), responsesOf(web, c, "q1"), "the restored question and its answer reach the web")
+        assertEquals(listOf("a0"), responsesOf(web, c, "q0"))
+    }
+
+    @Test
+    fun `a restored question becomes a sibling when the other device continued after deleting it`(): Unit = runBlocking {
+        val (app, web) = pair()
+        val c = app.newChatWith("c", "q0", "a0")
+        app.send(c, "q1")
+        app.sync(); web.sync()
+
+        val anchor = ReplyAnchor.forRequest(app.chat(c).messages)
+        assertTrue(web.deleteLast(c))
+        web.send(c, "q1-other")
+        web.sync(); app.pull()
+
+        assertNotNull(app.repo.addAnchoredResponse(app.user, c, Message(role = "assistant", text = "answer to q1"), anchor))
+        assertEquals(listOf("answer to q1"), responsesOf(app, c, "q1"))
+        assertEquals(listOf("a0"), responsesOf(app, c, "q0"))
+        val q0Child = app.chat(c).messageNodes.flatMap { it.variants }.first { it.userMessage.text == "q0" }.childNodeId
+        val siblings = app.chat(c).messageNodes.first { it.nodeId == q0Child }.variants.map { it.userMessage.text }
+        assertEquals(setOf("q1-other", "q1"), siblings.toSet(), "both continuations of q0 are kept as variants")
+        quiesce(listOf(app, web), "restored sibling")
+        SimAssert.assertConverged(listOf(app, web), "restored sibling")
+    }
+
+    @Test
+    fun `a chat deleted elsewhere mid-stream is restored with the reply and syncs back`(): Unit = runBlocking {
+        val (app, web) = pair()
+        val c = app.newChatWith("c", "q0", "a0")
+        app.send(c, "q1")
+        app.sync(); web.sync()
+
+        val anchor = ReplyAnchor.forRequest(app.chat(c).messages)
+        web.deleteChat(c)
+        web.sync(); app.pull()
+        assertEquals(null, app.chatOrNull(c), "precondition: the deletion reached the app")
+
+        assertNotNull(app.repo.addAnchoredResponse(app.user, c, Message(role = "assistant", text = "streamed answer"), anchor))
+        assertEquals(listOf("q0", "a0", "q1", "streamed answer"), app.chat(c).messages.map { it.text })
+        quiesce(listOf(app, web), "restored chat")
+        SimAssert.assertConverged(listOf(app, web), "restored chat")
+        assertEquals(listOf("streamed answer"), responsesOf(web, c, "q1"))
+    }
+
+    @Test
+    fun `a chat or question deleted on this device mid-stream stays deleted`(): Unit = runBlocking {
+        val (app, _) = pair()
+        val c1 = app.newChatWith("c1", "q0", "a0")
+        app.send(c1, "q1")
+        val anchor1 = ReplyAnchor.forRequest(app.chat(c1).messages)
+        app.repo.deleteChat(app.user, c1)  // the user deletes the chat while its reply streams
+        assertEquals(null, app.repo.addAnchoredResponse(app.user, c1, Message(role = "assistant", text = "late"), anchor1))
+        assertEquals(null, app.chatOrNull(c1), "a chat deleted here is not resurrected by its reply")
+
+        val c2 = app.newChatWith("c2", "q0", "a0")
+        app.send(c2, "q1")
+        val anchor2 = ReplyAnchor.forRequest(app.chat(c2).messages)
+        assertTrue(app.deleteLast(c2))  // the user deletes the question while its answer streams
+        assertEquals(null, app.repo.addAnchoredResponse(app.user, c2, Message(role = "assistant", text = "late"), anchor2))
+        assertEquals(listOf("q0", "a0"), app.chat(c2).messages.map { it.text }, "the reply is neither restored nor attached to q0")
+    }
+
+    @Test
+    fun `cleanup without sync still removes every empty chat`(): Unit = runBlocking {
+        val dev = device("solo")
+        val a = dev.newChat("a")
+        dev.newChatWith("b", "q")
+        dev.restart()  // the empty chat is no longer one this repository instance created
+        assertEquals(1, dev.repo.cleanupEmptyChats(dev.user))
+        assertEquals(null, dev.chatOrNull(a))
+    }
+
+    @Test
     fun `concurrent skill toggles are not lost`() {
         val dir = File(root, "skills-dir").apply { mkdirs() }
         val mgr = SkillsStorageManager(dir, JsonConfig.prettyPrint)

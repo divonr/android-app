@@ -151,6 +151,19 @@ class ChatHistoryManager(
         modifyChatHistory(username) { history -> transform(history).let { it to it } }
 
     /**
+     * Delete chat [chatId] on the user's request (locked). Recorded in [LocalDeletions], so a
+     * reply still streaming into it is dropped instead of restoring the chat.
+     *
+     * @return the history as saved
+     */
+    fun deleteChat(username: String, chatId: String): UserChatHistory {
+        LocalDeletions.recordChat(chatHistoryFile(username), chatId)
+        return updateChatHistory(username) { history ->
+            history.copy(chat_history = history.chat_history.filter { it.chat_id != chatId })
+        }
+    }
+
+    /**
      * Like [updateChatHistory], but [block] also returns a result for the caller.
      * Returning the loaded history unchanged writes nothing.
      */

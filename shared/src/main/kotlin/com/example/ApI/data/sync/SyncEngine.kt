@@ -772,7 +772,13 @@ class SyncEngine(
                 return null
             }
 
-            // Write the merge only if the local file is still what we merged
+            // Nothing for the server when the merge is the remote copy (+ device view state);
+            // else the remote copy is the base until our upload of the merge lands
+            val mergeIsRemote = SyncFileMerger.sameContent(filename, mergedForm, blob.content, json)
+
+            // Write the merge only if the local file is still what we merged. The base is
+            // recorded under the same lock, so a locked local writer never sees the merged file
+            // with the previous base (EmptyChatCleanup tells another device's chats by the base)
             var raced = false
             FileLocks.withLock(file) {
                 if (readLocal() != local) {
@@ -784,6 +790,7 @@ class SyncEngine(
                         wroteLocal = true
                     }
                     if (held) SyncHolds.release(file)
+                    record(blobMeta, if (mergeIsRemote) mergedForm else blob.content)
                 }
             }
             if (raced) {
@@ -791,13 +798,7 @@ class SyncEngine(
                 return Restart(blobMeta)
             }
 
-            if (SyncFileMerger.sameContent(filename, mergedForm, blob.content, json)) {
-                // Nothing for the server: the merge is the remote copy (+ device view state)
-                record(blobMeta, mergedForm)
-                return null
-            }
-            // The remote copy is the base until our upload of the merge lands
-            record(blobMeta, blob.content)
+            if (mergeIsRemote) return null
             return put(mergedForm, baseVersion = blob.updated_at)
         }
 

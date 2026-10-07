@@ -114,9 +114,7 @@ class ChatContextMenuManager(
             val currentUser = deps.appSettings.value.current_user
 
             // Remove the chat from history (locked load-modify-save)
-            val chatHistory = deps.repository.updateChatHistory(currentUser) { history ->
-                history.copy(chat_history = history.chat_history.filter { it.chat_id != chat.chat_id })
-            }
+            val chatHistory = deps.repository.deleteChat(currentUser, chat.chat_id)
 
             // Update UI
             val finalChatHistory = chatHistory.chat_history
@@ -172,9 +170,7 @@ class ChatContextMenuManager(
 
         deps.scope.launch {
             // Remove the chat from history (locked load-modify-save)
-            val finalChatHistory = deps.repository.updateChatHistory(currentUser) { history ->
-                history.copy(chat_history = history.chat_history.filter { it.chat_id != currentChat.chat_id })
-            }.chat_history
+            val finalChatHistory = deps.repository.deleteChat(currentUser, currentChat.chat_id).chat_history
 
             // Update UI
 

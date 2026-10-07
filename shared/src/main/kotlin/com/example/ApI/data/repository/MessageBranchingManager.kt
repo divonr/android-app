@@ -3,6 +3,7 @@ package com.example.ApI.data.repository
 import com.example.ApI.data.model.*
 import com.example.ApI.data.sync.merge.LegacyChatConverter
 import com.example.ApI.util.AppLogger
+import java.io.File
 import java.util.UUID
 
 /**
@@ -144,9 +145,35 @@ class MessageBranchingManager(
         targetVariantId: String? = null,
         expectedTailId: String? = null
     ): Chat? = chatHistoryManager.modifyChatHistory(username) { history ->
-        val original = history.chat_history.find { it.chat_id == chatId }
-            ?: return@modifyChatHistory history to null
-        val chat = migrateChatToBranchingStructure(original)
+        appendResponse(history, chatId, response, targetVariantId, expectedTailId, restore = null)
+    }
+
+    /** What an anchored save needs to restore a reply's vanished question or chat. */
+    private class Restore(val chatHistoryFile: File, val path: List<Message>)
+
+    /**
+     * The transform of [addResponseToCurrentVariant]. With [restore] (anchored saves), a pinned
+     * target that vanished never falls back to the current path (that would attach the reply to
+     * another question): the request's path is restored from [Restore.path] (see
+     * [restorePath]), or the reply is dropped.
+     */
+    private fun appendResponse(
+        history: UserChatHistory,
+        chatId: String,
+        response: Message,
+        targetVariantId: String?,
+        expectedTailId: String?,
+        restore: Restore?
+    ): Pair<UserChatHistory, Chat?> {
+        var base = history
+        var original = history.chat_history.find { it.chat_id == chatId }
+        if (original == null) {
+            val restored = restore?.let { restoreChat(chatId, it) } ?: return history to null
+            AppLogger.w("[$TAG] addAnchoredResponse: chat $chatId was deleted elsewhere while its reply streamed; restoring it")
+            base = history.copy(chat_history = history.chat_history + restored)
+            original = restored
+        }
+        var chat = migrateChatToBranchingStructure(original)
 
         fun locate(variantId: String): Pair<Int, Int>? {
             for ((nodeIndex, node) in chat.messageNodes.withIndex()) {
@@ -160,6 +187,18 @@ class MessageBranchingManager(
         if (expectedTailId != null) {
             target = resolveAnchoredTarget(chat, target, expectedTailId)
         }
+        if (targetVariantId != null && target == null && restore != null) {
+            // The question this reply answers was deleted elsewhere: restore it, never attach the reply elsewhere
+            val restored = restorePath(chat, restore)
+            if (restored == null) {
+                AppLogger.w("[$TAG] addAnchoredResponse: variant $targetVariantId of chat $chatId is gone and can't be restored; dropping the reply")
+                return replaceChat(base, chatId, original, chat) to null
+            }
+            AppLogger.w("[$TAG] addAnchoredResponse: variant $targetVariantId of chat $chatId was deleted elsewhere while its reply streamed; restoring it")
+            chat = restored
+            target = locate(targetVariantId)?.let { found -> expectedTailId?.let { resolveAnchoredTarget(chat, found, it) } ?: found }
+                ?: return replaceChat(base, chatId, original, chat) to null
+        }
         if (targetVariantId != null && target == null) {
             AppLogger.w("[$TAG] addResponseToCurrentVariant: variant $targetVariantId not found in chat $chatId, using the current path")
         }
@@ -168,15 +207,15 @@ class MessageBranchingManager(
             // Fallback if no variant path yet (shouldn't happen but just in case)
             if (chat.currentVariantPath.isEmpty()) {
                 val updatedChat = chat.copy(messages = chat.messages + response)
-                val otherChats = history.chat_history.filter { it.chat_id != chatId }
-                return@modifyChatHistory history.copy(chat_history = otherChats + updatedChat) to updatedChat
+                val otherChats = base.chat_history.filter { it.chat_id != chatId }
+                return base.copy(chat_history = otherChats + updatedChat) to updatedChat
             }
             target = locate(chat.currentVariantPath.last())
         }
 
         // Variant not found: persist the migration (if any) but drop the response, as before
         val (targetNodeIndex, targetVariantIndex) = target
-            ?: return@modifyChatHistory replaceChat(history, chatId, original, chat) to null
+            ?: return replaceChat(base, chatId, original, chat) to null
 
         val node = chat.messageNodes[targetNodeIndex]
         val variant = node.variants[targetVariantIndex]
@@ -206,7 +245,95 @@ class MessageBranchingManager(
             messages = newMessages
         )
 
-        replaceChat(history, chatId, original, updatedChat) to updatedChat
+        return replaceChat(base, chatId, original, updatedChat) to updatedChat
+    }
+
+    /** One turn of a request's path: a user message (with its node/variant) and its responses. */
+    private class Turn(val nodeId: String, val variantId: String, val userMessage: Message) {
+        val responses = mutableListOf<Message>()
+    }
+
+    /** The turns of path messages; null when a user message lacks its node/variant ids. */
+    private fun turnsOf(path: List<Message>): List<Turn>? {
+        val turns = mutableListOf<Turn>()
+        for (message in path) {
+            if (message.role == "user") {
+                turns += Turn(message.nodeId ?: return null, message.variantId ?: return null, message)
+            } else {
+                turns.lastOrNull()?.responses?.add(message)  // anything before the first user message is not stored in the tree
+            }
+        }
+        return turns.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * A chat another device deleted while this device streamed a reply into it, rebuilt from the
+     * request's path (title: the first question; the original's system prompt and group are not
+     * known here). Null: deleted on this device ([LocalDeletions]) or no usable path.
+     */
+    private fun restoreChat(chatId: String, restore: Restore): Chat? {
+        if (LocalDeletions.isChatDeleted(restore.chatHistoryFile, chatId)) return null
+        val firstQuestion = turnsOf(restore.path)?.first()?.userMessage?.text ?: return null
+        val title = firstQuestion.trim().lineSequence().firstOrNull().orEmpty().take(50).ifBlank { chatId.take(8) }
+        return restorePath(Chat(chat_id = chatId, preview_name = title, messages = emptyList()), restore)
+    }
+
+    /**
+     * Put the request's path ([Restore.path]) back into [chat]: variants still present are
+     * kept as they are; each missing one is re-created with its id and the messages of the path
+     * — in the node that follows the previous variant (as a sibling when that node exists, e.g.
+     * someone continued there meanwhile), else in a new node. The current path becomes the
+     * request's path. Null: no usable path, or a missing variant was deleted on this device
+     * ([LocalDeletions]: the reply is then dropped).
+     */
+    private fun restorePath(chat: Chat, restore: Restore): Chat? {
+        val turns = turnsOf(restore.path) ?: return null
+        val nodes = chat.messageNodes.toMutableList()
+        fun find(variantId: String): Pair<Int, Int>? {
+            for ((nodeIndex, node) in nodes.withIndex()) {
+                val variantIndex = node.variants.indexOfFirst { it.variantId == variantId }
+                if (variantIndex >= 0) return nodeIndex to variantIndex
+            }
+            return null
+        }
+
+        var previous: Pair<Int, Int>? = null
+        val pathIds = mutableListOf<String>()
+        for (turn in turns) {
+            val existing = find(turn.variantId)
+            if (existing != null) {
+                previous = existing
+                pathIds += turn.variantId
+                continue
+            }
+            if (LocalDeletions.isVariantDeleted(restore.chatHistoryFile, turn.variantId)) return null
+
+            val previousVariant = previous?.let { (n, v) -> nodes[n].variants[v] }
+            var nodeIndex = when {
+                previous == null -> nodes.indexOfFirst { it.parentNodeId == null }
+                previousVariant?.childNodeId != null -> nodes.indexOfFirst { it.nodeId == previousVariant.childNodeId }
+                else -> -1
+            }
+            if (nodeIndex < 0) {
+                val nodeId = turn.nodeId.takeIf { id -> nodes.none { it.nodeId == id } } ?: UUID.randomUUID().toString()
+                nodes += MessageNode(nodeId = nodeId, parentNodeId = previous?.let { nodes[it.first].nodeId }, variants = emptyList())
+                nodeIndex = nodes.lastIndex
+                previous?.let { (n, v) ->
+                    val parent = nodes[n]
+                    nodes[n] = parent.copy(variants = parent.variants.mapIndexed { i, pv -> if (i == v) pv.copy(childNodeId = nodeId) else pv })
+                }
+            }
+            val node = nodes[nodeIndex]
+            val variant = MessageVariant(
+                variantId = turn.variantId,
+                userMessage = turn.userMessage.copy(nodeId = node.nodeId, variantId = turn.variantId),
+                responses = turn.responses.map { it.copy(nodeId = node.nodeId, variantId = turn.variantId) }
+            )
+            nodes[nodeIndex] = node.copy(variants = node.variants + variant)
+            previous = nodeIndex to node.variants.size
+            pathIds += turn.variantId
+        }
+        return chat.copy(messageNodes = nodes, currentVariantPath = pathIds, messages = buildMessagesFromPath(nodes, pathIds))
     }
 
     /** The id of the message a new response of [variant] follows. */
@@ -245,14 +372,23 @@ class MessageBranchingManager(
      * Save a response of a streamed request at its [anchor] (see [ReplyAnchor]) and move the
      * anchor to the saved message, so the request's next response (after a tool call, say)
      * follows it in the same variant — the fork, if a merge moved this device's content there.
+     *
+     * The reply is never attached to another question: when its variant (or its whole chat) is
+     * gone — deleted on another device and merged in while the reply streamed — the question is
+     * restored from the anchor's path (see [restorePath]; the answer is a change made after that
+     * deletion, so it wins like any modification against a deletion and syncs back). A deletion
+     * made on this device ([LocalDeletions]) is respected: the reply is dropped (null).
      */
     fun addAnchoredResponse(username: String, chatId: String, response: Message, anchor: ReplyAnchor): Chat? {
         val withId = if (response.id.isBlank()) response.copy(id = UUID.randomUUID().toString()) else response
         val (variantId, tail) = anchor.current()
-        val chat = addResponseToCurrentVariant(username, chatId, withId, variantId, tail) ?: return null
-        val savedIn = chat.messageNodes.asSequence().flatMap { it.variants.asSequence() }
-            .firstOrNull { v -> v.responses.any { it.id == withId.id } }
-        anchor.moveTo(savedIn?.variantId ?: variantId, withId.id)
+        val restore = Restore(chatHistoryManager.chatHistoryFile(username), anchor.path())
+        val chat = chatHistoryManager.modifyChatHistory(username) { history ->
+            appendResponse(history, chatId, withId, variantId, tail, restore)
+        } ?: return null
+        val saved = chat.messageNodes.asSequence().flatMap { it.variants.asSequence() }
+            .flatMap { it.responses.asSequence() }.firstOrNull { it.id == withId.id }
+        anchor.moveTo(saved?.variantId ?: variantId, withId.id, saved)
         return chat
     }
 
@@ -667,6 +803,7 @@ class MessageBranchingManager(
                 }
 
                 // No messages after - delete this entire variant/branch
+                LocalDeletions.recordVariant(chatHistoryManager.chatHistoryFile(username), targetVariant.variantId)
                 val currentVariantIndex = targetNode.variants.indexOf(targetVariant)
                 val updatedVariants = targetNode.variants.toMutableList()
                 updatedVariants.removeAt(currentVariantIndex)
@@ -720,6 +857,7 @@ class MessageBranchingManager(
                 }
 
                 // Remove this node entirely
+                LocalDeletions.recordVariant(chatHistoryManager.chatHistoryFile(username), targetVariant.variantId)
                 val updatedNodes = chat.messageNodes.filter { it.nodeId != targetNode.nodeId }
 
                 // Update parent's childNodeId to null

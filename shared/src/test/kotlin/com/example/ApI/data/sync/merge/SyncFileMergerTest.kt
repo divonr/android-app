@@ -125,6 +125,13 @@ class SyncFileMergerTest {
             // Reconnected on one side after the other disconnected → the new connection
             assertTrue("\"n\"" in SyncFileMerger.mergeFile(name, conn, other, "null", json))
             assertTrue("\"n\"" in SyncFileMerger.mergeFile(name, "null", "null", other, json))
+            // Disconnect racing a reconnect (both changed) → the connection, in both directions
+            // (like the settings' per-key connection entry: modification beats deletion)
+            assertTrue("\"n\"" in SyncFileMerger.mergeFile(name, conn, "null", other, json))
+            assertTrue("\"n\"" in SyncFileMerger.mergeFile(name, conn, other, "null", json))
+            // No base: null is absence (union), so an old disconnect never wipes a connection
+            assertTrue("\"b\"" in SyncFileMerger.mergeFile(name, null, conn, "null", json))
+            assertTrue("\"b\"" in SyncFileMerger.mergeFile(name, null, "null", conn, json))
             assertTrue(SyncFileMerger.sameContent(name, "null", " null\n", json))
             assertFalse(SyncFileMerger.sameContent(name, "null", conn, json))
         }

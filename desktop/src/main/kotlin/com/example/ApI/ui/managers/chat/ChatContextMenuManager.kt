@@ -53,9 +53,7 @@ class ChatContextMenuManager(
         deps.scope.launch {
             val currentUser = deps.appSettings.value.current_user
             // Locked load-modify-save
-            val chatHistory = deps.repository.updateChatHistory(currentUser) { history ->
-                history.copy(chat_history = history.chat_history.filter { it.chat_id != chat.chat_id })
-            }
+            val chatHistory = deps.repository.deleteChat(currentUser, chat.chat_id)
             val finalChatHistory = chatHistory.chat_history
             val newCurrentChat = if (deps.uiState.value.currentChat?.chat_id == chat.chat_id) {
                 finalChatHistory.lastOrNull()
@@ -84,9 +82,7 @@ class ChatContextMenuManager(
         val currentUser = deps.appSettings.value.current_user
         deps.scope.launch {
             // Locked load-modify-save
-            val finalChatHistory = deps.repository.updateChatHistory(currentUser) { history ->
-                history.copy(chat_history = history.chat_history.filter { it.chat_id != currentChat.chat_id })
-            }.chat_history
+            val finalChatHistory = deps.repository.deleteChat(currentUser, currentChat.chat_id).chat_history
             deps.updateUiState(deps.uiState.value.copy(
                 chatHistory = finalChatHistory,
                 currentChat = null,

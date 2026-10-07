@@ -203,7 +203,8 @@ class StreamingService : Service() {
         val (fallbackVariant, fallbackTail) = fallbackAnchor.current()
         replyAnchors[requestId] = ReplyAnchor(
             intent.getStringExtra(EXTRA_TARGET_VARIANT_ID) ?: fallbackVariant,
-            intent.getStringExtra(EXTRA_EXPECTED_TAIL_ID) ?: fallbackTail
+            intent.getStringExtra(EXTRA_EXPECTED_TAIL_ID) ?: fallbackTail,
+            messages
         )
 
         // Start foreground with notification

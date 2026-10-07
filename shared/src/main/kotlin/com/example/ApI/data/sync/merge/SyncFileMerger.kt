@@ -16,6 +16,7 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
@@ -34,7 +35,13 @@ object SyncFileMerger {
     /** Typed file shapes (verified against the models and their storage managers). */
     private sealed class FileKind {
         object ChatHistory : FileKind()
-        class Typed<T>(val serializer: KSerializer<T>, val policy: JsonMergePolicy, val fillIds: Boolean = false) : FileKind()
+        class Typed<T>(
+            val serializer: KSerializer<T>,
+            val policy: JsonMergePolicy,
+            val fillIds: Boolean = false,
+            /** JSON `null` = disconnected (auth files): see [connectionMerge]. */
+            val nullIsDisconnect: Boolean = false
+        ) : FileKind()
         object Generic : FileKind()
     }
 
@@ -61,8 +68,10 @@ object SyncFileMerger {
             FileKind.Typed(ListSerializer(CustomProviderConfig.serializer()), KEYED_LIST_POLICY, fillIds = true)
         // JSON `null` = disconnected (ExternalConnectionsManager.DISCONNECTED: file deletions don't
         // sync, so a disconnect is an ordinary value that wins 3-way against an untouched connection)
-        filename.startsWith("github_auth_") -> FileKind.Typed(GitHubConnection.serializer().nullable, ATOMIC_POLICY)
-        filename.startsWith("google_workspace_auth_") -> FileKind.Typed(GoogleWorkspaceConnection.serializer().nullable, ATOMIC_POLICY)
+        filename.startsWith("github_auth_") ->
+            FileKind.Typed(GitHubConnection.serializer().nullable, ATOMIC_POLICY, nullIsDisconnect = true)
+        filename.startsWith("google_workspace_auth_") ->
+            FileKind.Typed(GoogleWorkspaceConnection.serializer().nullable, ATOMIC_POLICY, nullIsDisconnect = true)
         filename == "skills_enabled.json" ->
             FileKind.Typed(MapSerializer(String.serializer(), Boolean.serializer()), JsonMergePolicy())
         filename == "skills_sources.json" ->
@@ -198,13 +207,31 @@ object SyncFileMerger {
         val l = canonical(local) ?: return if (kind.policy.deviceLocalKeys.isEmpty()) remote else local
         val r = canonical(remote) ?: return local
         val b = canonical(base)
-        val merged = JsonMerger.merge(b, l, r, kind.policy)
+        val merged = (if (kind.nullIsDisconnect) connectionMerge(b, l, r) else null)
+            ?: JsonMerger.merge(b, l, r, kind.policy)
         return try {
             json.encodeToString(kind.serializer, json.decodeFromJsonElement(kind.serializer, merged))
         } catch (e: Exception) {
             AppLogger.e("[$TAG] Merged $filename does not fit its model; writing raw JSON", e)
             json.encodeToString(JsonElement.serializer(), merged)
         }
+    }
+
+    /**
+     * Auth files (`null` = disconnected), where the generic atomic merge would be wrong:
+     * - no base (first sync, held file, server rollback): `null` counts as absence — union, like
+     *   a missing file — so a connection made on one side is never wiped by an old disconnect;
+     * - both sides changed, one to `null`: the connection wins (modification beats deletion),
+     *   matching the per-key merge of the settings' `githubConnections` / `googleWorkspaceConnections`
+     *   entry, so the auth file and the entry the UI shows stay consistent.
+     * Null: no special case (the atomic 3-way merge applies).
+     */
+    private fun connectionMerge(base: JsonElement?, local: JsonElement, remote: JsonElement): JsonElement? {
+        val localNull = local is JsonNull
+        val remoteNull = remote is JsonNull
+        if (localNull == remoteNull) return null
+        if (base == null || (base != local && base != remote)) return if (localNull) remote else local
+        return null
     }
 
     private fun mergeGeneric(base: String?, local: String, remote: String, json: Json): String {

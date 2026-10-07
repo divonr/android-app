@@ -6,6 +6,7 @@ import com.example.ApI.util.SkillParser
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import com.example.ApI.util.AtomicFiles
+import com.example.ApI.util.FileLocks
 import java.io.File
 import java.io.IOException
 import java.util.zip.ZipEntry
@@ -32,12 +33,6 @@ class SkillsStorageManager(
     private val json: Json,
     private val onFileWritten: (java.io.File) -> Unit = {}
 ) {
-    /** Atomically write [content] to [file], then notify the sync engine. */
-    private fun writeAndNotify(file: File, content: String) {
-        AtomicFiles.write(file, content)
-        onFileWritten(file)
-    }
-
     private val skillsDir: File
         get() = File(internalDir, "skills").also { if (!it.exists()) it.mkdirs() }
 
@@ -204,12 +199,8 @@ class SkillsStorageManager(
         return try {
             dir.deleteRecursively()
             // Clean up enabled state and source URLs
-            val enabledState = loadEnabledState().toMutableMap()
-            enabledState.remove(dir.name)
-            saveEnabledState(enabledState)
-            val sourceUrls = loadSourceUrls().toMutableMap()
-            sourceUrls.remove(dir.name)
-            saveSourceUrls(sourceUrls)
+            updateEnabledState { it - dir.name }
+            updateSourceUrls { it - dir.name }
             true
         } catch (e: Exception) {
             false
@@ -221,9 +212,7 @@ class SkillsStorageManager(
      */
     fun setSkillEnabled(skillName: String, enabled: Boolean) {
         val dir = findSkillDir(skillName) ?: return
-        val state = loadEnabledState().toMutableMap()
-        state[dir.name] = enabled
-        saveEnabledState(state)
+        updateEnabledState { it + (dir.name to enabled) }
     }
 
     // ============ Import ============
@@ -339,9 +328,7 @@ class SkillsStorageManager(
      * Save a source URL for a skill (when imported from GitHub).
      */
     fun saveSkillSourceUrl(skillDirName: String, url: String) {
-        val urls = loadSourceUrls().toMutableMap()
-        urls[skillDirName] = url
-        saveSourceUrls(urls)
+        updateSourceUrls { it + (skillDirName to url) }
     }
 
     // ============ Internal Helpers ============
@@ -381,52 +368,48 @@ class SkillsStorageManager(
             ?.firstOrNull { it.exists() }
     }
 
-    // ============ Enabled State Persistence ============
+    // ============ Enabled State / Source URL Persistence ============
+    // Both files are synced account-global files: every change is a locked load-transform-save
+    // (the sync engine writes its merges under the same lock), so a concurrent write is never
+    // reverted by a stale copy.
 
-    private fun loadEnabledState(): Map<String, Boolean> {
-        val file = File(internalDir, "skills_enabled.json")
-        return if (file.exists()) {
+    private val enabledStateFile: File get() = File(internalDir, "skills_enabled.json")
+    private val sourceUrlsFile: File get() = File(internalDir, "skills_sources.json")
+
+    private fun loadEnabledState(): Map<String, Boolean> = loadMap(enabledStateFile)
+
+    private fun loadSourceUrls(): Map<String, String> = loadMap(sourceUrlsFile)
+
+    private fun updateEnabledState(transform: (Map<String, Boolean>) -> Map<String, Boolean>) =
+        updateMap(enabledStateFile, transform)
+
+    private fun updateSourceUrls(transform: (Map<String, String>) -> Map<String, String>) =
+        updateMap(sourceUrlsFile, transform)
+
+    private inline fun <reified V> loadMap(file: File): Map<String, V> =
+        if (file.exists()) {
             try {
-                json.decodeFromString<Map<String, Boolean>>(file.readText())
+                json.decodeFromString<Map<String, V>>(file.readText())
             } catch (e: Exception) {
                 emptyMap()
             }
         } else {
             emptyMap()
         }
-    }
 
-    private fun saveEnabledState(state: Map<String, Boolean>) {
-        val file = File(internalDir, "skills_enabled.json")
-        try {
-            writeAndNotify(file, json.encodeToString(state))
-        } catch (e: IOException) {
-            // Handle error
-        }
-    }
-
-    // ============ Source URL Persistence ============
-
-    private fun loadSourceUrls(): Map<String, String> {
-        val file = File(internalDir, "skills_sources.json")
-        return if (file.exists()) {
+    /** Load, transform and save [file] under its lock; the sync hook runs after the lock. */
+    private inline fun <reified V> updateMap(file: File, transform: (Map<String, V>) -> Map<String, V>) {
+        val written = FileLocks.withLock(file) {
+            val current = loadMap<V>(file)
+            val updated = transform(current)
+            if (updated == current && file.exists()) return@withLock false
             try {
-                json.decodeFromString<Map<String, String>>(file.readText())
-            } catch (e: Exception) {
-                emptyMap()
+                AtomicFiles.write(file, json.encodeToString(updated))
+                true
+            } catch (e: IOException) {
+                false
             }
-        } else {
-            emptyMap()
         }
-    }
-
-    private fun saveSourceUrls(urls: Map<String, String>) {
-        val file = File(internalDir, "skills_sources.json")
-        try {
-            writeAndNotify(file, json.encodeToString(urls))
-        } catch (e: IOException) {
-            // Handle error
-        }
+        if (written) onFileWritten(file)
     }
 }
-

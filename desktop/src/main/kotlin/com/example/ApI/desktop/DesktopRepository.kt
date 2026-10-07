@@ -38,7 +38,7 @@ class DesktopRepository(private val appDir: File) {
 
     // ── Sync engine (one per data dir per process, shared with any other repository) ─
     val syncEngine = SyncEngine.forDir(internalDir, JsonConfig.prettyPrint) { localStorageManager.loadAppSettings() }
-    private val emptyChatCleanup = EmptyChatCleanup(chatHistoryManager, syncEngine) { loadAppSettings().remoteSync.enabled }
+    private val emptyChatCleanup = EmptyChatCleanup(chatHistoryManager, syncEngine)
 
     private val titleGenerationService by lazy {
         TitleGenerationService(
@@ -249,6 +249,8 @@ class DesktopRepository(private val appDir: File) {
         messageBranchingManager.addResponseToCurrentVariant(username, chatId, response, targetVariantId, expectedTailId)
     fun addAnchoredResponse(username: String, chatId: String, response: Message, anchor: ReplyAnchor): Chat? =
         messageBranchingManager.addAnchoredResponse(username, chatId, response, anchor)
+    /** Delete a chat on the user's request (a reply still streaming into it is then dropped, not restored). */
+    fun deleteChat(username: String, chatId: String): UserChatHistory = chatHistoryManager.deleteChat(username, chatId)
     fun switchVariant(username: String, chatId: String, nodeId: String, variantIndex: Int): Chat? = messageBranchingManager.switchVariant(username, chatId, nodeId, variantIndex)
     fun getBranchInfo(chat: Chat, nodeId: String): BranchInfo? = messageBranchingManager.getBranchInfo(chat, nodeId)
     fun getBranchInfoForMessage(chat: Chat, messageId: String): BranchInfo? = messageBranchingManager.getBranchInfoForMessage(chat, messageId)

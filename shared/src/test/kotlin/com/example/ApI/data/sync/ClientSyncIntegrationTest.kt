@@ -93,13 +93,16 @@ class ClientSyncIntegrationTest {
     }
 
     @Test
-    fun `with sync disabled cleanup removes every empty chat`(): Unit = runBlocking {
+    fun `while signed out cleanup keeps empty chats of the kept sync base`(): Unit = runBlocking {
+        // Sign-out keeps the sync state, so removing another device's empty chat now would be
+        // uploaded as a deletion at the next sign-in (T5 review). Without any base (sync never
+        // used) every empty chat is removed: ClientIntegrationT5ReviewTest.
         val (app, web) = pair()
         val othersEmpty = web.newChat("web's new chat")
         web.sync(); app.sync()
         app.signOut()
-        assertEquals(1, app.repo.cleanupEmptyChats(app.user))
-        assertNull(app.chatOrNull(othersEmpty))
+        assertEquals(0, app.repo.cleanupEmptyChats(app.user))
+        assertNotNull(app.chatOrNull(othersEmpty))
     }
 
     @Test

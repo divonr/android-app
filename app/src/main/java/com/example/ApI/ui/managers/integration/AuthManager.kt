@@ -314,6 +314,30 @@ class AuthManager(
     }
 
     /**
+     * Align the registered GitHub / Google Workspace tools with the connections on disk, which a
+     * sync from another device may have changed (a disconnect there must not leave this device's
+     * tools working with the old token; a connection made there becomes usable here).
+     */
+    fun refreshIntegrationToolsAfterSync() {
+        deps.scope.launch(Dispatchers.IO) {
+            try {
+                val username = deps.appSettings.value.current_user
+                val toolRegistry = ToolRegistry.getInstance()
+                val github = deps.repository.isGitHubConnected(username)
+                if (github != toolRegistry.areGitHubToolsRegistered()) {
+                    if (github) initializeGitHubToolsIfConnected() else toolRegistry.unregisterGitHubTools()
+                }
+                val workspace = deps.repository.isGoogleWorkspaceConnected(username)
+                if (workspace != toolRegistry.areGoogleWorkspaceToolsRegistered()) {
+                    if (workspace) initializeGoogleWorkspaceToolsIfConnected() else toolRegistry.unregisterGoogleWorkspaceTools()
+                }
+            } catch (e: Exception) {
+                // Best effort: the next reload or restart retries
+            }
+        }
+    }
+
+    /**
      * Initialize Google Workspace tools if connected
      * Call this on app start and after connection/service changes
      */

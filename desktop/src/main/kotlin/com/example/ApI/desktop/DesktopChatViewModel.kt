@@ -194,9 +194,7 @@ class DesktopChatViewModel(
 
     fun deleteCurrentChat() {
         val chat = state.currentChat ?: return
-        repository.updateChatHistory(state.settings.current_user) { history ->
-            history.copy(chat_history = history.chat_history.filterNot { it.chat_id == chat.chat_id })
-        }
+        repository.deleteChat(state.settings.current_user, chat.chat_id)
         reload()
     }
 

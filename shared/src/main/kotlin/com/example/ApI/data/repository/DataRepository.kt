@@ -228,7 +228,7 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     fun updateChatSystemPrompt(username: String, chatId: String, systemPrompt: String): Chat? = chatHistoryManager.updateChatSystemPrompt(username, chatId, systemPrompt)
     fun updateChatShareLink(username: String, chatId: String, shareLink: String, shareId: String): Chat? = chatHistoryManager.updateChatShareLink(username, chatId, shareLink, shareId)
 
-    private val emptyChatCleanup = EmptyChatCleanup(chatHistoryManager, syncEngine) { loadAppSettings().remoteSync.enabled }
+    private val emptyChatCleanup = EmptyChatCleanup(chatHistoryManager, syncEngine)
 
     /**
      * Clean up empty chats (chats with no messages) from the chat history: chats that were
@@ -459,6 +459,8 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     /** Save a streamed response at [anchor] (pinned variant, after this device's content) and advance it. */
     fun addAnchoredResponse(username: String, chatId: String, response: Message, anchor: ReplyAnchor): Chat? =
         messageBranchingManager.addAnchoredResponse(username, chatId, response, anchor)
+    /** Delete a chat on the user's request (a reply still streaming into it is then dropped, not restored). */
+    fun deleteChat(username: String, chatId: String): UserChatHistory = chatHistoryManager.deleteChat(username, chatId)
     fun switchVariant(username: String, chatId: String, nodeId: String, variantIndex: Int): Chat? = messageBranchingManager.switchVariant(username, chatId, nodeId, variantIndex)
     fun getBranchInfo(chat: Chat, nodeId: String): BranchInfo? = messageBranchingManager.getBranchInfo(chat, nodeId)
     fun getBranchInfoForMessage(chat: Chat, messageId: String): BranchInfo? = messageBranchingManager.getBranchInfoForMessage(chat, messageId)

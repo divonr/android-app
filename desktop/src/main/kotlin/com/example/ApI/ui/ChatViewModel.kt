@@ -511,11 +511,40 @@ class ChatViewModel(
      * unsent draft are left alone.
      */
     private fun reloadAfterSync() {
-        val settings = repository.loadAppSettings()
-        val history = repository.loadChatHistory(settings.current_user)
-        _appSettings.value = settings
+        repeat(RELOAD_ATTEMPTS) {
+            val before = _uiState.value
+            val settingsBefore = _appSettings.value
+            val settings = repository.loadAppSettings()
+            val history = repository.loadChatHistory(settings.current_user)
+            while (true) {
+                when (applyReload(before, settingsBefore, settings, history)) {
+                    true -> {
+                        authManager.refreshIntegrationToolsAfterSync()
+                        return
+                    }
+                    false -> break  // re-read
+                    null -> continue  // another state update raced the apply: recompute
+                }
+            }
+        }
+        Log.w("ChatViewModel", "Reload after sync skipped: local changes kept racing it")
+    }
 
+    /**
+     * Apply a reload read from disk while the UI state was [before] and the settings
+     * [settingsBefore]. False: the chat state or settings changed meanwhile (a local write the
+     * read may predate — e.g. a new chat, a buffered message — must not be overlaid with an
+     * older disk copy; re-read). Null: another state update (streaming, loading) raced this one
+     * (recompute on the new state).
+     */
+    private fun applyReload(before: ChatUiState, settingsBefore: AppSettings, settings: AppSettings, history: UserChatHistory): Boolean? {
         val state = _uiState.value
+        if (_appSettings.value !== settingsBefore || state.chatHistory !== before.chatHistory ||
+            state.currentChat !== before.currentChat || state.groups !== before.groups ||
+            state.currentGroup !== before.currentGroup
+        ) {
+            return false  // written meanwhile: the disk copy read may predate it
+        }
         val busyChatIds = state.loadingChatIds + state.streamingChatIds
         val hasDraft = state.currentMessage.isNotBlank() || state.selectedFiles.isNotEmpty()
         val currentChat = SyncReload.currentChatAfterReload(history.chat_history, state.currentChat, busyChatIds, hasDraft)
@@ -561,11 +590,13 @@ class ChatViewModel(
                 }
             )
         }
-        _uiState.value = updated
+        if (!_uiState.compareAndSet(state, updated)) return null
+        _appSettings.value = settings
 
         if (onGroupScreen && currentGroup == null) {
             navigateToScreen(Screen.ChatHistory)
         }
+        return true
     }
 
     /** Call on window focus: pull latest changes now and periodically while focused. */
@@ -915,3 +946,6 @@ class ChatViewModel(
     fun navigateToVariant(nodeId: String, variantIndex: Int) = branchingManager.navigateToVariant(nodeId, variantIndex)
     fun ensureBranchingStructure() = branchingManager.ensureBranchingStructure()
 }
+
+/** Disk reads a sync reload makes before giving up on local writes racing it (the next tick retries). */
+private const val RELOAD_ATTEMPTS = 5
