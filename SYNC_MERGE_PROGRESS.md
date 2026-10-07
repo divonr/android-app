@@ -22,7 +22,12 @@ hash when done. Never redo an `[x]` step.
   AccessDenied and LinkageError; review tests enabled + 5 new; `:shared:test` (98) green.
 
 ## T4 — SyncEngine rewrite + RemoteStorageClient CAS + SyncState + migration/sign-in fixes + multi-device tests
-- [ ] implementation + tests
+- [x] implementation + tests — d739878: client CAS put/Conflict/get(version)/history; SyncState v2 (+legacy decode,
+  generation-guarded reset) + `sync_base/` snapshots; content-based per-file sync (plan §4 steps 1-4, merge written
+  only if local unchanged under FileLocks, ≤5 restarts, 30 s retry pull), Mutex, `SyncEngine.forDir` registry used by
+  DataRepository/DesktopRepository; UserMigration default-only/no overwrite/user_name rewrite; sign-in/out reset;
+  FakeSyncServer with full CAS + faults; 18 S1–S9 multi-device scenarios + seeded 3-device fuzz (20 seeds in CI, 200
+  extra seeds pass); `:shared:test` (135) green, server/desktop/app compile.
 
 ## T5 — Android + desktop integration
 - [ ] implementation + build
@@ -116,3 +121,41 @@ hash when done. Never redo an `[x]` step.
     - `SyncFileMerger`: unreadable local app_settings (files with device-local keys) → local text is
       returned unchanged (remote's stripped remoteSync / other device's current_user are never
       adopted). T4 must not upload a merge result that does not parse.
+- T4 sync engine (for T5/T6/T7):
+  - API: `SyncEngine.forDir(internalDir, json[, uploadDebounceMs, retryDelayMs]) { settings }` (one engine per dir per
+    process; first caller's params win; DataRepository/DesktopRepository use it, so Android's StreamingService repo
+    shares the UI's engine). `pullNow()`/`start()` fire-and-forget (coalesced: at most one queued pull);
+    `suspend pull()` waits (use `withTimeout(8_000) { repo.syncEngine.pull() }` for T6's login wait);
+    `uploadNow(f)`, `flushPendingUploads()`, `runExclusive { }` (sign-in), `resetSyncState(account = "",
+    adoptRemoteGlobals = false)`, `prepareForSignIn(username, migrationResult)`, `baseContent(filename)` (validated
+    base snapshot or null — T5's `cleanupEmptyChats` "not in the sync base" test), `syncStateAccount()`,
+    `close()`/`closeAndJoin()`. `RemoteStorageClient.put(f, content, baseVersion: Long? = null)` throws
+    `RemoteSyncException.Conflict(current: BlobMeta?)`; `get(f, version: Long? = null)`; `history(f)`; one shared
+    OkHttpClient. `SyncFileMerger.sameContent(f, a, b, json)` / `isValid(f, text, json)`; top-level `sha256Hex`.
+  - Deviations / choices beyond plan §4:
+    - Step 3 uploads the merge only if it differs from R in CONTENT (`sameContent`: ignores chat view state
+      `currentVariantPath`/derived `messages`, app_settings device-local keys and formatting). A byte/sha test would
+      ping-pong forever between devices looking at different branches (every merge keeps the local path).
+    - Before PUTting a merge the base is recorded as R (+ R as snapshot), so a failed PUT is retried by step 4.
+    - Snapshot missing: besides the plan's "baseServerVersion == R.updated_at → B = R", a local copy whose sha equals
+      `baseLocalSha` is used as B (it IS the base) — keeps 3-way deletions working when `sync_base/` is lost.
+    - Remote sha == base sha with another version → just follow the version (no merge).
+    - app_settings: change detection, base snapshot and upload all use the stripped form (remoteSync removed;
+      `current_user` stays in the upload for old clients); the snapshot never contains the token.
+    - Account switch from another account (MigrationResult.Switched, or a state recorded for another account)
+      resets the state AND marks the account-global files (app_settings, skills_*) "adopt remote": their first sync
+      is merge(base = local, local, remote) = the new account's copy (+ device-local keys) — no settings leak.
+      Re-sign-in to the account the state belongs to (needsReauth) keeps the bases.
+    - Locally missing file with a remote copy → adopted (file deletions are still not propagated: github/workspace
+      disconnect resurrects the auth file, L-6 open). An unreadable local file replaced by a merge is kept as
+      `<name>.corrupt-<ts>`; unparseable local content is never uploaded.
+    - UserMigration from `default` skips (keeps under `default`) each file whose target exists instead of the old
+      all-or-nothing switch when `chat_history_<new>` existed; `MigrationResult.Switched/Migrated` gained fields.
+  - Open for T5/T6: app_settings load-modify-save sites are still unlocked and ViewModels write stale snapshots
+    (a 3-way merge reads a stale snapshot as reverting the remote changes); `cleanupEmptyChats` must use
+    `baseContent`; UserRegistry's `startSync()+pullNow()` is now harmless (coalesced) but redundant; `:server:test`
+    still not run (live sync URL default).
+  - Tests: `FakeSyncServer` (CAS, per-token accounts, `/auth/google` with id_token `google:<user>`, fault injection,
+    `sun.net.httpserver.nodelay`), `SimDevice` (real DataRepository on a temp dir, test-configured engine registered
+    first), `SimAssert.quiesce/assertConverged`. Deeper fuzz: `SYNC_FUZZ_SEEDS=500 SYNC_FUZZ_START=n ./gradlew
+    :shared:test --tests '*MultiDeviceSyncFuzzTest'` (seeds 30000–30199 pass).
