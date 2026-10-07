@@ -57,6 +57,7 @@ import ThoughtsBubble from '../components/chat/ThoughtsBubble'
 import ToolCallBlock from '../components/chat/ToolCallBlock'
 import ChatInputArea from '../components/chat/ChatInputArea'
 import { MdArrowUpward, MdArrowDownward } from '../ui/icons'
+import { messageDayKey, formatDayLabel } from '../utils/chatDates'
 
 // ─── Streaming state ──────────────────────────────────────────────────────────
 
@@ -189,6 +190,10 @@ const ChatPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [showScrollDown, setShowScrollDown] = useState(false)
   const [showScrollUp, setShowScrollUp] = useState(false)
+  // Floating date chip shown while scrolling (WhatsApp-style); hides shortly after scrolling stops
+  const [floatingDay, setFloatingDay] = useState<string | null>(null)
+  const [showFloatingDay, setShowFloatingDay] = useState(false)
+  const floatingDayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const messagesRef = useRef<HTMLDivElement>(null)
@@ -247,6 +252,23 @@ const ChatPage: React.FC = () => {
     const distFromTop = el.scrollTop
     setShowScrollDown(distFromBottom > 150)
     setShowScrollUp(distFromTop > 150)
+
+    // Day of the top-most visible message
+    const top = el.getBoundingClientRect().top
+    let day: string | null = null
+    for (const node of el.querySelectorAll<HTMLElement>('[data-day]')) {
+      if (node.getBoundingClientRect().bottom > top) { day = node.dataset.day ?? null; break }
+    }
+    if (day) {
+      setFloatingDay(day)
+      setShowFloatingDay(true)
+      if (floatingDayTimerRef.current) clearTimeout(floatingDayTimerRef.current)
+      floatingDayTimerRef.current = setTimeout(() => setShowFloatingDay(false), 1500)
+    }
+  }, [])
+
+  useEffect(() => () => {
+    if (floatingDayTimerRef.current) clearTimeout(floatingDayTimerRef.current)
   }, [])
 
   useEffect(() => {
@@ -717,19 +739,29 @@ const ChatPage: React.FC = () => {
           </div>
         )}
 
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            msg={msg}
-            chat={chat!}
-            textDirectionMode={textDirectionMode}
-            onEdit={startEditing}
-            onCopy={handleCopy}
-            onDelete={handleDeleteMessage}
-            onRegenerate={handleRegenerate}
-            onBranchSwitch={updateChat}
-          />
-        ))}
+        {messages.map((msg, i) => {
+          const day = messageDayKey(msg.datetime)
+          const prevDay = i > 0 ? messageDayKey(messages[i - 1].datetime) : null
+          return (
+            <div key={msg.id} data-day={day ?? undefined}>
+              {day && day !== prevDay && (
+                <div className={styles.dateSeparator}>
+                  <span className={styles.dateChip}>{formatDayLabel(day)}</span>
+                </div>
+              )}
+              <MessageBubble
+                msg={msg}
+                chat={chat!}
+                textDirectionMode={textDirectionMode}
+                onEdit={startEditing}
+                onCopy={handleCopy}
+                onDelete={handleDeleteMessage}
+                onRegenerate={handleRegenerate}
+                onBranchSwitch={updateChat}
+              />
+            </div>
+          )
+        })}
 
         {/* ── Multi-message mode: "השב" reply bubble (ReplyPromptBubble) ─── */}
         {showReplyButton && !stream.streaming && (
@@ -794,6 +826,17 @@ const ChatPage: React.FC = () => {
 
         <div ref={bottomRef} />
       </div>
+
+      {/* ── Floating date chip while scrolling ─── */}
+      {floatingDay && (
+        <div
+          className={`${styles.floatingDate} ${showFloatingDay ? styles.floatingDateVisible : ''}`}
+          style={{ top: (messagesRef.current?.offsetTop ?? 0) + 8 }}
+          aria-hidden
+        >
+          <span className={`${styles.dateChip} ${styles.dateChipElevated}`}>{formatDayLabel(floatingDay)}</span>
+        </div>
+      )}
 
       {/* ── Floating scroll buttons (blue circles per screenshot) ─── */}
       {showScrollUp && (

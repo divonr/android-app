@@ -191,3 +191,41 @@
     transform: translateX(-50%);
   }
 }
+
+/* ── Date separators (WhatsApp-style) ── */
+.dateSeparator {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.dateChip {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--color-surface-variant);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.dateChipElevated {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.floatingDate {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  z-index: 5;
+}
+
+.floatingDateVisible {
+  opacity: 1;
+}

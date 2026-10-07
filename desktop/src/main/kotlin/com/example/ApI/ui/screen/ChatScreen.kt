@@ -154,6 +154,35 @@ fun ChatScreen(
                                         // משתנה לתיקון ויזואלי (Shift)
                     var listTranslationY by remember { mutableFloatStateOf(0f) }
 
+                    // Calendar date of every lazy-list item (in list order), used for the
+                    // floating date chip shown while scrolling.
+                    val currentChatIdForDates = uiState.currentChat?.chat_id
+                    val showsStreamingItem = uiState.isStreaming && (uiState.streamingText.isNotEmpty() ||
+                        (currentChatIdForDates?.let {
+                            uiState.isThinking(it) || uiState.getStreamingThoughts(it).isNotBlank()
+                        } ?: false))
+                    val showsReplyItem = uiState.showReplyButton && !uiState.isStreaming && !uiState.isLoading
+                    val showsToolItem = uiState.executingToolCall != null
+                    val reversedChatMessages = remember(uiState.currentChat?.messages) {
+                        uiState.currentChat?.messages?.reversed() ?: emptyList()
+                    }
+                    val reversedMessageDates = remember(reversedChatMessages) {
+                        reversedChatMessages.map { messageLocalDate(it.datetime) }
+                    }
+                    val leadingItemCount = listOf(showsStreamingItem, showsReplyItem, showsToolItem).count { it }
+                    val currentLeadingItemCount by rememberUpdatedState(leadingItemCount)
+                    val currentReversedMessageDates by rememberUpdatedState(reversedMessageDates)
+                    val floatingDate by remember {
+                        derivedStateOf {
+                            // reverseLayout: the highest visible index is the top-most item on screen
+                            val topIndex = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index }
+                                ?: return@derivedStateOf null
+                            val msgIndex = topIndex - currentLeadingItemCount
+                            if (msgIndex < 0) java.time.LocalDate.now()
+                            else currentReversedMessageDates.getOrNull(msgIndex)
+                        }
+                    }
+
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
@@ -242,9 +271,20 @@ fun ChatScreen(
                         }
                         
                         uiState.currentChat?.messages?.let { messages ->
-                            val reversedMessages = messages.reversed()
+                            val reversedMessages = reversedChatMessages
                             itemsIndexed(reversedMessages) { index, message ->
                                 if (message.role == "tool_call") return@itemsIndexed
+
+                                // Date separator when the day changes relative to the previous (older) message
+                                val messageDate = reversedMessageDates.getOrNull(index)
+                                val olderDate = run {
+                                    var olderIndex = index + 1
+                                    while (olderIndex < reversedMessages.size && reversedMessages[olderIndex].role == "tool_call") {
+                                        olderIndex++
+                                    }
+                                    reversedMessageDates.getOrNull(olderIndex)
+                                }
+                                val showDateSeparator = messageDate != null && messageDate != olderDate
                                 
                                 val isFirstMessage = index == 0
                                 val previousMessage = if (index > 0) {
@@ -267,16 +307,42 @@ fun ChatScreen(
                                     }
                                 } else null
 
-                                MessageBubble(
-                                    message = message,
-                                    viewModel = viewModel,
-                                    modifier = Modifier.padding(top = topPadding, bottom = bottomPadding),
-                                    isEditMode = uiState.isEditMode,
-                                    isBeingEdited = uiState.editingMessage == message,
-                                    searchHighlight = searchHighlight
-                                )
+                                Column {
+                                    if (showDateSeparator) {
+                                        DateSeparator(date = messageDate!!)
+                                    }
+                                    MessageBubble(
+                                        message = message,
+                                        viewModel = viewModel,
+                                        modifier = Modifier.padding(top = topPadding, bottom = bottomPadding),
+                                        isEditMode = uiState.isEditMode,
+                                        isBeingEdited = uiState.editingMessage == message,
+                                        searchHighlight = searchHighlight
+                                    )
+                                }
                             }
                         }
+                    }
+
+                    // Floating date chip: visible during active scrolling, fades out shortly after it stops
+                    var showFloatingDate by remember { mutableStateOf(false) }
+                    LaunchedEffect(listState.isScrollInProgress) {
+                        if (listState.isScrollInProgress) {
+                            showFloatingDate = true
+                        } else {
+                            delay(1500)
+                            showFloatingDate = false
+                        }
+                    }
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showFloatingDate && floatingDate != null,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 8.dp)
+                    ) {
+                        floatingDate?.let { DateChip(text = formatChatDateLabel(it), elevated = true) }
                     }
 
                     // Floating Scroll Buttons Logic
