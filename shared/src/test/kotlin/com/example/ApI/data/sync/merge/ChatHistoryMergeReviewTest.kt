@@ -3,7 +3,6 @@ package com.example.ApI.data.sync.merge
 import com.example.ApI.data.model.Chat
 import com.example.ApI.data.model.UserChatHistory
 import com.example.ApI.data.sync.merge.MergeAssert.assertValid
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -12,8 +11,8 @@ import kotlin.test.fail
 
 /**
  * Adversarial review scenarios (T2 review): realistic sync round trips where the device that
- * uploaded first later pulls the other device's merge. Disabled tests document confirmed
- * merge bugs; enable them once fixed.
+ * uploaded first later pulls the other device's merge. Each test is a regression test for a
+ * confirmed (and fixed) merge bug.
  */
 class ChatHistoryMergeReviewTest {
 
@@ -36,14 +35,18 @@ class ChatHistoryMergeReviewTest {
     private fun merge(base: UserChatHistory?, l: UserChatHistory, r: UserChatHistory): UserChatHistory =
         ChatHistoryMerger.merge(base, l, r).also { assertValid(it) }
 
-    /** Sibling variants with identical user text + response texts = duplicated content. */
+    /**
+     * Sibling variants with identical user text + response texts where one of them is a leaf =
+     * duplicated content (the leaf adds nothing). Identical siblings with two different
+     * continuations are legitimate branches (e.g. one device deleted the reply that made them
+     * differ, then continued).
+     */
     private fun duplicateVariants(chat: Chat): List<String> = chat.messageNodes.flatMap { n ->
-        n.variants.map { v -> (listOf(v.userMessage.text) + v.responses.map { it.text }).joinToString("|") }
-            .groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        n.variants.groupBy { v -> (listOf(v.userMessage.text) + v.responses.map { it.text }).joinToString("|") }
+            .filterValues { vs -> vs.size > 1 && vs.any { it.childNodeId == null } }.keys
     }
 
     @Test
-    @Disabled("T2 review: fork keeps local content under the shared variantId -> duplicate fork")
     fun `merge against a stale base (lost PUT response) does not duplicate the remote reply`() {
         val (base, a, b) = replicas { newChat("c"); send("c", "q") }
         a.reply("c", "A answer")
@@ -60,7 +63,6 @@ class ChatHistoryMergeReviewTest {
     }
 
     @Test
-    @Disabled("T2 review: fork swaps the shared variant content on the first uploader")
     fun `realistic sync - the device that uploaded first keeps its own reply in view`() {
         val (s0, a, b) = replicas { newChat("c"); send("c", "q") }
         a.reply("c", "A answer")
@@ -83,7 +85,6 @@ class ChatHistoryMergeReviewTest {
     }
 
     @Test
-    @Disabled("T2 review: chats cleared by a losing group deletion stay detached")
     fun `group kept by rename keeps its chats when the deleting side cleared them`() {
         val (base, l, r) = replicas {
             addGroup("g", "G"); newChat("c"); send("c", "q"); setChatGroup("c", "g")
@@ -94,6 +95,95 @@ class ChatHistoryMergeReviewTest {
         assertEquals(listOf("g"), m.groups.map { it.group_id })
         // Plan §3: clearing `group` on chats happens only if the deletion wins
         assertEquals("g", m.chat_history.single().group, "chat detached from a group that survived")
+    }
+
+    @Test
+    fun `group kept by rename keeps its chats when the remote side deleted it`() {
+        val (base, l, r) = replicas {
+            addGroup("g", "G"); newChat("c"); send("c", "q"); setChatGroup("c", "g")
+        }
+        l.renameGroup("g", "G2")
+        r.deleteGroup("g")
+        val m = merge(base, l.load(), r.load())
+        assertEquals(listOf("G2"), m.groups.map { it.group_name })
+        assertEquals("g", m.chat_history.single().group)
+    }
+
+    @Test
+    fun `response deleted locally while the remote continued after it is kept`() {
+        val (base, l, r) = replicas { newChat("c"); send("c", "q"); reply("c", "a1") }
+        l.deleteLast("c")
+        r.send("c", "follow-up to a1")
+        val m = merge(base, l.load(), r.load())
+        assertEquals(listOf("q", "a1", "follow-up to a1"), m.chat_history.single().messages.map { it.text })
+    }
+
+    @Test
+    fun `deleted response and continuation lose against a reply made below them`() {
+        val (base, l, r) = replicas { newChat("c"); send("c", "q"); reply("c", "a1"); send("c", "f1") }
+        l.reply("c", "f1 answer")
+        r.deleteLast("c"); r.deleteLast("c")  // f1, then a1
+        val m = merge(base, l.load(), r.load())
+        val chat = m.chat_history.single()
+        assertEquals(listOf("q", "a1", "f1", "f1 answer"), chat.messages.map { it.text })
+        assertEquals(listOf("f1" to "a1"), predecessors(chat).filter { it.first == "f1" })
+    }
+
+    @Test
+    fun `reply appended on one side while the other continued after the old reply forks`() {
+        val (base, l, r) = replicas { newChat("c"); send("c", "q"); reply("c", "a1") }
+        l.send("c", "follow-up to a1")
+        r.reply("c", "a2")
+        for ((name, m) in listOf("l-r" to merge(base, l.load(), r.load()), "r-l" to merge(base, r.load(), l.load()))) {
+            val chat = m.chat_history.single()
+            assertEquals(listOf("follow-up to a1" to "a1"), predecessors(chat).filter { it.first == "follow-up to a1" }, name)
+            assertEquals(setOf("q", "a1", "a2", "follow-up to a1"), MergeAssert.textsOf(chat), name)
+            assertEquals(emptyList(), duplicateVariants(chat), name)
+        }
+        // Each device keeps its own view
+        assertEquals(listOf("q", "a1", "follow-up to a1"),
+            merge(base, l.load(), r.load()).chat_history.single().messages.map { it.text })
+        assertEquals(listOf("q", "a1", "a2"),
+            merge(base, r.load(), l.load()).chat_history.single().messages.map { it.text })
+    }
+
+    @Test
+    fun `a third device pulling both merges sees no variant content change`() {
+        val (s, a, b) = replicas { newChat("c"); send("c", "q") }
+        val c = device().apply { save(s) }
+        a.reply("c", "A answer")
+        b.reply("c", "B answer")
+        c.reply("c", "C answer")
+        val s1 = b.load()                    // B uploads first
+        val s2 = merge(s, a.load(), s1)      // A merges, uploads
+        val s3 = merge(s, c.load(), s2)      // C merges, uploads
+        // Every variant id already on the server keeps its content in each later version
+        fun contents(h: UserChatHistory) = h.chat_history.single().messageNodes.flatMap { it.variants }
+            .associate { it.variantId to it.responses.map { m -> m.text } }
+        for ((older, newer) in listOf(s1 to s2, s2 to s3)) {
+            val n = contents(newer)
+            for ((id, texts) in contents(older)) assertEquals(texts, n[id], "variant $id changed content")
+        }
+        assertEquals(3, s3.chat_history.single().messageNodes.single().variants.size)
+        assertEquals(emptyList(), duplicateVariants(s3.chat_history.single()))
+    }
+
+    @Test
+    fun `fork origin reduced to the fork's content by a deletion is dropped`() {
+        val (s, a, b) = replicas { newChat("c"); send("c", "q"); reply("c", "a1") }
+        a.send("c", "f")
+        b.reply("c", "a2")
+        val s1 = b.load()                     // B uploads first
+        val m = merge(s, a.load(), s1)        // A: V=[q|a1,a2], fork=[q|a1]->f
+        a.save(m); b.save(m)                  // both in sync with M
+        b.switchVariant("c", 0, 0)
+        b.deleteLast("c")                     // B views V and deletes a2: V == fork content, leaf
+        assertEquals(listOf("q", "a1"), b.chat("c").messages.map { it.text })
+        a.reply("c", "f answer")              // A continues in the fork (its view)
+        val m2 = merge(m, b.load(), a.load())
+        val chat = m2.chat_history.single()
+        assertEquals(1, chat.messageNodes.first { it.parentNodeId == null }.variants.size, "redundant leaf twin kept")
+        assertEquals(listOf("q", "a1", "f", "f answer"), chat.messages.map { it.text })
     }
 
     /** Text of the message preceding each message occurrence in the tree (null for the first message). */
@@ -109,7 +199,6 @@ class ChatHistoryMergeReviewTest {
     }
 
     @Test
-    @Disabled("T2 review: fork content swap re-parents a follow-up under the other answer")
     fun `realistic sync - continuation sent before pulling the merge stays after its own answer`() {
         val (s, a, b) = replicas { newChat("c"); send("c", "q") }
         a.reply("c", "A answer")
@@ -125,7 +214,6 @@ class ChatHistoryMergeReviewTest {
     }
 
     @Test
-    @Disabled("T2 review: fork content swap duplicates the remote reply")
     fun `realistic sync - second reply before pulling the merge does not duplicate`() {
         val (s, a, b) = replicas { newChat("c"); send("c", "q") }
         a.reply("c", "A answer")
@@ -139,7 +227,6 @@ class ChatHistoryMergeReviewTest {
     }
 
     @Test
-    @Disabled("T2 review: response deletion applied although the other side continued after it")
     fun `response deleted on one side while the other continued after it is kept`() {
         val (base, l, r) = replicas { newChat("c"); send("c", "q"); reply("c", "a1") }
         l.send("c", "follow-up to a1")   // local continues after a1 (new child node)
@@ -152,18 +239,23 @@ class ChatHistoryMergeReviewTest {
     }
 
     @Test
-    @Disabled("T2 review: merges re-parent messages in realistic sync loops")
-    fun `random two device sync loop keeps every message after its original predecessor`() {
-        val runs = 80
+    fun `random two device sync loop keeps every message after its original predecessor`() =
+        randomSyncLoop(deviceCount = 2, runs = 300, seedBase = 31_000, ops = 40)
+
+    @Test
+    fun `random three device sync loop keeps every message after its original predecessor`() =
+        randomSyncLoop(deviceCount = 3, runs = 150, seedBase = 77_000, ops = 60)
+
+    private fun randomSyncLoop(deviceCount: Int, runs: Int, seedBase: Int, ops: Int) {
         val failures = mutableListOf<String>()
         repeat(runs) { iter ->
-            val seed = 31_000 + iter
+            val seed = seedBase + iter
             val rnd = kotlin.random.Random(seed)
             val dir = File(tmp, "loop$iter")
-            val devices = (0 until 2).map { Device(File(dir, "d$it"), clock) }
+            val devices = (0 until deviceCount).map { Device(File(dir, "d$it"), clock) }
             devices[0].newChat("c")
             var server: UserChatHistory? = null
-            val bases = arrayOfNulls<UserChatHistory>(2)
+            val bases = arrayOfNulls<UserChatHistory>(deviceCount)
             val expectedPred = HashMap<String, String?>()
             var counter = 0
             var failed = false
@@ -187,9 +279,9 @@ class ChatHistoryMergeReviewTest {
                 devices[i].save(result); server = result; bases[i] = devices[i].load()
                 check(result, "after sync of d$i")
             }
-            sync(0); sync(1)
-            run loop@{ repeat(40) {
-                val i = rnd.nextInt(2)
+            for (i in 0 until deviceCount) sync(i)
+            run loop@{ repeat(ops) {
+                val i = rnd.nextInt(deviceCount)
                 val d = devices[i]
                 val chat = d.chat("c")
                 when (rnd.nextInt(10)) {

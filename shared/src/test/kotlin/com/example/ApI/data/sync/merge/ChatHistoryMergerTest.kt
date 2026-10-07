@@ -133,16 +133,21 @@ class ChatHistoryMergerTest {
     }
 
     @Test
-    fun `both reply to the same leaf forks the remote replies into a sibling variant`() {
+    fun `both reply to the same leaf forks the local replies into a sibling variant`() {
         val (base, l, r) = replicas { newChat("c"); send("c", "q") }
         l.reply("c", "local answer")
         r.reply("c", "remote answer")
         val m = merge(base, l.load(), r.load())
-        val node = m.chat_history.single().messageNodes.single()
+        val chat = m.chat_history.single()
+        val node = chat.messageNodes.single()
         assertEquals(2, node.variants.size)
-        assertEquals(listOf("local answer"), node.variants[0].responses.map { it.text })
-        assertEquals(listOf("remote answer"), node.variants[1].responses.map { it.text })
+        // The remote (server) content keeps the shared variant id; local's moves to the fork
+        assertEquals(l.chat("c").currentVariantPath, listOf(node.variants[0].variantId))
+        assertEquals(listOf("remote answer"), node.variants[0].responses.map { it.text })
+        assertEquals(listOf("local answer"), node.variants[1].responses.map { it.text })
         assertEquals("q", node.variants[1].userMessage.text)
+        // local view follows its own content
+        assertEquals(listOf("q", "local answer"), chat.messages.map { it.text })
         // deterministic fork id
         val again = ChatHistoryMerger.merge(base, l.load(), r.load())
         assertEquals(m, again)

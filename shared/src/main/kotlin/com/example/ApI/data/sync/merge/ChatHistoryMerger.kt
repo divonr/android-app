@@ -31,6 +31,14 @@ object ChatHistoryMerger {
         val remoteChats = dedupeChats(remote.chat_history)
 
         val (groups, deletedGroupIds) = mergeGroups(base?.groups, local.groups, remote.groups)
+        // Group deletions that lost (the group survived): the deleting side's clearing of
+        // `group` on its chats was part of that deletion and is undone too
+        val baseGroupIds = base?.groups?.map { it.group_id }?.toSet() ?: emptySet()
+        val survivingGroupIds = groups.map { it.group_id }.toSet()
+        val lostDeletes = LostGroupDeletes(
+            local = (baseGroupIds - local.groups.map { it.group_id }.toSet()) intersect survivingGroupIds,
+            remote = (baseGroupIds - remote.groups.map { it.group_id }.toSet()) intersect survivingGroupIds
+        )
 
         val baseById = baseChats?.associateBy { it.chat_id }
         val localById = localChats.associateBy { it.chat_id }
@@ -43,9 +51,9 @@ object ChatHistoryMerger {
             val b = baseById?.get(id)
             val result = try {
                 when {
-                    l != null && r != null -> mergeChat(b, l, r)
-                    l != null -> keepOneSided(b, baseById != null, l)
-                    else -> keepOneSided(b, baseById != null, r!!)
+                    l != null && r != null -> mergeChat(b, l, r, lostDeletes)
+                    l != null -> keepOneSided(b, baseById != null, l, lostDeletes.local)
+                    else -> keepOneSided(b, baseById != null, r!!, lostDeletes.remote)
                 }
             } catch (e: Exception) {
                 AppLogger.e("[$TAG] Failed to merge chat $id; keeping one side", e)
@@ -71,6 +79,13 @@ object ChatHistoryMerger {
     // Chats
     // ---------------------------------------------------------------------------------
 
+    /** Per side: ids of groups that side deleted although the group survived the merge. */
+    private class LostGroupDeletes(val local: Set<String> = emptySet(), val remote: Set<String> = emptySet())
+
+    /** The chat's `group`, restoring one cleared by a group deletion that lost. */
+    private fun effectiveGroup(base: Chat?, chat: Chat, lostDeletes: Set<String>): String? =
+        if (chat.group == null && base?.group != null && base.group in lostDeletes) base.group else chat.group
+
     /** Unite chats sharing a `chat_id` inside one file (2-way), keeping the first position. */
     private fun dedupeChats(chats: List<Chat>): List<Chat> {
         if (chats.map { it.chat_id }.toSet().size == chats.size) return chats
@@ -86,9 +101,10 @@ object ChatHistoryMerger {
      * A chat present on one side only: added (absent from base) → kept; present in base →
      * deleted on the other side, kept only if this side modified it.
      */
-    private fun keepOneSided(base: Chat?, hasBase: Boolean, chat: Chat): Chat? {
+    private fun keepOneSided(base: Chat?, hasBase: Boolean, chat: Chat, lostDeletes: Set<String>): Chat? {
         if (hasBase && base != null && !isModified(base, chat)) return null
-        return ChatTreeRepair.finalizeChat(chat, chat.currentVariantPath)
+        val group = effectiveGroup(base, chat, lostDeletes)
+        return ChatTreeRepair.finalizeChat(if (group == chat.group) chat else chat.copy(group = group), chat.currentVariantPath)
     }
 
     /**
@@ -111,13 +127,20 @@ object ChatHistoryMerger {
     private fun sameTree(a: List<MessageNode>, b: List<MessageNode>): Boolean =
         ChatTreeRepair.stripNodes(a) == ChatTreeRepair.stripNodes(b)
 
-    private fun mergeChat(base: Chat?, local: Chat, remote: Chat): Chat {
-        if (local == remote) return ChatTreeRepair.finalizeChat(local, local.currentVariantPath)
+    private fun mergeChat(
+        base: Chat?,
+        local: Chat,
+        remote: Chat,
+        lostDeletes: LostGroupDeletes = LostGroupDeletes()
+    ): Chat {
+        val localGroup = effectiveGroup(base, local, lostDeletes.local)
+        val remoteGroup = effectiveGroup(base, remote, lostDeletes.remote)
+        if (local == remote && localGroup == local.group) return ChatTreeRepair.finalizeChat(local, local.currentVariantPath)
         val hasBase = base != null
         val scalars = local.copy(
             preview_name = MergeSupport.pick(base?.preview_name, hasBase, local.preview_name, remote.preview_name) { it.isBlank() },
             systemPrompt = MergeSupport.pick(base?.systemPrompt, hasBase, local.systemPrompt, remote.systemPrompt) { it.isEmpty() },
-            group = MergeSupport.pick(base?.group, hasBase, local.group, remote.group) { it == null },
+            group = MergeSupport.pick(base?.group, hasBase, localGroup, remoteGroup) { it == null },
             shareLink = MergeSupport.pick(base?.shareLink, hasBase, local.shareLink, remote.shareLink) { it.isEmpty() },
             shareId = MergeSupport.pick(base?.shareId, hasBase, local.shareId, remote.shareId) { it.isEmpty() }
         )
@@ -131,14 +154,15 @@ object ChatHistoryMerger {
             }
         }
 
-        val nodes = mergeTrees(
+        val (nodes, viewRemap) = mergeTrees(
             local.chat_id,
             base?.let { treeOf(it) },
             treeOf(local),
             treeOf(remote)
         )
-        val preferredPath = if (local.hasBranchingStructure) local.currentVariantPath
-            else LegacyChatConverter.toBranching(local).currentVariantPath
+        // Local content moved to a fork stays in this device's view
+        val preferredPath = (if (local.hasBranchingStructure) local.currentVariantPath
+            else LegacyChatConverter.toBranching(local).currentVariantPath).map { viewRemap[it] ?: it }
         if (nodes.isEmpty()) {
             // Everything deleted: an empty chat (a legacy local keeps its unconvertible messages)
             val messages = if (local.hasBranchingStructure) emptyList() else local.messages
@@ -191,8 +215,6 @@ object ChatHistoryMerger {
                 v.childNodeId?.let { ownerOfNode[it] = v.variantId }
             }
         }
-
-        fun has(variantId: String) = variantId in variantById
     }
 
     private class UnionFind(private val rank: (String) -> String) {
@@ -214,45 +236,41 @@ object ChatHistoryMerger {
         }
     }
 
+    /**
+     * Merged nodes, plus where local view ids went: a variant whose local content moved to a
+     * fork → the fork, a dropped redundant variant → its twin.
+     */
+    private data class TreeMerge(val nodes: List<MessageNode>, val localViewRemap: Map<String, String>)
+
     private fun mergeTrees(
         chatId: String,
         baseNodes: List<MessageNode>?,
         localNodes: List<MessageNode>,
         remoteNodes: List<MessageNode>
-    ): List<MessageNode> {
+    ): TreeMerge {
         val l = Side(localNodes)
         val r = Side(remoteNodes)
         val b = baseNodes?.let { Side(it) }
 
         // Whole-tree shortcuts (keeps ids/order exactly when only one side changed)
-        if (sameTree(localNodes, remoteNodes)) return localNodes
-        if (b != null && sameTree(localNodes, b.nodes)) return remoteNodes
-        if (b != null && sameTree(remoteNodes, b.nodes)) return localNodes
+        if (sameTree(localNodes, remoteNodes)) return TreeMerge(localNodes, emptyMap())
+        if (b != null && sameTree(localNodes, b.nodes)) return TreeMerge(remoteNodes, emptyMap())
+        if (b != null && sameTree(remoteNodes, b.nodes)) return TreeMerge(localNodes, emptyMap())
 
-        // 1. Per-variant decisions and contents
+        // 1. Which variants survive on their own (deletions 3-way)
         val allIds = LinkedHashSet<String>()
         localNodes.forEach { n -> n.variants.forEach { allIds += it.variantId } }
         remoteNodes.forEach { n -> n.variants.forEach { allIds += it.variantId } }
         val takenIds = HashSet(allIds)
         b?.variantById?.keys?.let { takenIds += it }
 
-        val content = HashMap<String, MessageVariant>()
-        val forkOf = HashMap<String, MessageVariant>()
         val kept = HashSet<String>()
         for (id in allIds) {
             val lv = l.variantById[id]
             val rv = r.variantById[id]
             val bv = b?.variantById?.get(id)
-            if (lv != null && rv != null) {
-                kept += id
-                val (main, fork) = mergeVariant(bv, lv, rv, takenIds)
-                content[id] = main
-                if (fork != null) forkOf[id] = fork
-            } else {
-                val v = lv ?: rv!!
-                content[id] = v
-                if (b == null || bv == null || !sameVariantContent(bv, v)) kept += id
-            }
+            val v = lv ?: rv!!
+            if ((lv != null && rv != null) || b == null || bv == null || !sameVariantContent(bv, v)) kept += id
         }
 
         // 2. A variant is needed if kept or if anything below it is kept
@@ -267,10 +285,28 @@ object ChatHistoryMerger {
             }
         }
 
-        // 3. Live nodes per side
+        // Live nodes per side
         fun alive(side: Side, nodeId: String?): Boolean =
             nodeId != null && side.nodeById[nodeId]?.variants?.any { it.variantId in needed } == true
         val baseNodeIds = b?.nodeById?.keys ?: emptySet()
+
+        // 3. Per-variant contents (a continuation below a variant decides which response
+        //    list it can stay attached to)
+        val content = HashMap<String, MessageVariant>()
+        val forkOf = HashMap<String, MessageVariant>()
+        for (id in allIds) {
+            val lv = l.variantById[id]
+            val rv = r.variantById[id]
+            if (lv != null && rv != null) {
+                val cl = lv.childNodeId?.takeIf { alive(l, it) }
+                val cr = rv.childNodeId?.takeIf { alive(r, it) }
+                val (main, fork) = mergeVariant(b?.variantById?.get(id), lv, rv, cl, cr, takenIds)
+                content[id] = main
+                if (fork != null) forkOf[id] = fork
+            } else {
+                content[id] = lv ?: rv!!
+            }
+        }
 
         // 4. Unite nodes that must become one
         // Representative: a node present in base, else the smallest id (symmetric, deterministic)
@@ -311,7 +347,8 @@ object ChatHistoryMerger {
             val forked = id in forkOf
             val childL = childFor(l, id)
             val childR = childFor(r, id)
-            val child = if (forked) (if (l.has(id)) childL else childR) else (childL ?: childR)
+            // A forked variant keeps remote's content, hence remote's continuation
+            val child = if (forked) childR else (childL ?: childR)
             classOrder.getValue(cls) += content.getValue(id).copy(childNodeId = child)
         }
         for (id in sequence) {
@@ -319,8 +356,29 @@ object ChatHistoryMerger {
             val cls = classOf(id) ?: continue
             val childL = childFor(l, id)
             val childR = childFor(r, id)
-            classOrder.getValue(cls) += fork.copy(childNodeId = childR?.takeIf { it != childL })
+            classOrder.getValue(cls) += fork.copy(childNodeId = childL?.takeIf { it != childR })
         }
+
+        // A leaf variant that only repeats a sibling (same messages, ids included) adds nothing,
+        // e.g. a fork's origin after the other device deleted the reply that made them differ
+        val redundant = HashMap<String, String>()
+        for (variants in classOrder.values) {
+            val twins = variants.withIndex().mapNotNull { (i, v) ->
+                if (v.childNodeId != null) return@mapNotNull null
+                variants.withIndex().firstOrNull { (j, o) ->
+                    j != i && (o.childNodeId != null || j < i) && sameVariantContent(o, v)
+                }?.let { v.variantId to it.value.variantId }
+            }
+            twins.forEach { (dropped, twin) -> redundant[dropped] = twin }
+            variants.removeAll { it.variantId in redundant }
+        }
+        fun survivor(id: String): String {
+            var cur = id
+            while (true) cur = redundant[cur] ?: return cur
+        }
+        val viewRemap = HashMap<String, String>()
+        forkOf.forEach { (id, fork) -> viewRemap[id] = survivor(fork.variantId) }
+        redundant.keys.forEach { if (it !in viewRemap) viewRemap[it] = survivor(it) }
 
         val rootClass = (l.root?.takeIf { alive(l, it) } ?: r.root?.takeIf { alive(r, it) })?.let(uf::find)
         val parentOfClass = HashMap<String, String>()
@@ -336,7 +394,7 @@ object ChatHistoryMerger {
         val nodes = classOrder.map { (cls, variants) ->
             MessageNode(nodeId = cls, parentNodeId = parentClass(cls), variants = variants)
         }
-        return ChatTreeRepair.repair(chatId, nodes)
+        return TreeMerge(ChatTreeRepair.repair(chatId, nodes), viewRemap)
     }
 
     private fun sameVariantContent(a: MessageVariant, b: MessageVariant): Boolean =
@@ -344,14 +402,27 @@ object ChatHistoryMerger {
             a.responses.map(ChatTreeRepair::stripMessage) == b.responses.map(ChatTreeRepair::stripMessage)
 
     /**
-     * Merges one variant present on both sides. Returns the merged variant (child decided by
-     * the caller) and, when the response lists diverged, a fork variant holding the remote
-     * continuation (deterministic id derived from the remote variant id).
+     * Merges one variant present on both sides. [localChild]/[remoteChild] are the live
+     * continuations (child node ids) below it on each side. Returns the merged variant (child
+     * decided by the caller) and, when the two sides cannot share one response list, a fork
+     * holding local's content.
+     *
+     * A continuation follows the last response of the side that made it, so the merged
+     * response list must equal that side's list (else the next message would silently follow a
+     * different answer); a child shared by both sides predates both changes and moves along.
+     * Within that constraint: 3-way (only one side changed → it wins, including suffix
+     * deletions), prefix → longer; a deleted suffix loses against a continuation made after it.
+     *
+     * On divergence the remote content (already on the server, possibly seen by other devices)
+     * stays under the shared variant id and local's unpublished content moves to a fork with a
+     * deterministic id, so no device ever sees an existing variant's content swapped.
      */
     private fun mergeVariant(
         base: MessageVariant?,
         local: MessageVariant,
         remote: MessageVariant,
+        localChild: String?,
+        remoteChild: String?,
         takenIds: MutableSet<String>
     ): Pair<MessageVariant, MessageVariant?> {
         val strip = ChatTreeRepair::stripMessage
@@ -360,7 +431,7 @@ object ChatHistoryMerger {
         val lr = local.responses.map(strip)
         val rr = remote.responses.map(strip)
         val br = base?.responses?.map(strip)
-        val responses: List<Message>? = when {
+        val threeWay: List<Message>? = when {
             lr == rr -> local.responses
             br != null && lr == br -> remote.responses
             br != null && rr == br -> local.responses
@@ -368,13 +439,26 @@ object ChatHistoryMerger {
             isPrefix(remote.responses, local.responses) -> local.responses
             else -> null
         }
+        val ownL = localChild != null && localChild != remoteChild
+        val ownR = remoteChild != null && remoteChild != localChild
+        fun fits(responses: List<Message>) =
+            (!ownL || sameAnchor(responses, local.responses)) && (!ownR || sameAnchor(responses, remote.responses))
+        val responses = when {
+            threeWay != null && fits(threeWay) -> threeWay
+            threeWay != null && isPrefix(remote.responses, local.responses) && fits(local.responses) -> local.responses
+            threeWay != null && isPrefix(local.responses, remote.responses) && fits(remote.responses) -> remote.responses
+            else -> null
+        }
         if (responses != null) {
             return local.copy(userMessage = userMessage, responses = responses) to null
         }
-        val forkId = MergeSupport.uniqueId("${remote.variantId}:fork", takenIds)
-        val fork = remote.copy(variantId = forkId, childNodeId = null)
-        return local to fork
+        val forkId = MergeSupport.uniqueId("${local.variantId}:fork", takenIds)
+        return remote.copy(userMessage = userMessage) to local.copy(variantId = forkId, childNodeId = null)
     }
+
+    /** Same response sequence for attaching a continuation: same message ids (or same content). */
+    private fun sameAnchor(a: List<Message>, b: List<Message>): Boolean =
+        a.size == b.size && a.indices.all { a[it].id == b[it].id || ChatTreeRepair.stripMessage(a[it]) == ChatTreeRepair.stripMessage(b[it]) }
 
     private object MessageMerge {
         fun pick(base: Message?, local: Message, remote: Message): Message {

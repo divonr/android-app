@@ -23,8 +23,8 @@ import kotlinx.serialization.json.jsonPrimitive
  * Merges one synced file (local vs remote against the last synced base), dispatching by
  * filename to [ChatHistoryMerger] or [JsonMerger] with a per-file policy.
  *
- * Never throws: unparseable local → remote, unparseable remote → local, unparseable base →
- * treated as absent (2-way). Output is encoded with the given [Json] (the app's storage
+ * Never throws: unparseable local → remote (except files with device-local keys, see
+ * [mergeTyped]), unparseable remote → local, unparseable base → treated as absent (2-way). Output is encoded with the given [Json] (the app's storage
  * format), so it is exactly what the app itself would write.
  */
 object SyncFileMerger {
@@ -122,7 +122,10 @@ object SyncFileMerger {
         } catch (e: Exception) {
             null
         }
-        val l = canonical(local) ?: return remote
+        // Device-local keys are never adopted from remote, and an unreadable local file has none
+        // to keep: leave it untouched (returned as is) instead of taking remote's credentials,
+        // `current_user` etc. The caller must not upload a result that does not parse.
+        val l = canonical(local) ?: return if (kind.policy.deviceLocalKeys.isEmpty()) remote else local
         val r = canonical(remote) ?: return local
         val b = canonical(base)
         val merged = JsonMerger.merge(b, l, r, kind.policy)

@@ -119,7 +119,11 @@ class SyncFileMergerTest {
     @Test
     fun `unparseable sides never throw`() {
         val good = enc(settings())
-        assertEquals(good, SyncFileMerger.mergeFile("app_settings.json", null, "{broken", good, json))
+        // app_settings: remote's device-local keys (stripped remoteSync, other device's
+        // current_user) are never adopted, so an unreadable local file is left as is
+        assertEquals("{broken", SyncFileMerger.mergeFile("app_settings.json", null, "{broken", good, json))
+        val keys = """[{"id":"k","provider":"openai","key":"x"}]"""
+        assertEquals(keys, SyncFileMerger.mergeFile("api_keys_u.json", null, "{broken", keys, json))
         assertEquals(good, SyncFileMerger.mergeFile("app_settings.json", null, good, "garbage", json))
         val merged = SyncFileMerger.mergeFile("app_settings.json", "nope", good, good, json)
         assertEquals(dec(good), dec(merged))
