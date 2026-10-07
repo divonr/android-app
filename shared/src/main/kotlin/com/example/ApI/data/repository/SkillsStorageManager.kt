@@ -5,6 +5,7 @@ import com.example.ApI.data.model.SkillMetadata
 import com.example.ApI.util.SkillParser
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
+import com.example.ApI.util.AtomicFiles
 import java.io.File
 import java.io.IOException
 import java.util.zip.ZipEntry
@@ -31,9 +32,9 @@ class SkillsStorageManager(
     private val json: Json,
     private val onFileWritten: (java.io.File) -> Unit = {}
 ) {
-    /** Write [content] to [file] and notify the sync engine. */
+    /** Atomically write [content] to [file], then notify the sync engine. */
     private fun writeAndNotify(file: File, content: String) {
-        file.writeText(content)
+        AtomicFiles.write(file, content)
         onFileWritten(file)
     }
 

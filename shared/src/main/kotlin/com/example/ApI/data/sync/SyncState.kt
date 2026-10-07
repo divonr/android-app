@@ -1,5 +1,6 @@
 package com.example.ApI.data.sync
 
+import com.example.ApI.util.AtomicFiles
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -55,7 +56,7 @@ class SyncState(
     /** Persist current state to disk.  Best-effort: must never throw into callers. */
     fun save() {
         try {
-            stateFile.writeText(json.encodeToString(data))
+            AtomicFiles.write(stateFile, json.encodeToString(data))
         } catch (e: Exception) {
             // Best-effort; will reconcile on next startup.
         }

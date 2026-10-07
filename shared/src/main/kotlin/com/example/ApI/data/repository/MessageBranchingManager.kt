@@ -1,6 +1,8 @@
 package com.example.ApI.data.repository
 
 import com.example.ApI.data.model.*
+import com.example.ApI.data.sync.merge.LegacyChatConverter
+import com.example.ApI.util.AppLogger
 import java.util.UUID
 
 /**
@@ -11,125 +13,50 @@ import java.util.UUID
 class MessageBranchingManager(
     private val chatHistoryManager: ChatHistoryManager
 ) {
+    companion object {
+        private const val TAG = "MessageBranchingManager"
+    }
+
     /**
      * Migrate a chat from linear structure to branching structure.
      * Each user message becomes a node with a single variant.
+     *
+     * Deterministic (see [LegacyChatConverter]): every device migrating the same legacy chat
+     * produces the same node/variant ids, so sync can merge the resulting trees by id.
      */
-    fun migrateChatToBranchingStructure(chat: Chat): Chat {
-        if (chat.hasBranchingStructure) return chat
-        if (chat.messages.isEmpty()) return chat
-
-        val nodes = mutableListOf<MessageNode>()
-        val variantPath = mutableListOf<String>()
-        var currentNodeId: String? = null
-        var currentVariant: MessageVariant? = null
-        var pendingResponses = mutableListOf<Message>()
-
-        for (message in chat.messages) {
-            when (message.role) {
-                "user" -> {
-                    // Save previous variant if exists
-                    if (currentVariant != null && currentNodeId != null) {
-                        val newNodeId = UUID.randomUUID().toString()
-                        val updatedVariant = currentVariant.copy(
-                            responses = pendingResponses.toList(),
-                            childNodeId = newNodeId
-                        )
-                        val node = nodes.find { it.nodeId == currentNodeId }
-                        if (node != null) {
-                            val nodeIndex = nodes.indexOf(node)
-                            nodes[nodeIndex] = node.copy(
-                                variants = node.variants.map {
-                                    if (it.variantId == updatedVariant.variantId) updatedVariant else it
-                                }
-                            )
-                        }
-                        currentNodeId = newNodeId
-                    } else {
-                        currentNodeId = UUID.randomUUID().toString()
-                    }
-
-                    // Create new variant for this user message
-                    val variantId = UUID.randomUUID().toString()
-                    val userMessageWithRefs = message.copy(
-                        id = if (message.id.isBlank()) UUID.randomUUID().toString() else message.id,
-                        nodeId = currentNodeId,
-                        variantId = variantId
-                    )
-                    currentVariant = MessageVariant(
-                        variantId = variantId,
-                        userMessage = userMessageWithRefs,
-                        responses = emptyList()
-                    )
-                    variantPath.add(variantId)
-                    pendingResponses = mutableListOf()
-
-                    // Create or update node
-                    val existingNode = nodes.find { it.nodeId == currentNodeId }
-                    if (existingNode != null) {
-                        val nodeIndex = nodes.indexOf(existingNode)
-                        nodes[nodeIndex] = existingNode.copy(
-                            variants = existingNode.variants + currentVariant
-                        )
-                    } else {
-                        val parentNodeId = if (nodes.isEmpty()) null else nodes.lastOrNull()?.nodeId
-                        nodes.add(MessageNode(
-                            nodeId = currentNodeId,
-                            parentNodeId = parentNodeId,
-                            variants = listOf(currentVariant)
-                        ))
-                    }
-                }
-                "assistant", "tool_call", "tool_response", "system" -> {
-                    // Add to pending responses
-                    if (currentNodeId != null && currentVariant != null) {
-                        val responseWithRefs = message.copy(
-                            id = if (message.id.isBlank()) UUID.randomUUID().toString() else message.id,
-                            nodeId = currentNodeId,
-                            variantId = currentVariant.variantId
-                        )
-                        pendingResponses.add(responseWithRefs)
-                    }
-                }
-            }
-        }
-
-        // Save final variant's responses
-        if (currentVariant != null && currentNodeId != null && pendingResponses.isNotEmpty()) {
-            val updatedVariant = currentVariant.copy(responses = pendingResponses.toList())
-            val node = nodes.find { it.nodeId == currentNodeId }
-            if (node != null) {
-                val nodeIndex = nodes.indexOf(node)
-                nodes[nodeIndex] = node.copy(
-                    variants = node.variants.map {
-                        if (it.variantId == updatedVariant.variantId) updatedVariant else it
-                    }
-                )
-            }
-        }
-
-        return chat.copy(
-            messageNodes = nodes,
-            currentVariantPath = variantPath
-        )
-    }
+    fun migrateChatToBranchingStructure(chat: Chat): Chat = LegacyChatConverter.toBranching(chat)
 
     /**
      * Ensure chat has branching structure, migrating if necessary.
      */
-    fun ensureBranchingStructure(username: String, chatId: String): Chat? {
-        val chatHistory = chatHistoryManager.loadChatHistory(username)
-        val chat = chatHistory.chat_history.find { it.chat_id == chatId } ?: return null
+    fun ensureBranchingStructure(username: String, chatId: String): Chat? =
+        modifyBranchingChat(username, chatId) { chat -> null to chat }
 
-        if (chat.hasBranchingStructure) return chat
-
-        val migratedChat = migrateChatToBranchingStructure(chat)
-        val updatedChats = chatHistory.chat_history.map {
-            if (it.chat_id == chatId) migratedChat else it
-        }
-        chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-        return migratedChat
+    /**
+     * Run [block] on chat [chatId], migrated to the branching structure first, as one
+     * load-modify-save of the chat history under its file lock (so nothing written in between,
+     * e.g. by streaming or sync, is lost). [block] returns the updated chat (null: keep the chat
+     * as is, persisting only the migration if one happened) and the operation's result.
+     * Returns null when the chat does not exist.
+     */
+    private fun <R> modifyBranchingChat(
+        username: String,
+        chatId: String,
+        block: (Chat) -> Pair<Chat?, R>
+    ): R? = chatHistoryManager.modifyChatHistory(username) { history ->
+        val original = history.chat_history.find { it.chat_id == chatId }
+            ?: return@modifyChatHistory history to null
+        val chat = migrateChatToBranchingStructure(original)
+        val (updated, result) = block(chat)
+        replaceChat(history, chatId, original, updated ?: chat) to result
     }
+
+    private fun replaceChat(history: UserChatHistory, chatId: String, original: Chat, updated: Chat): UserChatHistory =
+        if (updated == original) {
+            history
+        } else {
+            history.copy(chat_history = history.chat_history.map { if (it.chat_id == chatId) updated else it })
+        }
 
     /**
      * Create a new branch (variant) at a specific node.
@@ -146,11 +73,9 @@ class MessageBranchingManager(
         chatId: String,
         nodeId: String,
         newUserMessage: Message
-    ): Pair<Chat, String>? {
-        val chat = ensureBranchingStructure(username, chatId) ?: return null
-
+    ): Pair<Chat, String>? = modifyBranchingChat(username, chatId) { chat ->
         val nodeIndex = chat.messageNodes.indexOfFirst { it.nodeId == nodeId }
-        if (nodeIndex == -1) return null
+        if (nodeIndex == -1) return@modifyBranchingChat null to null
 
         val node = chat.messageNodes[nodeIndex]
         val newVariantId = UUID.randomUUID().toString()
@@ -191,48 +116,55 @@ class MessageBranchingManager(
             messages = newMessages
         )
 
-        // Save to storage
-        val chatHistory = chatHistoryManager.loadChatHistory(username)
-        val updatedChats = chatHistory.chat_history.map {
-            if (it.chat_id == chatId) updatedChat else it
-        }
-        chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-
-        return Pair(updatedChat, newVariantId)
+        updatedChat to Pair(updatedChat, newVariantId)
     }
 
     /**
      * Add a response message to the current variant of a node.
      * Used when receiving assistant responses.
+     *
+     * @param targetVariantId The variant the response belongs to (the variant of the user
+     *        message the request was sent for). When given, the response is appended to that
+     *        variant wherever it is in the tree, even if the current path moved elsewhere in the
+     *        meantime (variant switch, sync merge). If it no longer exists, falls back to the
+     *        last variant of the current path. Null: the last variant of the current path.
      */
     fun addResponseToCurrentVariant(
         username: String,
         chatId: String,
-        response: Message
-    ): Chat? {
-        val chat = ensureBranchingStructure(username, chatId) ?: return null
+        response: Message,
+        targetVariantId: String? = null
+    ): Chat? = chatHistoryManager.modifyChatHistory(username) { history ->
+        val original = history.chat_history.find { it.chat_id == chatId }
+            ?: return@modifyChatHistory history to null
+        val chat = migrateChatToBranchingStructure(original)
 
-        // Fallback if no variant path yet (shouldn't happen but just in case)
-        if (chat.currentVariantPath.isEmpty()) {
-            return chatHistoryManager.addMessageToChat(username, chatId, response)
-        }
-
-        val currentVariantId = chat.currentVariantPath.last()
-
-        // Find the node containing this variant
-        var targetNodeIndex = -1
-        var targetVariantIndex = -1
-
-        for ((nodeIndex, node) in chat.messageNodes.withIndex()) {
-            val variantIndex = node.variants.indexOfFirst { it.variantId == currentVariantId }
-            if (variantIndex >= 0) {
-                targetNodeIndex = nodeIndex
-                targetVariantIndex = variantIndex
-                break
+        fun locate(variantId: String): Pair<Int, Int>? {
+            for ((nodeIndex, node) in chat.messageNodes.withIndex()) {
+                val variantIndex = node.variants.indexOfFirst { it.variantId == variantId }
+                if (variantIndex >= 0) return nodeIndex to variantIndex
             }
+            return null
         }
 
-        if (targetNodeIndex == -1) return null
+        var target = targetVariantId?.let { locate(it) }
+        if (targetVariantId != null && target == null) {
+            AppLogger.w("[$TAG] addResponseToCurrentVariant: variant $targetVariantId not found in chat $chatId, using the current path")
+        }
+
+        if (target == null) {
+            // Fallback if no variant path yet (shouldn't happen but just in case)
+            if (chat.currentVariantPath.isEmpty()) {
+                val updatedChat = chat.copy(messages = chat.messages + response)
+                val otherChats = history.chat_history.filter { it.chat_id != chatId }
+                return@modifyChatHistory history.copy(chat_history = otherChats + updatedChat) to updatedChat
+            }
+            target = locate(chat.currentVariantPath.last())
+        }
+
+        // Variant not found: persist the migration (if any) but drop the response, as before
+        val (targetNodeIndex, targetVariantIndex) = target
+            ?: return@modifyChatHistory replaceChat(history, chatId, original, chat) to null
 
         val node = chat.messageNodes[targetNodeIndex]
         val variant = node.variants[targetVariantIndex]
@@ -241,7 +173,7 @@ class MessageBranchingManager(
         val responseWithRefs = response.copy(
             id = if (response.id.isBlank()) UUID.randomUUID().toString() else response.id,
             nodeId = node.nodeId,
-            variantId = currentVariantId
+            variantId = variant.variantId
         )
         val updatedVariant = variant.copy(responses = variant.responses + responseWithRefs)
 
@@ -262,14 +194,7 @@ class MessageBranchingManager(
             messages = newMessages
         )
 
-        // Save to storage
-        val chatHistory = chatHistoryManager.loadChatHistory(username)
-        val updatedChats = chatHistory.chat_history.map {
-            if (it.chat_id == chatId) updatedChat else it
-        }
-        chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-
-        return updatedChat
+        replaceChat(history, chatId, original, updatedChat) to updatedChat
     }
 
     /**
@@ -286,18 +211,16 @@ class MessageBranchingManager(
         chatId: String,
         nodeId: String,
         variantIndex: Int
-    ): Chat? {
-        val chat = ensureBranchingStructure(username, chatId) ?: return null
-
-        val node = chat.messageNodes.find { it.nodeId == nodeId } ?: return null
-        val variant = node.getVariant(variantIndex) ?: return null
+    ): Chat? = modifyBranchingChat(username, chatId) { chat ->
+        val node = chat.messageNodes.find { it.nodeId == nodeId } ?: return@modifyBranchingChat null to null
+        val variant = node.getVariant(variantIndex) ?: return@modifyBranchingChat null to null
 
         // Find position in path where this node's variant is
         val pathIndex = chat.currentVariantPath.indexOfFirst { variantId ->
             node.variants.any { it.variantId == variantId }
         }
 
-        if (pathIndex == -1) return null
+        if (pathIndex == -1) return@modifyBranchingChat null to null
 
         // Build new path: keep everything before this node, then add the new variant
         val newPath = chat.currentVariantPath.take(pathIndex).toMutableList()
@@ -338,14 +261,7 @@ class MessageBranchingManager(
             messages = newMessages
         )
 
-        // Save to storage
-        val chatHistory = chatHistoryManager.loadChatHistory(username)
-        val updatedChats = chatHistory.chat_history.map {
-            if (it.chat_id == chatId) updatedChat else it
-        }
-        chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-
-        return updatedChat
+        updatedChat to updatedChat
     }
 
     /**
@@ -423,8 +339,8 @@ class MessageBranchingManager(
         username: String,
         chatId: String,
         userMessage: Message
-    ): Chat? {
-        var chat = ensureBranchingStructure(username, chatId) ?: return null
+    ): Chat? = modifyBranchingChat(username, chatId) { migratedChat ->
+        var chat = migratedChat
 
         val newNodeId = UUID.randomUUID().toString()
         val newVariantId = UUID.randomUUID().toString()
@@ -455,14 +371,7 @@ class MessageBranchingManager(
                 messages = listOf(messageWithRefs)
             )
 
-            // Save
-            val chatHistory = chatHistoryManager.loadChatHistory(username)
-            val updatedChats = chatHistory.chat_history.map {
-                if (it.chat_id == chatId) updatedChat else it
-            }
-            chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-
-            return updatedChat
+            return@modifyBranchingChat updatedChat to updatedChat
         }
 
         // Find the last node in current path - we need to find where to attach the new message
@@ -570,14 +479,7 @@ class MessageBranchingManager(
             messages = newMessages
         )
 
-        // Save to storage
-        val chatHistory = chatHistoryManager.loadChatHistory(username)
-        val updatedChats = chatHistory.chat_history.map {
-            if (it.chat_id == chatId) updatedChat else it
-        }
-        chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-
-        return updatedChat
+        updatedChat to updatedChat
     }
 
     /**
@@ -612,10 +514,9 @@ class MessageBranchingManager(
         username: String,
         chatId: String,
         messageId: String
-    ): DeleteMessageResult {
-        val chatHistory = chatHistoryManager.loadChatHistory(username)
-        var chat = chatHistory.chat_history.find { it.chat_id == chatId }
-            ?: return DeleteMessageResult.Error("Chat not found")
+    ): DeleteMessageResult = chatHistoryManager.modifyChatHistory(username) { chatHistory ->
+        val chat = chatHistory.chat_history.find { it.chat_id == chatId }
+            ?: return@modifyChatHistory chatHistory to DeleteMessageResult.Error("Chat not found")
 
         // If no branching structure, use simple deletion
         if (!chat.hasBranchingStructure || chat.messageNodes.isEmpty()) {
@@ -625,8 +526,7 @@ class MessageBranchingManager(
             val updatedChats = chatHistory.chat_history.map { c ->
                 if (c.chat_id == chatId) updatedChat else c
             }
-            chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-            return DeleteMessageResult.Success(updatedChat)
+            return@modifyChatHistory chatHistory.copy(chat_history = updatedChats) to DeleteMessageResult.Success(updatedChat)
         }
 
         // Find the message in the branching structure
@@ -677,8 +577,7 @@ class MessageBranchingManager(
             val updatedChats = chatHistory.chat_history.map { c ->
                 if (c.chat_id == chatId) updatedChat else c
             }
-            chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-            return DeleteMessageResult.Success(updatedChat)
+            return@modifyChatHistory chatHistory.copy(chat_history = updatedChats) to DeleteMessageResult.Success(updatedChat)
         }
 
         val totalVariants = targetNode.variants.size
@@ -703,7 +602,7 @@ class MessageBranchingManager(
             if (isBranchPoint) {
                 // This is a branch point with multiple variants
                 if (hasMessagesAfter) {
-                    return DeleteMessageResult.CannotDeleteBranchPoint(
+                    return@modifyChatHistory chatHistory to DeleteMessageResult.CannotDeleteBranchPoint(
                         "לא ניתן למחוק הודעת התפצלות שיש אחריה הודעות נוספות. למחיקת ההודעה, מחקו קודם כל את ההודעות שאחריה."
                     )
                 }
@@ -751,13 +650,12 @@ class MessageBranchingManager(
                 val updatedChats = chatHistory.chat_history.map { c ->
                     if (c.chat_id == chatId) updatedChat else c
                 }
-                chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-                return DeleteMessageResult.Success(updatedChat)
+                return@modifyChatHistory chatHistory.copy(chat_history = updatedChats) to DeleteMessageResult.Success(updatedChat)
 
             } else {
                 // Single variant at this node
                 if (hasMessagesAfter) {
-                    return DeleteMessageResult.CannotDeleteBranchPoint(
+                    return@modifyChatHistory chatHistory to DeleteMessageResult.CannotDeleteBranchPoint(
                         "לא ניתן למחוק הודעה שיש אחריה הודעות נוספות. למחיקת ההודעה, מחקו קודם כל את ההודעות שאחריה."
                     )
                 }
@@ -794,8 +692,7 @@ class MessageBranchingManager(
                 val updatedChats = chatHistory.chat_history.map { c ->
                     if (c.chat_id == chatId) updatedChat else c
                 }
-                chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-                return DeleteMessageResult.Success(updatedChat)
+                return@modifyChatHistory chatHistory.copy(chat_history = updatedChats) to DeleteMessageResult.Success(updatedChat)
             }
 
         } else {
@@ -812,7 +709,7 @@ class MessageBranchingManager(
             val hasChildren = childNodeForResponse != null && childNodeForResponse.variants.isNotEmpty()
 
             if (hasMoreResponses || hasChildren) {
-                return DeleteMessageResult.CannotDeleteBranchPoint(
+                return@modifyChatHistory chatHistory to DeleteMessageResult.CannotDeleteBranchPoint(
                     "לא ניתן למחוק הודעה שיש אחריה הודעות נוספות. למחיקת ההודעה, מחקו קודם כל את ההודעות שאחריה."
                 )
             }
@@ -843,8 +740,7 @@ class MessageBranchingManager(
             val updatedChats = chatHistory.chat_history.map { c ->
                 if (c.chat_id == chatId) updatedChat else c
             }
-            chatHistoryManager.saveChatHistory(chatHistory.copy(chat_history = updatedChats))
-            return DeleteMessageResult.Success(updatedChat)
+            return@modifyChatHistory chatHistory.copy(chat_history = updatedChats) to DeleteMessageResult.Success(updatedChat)
         }
     }
 

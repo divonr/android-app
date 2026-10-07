@@ -11,6 +11,7 @@ import com.example.ApI.data.network.GoogleCalendarApiService
 import com.example.ApI.data.network.GoogleDriveApiService
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
+import com.example.ApI.util.AtomicFiles
 import java.io.File
 
 /**
@@ -23,9 +24,9 @@ class ExternalConnectionsManager(
     private val localStorageManager: LocalStorageManager,
     private val onFileWritten: (java.io.File) -> Unit = {}
 ) {
-    /** Write [content] to [file] and notify the sync engine. */
+    /** Atomically write [content] to [file], then notify the sync engine. */
     private fun writeAndNotify(file: File, content: String) {
-        file.writeText(content)
+        AtomicFiles.write(file, content)
         onFileWritten(file)
     }
 

@@ -8,12 +8,12 @@ import com.example.ApI.data.model.MessageVariant
 /**
  * Converts a legacy (linear `messages`, no `messageNodes`) chat into the branching structure.
  *
- * Mirrors [com.example.ApI.data.repository.MessageBranchingManager.migrateChatToBranchingStructure]
- * exactly (each user message opens a node with one variant, every following
+ * This is the app's only migration: [com.example.ApI.data.repository.MessageBranchingManager.migrateChatToBranchingStructure]
+ * delegates here. Each user message opens a node with one variant, every following
  * assistant/tool_call/tool_response/system message goes into that variant's responses,
  * messages before the first user message and unknown roles are dropped, `messages` itself
- * is left untouched), except that all ids are deterministic: two devices converting the same
- * legacy chat produce identical node/variant ids, so their trees can be merged by id.
+ * is left untouched. All ids are deterministic: two devices converting the same legacy chat
+ * produce identical node/variant ids, so their trees can be merged by id.
  */
 object LegacyChatConverter {
 

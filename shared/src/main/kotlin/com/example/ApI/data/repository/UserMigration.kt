@@ -2,6 +2,7 @@ package com.example.ApI.data.repository
 
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.util.AppLogger
+import com.example.ApI.util.AtomicFiles
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -156,7 +157,7 @@ object UserMigration {
 
     private fun saveSettings(file: File, json: Json, settings: AppSettings) {
         try {
-            file.writeText(json.encodeToString(settings))
+            AtomicFiles.write(file, json.encodeToString(settings))
         } catch (e: Exception) {
             AppLogger.e("[$TAG] Failed to save app_settings.json after migration", e)
         }

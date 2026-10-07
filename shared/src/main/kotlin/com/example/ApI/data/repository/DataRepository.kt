@@ -192,6 +192,15 @@ class DataRepository(private val platformStorage: PlatformStorage) {
 
     fun loadChatHistory(username: String): UserChatHistory = chatHistoryManager.loadChatHistory(username)
     fun saveChatHistory(chatHistory: UserChatHistory) = chatHistoryManager.saveChatHistory(chatHistory)
+    fun saveChatHistory(username: String, chatHistory: UserChatHistory) = chatHistoryManager.saveChatHistory(username, chatHistory)
+
+    /**
+     * Load + [transform] + save the chat history of [username] atomically under the file lock.
+     * Use this for every read-modify-write instead of loadChatHistory + saveChatHistory, so
+     * concurrent writers (UI, streaming, sync) never lose each other's changes.
+     */
+    fun updateChatHistory(username: String, transform: (UserChatHistory) -> UserChatHistory): UserChatHistory =
+        chatHistoryManager.updateChatHistory(username, transform)
     fun getChatJson(username: String, chatId: String): String? = chatHistoryManager.getChatJson(username, chatId)
     fun saveChatJsonToDownloads(chatId: String, content: String): String? = chatHistoryManager.saveChatJsonToDownloads(chatId, content)
     fun addMessageToChat(username: String, chatId: String, message: Message): Chat? = chatHistoryManager.addMessageToChat(username, chatId, message)
@@ -205,20 +214,15 @@ class DataRepository(private val platformStorage: PlatformStorage) {
      * This removes chats that were created but never had any content added to them.
      */
     fun cleanupEmptyChats(username: String): Int {
-        val chatHistory = loadChatHistory(username)
-
-        // Filter out chats with no messages
-        val nonEmptyChats = chatHistory.chat_history.filter { chat ->
-            chat.messages.isNotEmpty() || chat.messageNodes.isNotEmpty()
+        var removedCount = 0
+        updateChatHistory(username) { chatHistory ->
+            // Filter out chats with no messages
+            val nonEmptyChats = chatHistory.chat_history.filter { chat ->
+                chat.messages.isNotEmpty() || chat.messageNodes.isNotEmpty()
+            }
+            removedCount = chatHistory.chat_history.size - nonEmptyChats.size
+            if (removedCount > 0) chatHistory.copy(chat_history = nonEmptyChats) else chatHistory
         }
-
-        val removedCount = chatHistory.chat_history.size - nonEmptyChats.size
-
-        if (removedCount > 0) {
-            val updatedHistory = chatHistory.copy(chat_history = nonEmptyChats)
-            saveChatHistory(updatedHistory)
-        }
-
         return removedCount
     }
 
@@ -431,7 +435,7 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     fun migrateChatToBranchingStructure(chat: Chat): Chat = messageBranchingManager.migrateChatToBranchingStructure(chat)
     fun ensureBranchingStructure(username: String, chatId: String): Chat? = messageBranchingManager.ensureBranchingStructure(username, chatId)
     fun createBranch(username: String, chatId: String, nodeId: String, newUserMessage: Message): Pair<Chat, String>? = messageBranchingManager.createBranch(username, chatId, nodeId, newUserMessage)
-    fun addResponseToCurrentVariant(username: String, chatId: String, response: Message): Chat? = messageBranchingManager.addResponseToCurrentVariant(username, chatId, response)
+    fun addResponseToCurrentVariant(username: String, chatId: String, response: Message, targetVariantId: String? = null): Chat? = messageBranchingManager.addResponseToCurrentVariant(username, chatId, response, targetVariantId)
     fun switchVariant(username: String, chatId: String, nodeId: String, variantIndex: Int): Chat? = messageBranchingManager.switchVariant(username, chatId, nodeId, variantIndex)
     fun getBranchInfo(chat: Chat, nodeId: String): BranchInfo? = messageBranchingManager.getBranchInfo(chat, nodeId)
     fun getBranchInfoForMessage(chat: Chat, messageId: String): BranchInfo? = messageBranchingManager.getBranchInfoForMessage(chat, messageId)

@@ -139,6 +139,10 @@ class DesktopRepository(private val appDir: File) {
     // ==================== Chat History ====================
     fun loadChatHistory(username: String): UserChatHistory = chatHistoryManager.loadChatHistory(username)
     fun saveChatHistory(chatHistory: UserChatHistory) = chatHistoryManager.saveChatHistory(chatHistory)
+    fun saveChatHistory(username: String, chatHistory: UserChatHistory) = chatHistoryManager.saveChatHistory(username, chatHistory)
+    /** Load + [transform] + save under the chat history file lock (use for every read-modify-write). */
+    fun updateChatHistory(username: String, transform: (UserChatHistory) -> UserChatHistory): UserChatHistory =
+        chatHistoryManager.updateChatHistory(username, transform)
     fun getChatJson(username: String, chatId: String): String? = chatHistoryManager.getChatJson(username, chatId)
     fun saveChatJsonToDownloads(chatId: String, content: String): String? = chatHistoryManager.saveChatJsonToDownloads(chatId, content)
     fun addMessageToChat(username: String, chatId: String, message: Message): Chat? = chatHistoryManager.addMessageToChat(username, chatId, message)
@@ -155,10 +159,12 @@ class DesktopRepository(private val appDir: File) {
     fun validateChatJson(jsonContent: String): Boolean = chatHistoryManager.validateChatJson(jsonContent)
 
     fun cleanupEmptyChats(username: String): Int {
-        val chatHistory = loadChatHistory(username)
-        val nonEmptyChats = chatHistory.chat_history.filter { it.messages.isNotEmpty() || it.messageNodes.isNotEmpty() }
-        val removedCount = chatHistory.chat_history.size - nonEmptyChats.size
-        if (removedCount > 0) saveChatHistory(chatHistory.copy(chat_history = nonEmptyChats))
+        var removedCount = 0
+        updateChatHistory(username) { chatHistory ->
+            val nonEmptyChats = chatHistory.chat_history.filter { it.messages.isNotEmpty() || it.messageNodes.isNotEmpty() }
+            removedCount = chatHistory.chat_history.size - nonEmptyChats.size
+            if (removedCount > 0) chatHistory.copy(chat_history = nonEmptyChats) else chatHistory
+        }
         return removedCount
     }
 
@@ -233,7 +239,7 @@ class DesktopRepository(private val appDir: File) {
     fun migrateChatToBranchingStructure(chat: Chat): Chat = messageBranchingManager.migrateChatToBranchingStructure(chat)
     fun ensureBranchingStructure(username: String, chatId: String): Chat? = messageBranchingManager.ensureBranchingStructure(username, chatId)
     fun createBranch(username: String, chatId: String, nodeId: String, newUserMessage: Message): Pair<Chat, String>? = messageBranchingManager.createBranch(username, chatId, nodeId, newUserMessage)
-    fun addResponseToCurrentVariant(username: String, chatId: String, response: Message): Chat? = messageBranchingManager.addResponseToCurrentVariant(username, chatId, response)
+    fun addResponseToCurrentVariant(username: String, chatId: String, response: Message, targetVariantId: String? = null): Chat? = messageBranchingManager.addResponseToCurrentVariant(username, chatId, response, targetVariantId)
     fun switchVariant(username: String, chatId: String, nodeId: String, variantIndex: Int): Chat? = messageBranchingManager.switchVariant(username, chatId, nodeId, variantIndex)
     fun getBranchInfo(chat: Chat, nodeId: String): BranchInfo? = messageBranchingManager.getBranchInfo(chat, nodeId)
     fun getBranchInfoForMessage(chat: Chat, messageId: String): BranchInfo? = messageBranchingManager.getBranchInfoForMessage(chat, messageId)

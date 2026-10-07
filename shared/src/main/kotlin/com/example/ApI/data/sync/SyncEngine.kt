@@ -3,6 +3,7 @@ package com.example.ApI.data.sync
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.RemoteSyncSettings
 import com.example.ApI.util.AppLogger
+import com.example.ApI.util.AtomicFiles
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -365,7 +366,7 @@ class SyncEngine(
 
                 try {
                     // Write directly — do NOT call onFileWritten to avoid dirty-loop
-                    localFile.writeText(contentToWrite)
+                    AtomicFiles.write(localFile, contentToWrite)
                 } catch (e: Exception) {
                     AppLogger.e("[$TAG] pull(): could not write $filename to disk", e)
                     continue

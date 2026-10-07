@@ -6,6 +6,8 @@ import com.example.ApI.data.model.CustomProviderConfig
 import com.example.ApI.data.model.FullCustomProviderConfig
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
+import com.example.ApI.util.AtomicFiles
+import com.example.ApI.util.FileLocks
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -18,10 +20,15 @@ class LocalStorageManager(
     private val json: Json,
     private val onFileWritten: (java.io.File) -> Unit = {}
 ) {
-    /** Write [content] to [file] and notify the sync engine. */
+    /** Atomically write [content] to [file], then notify the sync engine. */
     private fun writeAndNotify(file: File, content: String) {
-        file.writeText(content)
+        AtomicFiles.write(file, content)
         onFileWritten(file)
+    }
+
+    /** Run a load-modify-save of [fileName] under its file lock (no lost concurrent updates). */
+    private inline fun locked(fileName: String, block: () -> Unit) {
+        FileLocks.withLock(File(internalDir, fileName)) { block() }
     }
 
     // ============ API Keys ============
@@ -50,59 +57,67 @@ class LocalStorageManager(
     }
 
     fun addApiKey(username: String, apiKey: ApiKey) {
-        val currentKeys = loadApiKeys(username).toMutableList()
+        locked("api_keys_$username.json") {
+            val currentKeys = loadApiKeys(username).toMutableList()
 
-        // If adding a new key for same provider and it should be active,
-        // deactivate all other keys for this provider
-        if (apiKey.isActive) {
-            for (i in currentKeys.indices) {
-                if (currentKeys[i].provider == apiKey.provider) {
-                    currentKeys[i] = currentKeys[i].copy(isActive = false)
+            // If adding a new key for same provider and it should be active,
+            // deactivate all other keys for this provider
+            if (apiKey.isActive) {
+                for (i in currentKeys.indices) {
+                    if (currentKeys[i].provider == apiKey.provider) {
+                        currentKeys[i] = currentKeys[i].copy(isActive = false)
+                    }
                 }
             }
-        }
 
-        currentKeys.add(apiKey)
-        saveApiKeys(username, currentKeys)
+            currentKeys.add(apiKey)
+            saveApiKeys(username, currentKeys)
+        }
     }
 
     fun toggleApiKeyStatus(username: String, keyId: String) {
-        val currentKeys = loadApiKeys(username)
-        val targetKey = currentKeys.find { it.id == keyId } ?: return
-        val updatedKeys = currentKeys.map { key ->
-            when {
-                key.id == keyId -> {
-                    // Toggle this key
-                    val newActiveState = !key.isActive
-                    // If activating this key, deactivate all other keys for same provider
-                    if (newActiveState) {
-                        key.copy(isActive = true)
-                    } else {
+        locked("api_keys_$username.json") {
+            val currentKeys = loadApiKeys(username)
+            val targetKey = currentKeys.find { it.id == keyId } ?: return
+            val updatedKeys = currentKeys.map { key ->
+                when {
+                    key.id == keyId -> {
+                        // Toggle this key
+                        val newActiveState = !key.isActive
+                        // If activating this key, deactivate all other keys for same provider
+                        if (newActiveState) {
+                            key.copy(isActive = true)
+                        } else {
+                            key.copy(isActive = false)
+                        }
+                    }
+                    key.provider == targetKey.provider && key.id != keyId && !targetKey.isActive -> {
+                        // If we're activating the target key, deactivate others of same provider
                         key.copy(isActive = false)
                     }
+                    else -> key
                 }
-                key.provider == targetKey.provider && key.id != keyId && !targetKey.isActive -> {
-                    // If we're activating the target key, deactivate others of same provider
-                    key.copy(isActive = false)
-                }
-                else -> key
             }
+            saveApiKeys(username, updatedKeys)
         }
-        saveApiKeys(username, updatedKeys)
     }
 
     fun deleteApiKey(username: String, keyId: String) {
-        val currentKeys = loadApiKeys(username)
-        val updatedKeys = currentKeys.filter { it.id != keyId }
-        saveApiKeys(username, updatedKeys)
+        locked("api_keys_$username.json") {
+            val currentKeys = loadApiKeys(username)
+            val updatedKeys = currentKeys.filter { it.id != keyId }
+            saveApiKeys(username, updatedKeys)
+        }
     }
 
     fun reorderApiKeys(username: String, fromIndex: Int, toIndex: Int) {
-        val currentKeys = loadApiKeys(username).toMutableList()
-        if (fromIndex in currentKeys.indices && toIndex in currentKeys.indices) {
-            val item = currentKeys.removeAt(fromIndex)
-            currentKeys.add(toIndex, item)
-            saveApiKeys(username, currentKeys)
+        locked("api_keys_$username.json") {
+            val currentKeys = loadApiKeys(username).toMutableList()
+            if (fromIndex in currentKeys.indices && toIndex in currentKeys.indices) {
+                val item = currentKeys.removeAt(fromIndex)
+                currentKeys.add(toIndex, item)
+                saveApiKeys(username, currentKeys)
+            }
         }
     }
 
@@ -165,23 +180,29 @@ class LocalStorageManager(
     }
 
     fun addCustomProvider(username: String, provider: CustomProviderConfig) {
-        val current = loadCustomProviders(username).toMutableList()
-        current.add(provider)
-        saveCustomProviders(username, current)
-    }
-
-    fun updateCustomProvider(username: String, providerId: String, updated: CustomProviderConfig) {
-        val current = loadCustomProviders(username).toMutableList()
-        val index = current.indexOfFirst { it.id == providerId }
-        if (index >= 0) {
-            current[index] = updated
+        locked("custom_providers_$username.json") {
+            val current = loadCustomProviders(username).toMutableList()
+            current.add(provider)
             saveCustomProviders(username, current)
         }
     }
 
+    fun updateCustomProvider(username: String, providerId: String, updated: CustomProviderConfig) {
+        locked("custom_providers_$username.json") {
+            val current = loadCustomProviders(username).toMutableList()
+            val index = current.indexOfFirst { it.id == providerId }
+            if (index >= 0) {
+                current[index] = updated
+                saveCustomProviders(username, current)
+            }
+        }
+    }
+
     fun deleteCustomProvider(username: String, providerId: String) {
-        val current = loadCustomProviders(username).filter { it.id != providerId }
-        saveCustomProviders(username, current)
+        locked("custom_providers_$username.json") {
+            val current = loadCustomProviders(username).filter { it.id != providerId }
+            saveCustomProviders(username, current)
+        }
     }
 
     // ============ Full Custom Providers ============
@@ -210,23 +231,29 @@ class LocalStorageManager(
     }
 
     fun addFullCustomProvider(username: String, provider: FullCustomProviderConfig) {
-        val current = loadFullCustomProviders(username).toMutableList()
-        current.add(provider)
-        saveFullCustomProviders(username, current)
-    }
-
-    fun updateFullCustomProvider(username: String, providerId: String, updated: FullCustomProviderConfig) {
-        val current = loadFullCustomProviders(username).toMutableList()
-        val index = current.indexOfFirst { it.id == providerId }
-        if (index >= 0) {
-            current[index] = updated
+        locked("full_custom_providers_$username.json") {
+            val current = loadFullCustomProviders(username).toMutableList()
+            current.add(provider)
             saveFullCustomProviders(username, current)
         }
     }
 
+    fun updateFullCustomProvider(username: String, providerId: String, updated: FullCustomProviderConfig) {
+        locked("full_custom_providers_$username.json") {
+            val current = loadFullCustomProviders(username).toMutableList()
+            val index = current.indexOfFirst { it.id == providerId }
+            if (index >= 0) {
+                current[index] = updated
+                saveFullCustomProviders(username, current)
+            }
+        }
+    }
+
     fun deleteFullCustomProvider(username: String, providerId: String) {
-        val current = loadFullCustomProviders(username).filter { it.id != providerId }
-        saveFullCustomProviders(username, current)
+        locked("full_custom_providers_$username.json") {
+            val current = loadFullCustomProviders(username).filter { it.id != providerId }
+            saveFullCustomProviders(username, current)
+        }
     }
 
     // ============ File Management ============
