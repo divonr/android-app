@@ -4,11 +4,13 @@ import com.example.ApI.data.model.*
 import com.example.ApI.util.AppLogger
 import com.example.ApI.util.AtomicFiles
 import com.example.ApI.util.FileLocks
+import com.example.ApI.util.SyncHolds
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.locks.ReentrantLock
 
 /**
  * Manages chat history operations: loading, saving, CRUD operations,
@@ -23,6 +25,11 @@ class ChatHistoryManager(
     companion object {
         private const val TAG = "ChatHistoryManager"
         private const val PARSE_RETRY_DELAY_MS = 50L
+
+        /** Locks of the chat history files whose transform is running on this thread. */
+        private val activeTransforms = object : ThreadLocal<MutableSet<ReentrantLock>>() {
+            override fun initialValue(): MutableSet<ReentrantLock> = mutableSetOf()
+        }
     }
 
     fun chatHistoryFile(username: String): File = File(internalDir, "chat_history_$username.json")
@@ -32,42 +39,48 @@ class ChatHistoryManager(
      * (the file name is authoritative, never the content).
      *
      * A missing or empty file is an empty history. A file that cannot be parsed is read once more
-     * (in case another writer was mid-write); if it still fails a copy is preserved as
-     * `chat_history_<user>.json.corrupt-<timestamp>` before an empty history is returned, so the
-     * next save never silently destroys the only copy.
+     * (in case another writer was mid-write); if it still fails its exact bytes are preserved as
+     * `chat_history_<user>.json.corrupt-<timestamp>`, sync of the file is held ([SyncHolds]) and
+     * an empty history is returned. Changes saved on top of that empty history stay local until
+     * the sync engine reconciles the file with the remote copy, so they never replace (or, in a
+     * 3-way merge, "delete") the account's chats.
      */
     fun loadChatHistory(username: String): UserChatHistory {
         val file = chatHistoryFile(username)
-        return FileLocks.withLock(file) { readChatHistory(file, username) }
+        return FileLocks.withLock(file) { readChatHistory(file, username).history }
     }
 
-    private fun readChatHistory(file: File, username: String): UserChatHistory {
+    private class ReadResult(val history: UserChatHistory, val unreadable: Boolean = false)
+
+    private fun readChatHistory(file: File, username: String): ReadResult {
         val empty = UserChatHistory(username, emptyList(), emptyList())
         if (!file.exists()) {
             AppLogger.d("[$TAG] No chat history file for $username yet")
-            return empty
+            return ReadResult(empty)
         }
         var lastError: Exception? = null
-        var content = ""
+        var bytes = ByteArray(0)
         for (attempt in 0..1) {
             if (attempt > 0) Thread.sleep(PARSE_RETRY_DELAY_MS)
             try {
-                content = file.readText()
-                if (content.isBlank()) return empty
-                return json.decodeFromString<UserChatHistory>(content).copy(user_name = username)
+                bytes = file.readBytes()
+                val content = String(bytes, Charsets.UTF_8)
+                if (content.isBlank()) return ReadResult(empty)
+                return ReadResult(json.decodeFromString<UserChatHistory>(content).copy(user_name = username))
             } catch (e: Exception) {
                 lastError = e
             }
         }
         AppLogger.e("[$TAG] Failed to load chat history of $username; treating it as empty", lastError ?: Exception("unknown"))
-        preserveCorruptFile(file, content)
-        return empty
+        preserveCorruptFile(file, bytes)
+        if (!SyncHolds.isHeld(file)) SyncHolds.hold(file, "unreadable local chat history (copy kept as ${file.name}.corrupt-*)")
+        return ReadResult(empty, unreadable = true)
     }
 
-    /** Keep a copy of an unreadable chat history file (once per distinct content). */
-    private fun preserveCorruptFile(file: File, content: String) {
+    /** Keep a byte-exact copy of an unreadable chat history file (once per distinct content). */
+    private fun preserveCorruptFile(file: File, content: ByteArray) {
         try {
-            val bytes = if (content.isNotEmpty()) content.toByteArray(Charsets.UTF_8) else file.readBytes()
+            val bytes = if (content.isNotEmpty()) content else file.readBytes()
             val prefix = "${file.name}.corrupt-"
             val alreadyKept = file.parentFile?.listFiles()?.any { other ->
                 other.name.startsWith(prefix) && other.length() == bytes.size.toLong() && other.readBytes().contentEquals(bytes)
@@ -82,8 +95,19 @@ class ChatHistoryManager(
     }
 
     /**
+     * Fail loudly when a chat history write runs inside a transform of the same file: the outer
+     * update was computed from the history read before the inner write and would overwrite it.
+     */
+    private fun checkNotInTransform(file: File, username: String) {
+        check(FileLocks.lockFor(file) !in activeTransforms.get()) {
+            "Nested write of chat history of $username inside an updateChatHistory/modifyChatHistory " +
+                "transform of the same file; return the change from the transform instead"
+        }
+    }
+
+    /**
      * Write [chatHistory] to the file of [username] (atomically, under the file lock), storing
-     * `user_name = username`, then notify the sync engine.
+     * `user_name = username`, then notify the sync engine (unless sync of the file is held).
      */
     fun saveChatHistory(username: String, chatHistory: UserChatHistory) {
         if (username.isBlank()) {
@@ -91,13 +115,17 @@ class ChatHistoryManager(
             return
         }
         val file = chatHistoryFile(username)
-        try {
-            AtomicFiles.write(file, json.encodeToString(chatHistory.copy(user_name = username)))
+        checkNotInTransform(file, username)
+        val notify = try {
+            FileLocks.withLock(file) {
+                AtomicFiles.write(file, json.encodeToString(chatHistory.copy(user_name = username)))
+                !SyncHolds.isHeld(file)
+            }
         } catch (e: IOException) {
             AppLogger.e("[$TAG] Failed to save chat history of $username", e)
             return
         }
-        onFileWritten(file)
+        if (notify) onFileWritten(file)
     }
 
     /**
@@ -111,8 +139,11 @@ class ChatHistoryManager(
      * Load + [transform] + save the chat history of [username] as one step under the file lock,
      * so concurrent updates (UI, streaming, sync) never lose each other's changes.
      * [transform] must be quick and side-effect free (it runs with the lock held and must not
-     * call into other files' locks). Returning an unchanged (equal) history writes nothing.
-     * The sync hook is called after the lock is released.
+     * call into other files' locks, nor write this chat history itself: a nested
+     * update/save of the same file throws [IllegalStateException]).
+     * Returning an unchanged (equal) history writes nothing.
+     * The sync hook is called after the lock is released, and not at all while sync of the file
+     * is held (see [loadChatHistory] for unreadable files).
      *
      * @return the history as saved (or as loaded, when nothing changed)
      */
@@ -125,21 +156,35 @@ class ChatHistoryManager(
      */
     fun <R> modifyChatHistory(username: String, block: (UserChatHistory) -> Pair<UserChatHistory, R>): R {
         val file = chatHistoryFile(username)
-        var written = false
+        checkNotInTransform(file, username)
+        val lock = FileLocks.lockFor(file)
+        var notify = false
         val result = FileLocks.withLock(file) {
-            val current = readChatHistory(file, username)
-            val (updated, value) = block(current)
+            val read = readChatHistory(file, username)
+            val current = read.history
+            val active = activeTransforms.get()
+            active.add(lock)
+            val (updated, value) = try {
+                block(current)
+            } finally {
+                active.remove(lock)
+            }
             if (updated !== current && updated != current) {
-                try {
-                    AtomicFiles.write(file, json.encodeToString(updated.copy(user_name = username)))
-                    written = true
-                } catch (e: IOException) {
-                    AppLogger.e("[$TAG] Failed to save chat history of $username", e)
+                if (read.unreadable && !SyncHolds.isHeld(file)) {
+                    // Without a recorded hold the write would be synced as the account's new state
+                    AppLogger.e("[$TAG] Not saving a change to the unreadable chat history of $username (sync hold unavailable)", IOException(file.path))
+                } else {
+                    try {
+                        AtomicFiles.write(file, json.encodeToString(updated.copy(user_name = username)))
+                        notify = !SyncHolds.isHeld(file)
+                    } catch (e: IOException) {
+                        AppLogger.e("[$TAG] Failed to save chat history of $username", e)
+                    }
                 }
             }
             value
         }
-        if (written) onFileWritten(file)
+        if (notify) onFileWritten(file)
         return result
     }
 
@@ -244,11 +289,31 @@ class ChatHistoryManager(
             chatHistory.copy(chat_history = otherChats + updatedChat) to updatedChat
         }
 
+    /**
+     * Store the re-uploaded attachments of [updatedMessages] (a snapshot taken before the upload)
+     * on the messages with the same ids, both in `messages` and in the branching tree. Only the
+     * attachments change: messages added or edited since the snapshot are kept.
+     */
     fun updateChatWithNewAttachments(username: String, chatId: String, updatedMessages: List<Message>) {
+        val attachmentsById = updatedMessages.filter { it.id.isNotBlank() }.associate { it.id to it.attachments }
+        if (attachmentsById.isEmpty()) return
+        fun Message.withNewAttachments(): Message =
+            attachmentsById[id]?.takeIf { it != attachments }?.let { copy(attachments = it) } ?: this
         try {
             updateChatHistory(username) { chatHistory ->
                 chatHistory.copy(chat_history = chatHistory.chat_history.map { chat ->
-                    if (chat.chat_id == chatId) chat.copy(messages = updatedMessages) else chat
+                    if (chat.chat_id != chatId) return@map chat
+                    chat.copy(
+                        messages = chat.messages.map { it.withNewAttachments() },
+                        messageNodes = chat.messageNodes.map { node ->
+                            node.copy(variants = node.variants.map { variant ->
+                                variant.copy(
+                                    userMessage = variant.userMessage.withNewAttachments(),
+                                    responses = variant.responses.map { it.withNewAttachments() }
+                                )
+                            })
+                        }
+                    )
                 })
             }
         } catch (e: Exception) {

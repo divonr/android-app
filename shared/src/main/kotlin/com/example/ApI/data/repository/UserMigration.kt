@@ -3,6 +3,7 @@ package com.example.ApI.data.repository
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.util.AppLogger
 import com.example.ApI.util.AtomicFiles
+import com.example.ApI.util.SyncHolds
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -118,6 +119,7 @@ object UserMigration {
             val dst = File(internalDir, "$prefix$newUsername.json")
             try {
                 src.renameTo(dst)
+                SyncHolds.moveHold(src, dst)
                 renamedFiles.add(src.name)
                 AppLogger.d("[$TAG] Renamed ${src.name} → ${dst.name}")
             } catch (e: Exception) {

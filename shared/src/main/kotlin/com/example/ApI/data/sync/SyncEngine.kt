@@ -2,8 +2,11 @@ package com.example.ApI.data.sync
 
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.RemoteSyncSettings
+import com.example.ApI.data.sync.merge.SyncFileMerger
 import com.example.ApI.util.AppLogger
 import com.example.ApI.util.AtomicFiles
+import com.example.ApI.util.FileLocks
+import com.example.ApI.util.SyncHolds
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +31,8 @@ import java.io.File
  *   - We never compare local wall-clock against server timestamps.
  *   - `sync_state.json` is never uploaded.
  *   - `app_settings.json` uploads strip the `remoteSync` block; pulls MERGE it back from local.
+ *   - A file under a [SyncHolds] hold (rebuilt locally from an unreadable copy) is never
+ *     uploaded as is: pull merges it into the remote copy with an empty base, then releases it.
  *   - A file that exists locally but was never synced (baseServerVersion == 0) is
  *     resolved once, LAST-WRITE-WINS: local newer than the server version uploads
  *     (local wins); local older adopts remote.  Identical content (sha match)
@@ -212,6 +217,11 @@ class SyncEngine(
 
         val localFile = File(internalDir, filename)
         if (!localFile.exists()) return
+        if (SyncHolds.isHeld(localFile)) {
+            // Leave dirty=true: pull() reconciles the held file with the remote copy first
+            AppLogger.w("[$TAG] upload($filename): sync held (rebuilt from an unreadable copy), not uploading")
+            return
+        }
 
         val content = try {
             if (filename == "app_settings.json") {
@@ -287,8 +297,19 @@ class SyncEngine(
                 if (filename != "sync_state.json") {
                     val localFile = File(internalDir, filename)
                     if (localFile.exists()) {
+                        // Nothing remote to protect: a held file can upload as is
+                        SyncHolds.release(localFile)
                         syncState.markDirty(filename)
                     }
+                }
+                continue
+            }
+
+            if (SyncHolds.isHeld(File(internalDir, filename))) {
+                when (reconcileHeld(client, filename)) {
+                    HeldResult.CHANGED -> anythingChanged = true
+                    HeldResult.UNAUTHORIZED -> return
+                    HeldResult.SKIPPED -> {}
                 }
                 continue
             }
@@ -390,6 +411,51 @@ class SyncEngine(
                 scheduleUpload(filename)
             }
         }
+    }
+
+    // ── Held files ────────────────────────────────────────────────────────────
+
+    private enum class HeldResult { CHANGED, SKIPPED, UNAUTHORIZED }
+
+    /**
+     * The local copy of [filename] was rebuilt from an unreadable file ([SyncHolds]), so it is
+     * not the account's state: merge it into the remote copy with an EMPTY base (a union, so
+     * nothing counts as deleted locally), write the result, release the hold and upload the
+     * union if it differs from the remote copy.
+     */
+    private suspend fun reconcileHeld(client: RemoteStorageClient, filename: String): HeldResult {
+        val localFile = File(internalDir, filename)
+        val blob: RemoteBlob = try {
+            client.get(filename) ?: return HeldResult.SKIPPED
+        } catch (e: RemoteSyncException.Unauthorized) {
+            _needsReauth.value = true
+            AppLogger.e("[$TAG] pull(): GET $filename 401 Unauthorized — needsReauth set", e)
+            return HeldResult.UNAUTHORIZED
+        } catch (e: Exception) {
+            AppLogger.e("[$TAG] pull(): GET $filename failed", e)
+            return HeldResult.SKIPPED
+        }
+        val merged = FileLocks.withLock(localFile) {
+            val local = try {
+                if (localFile.exists()) localFile.readText() else ""
+            } catch (e: Exception) {
+                ""
+            }
+            val merged = if (local.isBlank()) blob.content
+            else SyncFileMerger.mergeFile(filename, null, local, blob.content, json)
+            try {
+                AtomicFiles.write(localFile, merged)
+                SyncHolds.release(localFile)
+                merged
+            } catch (e: Exception) {
+                AppLogger.e("[$TAG] pull(): could not write reconciled $filename", e)
+                null
+            }
+        } ?: return HeldResult.SKIPPED
+        syncState.markPulled(filename, blob.updated_at)
+        if (merged != blob.content) syncState.markDirty(filename)
+        AppLogger.i("[$TAG] Reconciled held $filename with the remote copy (server updated_at=${blob.updated_at})")
+        return HeldResult.CHANGED
     }
 
     // ── AppSettings merge ─────────────────────────────────────────────────────

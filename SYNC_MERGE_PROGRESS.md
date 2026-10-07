@@ -14,7 +14,12 @@ hash when done. Never redo an `[x]` step.
   review tests enabled + 2/3-device random sync loops; 71 tests green.
 
 ## T3 — Storage hardening (atomic writes, FileLocks, updateChatHistory, user_name, deterministic migration, pinned responses)
-- [x] implementation + tests — c3d439f: util AtomicFiles (temp+fsync+rename, ATOMIC_MOVE→REPLACE→renameTo fallbacks) for every synced-file writer (+ SyncEngine pull write); FileLocks registry; ChatHistoryManager.updateChatHistory/modifyChatHistory and every shared load-modify-save (CHM, GroupProjectManager, MBM single-transform ops, cleanupEmptyChats) on it; user_name normalized; corrupt file kept as .corrupt-<ts>; MBM migration = LegacyChatConverter; pinned targetVariantId; importSingleChat fresh id; 13 new tests, `:shared:test` (84) green, server/desktop/app compile.
+- [x] implementation + tests — c3d439f: util AtomicFiles (temp+fsync+rename, ATOMIC_MOVE→REPLACE→renameTo fallbacks) for every synced-file writer (+ SyncEngine pull write); FileLocks registry; ChatHistoryManager.updateChatHistory/modifyChatHistory and every shared load-modify-save (CHM, GroupProjectManager, MBM single-transform ops, cleanupEmptyChats) on it; user_name normalized; corrupt file kept as .corrupt-<ts>; MBM migration = LegacyChatConverter; pinned targetVariantId; importSingleChat fresh id; 13 new tests, `:shared:test` (84) green, server/desktop/app compile. Review fixes (see commit after 9c5ae2a): unreadable chat history → byte-exact .corrupt copy +
+  `SyncHolds` hold (no sync hook while held; SyncEngine never uploads a held file, pull merges it
+  into remote with an empty base, then releases; UserMigration moves the hold); attachment
+  re-upload rewrites attachments by message id in messages + tree (no stale snapshot); nested
+  same-file write inside a transform throws ISE; AtomicFiles retries/falls back on Windows
+  AccessDenied and LinkageError; review tests enabled + 5 new; `:shared:test` (98) green.
 
 ## T4 — SyncEngine rewrite + RemoteStorageClient CAS + SyncState + migration/sign-in fixes + multi-device tests
 - [ ] implementation + tests
@@ -40,10 +45,19 @@ hash when done. Never redo an `[x]` step.
     (also `DataRepository`/`DesktopRepository.updateChatHistory`, `saveChatHistory(username, h)`).
     Transform runs under the lock: keep it quick, no I/O, no other file locks (deadlock risk).
     Returning an equal history writes nothing and does not call the sync hook; the hook runs after
-    the lock is released. A change made while the file is unreadable overwrites it (copy kept).
+    the lock is released. A write to the same file from inside a transform throws
+    IllegalStateException (it would be overwritten by the outer result); reads are fine.
+  - Unreadable chat history: exact bytes kept as `.corrupt-<ts>`, empty history returned, and a
+    durable hold `<file>.sync-hold` recorded (`util.SyncHolds`). While held, changes are written
+    locally but the sync hook is NOT called. T4 contract: never upload a held file; on pull,
+    `SyncFileMerger.mergeFile(name, base = null, local, remote)` (union, nothing counts as
+    deleted), write under the file lock, `SyncHolds.release(file)`, upload if merged != remote;
+    no remote copy → release + upload. The current SyncEngine already does this (`reconcileHeld`).
   - `loadChatHistory(u)` always returns `user_name = u`, so the one-arg `saveChatHistory(h)` of a
     loaded history is safe; files are always written with `user_name` = the target username.
     The stale-`user_name` rewrite on migration (plan §4) was not needed for routing and is left to T4.
+  - `updateChatWithNewAttachments(u, chatId, snapshot)` now only replaces the attachments of
+    messages with matching ids (messages + tree); it no longer writes `messages` from the snapshot.
   - `addResponseToCurrentVariant(u, chatId, msg, targetVariantId = null)` on MBM/DataRepository/
     DesktopRepository; unknown target → logs + current path's last variant. Callers still pass
     nothing (T5/T6 must pin).

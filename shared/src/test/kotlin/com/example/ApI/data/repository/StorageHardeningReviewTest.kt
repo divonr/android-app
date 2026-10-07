@@ -1,5 +1,6 @@
 package com.example.ApI.data.repository
 
+import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.Chat
 import com.example.ApI.data.model.Message
 import com.example.ApI.data.model.MessageNode
@@ -8,8 +9,8 @@ import com.example.ApI.data.model.UserChatHistory
 import com.example.ApI.util.AtomicFiles
 import com.example.ApI.util.FileLocks
 import com.example.ApI.util.JsonConfig
+import com.example.ApI.util.SyncHolds
 import kotlinx.serialization.encodeToString
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -21,7 +22,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /** Adversarial review tests for T3 storage hardening. */
 class StorageHardeningReviewTest {
@@ -34,7 +37,6 @@ class StorageHardeningReviewTest {
     // ── corrupt file preservation ─────────────────────────────────────────────
 
     @Test
-    @Disabled("T3 review: preserveCorruptFile re-encodes the decoded text, invalid UTF-8 bytes are replaced")
     fun `corrupt file with invalid UTF-8 is preserved byte for byte`() {
         val file = File(dir, "chat_history_u.json")
         // A torn/garbled file: valid JSON prefix followed by bytes that are not UTF-8
@@ -46,7 +48,6 @@ class StorageHardeningReviewTest {
     }
 
     @Test
-    @Disabled("T3 review: updates to an unreadable chat history are written and synced (T4 must block this)")
     fun `a change to an unreadable file is not handed to sync as the new state`() {
         // Corrupt file with 3 chats' worth of data: the next update writes a 1-chat history and
         // calls the sync hook, so the upload (LWW today, a 3-way "deleted" diff after T4) spreads
@@ -57,12 +58,39 @@ class StorageHardeningReviewTest {
         val hooked = mutableListOf<String>()
         val m = ChatHistoryManager(dir, json) { f -> hooked.add(f.readText()) }
         m.createNewChat("u", "new")
-        assertTrue(hooked.isEmpty(), "sync hook fired with a history built from an unreadable file: " +
+        if (hooked.isNotEmpty()) fail("sync hook fired with a history built from an unreadable file: " +
             json.decodeFromString<UserChatHistory>(hooked.single()).chat_history.map { it.preview_name })
+        // The change itself is kept locally, and the file is held for the sync engine
+        assertEquals(listOf("new"), m.loadChatHistory("u").chat_history.map { it.preview_name })
+        assertTrue(SyncHolds.isHeld(file))
+
+        // Later writes (the file is readable again) stay off the sync hook while the hold lasts
+        m.createNewChat("u", "second")
+        m.saveChatHistory("u", m.loadChatHistory("u"))
+        MessageBranchingManager(m).addUserMessageAsNewNode("u", m.loadChatHistory("u").chat_history.first().chat_id,
+            Message(id = "q", role = "user", text = "q"))
+        assertTrue(hooked.isEmpty(), "sync hook fired while the file is held")
+
+        // Once the sync engine released the hold, writes sync again
+        SyncHolds.release(file)
+        m.createNewChat("u", "third")
+        assertEquals(1, hooked.size)
     }
 
     @Test
-    @Disabled("T3 review: updateChatWithNewAttachments replaces messages with a stale caller snapshot")
+    fun `a corrupt file detected by a plain load holds sync of snapshot saves`() {
+        val file = File(dir, "chat_history_u.json")
+        file.writeText("{\"user_name\":\"u\",\"chat_history\":[")
+        val hooked = mutableListOf<String>()
+        val m = ChatHistoryManager(dir, json) { f -> hooked.add(f.name) }
+        // UI-style: load (empty), edit the snapshot, save it back in full
+        val snapshot = m.loadChatHistory("u")
+        m.saveChatHistory("u", snapshot.copy(chat_history = listOf(Chat(chat_id = "x", preview_name = "x", messages = emptyList()))))
+        assertTrue(hooked.isEmpty(), "snapshot save of a history loaded from an unreadable file was synced")
+        assertTrue(SyncHolds.isHeld(file))
+    }
+
+    @Test
     fun `attachment rewrite does not drop messages saved after the snapshot`() {
         val m = ChatHistoryManager(dir, json)
         val mbm = MessageBranchingManager(m)
@@ -76,20 +104,71 @@ class StorageHardeningReviewTest {
         assertEquals(listOf("q", "a"), chat.messages.map { it.id }, "messages lost by the snapshot rewrite")
     }
 
+    @Test
+    fun `attachment rewrite updates the tree as well as messages`() {
+        val m = ChatHistoryManager(dir, json)
+        val mbm = MessageBranchingManager(m)
+        val chatId = m.createNewChat("u", "c").chat_id
+        val old = Attachment(local_file_path = "/f", file_name = "f", mime_type = "text/plain", file_OPENAI_id = "old-id")
+        val snapshot = mbm.addUserMessageAsNewNode("u", chatId, Message(id = "q", role = "user", text = "q", attachments = listOf(old)))!!.messages
+        mbm.addResponseToCurrentVariant("u", chatId, Message(id = "a", role = "assistant", text = "a"))
+        val reuploaded = snapshot.map { it.copy(attachments = it.attachments.map { a -> a.copy(file_OPENAI_id = "new-id") }) }
+        m.updateChatWithNewAttachments("u", chatId, reuploaded)
+        val chat = m.loadChatHistory("u").chat_history.single()
+        assertEquals(listOf("new-id"), chat.messages.single { it.id == "q" }.attachments.map { it.file_OPENAI_id })
+        assertEquals(listOf("new-id"), chat.messageNodes.single().variants.single().userMessage.attachments.map { it.file_OPENAI_id })
+        // The next tree operation rebuilds messages from the tree and keeps the new ids
+        val after = mbm.addResponseToCurrentVariant("u", chatId, Message(id = "b", role = "assistant", text = "b"))!!
+        assertEquals(listOf("q", "a", "b"), after.messages.map { it.id })
+        assertEquals(listOf("new-id"), after.messages.first().attachments.map { it.file_OPENAI_id })
+    }
+
+    @Test
+    fun `user migration carries the sync hold along with the renamed chat history`() {
+        File(dir, "app_settings.json").writeText(json.encodeToString(
+            com.example.ApI.data.model.AppSettings(current_user = "default", selected_provider = "openai", selected_model = "m")))
+        val old = File(dir, "chat_history_default.json")
+        old.writeText("{garbage")
+        ChatHistoryManager(dir, json).loadChatHistory("default")
+        assertTrue(SyncHolds.isHeld(old))
+        UserMigration.migrateToAccount(dir, json, "acct")
+        assertTrue(SyncHolds.isHeld(File(dir, "chat_history_acct.json")))
+        assertTrue(!SyncHolds.isHeld(old))
+    }
+
     // ── nested updates (reentrancy) ───────────────────────────────────────────
 
     @Test
-    @Disabled("T3 review: nested modifyChatHistory on the same file is overwritten by the outer write")
-    fun `nested update inside a transform is not lost`() {
+    fun `nested update inside a transform fails loudly instead of being lost`() {
         val m = ChatHistoryManager(dir, json)
+        m.createNewChat("u", "before")
+        // A locked operation calling another locked write on the same file (reentrant lock): the
+        // outer result was computed before the inner write, so it would silently overwrite it
+        assertFailsWith<IllegalStateException> {
+            m.updateChatHistory("u") { outer ->
+                m.createNewChat("u", "inner")
+                outer.copy(chat_history = outer.chat_history + Chat(chat_id = "outer", preview_name = "outer", messages = emptyList()))
+            }
+        }
+        assertFailsWith<IllegalStateException> {
+            m.updateChatHistory("u") { outer -> m.saveChatHistory("u", outer); outer }
+        }
+        assertEquals(listOf("before"), m.loadChatHistory("u").chat_history.map { it.preview_name })
+
+        // Reads inside a transform, other users' files and an outer FileLocks section are fine
         m.updateChatHistory("u") { outer ->
-            // A locked operation calling another locked operation on the same file (reentrant)
-            m.createNewChat("u", "inner")
+            m.loadChatHistory("u")
+            m.createNewChat("other", "o")
             outer.copy(chat_history = outer.chat_history + Chat(chat_id = "outer", preview_name = "outer", messages = emptyList()))
         }
-        val names = m.loadChatHistory("u").chat_history.map { it.preview_name }
-        assertTrue("inner" in names, "inner update lost: $names")
-        assertTrue("outer" in names, "outer update lost: $names")
+        FileLocks.withLock(m.chatHistoryFile("u")) { m.createNewChat("u", "locked") }
+        assertEquals(listOf("before", "outer", "locked"), m.loadChatHistory("u").chat_history.map { it.preview_name })
+        assertEquals(listOf("o"), m.loadChatHistory("other").chat_history.map { it.preview_name })
+
+        // The guard is cleared after a failed transform
+        runCatching { m.updateChatHistory("u") { error("boom") } }
+        m.createNewChat("u", "after")
+        assertEquals("after", m.loadChatHistory("u").chat_history.last().preview_name)
     }
 
     // ── sync hook vs. lock ────────────────────────────────────────────────────

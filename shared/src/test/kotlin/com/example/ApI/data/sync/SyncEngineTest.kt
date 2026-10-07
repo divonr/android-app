@@ -1,6 +1,10 @@
 package com.example.ApI.data.sync
 
 import com.example.ApI.data.model.AppSettings
+import com.example.ApI.data.model.Chat
+import com.example.ApI.data.model.UserChatHistory
+import com.example.ApI.data.repository.ChatHistoryManager
+import com.example.ApI.util.SyncHolds
 import com.example.ApI.data.model.RemoteSyncSettings
 import com.example.ApI.util.JsonConfig
 import com.sun.net.httpserver.HttpExchange
@@ -18,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -250,5 +255,69 @@ class SyncEngineTest {
             SyncState(tempDir, json).apply { load() }.baseServerVersion("api_keys_u.json"),
             "base should advance to the new server version"
         )
+    }
+
+    // ── Held files: local chat history rebuilt from an unreadable copy ─────────
+
+    private fun chats(vararg names: String) =
+        UserChatHistory("u", names.map { Chat(chat_id = it, preview_name = it, messages = emptyList()) })
+
+    @Test
+    fun `a held chat history is never uploaded as is - pull merges it into the remote copy`() = runBlocking {
+        val remote = json.encodeToString(chats("c0", "c1", "c2"))
+        fake.seed("chat_history_u.json", remote, updatedAt = 10_000L)
+        // Previously synced, with an upload still pending, then the local file got corrupted
+        SyncState(tempDir, json).apply { load(); markPulled("chat_history_u.json", 10_000L); markDirty("chat_history_u.json"); save() }
+        val file = File(tempDir, "chat_history_u.json")
+        file.writeText(remote.dropLast(5))
+
+        val engine = engine()
+        val m = ChatHistoryManager(tempDir, json, onFileWritten = engine::onFileWritten)
+        m.createNewChat("u", "new")
+        assertTrue(SyncHolds.isHeld(file))
+        engine.onFileWritten(file) // even a direct trigger must not upload the held file
+        assertNull(fake.awaitPut("chat_history_u.json", timeoutMs = 1500), "held file was uploaded")
+
+        engine.pull()
+
+        val local = json.decodeFromString(UserChatHistory.serializer(), file.readText())
+        assertEquals(setOf("c0", "c1", "c2", "new"), local.chat_history.map { it.preview_name }.toSet(),
+            "reconcile must be a union: remote chats are not deleted by the rebuilt local copy")
+        assertFalse(SyncHolds.isHeld(file), "hold released after reconciling")
+        val uploaded = fake.awaitPut("chat_history_u.json")
+        assertEquals(setOf("c0", "c1", "c2", "new"),
+            json.decodeFromString(UserChatHistory.serializer(), uploaded!!).chat_history.map { it.preview_name }.toSet())
+        assertTrue(tempDir.listFiles()!!.any { it.name.startsWith("chat_history_u.json.corrupt-") })
+    }
+
+    @Test
+    fun `a held file that is still unreadable adopts the remote copy`() = runBlocking {
+        val remote = json.encodeToString(chats("c0"))
+        fake.seed("chat_history_u.json", remote, updatedAt = 10_000L)
+        val file = File(tempDir, "chat_history_u.json")
+        file.writeText("{garbage")
+        ChatHistoryManager(tempDir, json).loadChatHistory("u")
+        assertTrue(SyncHolds.isHeld(file))
+
+        engine().pull()
+
+        assertEquals(remote, file.readText())
+        assertFalse(SyncHolds.isHeld(file))
+        assertTrue(fake.putBodies.isEmpty(), "adopting the remote copy must not upload")
+    }
+
+    @Test
+    fun `a held file with no remote copy is released and uploaded`() = runBlocking {
+        val file = File(tempDir, "chat_history_u.json")
+        file.writeText("{garbage")
+        val m = ChatHistoryManager(tempDir, json)
+        m.createNewChat("u", "only")
+        assertTrue(SyncHolds.isHeld(file))
+
+        engine().pull()
+
+        assertFalse(SyncHolds.isHeld(file))
+        val uploaded = fake.awaitPut("chat_history_u.json")
+        assertEquals(listOf("only"), json.decodeFromString(UserChatHistory.serializer(), uploaded!!).chat_history.map { it.preview_name })
     }
 }

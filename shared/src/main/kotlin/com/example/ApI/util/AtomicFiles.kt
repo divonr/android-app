@@ -14,6 +14,8 @@ import java.io.IOException
 object AtomicFiles {
 
     private const val TAG = "AtomicFiles"
+    private const val MOVE_RETRIES = 4
+    private const val MOVE_RETRY_DELAY_MS = 25L
 
     /** java.nio.file only exists on Android API 26+ (always on the JVM). */
     private val nioAvailable: Boolean = try {
@@ -50,8 +52,11 @@ object AtomicFiles {
 
     private fun moveIntoPlace(tmp: File, target: File) {
         if (nioAvailable) {
-            Nio.move(tmp, target)
-            return
+            try {
+                if (Nio.moveWithRetry(tmp, target)) return
+            } catch (e: LinkageError) {
+                // java.nio.file present but incomplete (e.g. File.toPath missing before API 26)
+            }
         }
         // Old Android: rename(2) replaces the target atomically on POSIX file systems
         if (tmp.renameTo(target)) return
@@ -75,11 +80,28 @@ object AtomicFiles {
             }
         }
 
+        /**
+         * [move], retried briefly when the file system refuses (Windows denies replacing a file
+         * another reader holds open). False: still refused, the caller falls back to a copy.
+         */
+        fun moveWithRetry(tmp: File, target: File): Boolean {
+            for (attempt in 0..MOVE_RETRIES) {
+                if (attempt > 0) Thread.sleep(MOVE_RETRY_DELAY_MS * attempt)
+                try {
+                    move(tmp, target)
+                    return true
+                } catch (e: java.nio.file.FileSystemException) {
+                    AppLogger.w("[$TAG] replacing ${target.name} failed (${e.javaClass.simpleName}), attempt ${attempt + 1}")
+                }
+            }
+            return false
+        }
+
         /** Best-effort: persist the rename itself (not supported on every platform, e.g. Windows). */
         fun syncDirectory(dir: File) {
             try {
                 java.nio.channels.FileChannel.open(dir.toPath(), java.nio.file.StandardOpenOption.READ).use { it.force(true) }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 // Ignored: the content itself is already synced
             }
         }
