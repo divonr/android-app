@@ -316,7 +316,8 @@ const ChatPage: React.FC = () => {
   const handleToolToggle = useCallback((toolId: string, enabled: boolean) => {
     setExcludedToolIds((prev) => {
       const next = enabled ? prev.filter((x) => x !== toolId) : [...prev.filter((x) => x !== toolId), toolId]
-      settingsApi.update({ excludedToolIds: next }).catch(() => {})
+      // A delta, not the whole list (another device may have changed it since it was loaded)
+      settingsApi.update(enabled ? { excludedToolIdsRemove: [toolId] } : { excludedToolIdsAdd: [toolId] }).catch(() => {})
       return next
     })
   }, [])
@@ -599,7 +600,9 @@ const ChatPage: React.FC = () => {
       const next = already
         ? prev.filter((s) => !(s.provider === prov && s.modelName === modelName))
         : [...prev, { provider: prov, modelName }]
-      settingsApi.update({ starredModels: next }).catch(() => {})
+      // A delta, not the whole list (another device may have starred models since it was loaded)
+      const model = { provider: prov, modelName }
+      settingsApi.update(already ? { starredModelsRemove: [model] } : { starredModelsAdd: [model] }).catch(() => {})
       return next
     })
   }, [])

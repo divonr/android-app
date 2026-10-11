@@ -102,10 +102,12 @@ class MessageBranchingManager(
         val nodePositionInPath = chat.currentVariantPath.indexOfFirst { variantId ->
             node.variants.any { it.variantId == variantId }
         }
+        // A node off the current path (e.g. edited from a stale web tab) gets its own ancestors,
+        // so the path stays a root-to-leaf chain
         val newPath = if (nodePositionInPath >= 0) {
             chat.currentVariantPath.take(nodePositionInPath) + newVariantId
         } else {
-            chat.currentVariantPath + newVariantId
+            (ancestorPath(chat, nodeId) ?: chat.currentVariantPath) + newVariantId
         }
 
         // Rebuild messages list for the new path
@@ -415,10 +417,13 @@ class MessageBranchingManager(
             node.variants.any { it.variantId == variantId }
         }
 
-        if (pathIndex == -1) return@modifyBranchingChat null to null
-
-        // Build new path: keep everything before this node, then add the new variant
-        val newPath = chat.currentVariantPath.take(pathIndex).toMutableList()
+        // Build new path: keep everything before this node (a node off the current path: its
+        // ancestors), then add the new variant
+        val newPath = if (pathIndex >= 0) {
+            chat.currentVariantPath.take(pathIndex).toMutableList()
+        } else {
+            ancestorPath(chat, nodeId)?.toMutableList() ?: return@modifyBranchingChat null to null
+        }
         newPath.add(variant.variantId)
 
         // Follow the chain of child nodes from this variant
@@ -457,6 +462,31 @@ class MessageBranchingManager(
         )
 
         updatedChat to updatedChat
+    }
+
+    /**
+     * The variant ids from the root down to the variant whose child is [nodeId] (empty for the
+     * root node), preferring variants on the current path. Null when [nodeId] is not in the tree
+     * or not reachable from the root.
+     */
+    private fun ancestorPath(chat: Chat, nodeId: String): List<String>? {
+        val onPath = chat.currentVariantPath.toSet()
+        val result = ArrayDeque<String>()
+        val seen = mutableSetOf<String>()
+        var current = chat.messageNodes.find { it.nodeId == nodeId } ?: return null
+        while (seen.add(current.nodeId)) {
+            val parents = chat.messageNodes.flatMap { node ->
+                node.variants.filter { it.childNodeId == current.nodeId }.map { node to it }
+            }
+            if (parents.isEmpty()) {
+                val isRoot = current.parentNodeId == null || chat.messageNodes.none { it.nodeId == current.parentNodeId }
+                return if (isRoot) result.toList() else null
+            }
+            val (parentNode, parentVariant) = parents.firstOrNull { it.second.variantId in onPath } ?: parents.first()
+            result.addFirst(parentVariant.variantId)
+            current = parentNode
+        }
+        return null
     }
 
     /**
@@ -710,7 +740,10 @@ class MessageBranchingManager(
         chatId: String,
         messageId: String
     ): DeleteMessageResult = chatHistoryManager.modifyChatHistory(username) { chatHistory ->
+        // A legacy (flat) chat is migrated first (deterministically, like every device does), so
+        // the delete is a tree edit with the same rules as in a tree chat (a merge keeps it)
         val chat = chatHistory.chat_history.find { it.chat_id == chatId }
+            ?.let { original -> migrateChatToBranchingStructure(original).takeIf { it.hasBranchingStructure } ?: original }
             ?: return@modifyChatHistory chatHistory to DeleteMessageResult.Error("Chat not found")
 
         // If no branching structure, use simple deletion

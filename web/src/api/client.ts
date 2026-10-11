@@ -20,7 +20,9 @@ import type {
   ProviderModel_Flat,
   ResendMessageRequest,
   SearchResult,
+  StarredModel,
   SyncStatus,
+  TitleGenerationSettings,
   TitleResponse,
   UserChatHistory,
 } from './types'
@@ -372,12 +374,29 @@ export const apiKeys = {
 // Settings
 // ---------------------------------------------------------------------------
 
+/**
+ * A PATCH /api/settings body. The synced lists (starred models, enabled tools, excluded tools)
+ * are changed with `<list>Add` / `<list>Remove` deltas, which the server applies to the list as
+ * it is now: a whole list built from a copy loaded earlier would drop what another device
+ * added since (and the sync merge would then delete it everywhere). `titleGenerationSettings`
+ * may hold only the changed fields.
+ */
+export type SettingsPatch = Partial<Omit<AppSettings, 'titleGenerationSettings'>> & {
+  titleGenerationSettings?: Partial<TitleGenerationSettings>
+  starredModelsAdd?: StarredModel[]
+  starredModelsRemove?: StarredModel[]
+  enabledToolsAdd?: string[]
+  enabledToolsRemove?: string[]
+  excludedToolIdsAdd?: string[]
+  excludedToolIdsRemove?: string[]
+}
+
 export const settings = {
   /** GET /api/settings */
   get: () => request<AppSettings>('/api/settings'),
 
-  /** PATCH /api/settings */
-  update: (params: Partial<AppSettings>) =>
+  /** PATCH /api/settings (only the given fields; list deltas apply to the server's current list) */
+  update: (params: SettingsPatch) =>
     request<AppSettings>('/api/settings', {
       method: 'PATCH',
       body: JSON.stringify(params),

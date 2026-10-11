@@ -392,8 +392,13 @@ const SettingsPage: React.FC = () => {
 
   const updateTitleGen = (patch: Partial<TitleGenerationSettings>) => {
     if (!appSettings) return
-    const updated = { ...appSettings.titleGenerationSettings, ...patch }
-    autoSave({ titleGenerationSettings: updated })
+    setAppSettings((prev) => prev
+      ? { ...prev, titleGenerationSettings: { ...prev.titleGenerationSettings, ...patch } }
+      : prev)
+    // Only the changed fields: the others may have been changed by another device since load
+    settingsApi.update({ titleGenerationSettings: patch }).catch((err) => {
+      setError(err instanceof Error ? err.message : 'Save failed')
+    })
   }
 
   // ── Multi-message mode ────────────────────────────────────────────────────

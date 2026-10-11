@@ -260,12 +260,11 @@ const IntegrationsPage: React.FC = () => {
 
   const toggleTool = async (toolId: string, enabled: boolean) => {
     if (!appSettings) return
-    const current = appSettings.enabledTools ?? []
-    const next = enabled
-      ? [...current, toolId]
-      : current.filter((id) => id !== toolId)
     try {
-      const updated = await settingsApi.update({ enabledTools: next })
+      // A delta, not the whole list (another device may have changed it since it was loaded)
+      const updated = await settingsApi.update(
+        enabled ? { enabledToolsAdd: [toolId] } : { enabledToolsRemove: [toolId] },
+      )
       setAppSettings(updated)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Update failed')

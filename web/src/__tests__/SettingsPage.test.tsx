@@ -184,11 +184,10 @@ describe('SettingsPage', () => {
     })
 
     await waitFor(() => {
-      expect(clientModule.settings.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          titleGenerationSettings: expect.objectContaining({ enabled: false }),
-        }),
-      )
+      // Only the changed field: the others may have been changed by another device since load
+      expect(clientModule.settings.update).toHaveBeenCalledWith({
+        titleGenerationSettings: { enabled: false },
+      })
     })
   })
 

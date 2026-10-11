@@ -93,23 +93,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { history, currentChat } = get()
     const tasks: Promise<void>[] = []
     if (history) {
-      tasks.push(
+      const fetchList = (since: UserChatHistory | null, retry: boolean): Promise<void> =>
         chatsApi.list().then(
-          (fresh) => set({ history: fresh }),
+          (fresh) => {
+            if (get().history === since) set({ history: fresh })
+            // The list changed while the request ran (e.g. a stream's reload of the open chat):
+            // read it again rather than overwrite that newer entry with the older answer
+            else if (retry) return fetchList(get().history, false)
+          },
           () => { /* keep the list; the next change retries */ },
-        ),
-      )
+        )
+      tasks.push(fetchList(history, true))
     }
     if (currentChat) {
       const chatId = currentChat.chat_id
+      // Apply the answer only if nothing touched the open chat while the request ran: a stream
+      // that started meanwhile (or any reload of the chat) holds data newer than this read
+      const untouched = () => get().currentChat === currentChat && !get().streaming
       tasks.push(
         chatsApi.get(chatId).then(
           (fresh) => {
-            // Only if the user is still on that chat
-            if (get().currentChat?.chat_id === chatId) set({ currentChat: fresh })
+            if (untouched()) set({ currentChat: fresh })
           },
           (err) => {
-            if (isNotFound(err) && get().currentChat?.chat_id === chatId) {
+            if (isNotFound(err) && untouched()) {
               set({ currentChat: null, error: CHAT_NOT_FOUND })
             }
           },

@@ -102,6 +102,22 @@ class LocalStorageManager(
         }
     }
 
+    /**
+     * Replace key [keyId] with [transform] of it, as one load-modify-save under the file lock
+     * (a sync merge or another write in between is not overwritten). Null when there is no such key.
+     */
+    fun updateApiKey(username: String, keyId: String, transform: (ApiKey) -> ApiKey): ApiKey? {
+        var updated: ApiKey? = null
+        locked("api_keys_$username.json") {
+            val currentKeys = loadApiKeys(username)
+            val existing = currentKeys.find { it.id == keyId } ?: return null
+            val changed = transform(existing)
+            updated = changed
+            if (changed != existing) saveApiKeys(username, currentKeys.map { if (it.id == keyId) changed else it })
+        }
+        return updated
+    }
+
     fun deleteApiKey(username: String, keyId: String) {
         locked("api_keys_$username.json") {
             val currentKeys = loadApiKeys(username)

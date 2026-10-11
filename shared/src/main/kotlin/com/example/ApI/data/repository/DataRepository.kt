@@ -255,6 +255,7 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     fun saveApiKeys(username: String, apiKeys: List<ApiKey>) = localStorageManager.saveApiKeys(username, apiKeys)
     fun addApiKey(username: String, apiKey: ApiKey) = localStorageManager.addApiKey(username, apiKey)
     fun toggleApiKeyStatus(username: String, keyId: String) = localStorageManager.toggleApiKeyStatus(username, keyId)
+    fun updateApiKey(username: String, keyId: String, transform: (ApiKey) -> ApiKey): ApiKey? = localStorageManager.updateApiKey(username, keyId, transform)
     fun deleteApiKey(username: String, keyId: String) = localStorageManager.deleteApiKey(username, keyId)
     fun reorderApiKeys(username: String, fromIndex: Int, toIndex: Int) = localStorageManager.reorderApiKeys(username, fromIndex, toIndex)
     fun loadAppSettings(): AppSettings = localStorageManager.loadAppSettings()

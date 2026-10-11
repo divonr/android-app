@@ -369,6 +369,12 @@ fun Route.sendRoute() {
         } else {
             repo.loadChatHistory(username).chat_history.find { it.chat_id == body.chatId }
         }
+        if (savedChat == null) {
+            // Deleted (e.g. on another device) before the send: nothing to save the reply to —
+            // say so instead of streaming a reply that would be dropped
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+            return@post
+        }
         // Pin the replies to the saved user message (multi-message mode: the chat's last message)
         val anchor = anchorAfter(savedChat, userMessage?.takeIf { body.persistUserMessage }?.id)
 

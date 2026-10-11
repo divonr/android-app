@@ -29,10 +29,10 @@ const chat = (id: string, texts: string[]): Chat => ({
 }) as unknown as Chat
 
 describe('refreshFromSync vs a stream that starts while it is in flight', () => {
-  // T6 bug: refreshFromSync applies its response unconditionally (only the chat id is checked),
-  // so a snapshot read before the stream's saves (user message / tool messages reloaded by
-  // ChatPage on `messages_added`) overwrites the newer chat mid-stream.
-  it.skip('does not overwrite the open chat with a snapshot older than the stream', async () => {
+  // Regression (T6 review): refreshFromSync used to apply its response unconditionally (only the
+  // chat id was checked), so a snapshot read before the stream's saves (user message / tool
+  // messages reloaded by ChatPage on `messages_added`) overwrote the newer chat mid-stream.
+  it('does not overwrite the open chat with a snapshot older than the stream', async () => {
     let resolveGet: (c: Chat) => void = () => {}
     vi.mocked(clientModule.chats.get).mockImplementation(
       () => new Promise<Chat>((resolve) => { resolveGet = resolve }),
@@ -56,5 +56,36 @@ describe('refreshFromSync vs a stream that starts while it is in flight', () => 
 
     expect(useChatStore.getState().currentChat?.messages.map((m) => m.text))
       .toEqual(['q1', 'a1', 'q2', 'tool output'])
+  })
+
+  it('re-reads the chat list when it changed while the refresh ran, instead of applying the older answer', async () => {
+    const list = (texts: string[][]) => ({
+      user_name: 'u',
+      chat_history: texts.map((t, i) => chat(`c${i}`, t)),
+    }) as unknown as import('../api/types').UserChatHistory
+    let calls = 0
+    let resolveFirst: (h: ReturnType<typeof list>) => void = () => {}
+    vi.mocked(clientModule.chats.list).mockImplementation(() => {
+      calls++
+      if (calls === 1) return new Promise((resolve) => { resolveFirst = resolve })
+      return Promise.resolve(list([['q1', 'a1', 'q2', 'a2'], ['pulled']]))
+    })
+    useChatStore.setState({
+      history: list([['q1', 'a1']]),
+      currentChat: null,
+      loading: false,
+      error: null,
+      streaming: false,
+    })
+
+    const refresh = useChatStore.getState().refreshFromSync()
+    // The open chat's entry is updated (stream reload) while the list request runs
+    useChatStore.setState({ history: list([['q1', 'a1', 'q2', 'a2']]) })
+    resolveFirst(list([['q1', 'a1'], ['pulled']]))
+    await refresh
+
+    expect(calls).toBe(2)
+    expect(useChatStore.getState().history?.chat_history.map((c) => c.messages.map((m) => m.text)))
+      .toEqual([['q1', 'a1', 'q2', 'a2'], ['pulled']])
   })
 })

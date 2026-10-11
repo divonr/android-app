@@ -632,19 +632,18 @@ fun Route.mutationRoutes() {
         val ctx = call.userContext()
         val repo = ctx.repository
         val username = ctx.username
-        val keys = repo.loadApiKeys(username)
-        val existing = keys.find { it.id == keyId }
-        if (existing == null) {
+        // One locked load-modify-save (a sync merge or another tab's write in between is kept)
+        val updated = repo.updateApiKey(username, keyId) { existing ->
+            existing.copy(
+                key = body.key ?: existing.key,
+                isActive = body.isActive ?: existing.isActive,
+                customName = if (body.customName != null) body.customName else existing.customName
+            )
+        }
+        if (updated == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Key not found"))
             return@patch
         }
-        val updated = existing.copy(
-            key = body.key ?: existing.key,
-            isActive = body.isActive ?: existing.isActive,
-            customName = if (body.customName != null) body.customName else existing.customName
-        )
-        val updatedKeys = keys.map { if (it.id == keyId) updated else it }
-        repo.saveApiKeys(username, updatedKeys)
         call.respond(HttpStatusCode.OK, updated.masked())
     }
 
@@ -1025,8 +1024,32 @@ private suspend fun ApplicationCall.respondBranchDelete(ctx: UserContext, chatId
 /**
  * [current] with the fields of a PATCH /api/settings body applied.  `remoteSync` is
  * server-owned: only `remoteSync.syncApiKeys` is taken from the body.
+ *
+ * The synced lists also take deltas, applied to the list as it is now (under the settings
+ * lock): `starredModelsAdd`/`starredModelsRemove`, `enabledToolsAdd`/`enabledToolsRemove`,
+ * `excludedToolIdsAdd`/`excludedToolIdsRemove`.  The web sends these instead of a whole list
+ * built from the copy it loaded earlier, which would drop entries another device added since
+ * (the sync merge would then delete them everywhere).
  */
-internal fun applySettingsPatch(current: AppSettings, patch: JsonObject): AppSettings = current.copy(
+internal fun applySettingsPatch(current: AppSettings, patch: JsonObject): AppSettings {
+    val replaced = replaceSettingsFields(current, patch)
+    return replaced.copy(
+        starredModels = applyListDelta(replaced.starredModels, patch, "starredModels"),
+        enabledTools = applyListDelta(replaced.enabledTools, patch, "enabledTools"),
+        excludedToolIds = applyListDelta(replaced.excludedToolIds, patch, "excludedToolIds")
+    )
+}
+
+/** [list] with `<name>Remove` entries removed and missing `<name>Add` entries appended. */
+private inline fun <reified T> applyListDelta(list: List<T>, patch: JsonObject, name: String): List<T> {
+    val remove = patch["${name}Remove"]?.let { lenientJson.decodeFromJsonElement<List<T>>(it) }.orEmpty().toSet()
+    val add = patch["${name}Add"]?.let { lenientJson.decodeFromJsonElement<List<T>>(it) }.orEmpty()
+    if (remove.isEmpty() && add.isEmpty()) return list
+    val kept = list.filter { it !in remove }
+    return kept + add.filter { it !in kept }.distinct()
+}
+
+private fun replaceSettingsFields(current: AppSettings, patch: JsonObject): AppSettings = current.copy(
     selected_provider = patch["selected_provider"]?.jsonPrimitive?.contentOrNull ?: current.selected_provider,
     selected_model = patch["selected_model"]?.jsonPrimitive?.contentOrNull ?: current.selected_model,
     temperature = patch["temperature"]?.jsonPrimitive?.doubleOrNull ?: current.temperature,

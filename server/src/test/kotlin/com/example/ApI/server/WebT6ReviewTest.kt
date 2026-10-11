@@ -14,8 +14,8 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.testing.*
+import kotlinx.coroutines.async
 import kotlinx.serialization.json.*
-import kotlin.test.Ignore
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
@@ -24,7 +24,8 @@ import kotlin.test.assertTrue
 
 /**
  * T6 adversarial review: web tree edits on branches that are not the chat's current path,
- * legacy (flat) chats, and the bounded login wait.  Failing cases are @Disabled with the bug.
+ * legacy (flat) chats, the bounded login wait, stale settings lists, unlocked key edits and
+ * sends to a deleted chat.
  */
 class WebT6ReviewTest {
 
@@ -86,8 +87,7 @@ class WebT6ReviewTest {
         }
     }
 
-    // IGNORED: "T6 bug: createBranch on a node off the current path appends the new variant to the current path (MessageBranchingManager.createBranch `currentVariantPath + newVariantId`); the resend route then sends the wrong branch's context to the model and leaves a path that is not a chain"
-    @Ignore
+    // Regression (T6 review): createBranch on a node off the current path appends the new variant to the current path (MessageBranchingManager.createBranch `currentVariantPath + newVariantId`); the resend route then sends the wrong branch's context to the model and leaves a path that is not a chain
     @Test
     fun `regenerate of an answer on a branch that is not current answers in that branch's context`() = testApplication {
         val (storage, repo, chatId) = seeded()
@@ -110,8 +110,7 @@ class WebT6ReviewTest {
         assertEquals(listOf("Question 1", "Answer 1", "Question 2", "Answer 2 again"), after.messages.map { it.text })
     }
 
-    // IGNORED: "T6 bug: POST /branch (web edit) on a node off the current path appends the new variant to the current path (createBranch), so the edit's resend sends the other branch's context and the path is not a chain"
-    @Ignore
+    // Regression (T6 review): POST /branch (web edit) on a node off the current path appends the new variant to the current path (createBranch), so the edit's resend sends the other branch's context and the path is not a chain
     @Test
     fun `edit of a message on a branch that is not current answers in that branch's context`() = testApplication {
         val (storage, repo, chatId) = seeded()
@@ -137,8 +136,7 @@ class WebT6ReviewTest {
         assertPathIsChain(repo.chat(chatId))
     }
 
-    // IGNORED: "T6 bug: the web delete of a LEGACY (flat) chat message is not migrated to the tree first: deleteMessageFromBranch's no-tree branch filters only `messages`, so a message followed by others is deleted from the middle (a tree chat refuses with 400) and the edit stays a messages-only write"
-    @Ignore
+    // Regression (T6 review): the web delete of a LEGACY (flat) chat message is not migrated to the tree first: deleteMessageFromBranch's no-tree branch filters only `messages`, so a message followed by others is deleted from the middle (a tree chat refuses with 400) and the edit stays a messages-only write
     @Test
     fun `web delete of a legacy chat message followed by others is refused like in a tree chat`() = testApplication {
         val (storage, repo, chatId) = seeded()
@@ -155,8 +153,7 @@ class WebT6ReviewTest {
         assertEquals(listOf("lq1", "la1", "lq2", "la2"), repo.chat(chatId).messages.map { it.id })
     }
 
-    // IGNORED: "T6 bug: the web's flat delete of a middle message of a legacy chat (see above) shifts the deterministic legacy node ids; a sync merge against a device that migrated the chat and continued it DROPS that device's new message (merged = [lq1, lq2, la2], pq3 lost)"
-    @Ignore
+    // Regression (T6 review): the web's flat delete of a middle message of a legacy chat (see above) shifts the deterministic legacy node ids; a sync merge against a device that migrated the chat and continued it DROPS that device's new message (merged = [lq1, lq2, la2], pq3 lost)
     @Test
     fun `a legacy chat message deleted on the web stays deleted, once, after a merge with a device that continued the chat`() = testApplication {
         val (storage, repo, chatId) = seeded()
@@ -227,5 +224,127 @@ class WebT6ReviewTest {
             contentType(ContentType.Application.Json); setBody("""{"previewName":"Offline chat"}""")
         }
         assertEquals(HttpStatusCode.Created, created.status)
+    }
+
+    // ── Fix follow-ups ────────────────────────────────────────────────────────
+
+    @Test
+    fun `switching a variant of a node off the current path follows that node's own branch`() = testApplication {
+        val (storage, repo, chatId) = seeded()
+        repo.seedTwoBranches(chatId)
+        val q2Node = repo.chat(chatId).messageNodes.first { n -> n.variants.any { it.userMessage.id == "q2" } }.nodeId
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin()
+
+        val response = c.post("/api/chats/$chatId/nodes/$q2Node/switch") {
+            contentType(ContentType.Application.Json); setBody("""{"variantIndex":0}""")
+        }
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        val after = repo.chat(chatId)
+        assertPathIsChain(after)
+        assertEquals(listOf("Question 1", "Answer 1", "Question 2", "Answer 2"), after.messages.map { it.text })
+    }
+
+    @Test
+    fun `web delete of the last message of a legacy chat is a tree edit that a merge keeps`() = testApplication {
+        val (storage, repo, chatId) = seeded()
+        for ((id, role) in listOf("lq1" to "user", "la1" to "assistant", "lq2" to "user", "la2" to "assistant")) {
+            repo.addMessageToChat(TEST_USERNAME, chatId, Message(id = id, role = role, text = "text $id"))
+        }
+        val base = repo.loadChatHistory(TEST_USERNAME)
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin()
+        val response = c.delete("/api/chats/$chatId/messages/la2")
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        val local = repo.loadChatHistory(TEST_USERNAME)
+        assertTrue(local.chat_history.single { it.chat_id == chatId }.hasBranchingStructure, "migrated to the tree")
+
+        // The phone opened the legacy chat (migrated deterministically, same ids) and changed nothing
+        val phone = DataRepository(ServerPlatformStorage(baseDir = File(System.getProperty("java.io.tmpdir"), "t6-phone-${System.nanoTime()}")))
+        phone.saveChatHistory(TEST_USERNAME, base)
+        phone.ensureBranchingStructure(TEST_USERNAME, chatId)
+        val remote = phone.loadChatHistory(TEST_USERNAME)
+
+        val merged = com.example.ApI.data.sync.merge.ChatHistoryMerger.merge(base, local, remote)
+            .chat_history.single { it.chat_id == chatId }
+        assertEquals(listOf("lq1", "la1", "lq2"), merged.messages.map { it.id })
+    }
+
+    @Test
+    fun `settings list deltas keep entries another device added after the page loaded`() = testApplication {
+        val (storage, repo, _) = seeded()
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin()
+        // A sync pull adds the phone's entries after the web page loaded its copy
+        repo.updateAppSettings {
+            it.copy(
+                starredModels = listOf(com.example.ApI.data.model.StarredModel("openai", "phone-model")),
+                enabledTools = listOf("phone_tool"),
+                excludedToolIds = listOf("phone_excluded")
+            )
+        }
+
+        val response = c.patch("/api/settings") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"starredModelsAdd":[{"provider":"openai","modelName":"web-model"}],"enabledToolsAdd":["web_tool"],"excludedToolIdsAdd":["web_excluded"]}""")
+        }
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        var s = repo.loadAppSettings()
+        assertEquals(listOf("phone-model", "web-model"), s.starredModels.map { it.modelName })
+        assertEquals(listOf("phone_tool", "web_tool"), s.enabledTools)
+        assertEquals(listOf("phone_excluded", "web_excluded"), s.excludedToolIds)
+
+        c.patch("/api/settings") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"starredModelsRemove":[{"provider":"openai","modelName":"web-model"}],"enabledToolsRemove":["web_tool"],"excludedToolIdsRemove":["web_excluded"],"enabledToolsAdd":["phone_tool"]}""")
+        }
+        s = repo.loadAppSettings()
+        assertEquals(listOf("phone-model"), s.starredModels.map { it.modelName })
+        assertEquals(listOf("phone_tool"), s.enabledTools)
+        assertEquals(listOf("phone_excluded"), s.excludedToolIds)
+    }
+
+    @Test
+    fun `concurrent key edits and additions lose nothing`() = testApplication {
+        val (storage, repo, _) = seeded()
+        repo.saveApiKeys(TEST_USERNAME, listOf(com.example.ApI.data.model.ApiKey(id = "k0", provider = "openai", key = "sk-0")))
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin()
+        kotlinx.coroutines.coroutineScope {
+            val jobs = (1..20).flatMap { i ->
+                listOf(
+                    async {
+                        c.patch("/api/keys/k0") {
+                            contentType(ContentType.Application.Json); setBody("""{"customName":"name $i"}""")
+                        }.status
+                    },
+                    async {
+                        c.post("/api/keys") {
+                            contentType(ContentType.Application.Json)
+                            setBody("""{"id":"k$i","provider":"anthropic","key":"sk-$i","isActive":false}""")
+                        }.status
+                    }
+                )
+            }
+            jobs.forEach { it.await() }
+        }
+        val ids = repo.loadApiKeys(TEST_USERNAME).map { it.id }.toSet()
+        assertEquals((0..20).map { "k$it" }.toSet(), ids)
+    }
+
+    @Test
+    fun `send to a chat deleted before the send is refused instead of streaming a reply that is dropped`() = testApplication {
+        val (storage, repo, chatId) = seeded()
+        repo.deleteChat(TEST_USERNAME, chatId)
+        val engine = RecordingEngine("lost answer")
+        startWithFakeGoogleAuth(storage, chatEngineFactory = { engine })
+        val c = googleLogin()
+        val response = c.post("/api/chat/send") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"chatId":"$chatId","provider":"openai","modelName":"gpt-4o","messages":[{"id":"u1","role":"user","text":"hi"}]}""")
+        }
+        assertEquals(HttpStatusCode.NotFound, response.status, response.bodyAsText())
+        assertTrue(engine.received.isEmpty(), "the model is not called")
+        assertTrue(repo.loadChatHistory(TEST_USERNAME).chat_history.none { it.chat_id == chatId }, "no chat is created")
     }
 }

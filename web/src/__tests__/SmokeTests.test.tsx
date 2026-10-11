@@ -432,14 +432,14 @@ describe('R6 — IntegrationsPage interactions', () => {
     })
   })
 
-  it('tool toggle calls settings.update with enabledTools', async () => {
+  it('tool toggle sends an enabledTools delta, not a whole list from the loaded copy', async () => {
     render(<MemoryRouter><IntegrationsPage /></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole('heading', { name: /integrations/i })).toBeInTheDocument())
     const datetimeToggle = screen.getByLabelText(/תאריך ושעה/)
     fireEvent.click(datetimeToggle)
     await waitFor(() => {
       expect(mSettingsUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ enabledTools: expect.arrayContaining(['get_date_time']) })
+        { enabledToolsAdd: ['get_date_time'] }
       )
     })
   })
