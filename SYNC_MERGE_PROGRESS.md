@@ -63,6 +63,13 @@ hash when done. Never redo an `[x]` step.
   (+`?probe=false`) has needsReauth/serverLacksCas/accountEmail; web `useSyncRefresh` (10 s poll while visible + focus /
   visibility, reload list + open chat, waits for a stream) and server-managed sync settings card. `:server:test` (160)
   and web vitest (139) green, `tsc` + `vite build` ok.
+  Review fixes 9ab18f9: off-path branch create/switch follows the node's own ancestors (`ancestorPath`, path stays a
+  chain, resend answers in the edited branch's context); legacy flat deletes migrate to the tree first (same rules as
+  tree chats, merges keep the delete); PATCH /api/keys via locked `updateApiKey` (concurrent edits/adds lose nothing);
+  PATCH /api/settings via `updateAppSettings` + `*Add`/`*Remove` list deltas (web sends deltas, no stale whole lists);
+  POST /api/chat/send to a deleted chat → 404 without calling the model; web `chatStore` refresh re-reads when the
+  list/chat changed mid-request (no overwrite of newer stream data); review tests enabled + 5 new; `:server:test` (171)
+  green, web vitest (141) green.
 
 ## T7 — Adversarial verification, E2E, fixes
 - [ ] 
