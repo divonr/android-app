@@ -72,7 +72,11 @@ hash when done. Never redo an `[x]` step.
   green, web vitest (141) green.
 
 ## T7 — Adversarial verification, E2E, fixes
-- [ ] 
+- [x] verification green, no code changes — sync-server pytest 54/54; `:shared:test` 183/183 (MultiDevice + fuzz);
+  `:server:test` 171/171; web vitest 141/141 + `tsc --noEmit` clean; `:app:assembleDebug` + `:desktop:compileKotlin`
+  BUILD SUCCESSFUL; E2E vs real server.py on temp port/DB 12/12 (CAS create/409/idempotent, versioned GET, history,
+  second-device PUT, negative base 422). Residual: full JVM-vs-live-server SyncEngine harness not run (covered by
+  MultiDevice sims vs CAS-capable FakeSyncServer instead).
 
 ## T8 — Deploy
 - [ ] 
