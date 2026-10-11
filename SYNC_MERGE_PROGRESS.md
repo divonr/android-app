@@ -79,7 +79,11 @@ hash when done. Never redo an `[x]` step.
   MultiDevice sims vs CAS-capable FakeSyncServer instead).
 
 ## T8 — Deploy
-- [ ] 
+- [x] deployed 2026-10-11 — backups `/tmp/sync_data.db.bak-20261011-1822` + `/tmp/llm-api-web.bak-20261011-1822.tgz`;
+  sync-server main (local, cce036b; pytest 54/54) restarted, `/sync/health` → `{"status":"ok","cas":true}`;
+  `npm --prefix web run build` (web/dist served from disk, immediate) + `:server:installDist` BUILD SUCCESSFUL,
+  `llm-web` restarted and active; `:app:assembleDebug` ok → `app/build/outputs/apk/debug/app-debug.apk`.
+  Remaining: install the new APK on the phone (old APK does legacy unconditional PUTs that can clobber merges).
 
 ## Notes
 - T3 storage API (for T4/T5/T6):
