@@ -90,7 +90,7 @@ class TitleGenerationService(
             }
 
             apiService.sendMessage(
-                provider = selectedProvider,
+                provider = selectedProvider.withProjectIdFrom(loadApiKeys(username)),
                 modelName = modelName,
                 messages = promptMessages,
                 systemPrompt = "",
@@ -130,6 +130,7 @@ class TitleGenerationService(
         val cheapestModels = mapOf(
             "openai" to "gpt-5-nano",
             "google" to "gemini-2.5-flash-lite",
+            VERTEX_PROVIDER to "gemini-3.1-flash-lite",
             "poe" to "GPT-OSS-120B-T",
             "anthropic" to "claude-3-haiku-20240307",
             "cohere" to "command-r7b-12-2024",
@@ -152,7 +153,7 @@ class TitleGenerationService(
         }
 
         // Priority order: OpenAI > Google > Anthropic > Cohere > OpenRouter > POE
-        val priorityOrder = listOf("openai", "google", "anthropic", "cohere", "openrouter", "poe")
+        val priorityOrder = listOf("openai", "google", VERTEX_PROVIDER, "anthropic", "cohere", "openrouter", "poe")
         for (providerName in priorityOrder) {
             if (!apiKeys.containsKey(providerName)) continue
             val provider = availableProviders.find { it.provider == providerName } ?: continue

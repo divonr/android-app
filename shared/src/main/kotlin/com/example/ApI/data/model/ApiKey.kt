@@ -41,8 +41,28 @@ data class ApiKey(
     val provider: String,
     val key: String,
     val isActive: Boolean = true,
-    val customName: String? = null
+    val customName: String? = null,
+    /** Google Cloud project for an Agent Platform key; unset for every other provider. */
+    val projectId: String? = null
 )
+
+/** Provider key of Google Gemini Enterprise Agent Platform (formerly Vertex AI). */
+const val VERTEX_PROVIDER = "vertex"
+
+/** Placeholder in the Agent Platform request URL, filled from the key's [ApiKey.projectId]. */
+const val PROJECT_ID_PLACEHOLDER = "{project_id}"
+
+/**
+ * Fills the project ID into an Agent Platform provider's URL, from the same key that is used for
+ * the request (the last active one, as `associate` picks). Other providers pass through.
+ */
+fun Provider.withProjectIdFrom(apiKeys: List<ApiKey>): Provider {
+    if (provider != VERTEX_PROVIDER) return this
+    val projectId = apiKeys.lastOrNull { it.isActive && it.provider == VERTEX_PROVIDER }
+        ?.projectId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return this
+    return copy(request = request.copy(base_url = request.base_url.replace(PROJECT_ID_PLACEHOLDER, projectId)))
+}
 
 @Serializable
 data class AppSettings(

@@ -101,6 +101,7 @@ object ThinkingBudgetConfig {
             "anthropic" -> getAnthropicThinkingBudget(model)
             "google" -> getGoogleThinkingBudget(model)
             "google" -> getGoogleThinkingBudget(model)
+            VERTEX_PROVIDER -> getVertexThinkingBudget(model)
             "openrouter" -> getOpenRouterThinkingBudget(model)
             "poe" -> getPoeThinkingBudget(model)
             else -> ThinkingBudgetType.InDevelopment
@@ -238,6 +239,31 @@ object ThinkingBudgetConfig {
             // Unknown Google model
             else -> ThinkingBudgetType.InDevelopment
         }
+    }
+
+    /**
+     * Agent Platform thinking configuration, from Google's per-model thinking level table.
+     * MINIMAL is left out on purpose: it needs thought signatures replayed from every earlier
+     * turn, and this app only keeps them for function calls.
+     */
+    private fun getVertexThinkingBudget(model: String): ThinkingBudgetType {
+        val modelLower = model.lowercase()
+
+        // Gemini 2.5 and earlier use token budgets, not levels
+        if (modelLower.contains("gemini-2") || modelLower.contains("gemini-1")) {
+            return getGoogleThinkingBudget(model)
+        }
+
+        val default = when {
+            modelLower.contains("flash-lite") -> "low"
+            modelLower.startsWith("gemini-3-") || modelLower.contains("gemini-3.1-pro") -> "high"
+            else -> "medium"
+        }
+        return ThinkingBudgetType.Discrete(
+            options = listOf("low", "medium", "high"),
+            default = default,
+            displayNames = hebrewDisplayNames
+        )
     }
 
     /**

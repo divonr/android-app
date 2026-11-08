@@ -84,7 +84,7 @@ object TemperatureConfigUtils {
         // Fall back to provider defaults
         return when (provider.lowercase()) {
             "openai" -> TemperatureConfig.OPENAI_DEFAULT
-            "google" -> TemperatureConfig.GOOGLE_DEFAULT
+            "google", VERTEX_PROVIDER -> TemperatureConfig.GOOGLE_DEFAULT
             "anthropic" -> TemperatureConfig.ANTHROPIC_DEFAULT
             "cohere" -> TemperatureConfig.COHERE_DEFAULT
             "openrouter" -> TemperatureConfig.OPENROUTER_DEFAULT

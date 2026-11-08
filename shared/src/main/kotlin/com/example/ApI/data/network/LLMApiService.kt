@@ -31,6 +31,7 @@ class LLMApiService() {
     // Lazy-initialized provider instances
     private val openAIProvider by lazy { OpenAIProvider() }
     private val googleProvider by lazy { GoogleProvider() }
+    private val vertexProvider by lazy { GoogleProvider(GooglePlatform.AGENT_PLATFORM) }
     private val anthropicProvider by lazy { AnthropicProvider() }
     private val poeProvider by lazy { PoeProvider() }
     private val cohereProvider by lazy { CohereProvider() }
@@ -136,6 +137,10 @@ class LLMApiService() {
                 webSearchEnabled, enabledTools, thinkingBudget, temperature, callback
             )
             "google" -> googleProvider.sendMessage(
+                provider, modelName, messages, systemPrompt, apiKey,
+                webSearchEnabled, enabledTools, thinkingBudget, temperature, callback
+            )
+            VERTEX_PROVIDER -> vertexProvider.sendMessage(
                 provider, modelName, messages, systemPrompt, apiKey,
                 webSearchEnabled, enabledTools, thinkingBudget, temperature, callback
             )

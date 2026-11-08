@@ -281,14 +281,15 @@ class DesktopRepository(private val appDir: File) {
         temperature: Float? = null,
         callback: StreamingCallback
     ) {
-        val apiKeys = loadApiKeys(username).filter { it.isActive }.associate { it.provider to it.key }
+        val storedApiKeys = loadApiKeys(username)
+        val apiKeys = storedApiKeys.filter { it.isActive }.associate { it.provider to it.key }
         val (updatedMessages, hasUpdates) = fileUploadManager.ensureFilesUploadedForProvider(provider, messages, username)
         if (hasUpdates && chatId != null) updateChatWithNewAttachments(username, chatId, updatedMessages)
         val updatedProjectAttachments = fileUploadManager.ensureProjectFilesUploadedForProvider(provider, projectAttachments, username)
         val finalMessages = if (updatedProjectAttachments.isNotEmpty()) {
             listOf(Message(role = "user", text = "General files belonging to the project of which this conversation is a part are attached:", attachments = updatedProjectAttachments)) + updatedMessages
         } else updatedMessages
-        apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, temperature, callback)
+        apiService.sendMessage(provider.withProjectIdFrom(storedApiKeys), modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, temperature, callback)
     }
 
     // ==================== Title Generation ====================

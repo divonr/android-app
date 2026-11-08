@@ -387,6 +387,18 @@ class ModelsCacheManager(
         Model.SimpleModel("gemini-1.5-pro-latest")
     )
 
+    // Text models confirmed on the global endpoint; the API can't list models with an API key
+    val defaultVertexModels = listOf(
+        Model.SimpleModel("gemini-4-argon"),
+        Model.SimpleModel("gemini-3.8-flash"),
+        Model.SimpleModel("gemini-3.7-flash"),
+        Model.SimpleModel("gemini-3.5-flash"),
+        Model.SimpleModel("gemini-3.5-flash-lite"),
+        Model.SimpleModel("gemini-3.1-flash-lite"),
+        Model.SimpleModel("gemini-3.1-pro-preview"),
+        Model.SimpleModel("gemini-3-flash-preview")
+    )
+
     val defaultPoeModels = listOf(
         Model.ComplexModel(name = "GPT-4o", min_points = 250, pricing = PoePricing(min_points = 250), webSearch = "optional"),
         Model.ComplexModel(name = "Claude-Sonnet-3.5", min_points = 270, pricing = PoePricing(min_points = 270), webSearch = "optional")
@@ -580,6 +592,27 @@ class ModelsCacheManager(
                 upload_files_response_important_fields = UploadResponseFields(
                     file = null
                 )
+            ),
+            Provider(
+                provider = VERTEX_PROVIDER,
+                models = getModelsForProvider(VERTEX_PROVIDER, defaultVertexModels),
+                request = ApiRequest(
+                    request_type = "POST",
+                    base_url = "https://aiplatform.googleapis.com/v1/projects/$PROJECT_ID_PLACEHOLDER/locations/global/publishers/google/models/{model_name}:generateContent",
+                    headers = mapOf(
+                        "x-goog-api-key" to "{VERTEX_API_KEY_HERE}",
+                        "Content-Type" to "application/json"
+                    ),
+                    body = null
+                ),
+                response_important_fields = ResponseFields(
+                    candidates = emptyList(),
+                    usageMetadata = null,
+                    modelVersion = "{model_name}",
+                    responseId = "{response_id}"
+                ),
+                upload_files_request = null,  // No Files API here: attachments go inline as base64
+                upload_files_response_important_fields = null
             ),
             Provider(
                 provider = "poe",

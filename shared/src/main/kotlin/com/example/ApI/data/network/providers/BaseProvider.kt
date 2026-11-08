@@ -178,6 +178,7 @@ abstract class BaseProvider() {
      *
      * @param initialToolCall The first detected tool call
      * @param initialPrecedingText Any text before the tool call
+     * @param initialAdditionalToolCalls The rest of the first step, when it was a parallel one
      * @param messages Current conversation messages
      * @param modelName The model being used
      * @param callback Streaming callback for notifications
@@ -187,31 +188,19 @@ abstract class BaseProvider() {
     protected suspend fun handleToolCallChain(
         initialToolCall: ToolCall,
         initialPrecedingText: String,
+        initialAdditionalToolCalls: List<ToolCall> = emptyList(),
         messages: List<Message>,
         modelName: String,
         callback: StreamingCallback,
         makeFollowUpRequest: suspend (List<Message>) -> ProviderStreamingResult
     ): String? {
-        // Execute the initial tool
-        val toolResult = callback.onToolCall(
-            toolCall = initialToolCall,
-            precedingText = initialPrecedingText
+        // Execute the initial step and build the follow-up messages
+        val messagesToAdd = executeToolCalls(
+            calls = listOf(initialToolCall) + initialAdditionalToolCalls,
+            precedingText = initialPrecedingText,
+            modelName = modelName,
+            callback = callback
         )
-
-        // Create tool messages
-        val toolCallMessage = createToolCallMessage(initialToolCall, toolResult)
-        val toolResponseMessage = createToolResponseMessage(initialToolCall, toolResult)
-
-        // Save the tool messages
-        callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, initialPrecedingText)
-
-        // Build follow-up messages
-        val messagesToAdd = mutableListOf<Message>()
-        if (initialPrecedingText.isNotBlank()) {
-            messagesToAdd.add(createAssistantMessage(initialPrecedingText, modelName))
-        }
-        messagesToAdd.add(toolCallMessage)
-        messagesToAdd.add(toolResponseMessage)
 
         var currentMessages = messages + messagesToAdd
         var currentResponse = makeFollowUpRequest(currentMessages)
@@ -221,23 +210,12 @@ abstract class BaseProvider() {
         while (currentResponse is ProviderStreamingResult.ToolCallDetected && toolDepth < MAX_TOOL_DEPTH) {
             AppLogger.d("[TOOL_CALL_DEBUG] BaseProvider: Chained tool call #$toolDepth detected - ${currentResponse.toolCall.toolId}")
 
-            val chainedToolResult = callback.onToolCall(
-                toolCall = currentResponse.toolCall,
-                precedingText = currentResponse.precedingText
+            val chainedMessagesToAdd = executeToolCalls(
+                calls = listOf(currentResponse.toolCall) + currentResponse.additionalToolCalls,
+                precedingText = currentResponse.precedingText,
+                modelName = modelName,
+                callback = callback
             )
-
-            val chainedMessagesToAdd = mutableListOf<Message>()
-            if (currentResponse.precedingText.isNotBlank()) {
-                chainedMessagesToAdd.add(createAssistantMessage(currentResponse.precedingText, modelName))
-            }
-
-            val chainedToolCallMessage = createToolCallMessage(currentResponse.toolCall, chainedToolResult)
-            chainedMessagesToAdd.add(chainedToolCallMessage)
-
-            val chainedToolResponseMessage = createToolResponseMessage(currentResponse.toolCall, chainedToolResult)
-            chainedMessagesToAdd.add(chainedToolResponseMessage)
-
-            callback.onSaveToolMessages(chainedToolCallMessage, chainedToolResponseMessage, currentResponse.precedingText)
 
             currentMessages = currentMessages + chainedMessagesToAdd
             toolDepth++
@@ -254,6 +232,36 @@ abstract class BaseProvider() {
                 null
             }
         }
+    }
+
+    /**
+     * Executes one model step's tool calls in order, saving each call/response pair.
+     * The preceding text belongs to the first call only.
+     *
+     * @return the messages to append to the conversation for the follow-up request
+     */
+    private suspend fun executeToolCalls(
+        calls: List<ToolCall>,
+        precedingText: String,
+        modelName: String,
+        callback: StreamingCallback
+    ): List<Message> {
+        val messagesToAdd = mutableListOf<Message>()
+        if (precedingText.isNotBlank()) {
+            messagesToAdd.add(createAssistantMessage(precedingText, modelName))
+        }
+
+        calls.forEachIndexed { index, toolCall ->
+            val textForThisCall = if (index == 0) precedingText else ""
+            val toolResult = callback.onToolCall(toolCall = toolCall, precedingText = textForThisCall)
+            val toolCallMessage = createToolCallMessage(toolCall, toolResult)
+            val toolResponseMessage = createToolResponseMessage(toolCall, toolResult)
+            callback.onSaveToolMessages(toolCallMessage, toolResponseMessage, textForThisCall)
+            messagesToAdd.add(toolCallMessage)
+            messagesToAdd.add(toolResponseMessage)
+        }
+
+        return messagesToAdd
     }
 
     /**

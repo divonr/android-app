@@ -363,7 +363,8 @@ class DataRepository(private val platformStorage: PlatformStorage) {
         temperature: Float? = null,
         callback: StreamingCallback
     ) {
-        val apiKeys = loadApiKeys(username)
+        val storedApiKeys = loadApiKeys(username)
+        val apiKeys = storedApiKeys
             .filter { it.isActive }
             .associate { it.provider to it.key }
 
@@ -391,7 +392,7 @@ class DataRepository(private val platformStorage: PlatformStorage) {
             updatedMessages
         }
 
-        apiService.sendMessage(provider, modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, temperature, callback)
+        apiService.sendMessage(provider.withProjectIdFrom(storedApiKeys), modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, temperature, callback)
     }
 
     // ============ File Upload (delegated to FileUploadManager) ============

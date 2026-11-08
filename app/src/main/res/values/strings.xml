@@ -36,6 +36,7 @@
     <string name="provider_openai">OpenAI</string>
     <string name="provider_poe">Poe</string>
     <string name="provider_google">Google</string>
+    <string name="provider_vertex">Google Agent Platform (Vertex)</string>
     <string name="provider_anthropic">Anthropic</string>
     <string name="provider_cohere">Cohere</string>
     <string name="provider_openrouter">OpenRouter</string>
@@ -75,6 +76,7 @@
     <string name="openai_gpt5_nano">gpt-5-nano via OpenAI</string>
     <string name="poe_gpt5_nano">gpt-5-nano via POE</string>
     <string name="google_gemini_flash_lite">gemini-2.5-flash-lite via Google</string>
+    <string name="vertex_gemini_flash_lite">gemini-3.1-flash-lite via Google Agent Platform</string>
     <string name="anthropic_claude_haiku">claude-3-haiku via Anthropic</string>
     <string name="cohere_command_r7b">command-r7b via Cohere</string>
     <string name="openrouter_llama">llama-3.1-8b via OpenRouter</string>

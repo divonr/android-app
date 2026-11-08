@@ -41,7 +41,7 @@ class ToolManager(
         val enabledToolIds = baseEnabledTools.filter { it !in excludedTools }
 
         val toolRegistry = ToolRegistry.getInstance()
-        val currentProvider = deps.uiState.value.currentProvider?.provider ?: "openai"
+        val currentProvider = ToolRegistry.specProviderFor(deps.uiState.value.currentProvider?.provider ?: "openai")
 
         val specifications = mutableListOf<ToolSpecification>()
 

@@ -28,7 +28,8 @@ sealed class ProviderStreamingResult {
         val thoughts: String? = null,
         val thinkingDurationSeconds: Float? = null,
         val thoughtsStatus: ThoughtsStatus = ThoughtsStatus.NONE,
-        val thoughtsSignature: String? = null  // Cryptographic signature for Anthropic thinking blocks
+        val thoughtsSignature: String? = null,  // Cryptographic signature for Anthropic thinking blocks
+        val additionalToolCalls: List<ToolCall> = emptyList()  // Rest of a parallel step, after toolCall
     ) : ProviderStreamingResult()
 
     /**

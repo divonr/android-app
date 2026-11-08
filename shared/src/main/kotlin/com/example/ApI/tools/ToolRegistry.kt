@@ -1,6 +1,7 @@
 package com.example.ApI.tools
 
 import com.example.ApI.data.model.EnabledGoogleServices
+import com.example.ApI.data.model.VERTEX_PROVIDER
 import com.example.ApI.data.network.GitHubApiService
 import com.example.ApI.data.network.GmailApiService
 import com.example.ApI.data.network.GoogleCalendarApiService
@@ -60,6 +61,13 @@ class ToolRegistry {
         const val SKILL_READ_FILE = "read_skill_file"
         const val SKILL_WRITE_FILE = "write_skill_file"
         const val SKILL_EDIT_FILE = "edit_skill_file"
+
+        /**
+         * The provider name to request tool schemas with. Agent Platform takes the same schema
+         * dialect as Gemini on AI Studio, so tools only need to know the one name.
+         */
+        fun specProviderFor(provider: String): String =
+            if (provider == VERTEX_PROVIDER) "google" else provider
     }
 
     private val tools = mutableMapOf<String, Tool>()
@@ -323,7 +331,7 @@ class ToolRegistry {
      */
     fun getEnabledToolsSpecifications(enabledToolIds: List<String>, provider: String): List<ToolSpecification> {
         return enabledToolIds.mapNotNull { toolId ->
-            tools[toolId]?.getSpecification(provider)
+            tools[toolId]?.getSpecification(specProviderFor(provider))
         }
     }
 
@@ -335,7 +343,7 @@ class ToolRegistry {
     fun getToolSpecifications(provider: String, excludedToolIds: List<String> = emptyList()): List<ToolSpecification> {
         return tools.values
             .filter { it.id !in excludedToolIds }
-            .map { it.getSpecification(provider) }
+            .map { it.getSpecification(specProviderFor(provider)) }
     }
     
     /**

@@ -3,6 +3,7 @@ package com.example.ApI.ui.managers.streaming
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.Chat
 import com.example.ApI.data.model.TitleGenerationSettings
+import com.example.ApI.data.model.VERTEX_PROVIDER
 import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.launch
 
@@ -33,7 +34,7 @@ class TitleGenerationManager(
             .filter { it.isActive }
             .map { it.provider }
 
-        return listOf("openai", "anthropic", "google", "poe", "cohere", "openrouter").filter { provider ->
+        return listOf("openai", "anthropic", "google", VERTEX_PROVIDER, "poe", "cohere", "openrouter").filter { provider ->
             apiKeys.contains(provider)
         }
     }

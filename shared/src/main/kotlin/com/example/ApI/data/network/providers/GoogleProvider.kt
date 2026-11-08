@@ -13,16 +13,35 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 
+/** Which Google backend a [GoogleProvider] instance talks to. */
+enum class GooglePlatform {
+    /** generativelanguage.googleapis.com, keyed by `key=` and with the Files API. */
+    AI_STUDIO,
+
+    /** Gemini Enterprise Agent Platform (formerly Vertex AI), project-scoped, `x-goog-api-key`. */
+    AGENT_PLATFORM
+}
+
 /**
  * Google Gemini API provider implementation.
  * Handles streaming responses, tool calling, and thinking support.
+ *
+ * The same wire protocol serves both [GooglePlatform]s. Agent Platform differs in auth, in
+ * attachments (no Files API: inline base64 only), and in being stricter about a few request
+ * shapes; those differences are gated on [isAgentPlatform] and leave AI Studio untouched.
  */
-class GoogleProvider() : BaseProvider() {
+class GoogleProvider(
+    private val platform: GooglePlatform = GooglePlatform.AI_STUDIO
+) : BaseProvider() {
+
+    private val isAgentPlatform: Boolean get() = platform == GooglePlatform.AGENT_PLATFORM
+    private val toolCallProviderName: String get() = if (isAgentPlatform) VERTEX_PROVIDER else "google"
 
     override suspend fun sendMessage(
         provider: Provider,
@@ -81,6 +100,7 @@ class GoogleProvider() : BaseProvider() {
         val finalText = handleToolCallChain(
             initialToolCall = initialResponse.toolCall,
             initialPrecedingText = initialResponse.precedingText,
+            initialAdditionalToolCalls = initialResponse.additionalToolCalls,
             messages = messages,
             modelName = modelName,
             callback = callback
@@ -118,28 +138,46 @@ class GoogleProvider() : BaseProvider() {
             // Build request URL - replace placeholder and change to streaming endpoint
             val baseUrl = provider.request.base_url.replace("{model_name}", modelName)
                 .replace(":generateContent", ":streamGenerateContent")
-            val url = URL("$baseUrl?alt=sse&key=$apiKey")
+            if (isAgentPlatform && baseUrl.contains(PROJECT_ID_PLACEHOLDER)) {
+                val message = "Google Agent Platform needs a Cloud project ID. In API Keys, delete this key and add it again with the Project ID field filled in."
+                callback.onError(message)
+                return@withContext ProviderStreamingResult.Error(message)
+            }
+
+            // Agent Platform authenticates by header so the key stays out of URLs and logs.
+            val url = URL(if (isAgentPlatform) "$baseUrl?alt=sse" else "$baseUrl?alt=sse&key=$apiKey")
             val connection = url.openConnection() as HttpURLConnection
 
             connection.requestMethod = provider.request.request_type
             connection.setRequestProperty("Content-Type", "application/json")
+            if (isAgentPlatform) {
+                connection.setRequestProperty("x-goog-api-key", apiKey)
+            }
             connection.doOutput = true
 
-            val contents = buildContents(messages, systemPrompt)
-            val requestBody = buildRequestBody(modelName, contents, webSearchEnabled, enabledTools, thinkingBudget, temperature)
-            val requestBodyJson = json.encodeToString(requestBody)
+            if (isAgentPlatform) {
+                val contents = buildContents(messages, systemPrompt = "")
+                val requestBody = buildAgentPlatformRequestBody(
+                    modelName, contents, systemPrompt, webSearchEnabled, enabledTools, thinkingBudget, temperature
+                )
+                writeAgentPlatformBody(connection, baseUrl, contents, requestBody)
+            } else {
+                val contents = buildContents(messages, systemPrompt)
+                val requestBody = buildRequestBody(modelName, contents, webSearchEnabled, enabledTools, thinkingBudget, temperature)
+                val requestBodyJson = json.encodeToString(requestBody)
 
-            // Log request details (API key is in URL, so we mask the full URL)
-            logApiRequestDetails(
-                baseUrl = baseUrl.substringBefore("?"),
-                headers = mapOf("Content-Type" to "application/json"),
-                body = requestBodyJson
-            )
+                // Log request details (API key is in URL, so we mask the full URL)
+                logApiRequestDetails(
+                    baseUrl = baseUrl.substringBefore("?"),
+                    headers = mapOf("Content-Type" to "application/json"),
+                    body = requestBodyJson
+                )
 
-            val writer = OutputStreamWriter(connection.outputStream)
-            writer.write(requestBodyJson)
-            writer.flush()
-            writer.close()
+                val writer = OutputStreamWriter(connection.outputStream)
+                writer.write(requestBodyJson)
+                writer.flush()
+                writer.close()
+            }
 
             val responseCode = connection.responseCode
             logApiResponse(responseCode)
@@ -173,6 +211,12 @@ class GoogleProvider() : BaseProvider() {
         // Tool call tracking
         var detectedToolCall: ToolCall? = null
 
+        // Agent Platform: every functionCall part in order; the first is the signed one
+        val detectedToolCalls = mutableListOf<ToolCall>()
+
+        // Agent Platform: last finish reason seen, reported when the response comes back empty
+        var lastFinishReason: String? = null
+
         // Thinking state tracking
         var isInThinkingPhase = false
         var thinkingStartTime: Long = 0
@@ -194,14 +238,27 @@ class GoogleProvider() : BaseProvider() {
                 return StreamAction.Error("Google API streaming error: $errorMessage")
             }
 
+            if (isAgentPlatform) {
+                val blockReason = (data["promptFeedback"] as? JsonObject)
+                    ?.get("blockReason")?.jsonPrimitive?.contentOrNull
+                if (blockReason != null) {
+                    val detail = (data["promptFeedback"] as? JsonObject)
+                        ?.get("blockReasonMessage")?.jsonPrimitive?.contentOrNull
+                    errorMessage = "Google Agent Platform blocked the prompt: $blockReason" +
+                        (detail?.let { " ($it)" } ?: "")
+                    callback.onError(errorMessage!!)
+                    return StreamAction.Error(errorMessage!!)
+                }
+            }
+
             val candidates = data["candidates"]?.jsonArray
 
             if (candidates != null && candidates.isNotEmpty()) {
                 val firstCandidate = candidates[0].jsonObject
 
                 // Check for safety blocks
-                val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.content
-                if (finishReason != null && finishReason != "STOP") {
+                val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.contentOrNull
+                if (!isAgentPlatform && finishReason != null && finishReason != "STOP") {
                     errorMessage = "Google API streaming blocked due to: $finishReason"
                     callback.onError(errorMessage!!)
                     return StreamAction.Error(errorMessage!!)
@@ -232,18 +289,32 @@ class GoogleProvider() : BaseProvider() {
                             functionCall != null -> {
                                 AppLogger.d("[TOOL_CALL_DEBUG] Google Streaming: Found functionCall part: $functionCall")
                                 val name = functionCall["name"]?.jsonPrimitive?.content
-                                val args = functionCall["args"]?.jsonObject
+                                val args = if (isAgentPlatform) {
+                                    // A call to a parameterless function may omit args altogether
+                                    (functionCall["args"] as? JsonObject) ?: buildJsonObject {}
+                                } else {
+                                    functionCall["args"]?.jsonObject
+                                }
                                 // Capture thoughtSignature - required for Gemini 3+ function calling
                                 val thoughtSignature = part["thoughtSignature"]?.jsonPrimitive?.contentOrNull
 
                                 if (name != null && args != null) {
-                                    detectedToolCall = ToolCall(
-                                        id = "google_${System.currentTimeMillis()}",
+                                    val toolCall = ToolCall(
+                                        // Parallel calls can share a millisecond; replay matches by this id
+                                        id = "google_${System.currentTimeMillis()}" +
+                                            if (isAgentPlatform) "_${detectedToolCalls.size}" else "",
                                         toolId = name,
                                         parameters = args,
-                                        provider = "google",
+                                        provider = toolCallProviderName,
                                         thoughtSignature = thoughtSignature
                                     )
+                                    if (isAgentPlatform) {
+                                        // Only the first parallel call is signed, so it must stay first
+                                        detectedToolCalls.add(toolCall)
+                                        detectedToolCall = detectedToolCalls.first()
+                                    } else {
+                                        detectedToolCall = toolCall
+                                    }
                                     AppLogger.d("[TOOL_CALL_DEBUG] Google Streaming: Detected tool call in chunk, thoughtSignature=${thoughtSignature != null}")
                                 }
                             }
@@ -260,6 +331,22 @@ class GoogleProvider() : BaseProvider() {
                                 callback.onPartialResponse(text)
                             }
                         }
+                    }
+                }
+
+                // Agent Platform: read this chunk's parts first, its final text must not be lost
+                if (isAgentPlatform && finishReason != null) {
+                    lastFinishReason = finishReason
+                    if (finishReason != "STOP" && finishReason != "FINISH_REASON_UNSPECIFIED") {
+                        if (finishReason == "MAX_TOKENS" && (fullResponse.isNotEmpty() || detectedToolCall != null)) {
+                            AppLogger.w("[GoogleProvider] Response truncated at the output token limit")
+                            return StreamAction.Stop
+                        }
+                        val detail = firstCandidate["finishMessage"]?.jsonPrimitive?.contentOrNull
+                        errorMessage = "Google Agent Platform stopped the response: $finishReason" +
+                            (detail?.let { " ($it)" } ?: "")
+                        callback.onError(errorMessage!!)
+                        return StreamAction.Error(errorMessage!!)
                     }
                 }
             }
@@ -304,7 +391,8 @@ class GoogleProvider() : BaseProvider() {
                     precedingText = fullResponse.toString(),
                     thoughts = thoughtsContent,
                     thinkingDurationSeconds = thinkingDuration,
-                    thoughtsStatus = thoughtsStatus
+                    thoughtsStatus = thoughtsStatus,
+                    additionalToolCalls = detectedToolCalls.drop(1)
                 )
                 fullResponse.isNotEmpty() -> ProviderStreamingResult.TextComplete(
                     fullText = fullResponse.toString(),
@@ -312,6 +400,13 @@ class GoogleProvider() : BaseProvider() {
                     thinkingDurationSeconds = thinkingDuration,
                     thoughtsStatus = thoughtsStatus
                 )
+                isAgentPlatform -> {
+                    // Unlike the AI Studio path this must reach the UI, or the request spins forever
+                    val message = "Google Agent Platform returned no content" +
+                        (lastFinishReason?.let { " (finish reason: $it)" } ?: "")
+                    callback.onError(message)
+                    ProviderStreamingResult.Error(message)
+                }
                 else -> ProviderStreamingResult.Error("Empty response from Google")
             }
         }
@@ -346,6 +441,7 @@ class GoogleProvider() : BaseProvider() {
 
     private fun buildContents(messages: List<Message>, systemPrompt: String): List<JsonObject> {
         val contents = mutableListOf<JsonObject>()
+        val inlineAttachments = if (isAgentPlatform) selectInlineAttachments(messages) else emptySet()
 
         // Add system instruction if provided
         if (systemPrompt.isNotBlank()) {
@@ -374,7 +470,9 @@ class GoogleProvider() : BaseProvider() {
                     }
 
                     message.attachments.forEach { attachment ->
-                        if (!attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}") {
+                        if (isAgentPlatform) {
+                            parts.add(buildAgentPlatformAttachmentPart(attachment, inlineAttachments))
+                        } else if (!attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}") {
                             parts.add(buildJsonObject {
                                 put("file_data", buildJsonObject {
                                     put("mime_type", attachment.mime_type)
@@ -395,7 +493,9 @@ class GoogleProvider() : BaseProvider() {
                 "assistant" -> {
                     // Check if next message is tool_call - combine them into one model turn
                     val nextMessage = messages.getOrNull(i + 1)
-                    if (nextMessage?.role == "tool_call") {
+                    if (isAgentPlatform && nextMessage?.role == "tool_call") {
+                        i = appendAgentPlatformToolCallGroup(contents, messages, i + 1, message.text)
+                    } else if (nextMessage?.role == "tool_call") {
                         // Combine assistant text + functionCall into one message
                         contents.add(buildJsonObject {
                             put("role", "model")
@@ -432,7 +532,9 @@ class GoogleProvider() : BaseProvider() {
                         i++
                     }
                 }
-                "tool_call" -> {
+                "tool_call" -> if (isAgentPlatform) {
+                    i = appendAgentPlatformToolCallGroup(contents, messages, i, precedingText = "")
+                } else {
                     // Standalone tool_call (old format or no preceding assistant)
                     contents.add(buildJsonObject {
                         put("role", "model")
@@ -452,7 +554,8 @@ class GoogleProvider() : BaseProvider() {
                 }
                 "tool_response" -> {
                     contents.add(buildJsonObject {
-                        put("role", "function")
+                        // Agent Platform only accepts user/model as content roles
+                        put("role", if (isAgentPlatform) "user" else "function")
                         put("parts", buildJsonArray {
                             add(buildJsonObject {
                                 put("functionResponse", buildJsonObject {
@@ -476,6 +579,274 @@ class GoogleProvider() : BaseProvider() {
     private fun findToolNameByCallId(messages: List<Message>, callId: String): String? {
         return messages.find { it.role == "tool_call" && it.toolCallId == callId }
             ?.toolCall?.toolId
+    }
+
+    /**
+     * Appends one model step and its function responses, starting at the tool_call at [callIndex].
+     *
+     * A parallel step must be replayed as all calls followed by all responses: interleaving them
+     * is a 400 on Gemini 3+. Calls are stored as (tool_call, tool_response) pairs, and only the
+     * first call of a parallel step is signed, so an unsigned call after a signed step is a
+     * sibling of that step. Unsigned calls after an unsigned one (Gemini 2.5, or a chat started
+     * on another provider) are left as separate steps.
+     *
+     * @return the index of the first message after this group
+     */
+    private fun appendAgentPlatformToolCallGroup(
+        contents: MutableList<JsonObject>,
+        messages: List<Message>,
+        callIndex: Int,
+        precedingText: String
+    ): Int {
+        val calls = mutableListOf(messages[callIndex])
+        val responses = mutableListOf<Message>()
+        var next = callIndex + 1
+        if (messages.getOrNull(next)?.role == "tool_response") {
+            responses.add(messages[next])
+            next++
+        }
+
+        val firstCallIsSigned = !calls.first().toolCall?.thoughtSignature.isNullOrBlank()
+        while (firstCallIsSigned &&
+            messages.getOrNull(next)?.role == "tool_call" &&
+            messages[next].toolCall?.thoughtSignature.isNullOrBlank() &&
+            messages.getOrNull(next + 1)?.role == "tool_response"
+        ) {
+            calls.add(messages[next])
+            responses.add(messages[next + 1])
+            next += 2
+        }
+
+        contents.add(buildJsonObject {
+            put("role", "model")
+            put("parts", buildJsonArray {
+                if (precedingText.isNotBlank()) {
+                    add(buildJsonObject { put("text", precedingText) })
+                }
+                calls.forEach { call ->
+                    add(buildJsonObject {
+                        put("functionCall", buildJsonObject {
+                            put("name", call.toolCall?.toolId ?: "unknown")
+                            put("args", call.toolCall?.parameters ?: buildJsonObject {})
+                        })
+                        call.toolCall?.thoughtSignature?.let { signature ->
+                            put("thoughtSignature", signature)
+                        }
+                    })
+                }
+            })
+        })
+
+        if (responses.isNotEmpty()) {
+            contents.add(buildJsonObject {
+                put("role", "user")
+                put("parts", buildJsonArray {
+                    responses.forEach { response ->
+                        add(buildJsonObject {
+                            put("functionResponse", buildJsonObject {
+                                put("name", response.toolResponseCallId?.let { findToolNameByCallId(messages, it) } ?: "unknown")
+                                put("response", buildJsonObject {
+                                    put("result", response.toolResponseOutput ?: "")
+                                })
+                            })
+                        })
+                    }
+                })
+            })
+        }
+
+        return next
+    }
+
+    /**
+     * Chooses which attachments are sent inline, newest first, so one oversized history can't
+     * push out what the user just attached. Agent Platform has no Files API.
+     */
+    private fun selectInlineAttachments(messages: List<Message>): Set<Attachment> {
+        val selected = HashSet<Attachment>()
+        var total = 0L
+        for (message in messages.asReversed()) {
+            if (message.role != "user") continue
+            for (attachment in message.attachments) {
+                val size = attachment.local_file_path?.let { File(it) }
+                    ?.takeIf { it.exists() }?.length() ?: continue
+                if (size > MAX_INLINE_ATTACHMENT_BYTES || total + size > MAX_INLINE_TOTAL_BYTES) continue
+                selected.add(attachment)
+                total += size
+            }
+        }
+        return selected
+    }
+
+    /** One inlineData part, or a text note telling the model why this file isn't there. */
+    private fun buildAgentPlatformAttachmentPart(attachment: Attachment, inlineAttachments: Set<Attachment>): JsonObject {
+        fun note(reason: String) = buildJsonObject {
+            put("text", "[Attachment \"${attachment.file_name}\" was not sent: $reason]")
+        }
+
+        val mimeType = agentPlatformMimeType(attachment.mime_type)
+            ?: return note("${attachment.mime_type} is not a supported file type")
+        val file = attachment.local_file_path?.let { File(it) }?.takeIf { it.exists() }
+            ?: return note("the file is not available on this device")
+        if (attachment !in inlineAttachments) {
+            return note("it is too large to send inline")
+        }
+        val base64 = try {
+            readFileAsBase64(file.path)
+        } catch (e: OutOfMemoryError) {
+            null
+        } ?: return note("the file could not be read")
+
+        return buildJsonObject {
+            put("inlineData", buildJsonObject {
+                put("mimeType", mimeType)
+                put("data", base64)
+            })
+        }
+    }
+
+    /** The MIME type to send for an attachment, or null when Agent Platform can't accept it. */
+    private fun agentPlatformMimeType(mimeType: String): String? {
+        val lower = mimeType.lowercase()
+        return when {
+            lower == "image/jpg" -> "image/jpeg"
+            lower in AGENT_PLATFORM_IMAGE_TYPES -> lower
+            lower == "application/pdf" -> lower
+            lower.startsWith("audio/") || lower.startsWith("video/") -> lower
+            // text/plain is the only text type accepted; send other text formats as that
+            lower.startsWith("text/") || lower in AGENT_PLATFORM_TEXT_LIKE_TYPES -> "text/plain"
+            else -> null
+        }
+    }
+
+    /**
+     * Sends the request. Bodies carrying inline files are streamed (HttpURLConnection otherwise
+     * buffers the whole upload in memory) and never logged, since the base64 could be huge.
+     */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    private fun writeAgentPlatformBody(
+        connection: HttpURLConnection,
+        baseUrl: String,
+        contents: List<JsonObject>,
+        requestBody: JsonObject
+    ) {
+        val headers = mapOf("Content-Type" to "application/json")
+        val hasInlineFiles = contents.any { content ->
+            content["parts"]?.jsonArray.orEmpty().any { "inlineData" in it.jsonObject }
+        }
+
+        if (hasInlineFiles) {
+            logApiRequestDetails(baseUrl, headers, body = "<${contents.size} turns with inline attachments, body not logged>")
+            connection.setChunkedStreamingMode(0)
+            connection.outputStream.use { json.encodeToStream(JsonObject.serializer(), requestBody, it) }
+        } else {
+            val requestBodyJson = json.encodeToString(requestBody)
+            logApiRequestDetails(baseUrl, headers, body = requestBodyJson)
+            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(requestBodyJson) }
+        }
+    }
+
+    private fun buildAgentPlatformRequestBody(
+        modelName: String,
+        contents: List<JsonObject>,
+        systemPrompt: String,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue,
+        temperature: Float?
+    ): JsonObject = buildJsonObject {
+        if (systemPrompt.isNotBlank()) {
+            put("systemInstruction", buildJsonObject {
+                put("parts", buildJsonArray {
+                    add(buildJsonObject { put("text", systemPrompt) })
+                })
+            })
+        }
+
+        // Agent Platform rejects search tools alongside function tools in one request, so the
+        // explicit per-chat search toggle wins and function tools sit out while it is on.
+        when {
+            webSearchEnabled -> put("tools", buildJsonArray {
+                add(buildJsonObject { put("googleSearch", buildJsonObject {}) })
+            })
+            enabledTools.isNotEmpty() -> put("tools", buildJsonArray {
+                add(buildJsonObject {
+                    put("functionDeclarations", buildJsonArray {
+                        enabledTools.forEach { toolSpec ->
+                            add(buildJsonObject {
+                                put("name", toolSpec.name)
+                                put("description", toolSpec.description)
+                                toolSpec.parameters?.let { params ->
+                                    sanitizeToolParameters(params)?.let { put("parameters", it) }
+                                }
+                            })
+                        }
+                    })
+                })
+            })
+        }
+
+        val thinkingConfig = buildAgentPlatformThinkingConfig(modelName, thinkingBudget)
+        if (temperature != null || thinkingConfig != null) {
+            put("generationConfig", buildJsonObject {
+                temperature?.let { put("temperature", it.toDouble()) }
+                thinkingConfig?.let { put("thinkingConfig", it) }
+            })
+        }
+
+        put("contents", JsonArray(contents))
+    }
+
+    /**
+     * Keeps the level inside what the model accepts: a stale token budget or a level left over
+     * from another model would be a 400 on Gemini 3+. Always explicit so a model whose server
+     * default is MINIMAL can't reach MINIMAL, which needs replayed text signatures.
+     */
+    private fun buildAgentPlatformThinkingConfig(modelName: String, thinkingBudget: ThinkingBudgetValue): JsonObject? {
+        return when (val type = ThinkingBudgetConfig.getThinkingBudgetType(VERTEX_PROVIDER, modelName)) {
+            is ThinkingBudgetType.Discrete -> buildJsonObject {
+                put("includeThoughts", true)
+                val requested = (thinkingBudget as? ThinkingBudgetValue.Effort)?.level?.lowercase()
+                val level = requested?.takeIf { it in type.options } ?: type.default
+                put("thinkingLevel", level.uppercase())
+            }
+            is ThinkingBudgetType.Continuous -> buildJsonObject {
+                put("includeThoughts", true)
+                if (thinkingBudget is ThinkingBudgetValue.Tokens && thinkingBudget.count > 0) {
+                    put("thinkingBudget", thinkingBudget.count)
+                }
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Reduces a tool schema to what Agent Platform documents. Returns null for a function with
+     * no parameters, which must omit the field instead of sending an empty OBJECT.
+     */
+    private fun sanitizeToolParameters(parameters: JsonObject): JsonObject? {
+        val properties = parameters["properties"] as? JsonObject
+        if (properties == null || properties.isEmpty()) return null
+        return sanitizeSchema(parameters)
+    }
+
+    private fun sanitizeSchema(schema: JsonObject): JsonObject = buildJsonObject {
+        schema.forEach { (key, value) ->
+            when {
+                key !in AGENT_PLATFORM_SCHEMA_KEYS -> Unit
+                key == "properties" && value is JsonObject -> put(key, buildJsonObject {
+                    value.forEach { (name, property) ->
+                        put(name, if (property is JsonObject) sanitizeSchema(property) else property)
+                    }
+                })
+                key == "items" && value is JsonObject -> put(key, sanitizeSchema(value))
+                key == "anyOf" && value is JsonArray -> put(key, JsonArray(value.map { option ->
+                    if (option is JsonObject) sanitizeSchema(option) else option
+                }))
+                key == "required" && value is JsonArray && value.isEmpty() -> Unit
+                else -> put(key, value)
+            }
+        }
     }
 
     private fun buildRequestBody(
@@ -555,4 +926,22 @@ class GoogleProvider() : BaseProvider() {
         }
     }
 
+    private companion object {
+        // Google allows far more inline (256 MB a part on Gemini 3+); these keep the phone's
+        // heap safe, since the whole base64 body lives in memory while it is built.
+        const val MAX_INLINE_ATTACHMENT_BYTES = 50L * 1024 * 1024
+        const val MAX_INLINE_TOTAL_BYTES = 64L * 1024 * 1024
+
+        val AGENT_PLATFORM_IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/webp", "image/heic", "image/heif")
+        val AGENT_PLATFORM_TEXT_LIKE_TYPES = setOf(
+            "application/json", "application/xml", "application/javascript",
+            "application/x-yaml", "application/yaml", "application/csv"
+        )
+
+        /** The subset of OpenAPI schema fields Agent Platform accepts in function parameters. */
+        val AGENT_PLATFORM_SCHEMA_KEYS = setOf(
+            "type", "nullable", "required", "format", "description",
+            "properties", "items", "enum", "anyOf", "\$ref", "\$defs"
+        )
+    }
 }
