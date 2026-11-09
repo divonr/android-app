@@ -42,6 +42,10 @@ class GoogleProvider(
 
     private val isAgentPlatform: Boolean get() = platform == GooglePlatform.AGENT_PLATFORM
     private val toolCallProviderName: String get() = if (isAgentPlatform) VERTEX_PROVIDER else "google"
+    private val platformLabel: String get() = if (isAgentPlatform) "Google Agent Platform" else "Google"
+
+    // The content role function responses are replayed with on each platform
+    private val toolResponseRole: String get() = if (isAgentPlatform) "user" else "function"
 
     override suspend fun sendMessage(
         provider: Provider,
@@ -97,6 +101,7 @@ class GoogleProvider(
     ) {
         AppLogger.d("[TOOL_CALL_DEBUG] Google Streaming: Tool call detected - ${initialResponse.toolCall.toolId}")
 
+        var followUpFailed = false
         val finalText = handleToolCallChain(
             initialToolCall = initialResponse.toolCall,
             initialPrecedingText = initialResponse.precedingText,
@@ -109,13 +114,13 @@ class GoogleProvider(
                 provider, modelName, updatedMessages, systemPrompt, apiKey,
                 webSearchEnabled, enabledTools, thinkingBudget, callback,
                 temperature = temperature
-            )
+            ).also { if (it is ProviderStreamingResult.Error) followUpFailed = true }
         }
 
         if (finalText != null) {
             callback.onComplete(finalText)
-        } else {
-            // Max depth exceeded (error already reported by handleToolCallChain if it was an error)
+        } else if (!followUpFailed) {
+            // Max depth exceeded; a failed follow-up was already reported, and this would replace it
             callback.onError("Maximum tool call depth ($MAX_TOOL_DEPTH) exceeded")
         }
     }
@@ -211,10 +216,10 @@ class GoogleProvider(
         // Tool call tracking
         var detectedToolCall: ToolCall? = null
 
-        // Agent Platform: every functionCall part in order; the first is the signed one
+        // Every functionCall part in order; on Gemini 3+ the first is the signed one
         val detectedToolCalls = mutableListOf<ToolCall>()
 
-        // Agent Platform: last finish reason seen, reported when the response comes back empty
+        // Last finish reason seen, reported when the response comes back empty
         var lastFinishReason: String? = null
 
         // Thinking state tracking
@@ -238,17 +243,15 @@ class GoogleProvider(
                 return StreamAction.Error("Google API streaming error: $errorMessage")
             }
 
-            if (isAgentPlatform) {
-                val blockReason = (data["promptFeedback"] as? JsonObject)
-                    ?.get("blockReason")?.jsonPrimitive?.contentOrNull
-                if (blockReason != null) {
-                    val detail = (data["promptFeedback"] as? JsonObject)
-                        ?.get("blockReasonMessage")?.jsonPrimitive?.contentOrNull
-                    errorMessage = "Google Agent Platform blocked the prompt: $blockReason" +
-                        (detail?.let { " ($it)" } ?: "")
-                    callback.onError(errorMessage!!)
-                    return StreamAction.Error(errorMessage!!)
-                }
+            val blockReason = (data["promptFeedback"] as? JsonObject)
+                ?.get("blockReason")?.jsonPrimitive?.contentOrNull
+            if (blockReason != null) {
+                val detail = (data["promptFeedback"] as? JsonObject)
+                    ?.get("blockReasonMessage")?.jsonPrimitive?.contentOrNull
+                errorMessage = "$platformLabel blocked the prompt: $blockReason" +
+                    (detail?.let { " ($it)" } ?: "")
+                callback.onError(errorMessage!!)
+                return StreamAction.Error(errorMessage!!)
             }
 
             val candidates = data["candidates"]?.jsonArray
@@ -258,6 +261,7 @@ class GoogleProvider(
 
                 // Check for safety blocks
                 val finishReason = firstCandidate["finishReason"]?.jsonPrimitive?.contentOrNull
+                if (finishReason != null) lastFinishReason = finishReason
                 if (!isAgentPlatform && finishReason != null && finishReason != "STOP") {
                     errorMessage = "Google API streaming blocked due to: $finishReason"
                     callback.onError(errorMessage!!)
@@ -289,32 +293,23 @@ class GoogleProvider(
                             functionCall != null -> {
                                 AppLogger.d("[TOOL_CALL_DEBUG] Google Streaming: Found functionCall part: $functionCall")
                                 val name = functionCall["name"]?.jsonPrimitive?.content
-                                val args = if (isAgentPlatform) {
-                                    // A call to a parameterless function may omit args altogether
-                                    (functionCall["args"] as? JsonObject) ?: buildJsonObject {}
-                                } else {
-                                    functionCall["args"]?.jsonObject
-                                }
+                                // A call to a parameterless function may omit args altogether
+                                val args = (functionCall["args"] as? JsonObject) ?: buildJsonObject {}
                                 // Capture thoughtSignature - required for Gemini 3+ function calling
                                 val thoughtSignature = part["thoughtSignature"]?.jsonPrimitive?.contentOrNull
 
-                                if (name != null && args != null) {
+                                if (name != null) {
                                     val toolCall = ToolCall(
                                         // Parallel calls can share a millisecond; replay matches by this id
-                                        id = "google_${System.currentTimeMillis()}" +
-                                            if (isAgentPlatform) "_${detectedToolCalls.size}" else "",
+                                        id = "google_${System.currentTimeMillis()}_${detectedToolCalls.size}",
                                         toolId = name,
                                         parameters = args,
                                         provider = toolCallProviderName,
                                         thoughtSignature = thoughtSignature
                                     )
-                                    if (isAgentPlatform) {
-                                        // Only the first parallel call is signed, so it must stay first
-                                        detectedToolCalls.add(toolCall)
-                                        detectedToolCall = detectedToolCalls.first()
-                                    } else {
-                                        detectedToolCall = toolCall
-                                    }
+                                    // Only the first parallel call is signed, so it must stay first
+                                    detectedToolCalls.add(toolCall)
+                                    detectedToolCall = detectedToolCalls.first()
                                     AppLogger.d("[TOOL_CALL_DEBUG] Google Streaming: Detected tool call in chunk, thoughtSignature=${thoughtSignature != null}")
                                 }
                             }
@@ -336,7 +331,6 @@ class GoogleProvider(
 
                 // Agent Platform: read this chunk's parts first, its final text must not be lost
                 if (isAgentPlatform && finishReason != null) {
-                    lastFinishReason = finishReason
                     if (finishReason != "STOP" && finishReason != "FINISH_REASON_UNSPECIFIED") {
                         if (finishReason == "MAX_TOKENS" && (fullResponse.isNotEmpty() || detectedToolCall != null)) {
                             AppLogger.w("[GoogleProvider] Response truncated at the output token limit")
@@ -400,14 +394,13 @@ class GoogleProvider(
                     thinkingDurationSeconds = thinkingDuration,
                     thoughtsStatus = thoughtsStatus
                 )
-                isAgentPlatform -> {
-                    // Unlike the AI Studio path this must reach the UI, or the request spins forever
-                    val message = "Google Agent Platform returned no content" +
+                else -> {
+                    // Must reach the UI: nothing else ends the request, and it would spin forever
+                    val message = "$platformLabel returned no content" +
                         (lastFinishReason?.let { " (finish reason: $it)" } ?: "")
                     callback.onError(message)
                     ProviderStreamingResult.Error(message)
                 }
-                else -> ProviderStreamingResult.Error("Empty response from Google")
             }
         }
     }
@@ -493,30 +486,8 @@ class GoogleProvider(
                 "assistant" -> {
                     // Check if next message is tool_call - combine them into one model turn
                     val nextMessage = messages.getOrNull(i + 1)
-                    if (isAgentPlatform && nextMessage?.role == "tool_call") {
-                        i = appendAgentPlatformToolCallGroup(contents, messages, i + 1, message.text)
-                    } else if (nextMessage?.role == "tool_call") {
-                        // Combine assistant text + functionCall into one message
-                        contents.add(buildJsonObject {
-                            put("role", "model")
-                            put("parts", buildJsonArray {
-                                if (message.text.isNotBlank()) {
-                                    add(buildJsonObject {
-                                        put("text", message.text)
-                                    })
-                                }
-                                add(buildJsonObject {
-                                    put("functionCall", buildJsonObject {
-                                        put("name", nextMessage.toolCall?.toolId ?: "unknown")
-                                        put("args", nextMessage.toolCall?.parameters ?: buildJsonObject {})
-                                    })
-                                    nextMessage.toolCall?.thoughtSignature?.let { signature ->
-                                        put("thoughtSignature", signature)
-                                    }
-                                })
-                            })
-                        })
-                        i += 2  // Skip both messages
+                    if (nextMessage?.role == "tool_call") {
+                        i = appendToolCallGroup(contents, messages, i + 1, message.text)
                     } else {
                         // Regular assistant message
                         if (message.text.isNotBlank()) {
@@ -532,30 +503,13 @@ class GoogleProvider(
                         i++
                     }
                 }
-                "tool_call" -> if (isAgentPlatform) {
-                    i = appendAgentPlatformToolCallGroup(contents, messages, i, precedingText = "")
-                } else {
+                "tool_call" -> {
                     // Standalone tool_call (old format or no preceding assistant)
-                    contents.add(buildJsonObject {
-                        put("role", "model")
-                        put("parts", buildJsonArray {
-                            add(buildJsonObject {
-                                put("functionCall", buildJsonObject {
-                                    put("name", message.toolCall?.toolId ?: "unknown")
-                                    put("args", message.toolCall?.parameters ?: buildJsonObject {})
-                                })
-                                message.toolCall?.thoughtSignature?.let { signature ->
-                                    put("thoughtSignature", signature)
-                                }
-                            })
-                        })
-                    })
-                    i++
+                    i = appendToolCallGroup(contents, messages, i, precedingText = "")
                 }
                 "tool_response" -> {
                     contents.add(buildJsonObject {
-                        // Agent Platform only accepts user/model as content roles
-                        put("role", if (isAgentPlatform) "user" else "function")
+                        put("role", toolResponseRole)
                         put("parts", buildJsonArray {
                             add(buildJsonObject {
                                 put("functionResponse", buildJsonObject {
@@ -592,7 +546,7 @@ class GoogleProvider(
      *
      * @return the index of the first message after this group
      */
-    private fun appendAgentPlatformToolCallGroup(
+    private fun appendToolCallGroup(
         contents: MutableList<JsonObject>,
         messages: List<Message>,
         callIndex: Int,
@@ -639,7 +593,7 @@ class GoogleProvider(
 
         if (responses.isNotEmpty()) {
             contents.add(buildJsonObject {
-                put("role", "user")
+                put("role", toolResponseRole)
                 put("parts", buildJsonArray {
                     responses.forEach { response ->
                         add(buildJsonObject {
