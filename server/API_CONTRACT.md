@@ -420,7 +420,7 @@ Adds an API key.
 
 **Request** — `ApiKey` body (id may be omitted; server generates UUID):
 ```json
-{ "provider": "openai", "key": "sk-...", "isActive": true, "customName": null }
+{ "provider": "openai", "key": "sk-...", "isActive": true, "customName": null, "projectId": null }
 ```
 
 **Response 201** — `ApiKey`
@@ -431,7 +431,7 @@ Updates a key (typically toggles `isActive` or updates the key value).
 
 **Request** (all optional):
 ```json
-{ "key": "sk-new", "isActive": false, "customName": "My key" }
+{ "key": "sk-new", "isActive": false, "customName": "My key", "projectId": "my-project" }
 ```
 
 **Response 200** — updated `ApiKey`

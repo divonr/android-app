@@ -31,6 +31,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   openai: t('provider_openai'),
   anthropic: t('provider_anthropic'),
   google: t('provider_google'),
+  vertex: t('provider_vertex'),
   poe: t('provider_poe'),
   cohere: t('provider_cohere'),
   openrouter: t('provider_openrouter'),

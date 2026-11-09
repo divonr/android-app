@@ -15,6 +15,9 @@ import java.util.UUID
 
 private val lenientJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
+/** A project ID as Android's key form produces it: no whitespace, null when empty. */
+private fun String?.normalizedProjectId(): String? = this?.filterNot { it.isWhitespace() }?.takeIf { it.isNotEmpty() }
+
 private const val MAX_ZIP_UPLOAD_BYTES = 50L * 1024 * 1024  // 50 MB
 
 // ── P4 Request DTOs ──────────────────────────────────────────────────────────
@@ -58,14 +61,18 @@ data class AddApiKeyRequest(
     val provider: String,
     val key: String,
     val isActive: Boolean = true,
-    val customName: String? = null
+    val customName: String? = null,
+    /** Google Cloud project; required for the `vertex` provider, ignored for the others. */
+    val projectId: String? = null
 )
 
 @Serializable
 data class PatchApiKeyRequest(
     val key: String? = null,
     val isActive: Boolean? = null,
-    val customName: String? = null
+    val customName: String? = null,
+    /** New Google Cloud project of a `vertex` key. Absent or blank keeps the current one. */
+    val projectId: String? = null
 )
 
 @Serializable
@@ -612,12 +619,18 @@ fun Route.mutationRoutes() {
         val ctx = call.userContext()
         val repo = ctx.repository
         val username = ctx.username
+        val projectId = body.projectId.normalizedProjectId()
+        if (body.provider == VERTEX_PROVIDER && projectId == null) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "projectId is required for this provider"))
+            return@post
+        }
         val key = ApiKey(
             id = body.id ?: UUID.randomUUID().toString(),
             provider = body.provider,
             key = body.key,
             isActive = body.isActive,
-            customName = body.customName
+            customName = body.customName,
+            projectId = projectId.takeIf { body.provider == VERTEX_PROVIDER }
         )
         repo.addApiKey(username, key)
         call.respond(HttpStatusCode.Created, key.masked())
@@ -632,12 +645,14 @@ fun Route.mutationRoutes() {
         val ctx = call.userContext()
         val repo = ctx.repository
         val username = ctx.username
+        val projectId = body.projectId.normalizedProjectId()
         // One locked load-modify-save (a sync merge or another tab's write in between is kept)
         val updated = repo.updateApiKey(username, keyId) { existing ->
             existing.copy(
                 key = body.key ?: existing.key,
                 isActive = body.isActive ?: existing.isActive,
-                customName = if (body.customName != null) body.customName else existing.customName
+                customName = if (body.customName != null) body.customName else existing.customName,
+                projectId = projectId.takeIf { existing.provider == VERTEX_PROVIDER } ?: existing.projectId
             )
         }
         if (updated == null) {

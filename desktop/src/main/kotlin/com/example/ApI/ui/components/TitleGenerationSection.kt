@@ -170,6 +170,17 @@ fun TitleGenerationSettingsSection(
                                         )
                                     }
 
+                                    if ("vertex" in availableProviders) {
+                                        ProviderOption(
+                                            text = stringResource(R.string.vertex_gemini_flash_lite),
+                                            isSelected = settings.provider == "vertex",
+                                            onClick = {
+                                                onSettingsChange(settings.copy(provider = "vertex"))
+                                                showProviderSelector = false
+                                            }
+                                        )
+                                    }
+
                                     if ("anthropic" in availableProviders) {
                                         ProviderOption(
                                             text = stringResource(R.string.anthropic_claude_haiku),
@@ -269,6 +280,7 @@ private fun getProviderDisplayName(provider: String): String {
         "openai" -> stringResource(R.string.openai_gpt5_nano)
         "poe" -> stringResource(R.string.poe_gpt5_nano)
         "google" -> stringResource(R.string.google_gemini_flash_lite)
+        "vertex" -> stringResource(R.string.vertex_gemini_flash_lite)
         "anthropic" -> stringResource(R.string.anthropic_claude_haiku)
         "cohere" -> stringResource(R.string.cohere_command_r7b)
         "openrouter" -> stringResource(R.string.openrouter_llama)

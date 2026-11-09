@@ -510,6 +510,60 @@ class MutationApisTest {
     }
 
     @Test
+    fun `POST api keys requires a project ID for vertex and stores it`() = testApplication {
+        val (storage, repo) = seededStorage()
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin(TEST_USER_EMAIL)
+
+        val missing = c.post("/api/keys") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"provider":"vertex","key":"FAKE-VERTEX-KEY"}""")
+        }
+        assertEquals(HttpStatusCode.BadRequest, missing.status)
+
+        val created = c.post("/api/keys") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"provider":"vertex","key":"FAKE-VERTEX-KEY","projectId":" fake-project "}""")
+        }
+        assertEquals(HttpStatusCode.Created, created.status)
+        val body = Json.parseToJsonElement(created.bodyAsText()).jsonObject
+        assertEquals("fake-project", body["projectId"]?.jsonPrimitive?.content)
+
+        val stored = repo.loadApiKeys(TEST_USERNAME).single { it.provider == "vertex" }
+        assertEquals("FAKE-VERTEX-KEY", stored.key)
+        assertEquals("fake-project", stored.projectId)
+
+        val list = Json.parseToJsonElement(c.get("/api/keys").bodyAsText()).jsonArray
+        assertEquals("fake-project", list.single { it.jsonObject["provider"]?.jsonPrimitive?.content == "vertex" }
+            .jsonObject["projectId"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `project ID survives every web edit of a key and is ignored for other providers`() = testApplication {
+        val (storage, repo) = seededStorage()
+        repo.addApiKey(TEST_USERNAME, ApiKey(id = "v", provider = "vertex", key = "FAKE-KEY", projectId = "fake-project"))
+        startWithFakeGoogleAuth(storage)
+        val c = googleLogin(TEST_USER_EMAIL)
+
+        c.patch("/api/keys/v") { contentType(ContentType.Application.Json); setBody("""{"customName":"renamed"}""") }
+        c.post("/api/keys/v/toggle")
+        c.post("/api/keys/reorder") { contentType(ContentType.Application.Json); setBody("""{"fromIndex":0,"toIndex":1}""") }
+        c.patch("/api/keys/v") { contentType(ContentType.Application.Json); setBody("""{"projectId":"  "}""") }
+        assertEquals("fake-project", repo.loadApiKeys(TEST_USERNAME).single { it.id == "v" }.projectId)
+        assertEquals("renamed", repo.loadApiKeys(TEST_USERNAME).single { it.id == "v" }.customName)
+
+        c.patch("/api/keys/v") { contentType(ContentType.Application.Json); setBody("""{"projectId":"fake-other"}""") }
+        assertEquals("fake-other", repo.loadApiKeys(TEST_USERNAME).single { it.id == "v" }.projectId)
+
+        val other = c.post("/api/keys") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"id":"new-openai","provider":"openai","key":"FAKE","projectId":"ignored"}""")
+        }
+        assertEquals(HttpStatusCode.Created, other.status)
+        assertEquals(null, repo.loadApiKeys(TEST_USERNAME).single { it.id == "new-openai" }.projectId)
+    }
+
+    @Test
     fun `PATCH api keys toggles isActive`() = testApplication {
         val (storage, repo) = seededStorage()
         startWithFakeGoogleAuth(storage)

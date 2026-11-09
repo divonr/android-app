@@ -22,6 +22,7 @@ import com.example.ApI.R
 import com.example.ApI.data.model.CustomProviderConfig
 import com.example.ApI.data.model.FullCustomProviderConfig
 import com.example.ApI.data.model.Provider
+import com.example.ApI.data.model.VERTEX_PROVIDER
 import com.example.ApI.data.model.getDisplayNameFromProviderKey
 import com.example.ApI.data.model.isCustomProvider
 import com.example.ApI.data.model.isFullCustomProvider
@@ -33,7 +34,7 @@ fun AddApiKeyDialog(
     providers: List<Provider>,
     customProviders: List<CustomProviderConfig> = emptyList(),
     fullCustomProviders: List<FullCustomProviderConfig> = emptyList(),
-    onConfirm: (String, String, String?) -> Unit,
+    onConfirm: (provider: String, key: String, customName: String?, projectId: String?) -> Unit,
     onDismiss: () -> Unit,
     onCreateCustomProvider: (CustomProviderConfig) -> Unit = {},
     onEditCustomProvider: (CustomProviderConfig) -> Unit = {},
@@ -47,6 +48,8 @@ fun AddApiKeyDialog(
     var selectedProvider by remember { mutableStateOf(initialProvider ?: "") }
     var apiKey by remember { mutableStateOf(initialApiKey ?: "") }
     var customName by remember { mutableStateOf("") }
+    var projectId by remember { mutableStateOf("") }
+    val needsProjectId = selectedProvider == VERTEX_PROVIDER
     var showProviderDropdown by remember { mutableStateOf(false) }
 
     // Custom provider dialog state
@@ -127,6 +130,7 @@ fun AddApiKeyDialog(
                                                 "openai" -> R.string.provider_openai
                                                 "poe" -> R.string.provider_poe
                                                 "google" -> R.string.provider_google
+                                                "vertex" -> R.string.provider_vertex
                                                 "anthropic" -> R.string.provider_anthropic
                                                 "cohere" -> R.string.provider_cohere
                                                 "openrouter" -> R.string.provider_openrouter
@@ -311,6 +315,24 @@ fun AddApiKeyDialog(
                         )
                     )
 
+                    // Google Cloud project, part of the request URL for this provider
+                    if (needsProjectId) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = projectId,
+                            onValueChange = { value -> projectId = value.filterNot { it.isWhitespace() } },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Google Cloud Project ID", color = OnSurface.copy(alpha = 0.7f)) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Primary,
+                                unfocusedBorderColor = OnSurface.copy(alpha = 0.3f),
+                                focusedTextColor = OnSurface,
+                                unfocusedTextColor = OnSurface
+                            )
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Custom name field (optional)
@@ -346,8 +368,16 @@ fun AddApiKeyDialog(
                         Spacer(modifier = Modifier.width(8.dp))
 
                         Button(
-                            onClick = { onConfirm(selectedProvider, apiKey, customName.takeIf { it.isNotBlank() }) },
-                            enabled = selectedProvider.isNotEmpty() && apiKey.isNotEmpty(),
+                            onClick = {
+                                onConfirm(
+                                    selectedProvider,
+                                    apiKey,
+                                    customName.takeIf { it.isNotBlank() },
+                                    projectId.takeIf { needsProjectId && it.isNotBlank() }
+                                )
+                            },
+                            enabled = selectedProvider.isNotEmpty() && apiKey.isNotEmpty() &&
+                                (!needsProjectId || projectId.isNotBlank()),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Primary,
                                 contentColor = OnPrimary

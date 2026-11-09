@@ -164,6 +164,7 @@ class ModelSelectionManager(
             }
             "poe" -> WebSearchSupport.OPTIONAL
             "google" -> WebSearchSupport.OPTIONAL
+            "vertex" -> WebSearchSupport.OPTIONAL
             "anthropic" -> WebSearchSupport.OPTIONAL
             "openrouter" -> WebSearchSupport.UNSUPPORTED
             else -> WebSearchSupport.UNSUPPORTED

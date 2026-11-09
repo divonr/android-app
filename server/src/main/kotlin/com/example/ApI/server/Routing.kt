@@ -96,13 +96,14 @@ data class MaskedApiKey(
     val provider: String,
     val key: String,             // masked form, e.g. "sk-...abcd"
     val isActive: Boolean,
-    val customName: String?
+    val customName: String?,
+    val projectId: String? = null  // Google Cloud project of a vertex key; not a secret
 )
 
 /** Mask an ApiKey for HTTP responses — last 4 chars visible, rest replaced by "...". */
 fun ApiKey.masked(): MaskedApiKey {
     val maskedKey = if (key.length <= 4) "****" else "...${key.takeLast(4)}"
-    return MaskedApiKey(id = id, provider = provider, key = maskedKey, isActive = isActive, customName = customName)
+    return MaskedApiKey(id = id, provider = provider, key = maskedKey, isActive = isActive, customName = customName, projectId = projectId)
 }
 
 /**

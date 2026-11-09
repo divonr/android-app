@@ -25,7 +25,7 @@ class TitleGenerationManager(
     fun getAvailableProvidersForTitleGeneration(): List<String> {
         val currentUser = deps.appSettings.value.current_user
         val apiKeys = deps.repository.loadApiKeys(currentUser).filter { it.isActive }.map { it.provider }
-        return listOf("openai", "anthropic", "google", "poe", "cohere", "openrouter").filter { apiKeys.contains(it) }
+        return listOf("openai", "anthropic", "google", "vertex", "poe", "cohere", "openrouter").filter { apiKeys.contains(it) }
     }
 
     suspend fun handleTitleGeneration(chat: Chat) {

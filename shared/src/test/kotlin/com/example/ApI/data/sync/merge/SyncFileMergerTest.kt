@@ -87,6 +87,46 @@ class SyncFileMergerTest {
     }
 
     @Test
+    fun `a projectId dropped by an older client is kept, also when the file was edited`() {
+        val s = ListSerializer(ApiKey.serializer())
+        val vertex = ApiKey(id = "v", provider = "vertex", key = "FAKE", projectId = "fake-project")
+        val other = ApiKey(id = "o", provider = "openai", key = "FAKE2")
+        fun encode(keys: List<ApiKey>) = json.encodeToString(s, keys)
+
+        // What an older client uploads: same key, no projectId, and one edit of its own
+        val stripped = """[{"id":"v","provider":"vertex","key":"FAKE","isActive":false},{"id":"o","provider":"openai","key":"FAKE2"}]"""
+        val base = encode(listOf(vertex, other))
+
+        val m = json.decodeFromString(s, SyncFileMerger.mergeFile("api_keys_u.json", base, base, stripped, json))
+        assertEquals("fake-project", m.single { it.id == "v" }.projectId)
+        assertFalse(m.single { it.id == "v" }.isActive, "the older client's real edit still applies")
+
+        // No base (first sync) and both directions
+        val noBase = json.decodeFromString(s, SyncFileMerger.mergeFile("api_keys_u.json", null, base, stripped, json))
+        assertEquals("fake-project", noBase.single { it.id == "v" }.projectId)
+        val strippedLocal = json.decodeFromString(s, SyncFileMerger.mergeFile("api_keys_u.json", base, stripped, base, json))
+        assertEquals("fake-project", strippedLocal.single { it.id == "v" }.projectId)
+
+        // A changed project is a normal 3-way change, a deleted key stays deleted
+        val changed = encode(listOf(vertex.copy(projectId = "fake-other"), other))
+        assertEquals("fake-other", json.decodeFromString(s, SyncFileMerger.mergeFile("api_keys_u.json", base, base, changed, json))
+            .single { it.id == "v" }.projectId)
+        val deleted = encode(listOf(other))
+        assertEquals(listOf("o"), json.decodeFromString(s, SyncFileMerger.mergeFile("api_keys_u.json", base, base, deleted, json)).map { it.id })
+    }
+
+    @Test
+    fun `key files that predate projectId are unaffected by it`() {
+        val s = ListSerializer(ApiKey.serializer())
+        val old = """[{"id":"1","provider":"openai","key":"FAKE","isActive":true,"customName":"mine"}]"""
+        val merged = SyncFileMerger.mergeFile("api_keys_u.json", old, old, old, json)
+        assertFalse(merged.contains("projectId"), "older clients keep getting the same fields: $merged")
+        val decoded = json.decodeFromString(s, merged).single()
+        assertEquals(null, decoded.projectId)
+        assertTrue(SyncFileMerger.sameContent("api_keys_u.json", old, merged, json))
+    }
+
+    @Test
     fun `api keys stored without ids get deterministic ids`() {
         val raw = """[{"provider":"openai","key":"a"}]"""
         val m1 = SyncFileMerger.mergeFile("api_keys_u.json", null, raw, raw, json)

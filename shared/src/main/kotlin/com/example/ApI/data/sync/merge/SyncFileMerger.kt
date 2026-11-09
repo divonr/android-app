@@ -40,7 +40,9 @@ object SyncFileMerger {
             val policy: JsonMergePolicy,
             val fillIds: Boolean = false,
             /** JSON `null` = disconnected (auth files): see [connectionMerge]. */
-            val nullIsDisconnect: Boolean = false
+            val nullIsDisconnect: Boolean = false,
+            /** Fields a client older than the field drops on rewrite: see [restoreDropped]. */
+            val keepIfDropped: Set<String> = emptySet()
         ) : FileKind()
         object Generic : FileKind()
     }
@@ -61,7 +63,7 @@ object SyncFileMerger {
         filename.startsWith("chat_history_") && filename.endsWith(".json") -> FileKind.ChatHistory
         filename == "app_settings.json" -> FileKind.Typed(AppSettings.serializer(), APP_SETTINGS_POLICY)
         filename.startsWith("api_keys_") ->
-            FileKind.Typed(ListSerializer(ApiKey.serializer()), KEYED_LIST_POLICY, fillIds = true)
+            FileKind.Typed(ListSerializer(ApiKey.serializer()), KEYED_LIST_POLICY, fillIds = true, keepIfDropped = setOf("projectId"))
         filename.startsWith("full_custom_providers_") ->
             FileKind.Typed(ListSerializer(FullCustomProviderConfig.serializer()), KEYED_LIST_POLICY, fillIds = true)
         filename.startsWith("custom_providers_") ->
@@ -204,9 +206,11 @@ object SyncFileMerger {
         // Device-local keys are never adopted from remote, and an unreadable local file has none
         // to keep: leave it untouched (returned as is) instead of taking remote's credentials,
         // `current_user` etc. The caller must not upload a result that does not parse.
-        val l = canonical(local) ?: return if (kind.policy.deviceLocalKeys.isEmpty()) remote else local
-        val r = canonical(remote) ?: return local
+        val parsedLocal = canonical(local) ?: return if (kind.policy.deviceLocalKeys.isEmpty()) remote else local
+        val parsedRemote = canonical(remote) ?: return local
         val b = canonical(base)
+        val l = restoreDropped(kind, parsedLocal, listOfNotNull(b, parsedRemote))
+        val r = restoreDropped(kind, parsedRemote, listOfNotNull(b, parsedLocal))
         val merged = (if (kind.nullIsDisconnect) connectionMerge(b, l, r) else null)
             ?: JsonMerger.merge(b, l, r, kind.policy)
         return try {
@@ -215,6 +219,31 @@ object SyncFileMerger {
             AppLogger.e("[$TAG] Merged $filename does not fit its model; writing raw JSON", e)
             json.encodeToString(JsonElement.serializer(), merged)
         }
+    }
+
+    /**
+     * A client older than a [FileKind.Typed.keepIfDropped] field rewrites the file without it, and
+     * a 3-way merge would read that as "cleared". The field can't be cleared on purpose, so an
+     * entry of [side] missing it takes the value from [sources], the first that has one. The merge
+     * then differs from the remote copy, so it is uploaded and the server's copy is repaired too.
+     */
+    private fun restoreDropped(kind: FileKind.Typed<*>, side: JsonElement, sources: List<JsonElement>): JsonElement {
+        if (kind.keepIfDropped.isEmpty() || side !is JsonArray) return side
+        fun field(entry: JsonElement, name: String): JsonElement? =
+            (entry as? JsonObject)?.get(name)?.takeIf { it !is JsonNull }
+        return JsonArray(side.map { entry ->
+            if (entry !is JsonObject) return@map entry
+            val id = entry["id"]
+            var restored: JsonObject = entry
+            for (name in kind.keepIfDropped) {
+                if (field(restored, name) != null) continue
+                val value = sources.firstNotNullOfOrNull { source ->
+                    (source as? JsonArray)?.firstOrNull { (it as? JsonObject)?.get("id") == id }?.let { field(it, name) }
+                } ?: continue
+                restored = JsonObject(LinkedHashMap(restored).apply { put(name, value) })
+            }
+            restored
+        })
     }
 
     /**

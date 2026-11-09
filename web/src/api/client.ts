@@ -348,7 +348,7 @@ export const apiKeys = {
     }),
 
   /** PATCH /api/keys/:id */
-  update: (keyId: string, params: { key?: string; isActive?: boolean; customName?: string | null }) =>
+  update: (keyId: string, params: { key?: string; isActive?: boolean; customName?: string | null; projectId?: string | null }) =>
     request<ApiKey>(`/api/keys/${keyId}`, {
       method: 'PATCH',
       body: JSON.stringify(params),

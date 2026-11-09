@@ -78,13 +78,14 @@ fun ApiKeysScreen(
     val haptics = LocalHapticFeedback.current
     
     // Helper functions to handle operations and update state
-    val onAddApiKey = { provider: String, key: String, customName: String? ->
+    val onAddApiKey = { provider: String, key: String, customName: String?, projectId: String? ->
         repository.addApiKey(
             currentUser,
             ApiKey(
                 provider = provider, 
                 key = key,
-                customName = customName
+                customName = customName,
+                projectId = projectId
             )
         )
         apiKeys = repository.loadApiKeys(currentUser) // Refresh the state
@@ -311,8 +312,8 @@ fun ApiKeysScreen(
             providers = providers,
             customProviders = customProviders,
             fullCustomProviders = fullCustomProviders,
-            onConfirm = { provider, key, customName ->
-                onAddApiKey(provider, key, customName)
+            onConfirm = { provider, key, customName, projectId ->
+                onAddApiKey(provider, key, customName, projectId)
                 showAddDialog = false
             },
             onDismiss = { showAddDialog = false },
@@ -510,6 +511,10 @@ private fun ApiKeyItem(
             Color(0xFFFBBC05).copy(alpha = 0.25f), // Yellow
             Color(0xFF34A853).copy(alpha = 0.25f)  // Green
         )
+        "vertex" -> listOf(
+            Color(0xFF4285F4).copy(alpha = 0.30f), // Google Cloud Blue
+            Color(0xFF4285F4).copy(alpha = 0.15f)
+        )
         "anthropic" -> listOf(
             Color(0xFFC6613F).copy(alpha = 0.25f), // Anthropic Orange
             Color(0xFFC6613F).copy(alpha = 0.15f)
@@ -591,6 +596,15 @@ private fun ApiKeyItem(
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                     )
                     
+                    // Google Cloud project of an Agent Platform key
+                    apiKey.projectId?.let { projectId ->
+                        Text(
+                            text = "Project: $projectId",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant
+                        )
+                    }
+
                     // Custom name display (if available)
                     apiKey.customName?.let { customName ->
                         Text(

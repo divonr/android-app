@@ -63,6 +63,7 @@ const PROVIDERS_FOR_TITLE_GEN = [
   { key: 'openai', label: t('openai_gpt5_nano') },
   { key: 'poe', label: t('poe_gpt5_nano') },
   { key: 'google', label: t('google_gemini_flash_lite') },
+  { key: 'vertex', label: t('vertex_gemini_flash_lite') },
   { key: 'anthropic', label: t('anthropic_claude_haiku') },
   { key: 'cohere', label: t('cohere_command_r7b') },
 ]

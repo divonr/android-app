@@ -54,6 +54,8 @@ function providerGradient(provider: string): string {
       return 'linear-gradient(180deg, rgba(198,97,63,0.25) 0%, rgba(198,97,63,0.15) 100%)'
     case 'google':
       return 'linear-gradient(90deg, rgba(66,133,244,0.25) 0%, rgba(234,67,53,0.25) 33%, rgba(251,188,5,0.25) 66%, rgba(52,168,83,0.25) 100%)'
+    case 'vertex':
+      return 'linear-gradient(180deg, rgba(66,133,244,0.30) 0%, rgba(66,133,244,0.15) 100%)'
     case 'poe':
       return 'linear-gradient(180deg, rgba(105,75,194,0.25) 0%, rgba(105,75,194,0.15) 100%)'
     case 'cohere':
@@ -80,10 +82,14 @@ function generateProviderKey(name: string, prefix: 'custom_' | 'fullcustom_'): s
 
 // ─── Built-in providers ───────────────────────────────────────────────────────
 
+/** Mirrors VERTEX_PROVIDER (ApiKey.kt): the one provider whose key needs a project ID. */
+const VERTEX_PROVIDER = 'vertex'
+
 const BUILTIN_PROVIDERS = [
   { key: 'openai', label: t('provider_openai') },
   { key: 'anthropic', label: t('provider_anthropic') },
   { key: 'google', label: t('provider_google') },
+  { key: VERTEX_PROVIDER, label: t('provider_vertex') },
   { key: 'poe', label: t('provider_poe') },
   { key: 'cohere', label: t('provider_cohere') },
   { key: 'openrouter', label: t('provider_openrouter') },
@@ -280,7 +286,7 @@ interface AddKeyDialogProps {
   open: boolean
   customList: CustomProviderConfig[]
   fullList: FullCustomProviderConfig[]
-  onConfirm: (provider: string, key: string, customName: string | null) => Promise<void>
+  onConfirm: (provider: string, key: string, customName: string | null, projectId: string | null) => Promise<void>
   onDismiss: () => void
   onEditCustom: (cfg: CustomProviderConfig) => void
   onDeleteCustom: (cfg: CustomProviderConfig) => void
@@ -297,8 +303,11 @@ const AddKeyDialog: React.FC<AddKeyDialogProps> = ({
   const [provider, setProvider] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [customName, setCustomName] = useState('')
+  const [projectId, setProjectId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  const needsProjectId = provider === VERTEX_PROVIDER
 
   // Reset when opened
   useEffect(() => {
@@ -306,19 +315,20 @@ const AddKeyDialog: React.FC<AddKeyDialogProps> = ({
       setProvider('')
       setApiKey('')
       setCustomName('')
+      setProjectId('')
       setError('')
     }
   }, [open])
 
   const handleConfirm = async () => {
-    if (!provider || !apiKey.trim()) {
+    if (!provider || !apiKey.trim() || (needsProjectId && !projectId)) {
       setError('יש לבחור ספק ולהזין מפתח API')
       return
     }
     setBusy(true)
     setError('')
     try {
-      await onConfirm(provider, apiKey.trim(), customName.trim() || null)
+      await onConfirm(provider, apiKey.trim(), customName.trim() || null, needsProjectId ? projectId : null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בהוספת מפתח')
     } finally {
@@ -338,7 +348,7 @@ const AddKeyDialog: React.FC<AddKeyDialogProps> = ({
           <DialogButton
             label={t('approve')}
             primary
-            disabled={busy || !provider || !apiKey.trim()}
+            disabled={busy || !provider || !apiKey.trim() || (needsProjectId && !projectId)}
             onClick={handleConfirm}
           />
         </>
@@ -373,6 +383,20 @@ const AddKeyDialog: React.FC<AddKeyDialogProps> = ({
             dir="ltr"
           />
         </div>
+
+        {/* Google Cloud project, part of the request URL for this provider */}
+        {needsProjectId && (
+          <div className={styles.dialogField}>
+            <label className={styles.dialogLabel} htmlFor="vertex-project-id">{'Google Cloud Project ID'}</label>
+            <input
+              id="vertex-project-id"
+              className={styles.dialogInput}
+              value={projectId}
+              onChange={e => setProjectId(e.target.value.replace(/\s/g, ''))}
+              dir="ltr"
+            />
+          </div>
+        )}
 
         {/* Custom name (optional) */}
         <div className={styles.dialogField}>
@@ -958,6 +982,9 @@ const KeyCard: React.FC<KeyCardProps> = ({
         <div className={styles.keyInfo}>
           <span className={styles.providerName}>{k.provider.toUpperCase()}</span>
           <span className={styles.maskedKey}>{k.key}</span>
+          {k.projectId && (
+            <span className={styles.customName}>{`Project: ${k.projectId}`}</span>
+          )}
           {k.customName && (
             <span className={styles.customName}>{k.customName}</span>
           )}
@@ -1063,8 +1090,8 @@ const KeysPage: React.FC = () => {
 
   // ── API Key actions ────────────────────────────────────────────────────────
 
-  const handleAddKey = async (provider: string, key: string, customName: string | null) => {
-    await apiKeys.create({ provider, key, isActive: true, customName })
+  const handleAddKey = async (provider: string, key: string, customName: string | null, projectId: string | null) => {
+    await apiKeys.create({ provider, key, isActive: true, customName, projectId })
     setShowAddKey(false)
     await loadAll()
   }

@@ -81,6 +81,27 @@ class SyncEngineTest {
         }
     }
 
+    @Test
+    fun `a projectId wiped on the server by an older client is restored by the next sync`() = runBlocking {
+        val withProject = """[{"id":"v","provider":"vertex","key":"FAKE","projectId":"fake-project"}]"""
+        val stripped = """[{"id":"v","provider":"vertex","key":"FAKE","isActive":true}]"""
+        keysFile().writeText(withProject)
+        val e = engine()
+        e.pull()
+        assertEquals(withProject, fake.content("api_keys_u.json"))
+
+        // An older client rewrites the blob with its model, which doesn't know projectId
+        fake.seed("api_keys_u.json", stripped, updatedAt = fake.blob("api_keys_u.json")!!.updatedAt + 1_000L)
+        e.pull()
+
+        assertEquals("fake-project", keys(keysFile().readText()).single().projectId)
+        assertEquals("fake-project", keys(fake.content("api_keys_u.json")!!).single().projectId)
+        // Settled: nothing more to upload
+        val puts = fake.putCount.get()
+        e.pull()
+        assertEquals(puts, fake.putCount.get())
+    }
+
     // ── Never-synced local copies: merged with the account's copy (2-way union), never
     //    resolved by file mtime / last-write-wins any more. ──
 

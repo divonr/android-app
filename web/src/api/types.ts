@@ -92,6 +92,7 @@ export interface ApiKey {
   key: string           // masked in reads (last 4 chars visible)
   isActive: boolean
   customName?: string | null
+  projectId?: string | null  // Google Cloud project (vertex keys only)
 }
 
 export interface TitleGenerationSettings {

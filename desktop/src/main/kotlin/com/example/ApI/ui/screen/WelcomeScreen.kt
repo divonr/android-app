@@ -107,8 +107,8 @@ fun WelcomeScreen(
     if (showAddApiKeyDialog) {
         AddApiKeyDialog(
             providers = providers,
-            onConfirm = { provider, key, customName ->
-                repository.addApiKey(currentUser, ApiKey(provider = provider, key = key, customName = customName))
+            onConfirm = { provider, key, customName, projectId ->
+                repository.addApiKey(currentUser, ApiKey(provider = provider, key = key, customName = customName, projectId = projectId))
                 showAddApiKeyDialog = false
                 detectedApiKey = null
                 detectedProvider = null

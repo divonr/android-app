@@ -41,6 +41,7 @@ object R {
         const val provider_openai = 30
         const val provider_poe = 31
         const val provider_google = 32
+        const val provider_vertex = 112
         const val provider_anthropic = 33
         const val provider_cohere = 34
         const val provider_openrouter = 35
@@ -74,6 +75,7 @@ object R {
         const val openai_gpt5_nano = 63
         const val poe_gpt5_nano = 64
         const val google_gemini_flash_lite = 65
+        const val vertex_gemini_flash_lite = 113
         const val anthropic_claude_haiku = 66
         const val cohere_command_r7b = 67
         const val openrouter_llama = 68
@@ -158,6 +160,7 @@ private val stringValues = mapOf(
     R.string.provider_openai to "OpenAI",
     R.string.provider_poe to "Poe",
     R.string.provider_google to "Google",
+    R.string.provider_vertex to "Google Agent Platform (Vertex)",
     R.string.provider_anthropic to "Anthropic",
     R.string.provider_cohere to "Cohere",
     R.string.provider_openrouter to "OpenRouter",
@@ -191,6 +194,7 @@ private val stringValues = mapOf(
     R.string.openai_gpt5_nano to "gpt-5-nano via OpenAI",
     R.string.poe_gpt5_nano to "gpt-5-nano via POE",
     R.string.google_gemini_flash_lite to "gemini-2.5-flash-lite via Google",
+    R.string.vertex_gemini_flash_lite to "gemini-3.1-flash-lite via Google Agent Platform",
     R.string.anthropic_claude_haiku to "claude-3-haiku via Anthropic",
     R.string.cohere_command_r7b to "command-r7b via Cohere",
     R.string.openrouter_llama to "llama-3.1-8b via OpenRouter",

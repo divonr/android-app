@@ -481,6 +481,7 @@ private fun getProviderDisplayName(providerKey: String): String {
             "openai" -> R.string.provider_openai
             "poe" -> R.string.provider_poe
             "google" -> R.string.provider_google
+            "vertex" -> R.string.provider_vertex
             "anthropic" -> R.string.provider_anthropic
             "cohere" -> R.string.provider_cohere
             "openrouter" -> R.string.provider_openrouter

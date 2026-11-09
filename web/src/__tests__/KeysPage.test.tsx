@@ -198,6 +198,45 @@ describe('KeysPage', () => {
 
   // ── Toggle ────────────────────────────────────────────────────────────────
 
+  it('requires the Google Cloud Project ID for a Vertex key and sends it', async () => {
+    renderPage()
+    await waitFor(() => screen.getByRole('button', { name: t('add_api_key') }))
+    fireEvent.click(screen.getByRole('button', { name: t('add_api_key') }))
+    await waitFor(() => screen.getByText(t('select_provider')))
+
+    expect(screen.queryByLabelText('Google Cloud Project ID')).toBeNull()
+
+    fireEvent.click(screen.getByText(t('select_provider')))
+    fireEvent.click(await screen.findByRole('option', { name: t('provider_vertex') }))
+
+    const projectField = await screen.findByLabelText('Google Cloud Project ID')
+    fireEvent.change(document.querySelector('input[type="password"]') as HTMLInputElement, { target: { value: 'FAKE-KEY' } })
+
+    const approve = screen.getByRole('button', { name: t('approve') })
+    expect(approve).toBeDisabled()
+    expect(clientModule.apiKeys.create).not.toHaveBeenCalled()
+
+    // Android strips whitespace as it is typed; so does the web
+    fireEvent.change(projectField, { target: { value: ' fake project ' } })
+    expect((projectField as HTMLInputElement).value).toBe('fakeproject')
+    expect(approve).not.toBeDisabled()
+
+    fireEvent.click(approve)
+    await waitFor(() => {
+      expect(clientModule.apiKeys.create).toHaveBeenCalledWith({
+        provider: 'vertex', key: 'FAKE-KEY', isActive: true, customName: null, projectId: 'fakeproject',
+      })
+    })
+  })
+
+  it('shows the project of a Vertex key', async () => {
+    vi.mocked(clientModule.apiKeys.list).mockResolvedValue([
+      { id: 'v1', provider: 'vertex', key: '...abcd', isActive: true, customName: null, projectId: 'fake-project' },
+    ])
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Project: fake-project')).toBeInTheDocument())
+  })
+
   it('toggles a key when status pill is clicked', async () => {
     vi.mocked(clientModule.apiKeys.list).mockResolvedValue(SAMPLE_KEYS)
     vi.mocked(clientModule.apiKeys.toggle).mockResolvedValue({ ...SAMPLE_KEYS[0], isActive: false })

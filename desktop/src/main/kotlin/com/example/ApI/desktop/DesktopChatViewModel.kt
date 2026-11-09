@@ -296,11 +296,11 @@ class DesktopChatViewModel(
         state = state.copy(showApiKeyDialog = false)
     }
 
-    fun addApiKey(provider: String, key: String, customName: String?) {
+    fun addApiKey(provider: String, key: String, customName: String?, projectId: String? = null) {
         if (provider.isBlank() || key.isBlank()) return
         repository.addApiKey(
             state.settings.current_user,
-            ApiKey(provider = provider.trim(), key = key.trim(), customName = customName?.trim()?.takeIf { it.isNotBlank() })
+            ApiKey(provider = provider.trim(), key = key.trim(), customName = customName?.trim()?.takeIf { it.isNotBlank() }, projectId = projectId)
         )
         reload()
         state = state.copy(showApiKeyDialog = false, pane = DesktopPane.ApiKeys)
