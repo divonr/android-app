@@ -11,13 +11,22 @@
  * Frames are delimited by a blank line (\n\n).  Chunks from the network may
  * arrive at any byte boundary, so the parser accumulates a buffer and processes
  * complete lines one by one.
+ *
+ * The request is executed by a server-owned "run": the stream starts with a `run` event
+ * carrying its id, relays the run's events and ends after its terminal event (`complete`,
+ * `error` or `cancelled`).  `: ping` comment frames keep an idle stream alive.  Closing the
+ * response does NOT stop the run (that is POST /api/runs/{runId}/cancel, see ./runs); a stream
+ * that breaks before the terminal event is reported through `onStreamLost`, and the run can
+ * still be followed on the account-level stream.
  */
 
 import type {
+  SseCancelledEvent,
   SseCompleteEvent,
   SseErrorEvent,
   SseMessagesAddedEvent,
   SsePartialEvent,
+  SseRunEvent,
   SseThinkingCompleteEvent,
   SseThinkingPartialEvent,
   SseThinkingStartedEvent,
@@ -35,6 +44,8 @@ const BASE_URL = ''
 // ---------------------------------------------------------------------------
 
 export interface StreamCallbacks {
+  /** First event: the id of the run executing this request */
+  onRun?: (event: SseRunEvent) => void
   /** Incremental assistant text delta */
   onPartial?: (event: SsePartialEvent) => void
   /** Model started a thinking phase */
@@ -51,8 +62,15 @@ export interface StreamCallbacks {
   onComplete?: (event: SseCompleteEvent) => void
   /** Tool messages persisted mid-stream — client should reload chat history */
   onMessagesAdded?: (event: SseMessagesAddedEvent) => void
+  /** The run was stopped through the cancel endpoint (terminal; what it saved is in the chat) */
+  onCancelled?: (event: SseCancelledEvent) => void
   /** Server-side or network error */
   onError?: (event: SseErrorEvent) => void
+  /**
+   * The connection broke (or ended) before the run's terminal event, after its id was known:
+   * the run goes on at the server.  Without this callback it is reported through `onError`.
+   */
+  onStreamLost?: (event: { runId: string; error: string }) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +110,7 @@ export function parseSseChunk(
       } else if (rawLine.startsWith('data:')) {
         dataLines.push(rawLine.slice('data:'.length).trim())
       }
-      // Ignore id: and retry: fields
+      // Ignore id: and retry: fields, and comment lines (": ping")
     }
 
     if (dataLines.length > 0) {
@@ -107,47 +125,72 @@ export function parseSseChunk(
 // Internal: dispatch a parsed frame to callbacks
 // ---------------------------------------------------------------------------
 
+/** What the reader loop needs to know about the frames seen so far. */
+interface StreamProgress {
+  runId: string | null
+  /** A terminal event (complete / error / cancelled) was dispatched */
+  ended: boolean
+}
+
 function dispatchFrame(
   frame: { event: string; data: string },
   callbacks: StreamCallbacks,
+  progress: StreamProgress,
 ): void {
+  let json: unknown
   try {
-    const json = JSON.parse(frame.data)
-    switch (frame.event) {
-      case 'partial':
-        callbacks.onPartial?.(json as SsePartialEvent)
-        break
-      case 'thinking_started':
-        callbacks.onThinkingStarted?.(json as SseThinkingStartedEvent)
-        break
-      case 'thinking_partial':
-        callbacks.onThinkingPartial?.(json as SseThinkingPartialEvent)
-        break
-      case 'thinking_complete':
-        callbacks.onThinkingComplete?.(json as SseThinkingCompleteEvent)
-        break
-      case 'tool_call':
-        callbacks.onToolCall?.(json as SseToolCallEvent)
-        break
-      case 'tool_result':
-        callbacks.onToolResult?.(json as SseToolResultEvent)
-        break
-      case 'complete':
-        callbacks.onComplete?.(json as SseCompleteEvent)
-        break
-      case 'messages_added':
-        callbacks.onMessagesAdded?.(json as SseMessagesAddedEvent)
-        break
-      case 'error':
-        callbacks.onError?.(json as SseErrorEvent)
-        break
-      default:
-        // Unknown event type — ignore silently
-        break
-    }
+    json = JSON.parse(frame.data)
   } catch {
     // JSON parse error — emit as error event
+    progress.ended = true
     callbacks.onError?.({ error: `Failed to parse SSE frame: ${frame.data}` })
+    return
+  }
+  switch (frame.event) {
+    case 'run': {
+      const runId = (json as SseRunEvent)?.runId
+      if (typeof runId === 'string' && runId) {
+        progress.runId = runId
+        callbacks.onRun?.({ runId })
+      }
+      break
+    }
+    case 'partial':
+      callbacks.onPartial?.(json as SsePartialEvent)
+      break
+    case 'thinking_started':
+      callbacks.onThinkingStarted?.(json as SseThinkingStartedEvent)
+      break
+    case 'thinking_partial':
+      callbacks.onThinkingPartial?.(json as SseThinkingPartialEvent)
+      break
+    case 'thinking_complete':
+      callbacks.onThinkingComplete?.(json as SseThinkingCompleteEvent)
+      break
+    case 'tool_call':
+      callbacks.onToolCall?.(json as SseToolCallEvent)
+      break
+    case 'tool_result':
+      callbacks.onToolResult?.(json as SseToolResultEvent)
+      break
+    case 'complete':
+      progress.ended = true
+      callbacks.onComplete?.(json as SseCompleteEvent)
+      break
+    case 'cancelled':
+      progress.ended = true
+      callbacks.onCancelled?.(json as SseCancelledEvent)
+      break
+    case 'messages_added':
+      callbacks.onMessagesAdded?.(json as SseMessagesAddedEvent)
+      break
+    case 'error':
+      progress.ended = true
+      callbacks.onError?.(json as SseErrorEvent)
+      break
+    default:
+      // Unknown event type — ignore silently
+      break
   }
 }
 
@@ -167,7 +210,19 @@ async function readStream(
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
+  const progress: StreamProgress = { runId: null, ended: false }
   let buffer = ''
+
+  // The connection is gone but the run has not ended: it goes on at the server
+  const lost = (error: string) => {
+    if (signal.aborted || progress.ended) return
+    progress.ended = true
+    if (progress.runId && callbacks.onStreamLost) {
+      callbacks.onStreamLost({ runId: progress.runId, error })
+    } else {
+      callbacks.onError?.({ error })
+    }
+  }
 
   try {
     while (!signal.aborted) {
@@ -179,21 +234,20 @@ async function readStream(
       buffer = remainder
 
       for (const frame of frames) {
-        dispatchFrame(frame, callbacks)
+        // Nothing of a run follows its terminal event
+        if (!progress.ended) dispatchFrame(frame, callbacks, progress)
       }
     }
     // Flush remaining bytes
     if (buffer.trim()) {
       const { frames } = parseSseChunk(buffer + '\n\n')
       for (const frame of frames) {
-        dispatchFrame(frame, callbacks)
+        if (!progress.ended) dispatchFrame(frame, callbacks, progress)
       }
     }
+    lost('Stream ended before the reply was complete')
   } catch (err) {
-    if (signal.aborted) return
-    callbacks.onError?.({
-      error: err instanceof Error ? err.message : String(err),
-    })
+    lost(err instanceof Error ? err.message : String(err))
   } finally {
     reader.releaseLock()
   }

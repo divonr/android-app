@@ -25,6 +25,11 @@ vi.mock('../api/stream', async () => ({
   parseSseChunk: vi.fn(),
 }))
 
+vi.mock('../api/runs', async () => ({
+  cancelRun: vi.fn(() => Promise.resolve({ runId: 'r', status: 'running' })),
+  connectRunsStream: vi.fn(() => ({ close: vi.fn() })),
+}))
+
 vi.mock('../api/client', async () => ({
   providers: {
     models: () => Promise.resolve([]),
@@ -165,6 +170,9 @@ const SAMPLE_CHAT: Chat = {
 
 import * as streamModule from '../api/stream'
 import * as clientModule from '../api/client'
+import * as runsModule from '../api/runs'
+import { useRunsStore } from '../stores/runsStore'
+import type { RunState } from '../api/types'
 
 function renderChatPage(chatId = 'c1') {
   return render(
@@ -180,6 +188,7 @@ function renderChatPage(chatId = 'c1') {
 // ─── Default beforeEach ───────────────────────────────────────────────────────
 
 function setupDefaultStore(overrides = {}) {
+  useRunsStore.getState().reset()
   chatStoreModule.useChatStore.setState({
     history: null,
     currentChat: SAMPLE_CHAT,
@@ -373,28 +382,68 @@ describe('ChatPage', () => {
     })
   })
 
-  it('calls abort when stop button is clicked', async () => {
+  it('stop cancels the run at the server (keeping the partial reply) instead of aborting the fetch', async () => {
     const abortFn = vi.fn()
-    vi.mocked(streamModule.sendStream).mockReturnValue({
-      abort: abortFn,
-      done: new Promise(() => {}),
+    let cbs: StreamCallbacks | null = null
+    vi.mocked(streamModule.sendStream).mockImplementation((_req, callbacks) => {
+      cbs = callbacks
+      return { abort: abortFn, done: new Promise(() => {}) }
+    })
+    const loadChat = vi.fn().mockResolvedValue(undefined)
+    setupDefaultStore({ loadChat })
+
+    renderChatPage()
+    await waitFor(() => {
+      screen.getByPlaceholderText(/הקלד הודעה/i)
+    })
+    loadChat.mockClear()
+
+    const input = screen.getByPlaceholderText(/הקלד הודעה/i)
+    fireEvent.change(input, { target: { value: 'Hello' } })
+    fireEvent.click(screen.getByLabelText(/send message/i))
+    await act(async () => {
+      cbs?.onRun?.({ runId: 'run-1' })
+      cbs?.onPartial?.({ text: 'Partial answer' })
+    })
+
+    fireEvent.click(screen.getByLabelText(/stop generation/i))
+    expect(runsModule.cancelRun).toHaveBeenCalledWith('run-1', true)
+    expect(abortFn).not.toHaveBeenCalled()
+    // The streamed text stays until the server confirms with `cancelled`
+    expect(screen.getByText('Partial answer')).toBeInTheDocument()
+    expect(screen.getByLabelText(/stop generation/i)).toBeInTheDocument()
+    expect(loadChat).not.toHaveBeenCalled()
+
+    await act(async () => {
+      cbs?.onCancelled?.({})
+    })
+    expect(loadChat).toHaveBeenCalledWith('c1')
+    expect(screen.queryByText('Partial answer')).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/send message/i)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('stop before the run id is known cancels as soon as the `run` event arrives', async () => {
+    let cbs: StreamCallbacks | null = null
+    vi.mocked(streamModule.sendStream).mockImplementation((_req, callbacks) => {
+      cbs = callbacks
+      return { abort: vi.fn(), done: new Promise(() => {}) }
     })
 
     renderChatPage()
     await waitFor(() => {
       screen.getByPlaceholderText(/הקלד הודעה/i)
     })
-
-    const input = screen.getByPlaceholderText(/הקלד הודעה/i)
-    fireEvent.change(input, { target: { value: 'Hello' } })
+    fireEvent.change(screen.getByPlaceholderText(/הקלד הודעה/i), { target: { value: 'Hello' } })
     fireEvent.click(screen.getByLabelText(/send message/i))
 
-    await waitFor(() => {
-      screen.getByLabelText(/stop generation/i)
-    })
-
     fireEvent.click(screen.getByLabelText(/stop generation/i))
-    expect(abortFn).toHaveBeenCalled()
+    expect(runsModule.cancelRun).not.toHaveBeenCalled()
+
+    await act(async () => {
+      cbs?.onRun?.({ runId: 'run-9' })
+    })
+    expect(runsModule.cancelRun).toHaveBeenCalledWith('run-9', true)
   })
 
   it('navigates back on back button click', async () => {
@@ -729,5 +778,254 @@ describe('ChatPage — R3 streaming sequence', () => {
     // We can achieve this by directly setting state via React test utilities in the future,
     // but for now we verify the component renders without crashing.
     expect(screen.getByPlaceholderText(/הקלד הודעה/i)).toBeInTheDocument()
+  })
+})
+
+// ─── Cloud runs: the account-level stream ─────────────────────────────────────
+
+describe('ChatPage — cloud runs', () => {
+  const runState = (over: Partial<RunState> = {}): RunState => ({
+    runId: 'far-1',
+    chatId: 'c1',
+    provider: 'openai',
+    modelName: 'gpt-4o',
+    status: 'running',
+    text: '',
+    thinkingActive: false,
+    thinkingText: '',
+    error: null,
+    startedAt: 1,
+    ...over,
+  })
+  const ev = (type: string, data: Record<string, unknown> = {}, runId = 'far-1', chatId = 'c1') =>
+    ({ type, runId, chatId, data: { runId, chatId, ...data } })
+
+  let cbs: StreamCallbacks | null = null
+  let abortFn = vi.fn()
+  let loadChat = vi.fn()
+  let refreshChat = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    cbs = null
+    abortFn = vi.fn()
+    loadChat = vi.fn().mockResolvedValue(undefined)
+    refreshChat = vi.fn().mockResolvedValue(undefined)
+    setupDefaultStore({ loadChat, refreshChat, refreshHistory: vi.fn().mockResolvedValue(undefined) })
+    vi.mocked(streamModule.sendStream).mockImplementation((_req, callbacks) => {
+      cbs = callbacks
+      return { abort: abortFn, done: new Promise(() => {}) }
+    })
+  })
+
+  async function ready() {
+    renderChatPage()
+    await waitFor(() => screen.getByPlaceholderText(/הקלד הודעה/i))
+  }
+  async function send(text = 'Hello') {
+    fireEvent.change(screen.getByPlaceholderText(/הקלד הודעה/i), { target: { value: text } })
+    fireEvent.click(screen.getByLabelText(/send message/i))
+  }
+  const runs = () => useRunsStore.getState()
+
+  it('streams a run started on another device with the same UI (text, thinking, tool calls)', async () => {
+    await ready()
+    await act(async () => {
+      runs().applyEvent(ev('run_started', { run: runState() }))
+    })
+    // The question of the other device is fetched; the stop button replaces send
+    expect(refreshChat).toHaveBeenCalledWith('c1')
+    expect(screen.getByLabelText(/stop generation/i)).toBeInTheDocument()
+
+    await act(async () => {
+      runs().applyEvent(ev('thinking_started'))
+      runs().applyEvent(ev('thinking_partial', { text: 'pondering' }))
+      runs().applyEvent(ev('thinking_complete', { thoughts: 'pondering', durationSeconds: 1.5, status: 'PRESENT' }))
+      runs().applyEvent(ev('tool_call', { toolId: 't1', toolName: 'get_date_time', parameters: {} }))
+      runs().applyEvent(ev('tool_result', { toolId: 't1', success: true, output: 'now' }))
+      runs().applyEvent(ev('partial', { text: 'From the ' }))
+      runs().applyEvent(ev('partial', { text: 'phone' }))
+    })
+    expect(screen.getByText(/מחשבות/)).toBeInTheDocument()
+    expect(screen.getAllByText('get_date_time').length).toBeGreaterThan(0)
+    expect(screen.getByText('From the phone')).toBeInTheDocument()
+
+    // Terminal event: the chat is re-read, then the bubble goes away
+    refreshChat.mockClear()
+    await act(async () => {
+      runs().applyEvent(ev('complete', { text: 'From the phone', messageId: 'm9' }))
+    })
+    expect(refreshChat).toHaveBeenCalledWith('c1')
+    await waitFor(() => expect(screen.queryByText('From the phone')).not.toBeInTheDocument())
+    expect(screen.getByLabelText(/send message/i)).toBeInTheDocument()
+  })
+
+  it('shows a running run from the snapshot (this tab after a page reload)', async () => {
+    runs().applySnapshot([runState({ text: 'Half an ans', thinkingText: 'hm', thinkingActive: false })])
+    await ready()
+    expect(screen.getByText('Half an ans')).toBeInTheDocument()
+    expect(screen.getByText(/מחשבות/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/stop generation/i)).toBeInTheDocument()
+
+    await act(async () => {
+      runs().applyEvent(ev('partial', { text: 'wer' }))
+    })
+    expect(screen.getByText('Half an answer')).toBeInTheDocument()
+  })
+
+  it('does not show a run of another chat', async () => {
+    await ready()
+    await act(async () => {
+      runs().applyEvent(ev('run_started', { run: runState({ chatId: 'other' }) }, 'far-1', 'other'))
+      runs().applyEvent(ev('partial', { text: 'elsewhere' }, 'far-1', 'other'))
+    })
+    expect(screen.queryByText('elsewhere')).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/send message/i)).toBeInTheDocument()
+  })
+
+  it('stop on a foreign run cancels it, keeping the partial reply', async () => {
+    await ready()
+    await act(async () => {
+      runs().applyEvent(ev('run_started', { run: runState() }))
+    })
+    fireEvent.click(screen.getByLabelText(/stop generation/i))
+    expect(runsModule.cancelRun).toHaveBeenCalledWith('far-1', true)
+  })
+
+  it('shows the error of a foreign run and clears its bubble', async () => {
+    await ready()
+    await act(async () => {
+      runs().applyEvent(ev('run_started', { run: runState() }))
+      runs().applyEvent(ev('partial', { text: 'so far' }))
+    })
+    await act(async () => {
+      runs().applyEvent(ev('error', { error: 'Provider exploded' }))
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('Provider exploded')
+    expect(screen.queryByText('so far')).not.toBeInTheDocument()
+    expect(runs().errors).toEqual({})
+  })
+
+  it("ignores the account-level stream's copy of the tab's own run (no double text, no double reload)", async () => {
+    await ready()
+    await send()
+    await act(async () => {
+      // The account stream may announce the run before the per-request stream names it
+      runs().applyEvent(ev('run_started', { run: runState({ runId: 'own-1' }) }, 'own-1'))
+      cbs?.onRun?.({ runId: 'own-1' })
+      cbs?.onPartial?.({ text: 'Mine' })
+      runs().applyEvent(ev('partial', { text: 'Mine' }, 'own-1'))
+    })
+    expect(screen.getAllByText('Mine')).toHaveLength(1)
+
+    refreshChat.mockClear()
+    loadChat.mockClear()
+    await act(async () => {
+      runs().applyEvent(ev('messages_added', {}, 'own-1'))
+      runs().applyEvent(ev('complete', { text: 'Mine', messageId: 'm' }, 'own-1'))
+    })
+    // Only the per-request stream drives the tab's own run
+    expect(refreshChat).not.toHaveBeenCalled()
+    expect(loadChat).not.toHaveBeenCalled()
+    expect(screen.getByText('Mine')).toBeInTheDocument()
+
+    await act(async () => {
+      cbs?.onComplete?.({ text: 'Mine', messageId: 'm' })
+    })
+    expect(loadChat).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('Mine')).not.toBeInTheDocument()
+    expect(runs().ownRunIds).toEqual({})
+    expect(runs().runs).toEqual({})
+  })
+
+  it('falls over to the account-level stream when the per-request stream dies mid-run', async () => {
+    await ready()
+    await send()
+    await act(async () => {
+      runs().applyEvent(ev('run_started', { run: runState({ runId: 'own-1' }) }, 'own-1'))
+      cbs?.onRun?.({ runId: 'own-1' })
+      cbs?.onPartial?.({ text: 'Before the blip' })
+      runs().applyEvent(ev('partial', { text: 'Before the blip' }, 'own-1'))
+    })
+
+    await act(async () => {
+      cbs?.onStreamLost?.({ runId: 'own-1', error: 'network error' })
+    })
+    // No error; the same text, now from the account-level stream, and it keeps flowing
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('Before the blip')).toBeInTheDocument()
+    expect(screen.getByLabelText(/stop generation/i)).toBeInTheDocument()
+
+    await act(async () => {
+      runs().applyEvent(ev('partial', { text: ', and after' }, 'own-1'))
+    })
+    expect(screen.getByText('Before the blip, and after')).toBeInTheDocument()
+
+    refreshChat.mockClear()
+    await act(async () => {
+      runs().applyEvent(ev('complete', { text: 'x', messageId: 'm' }, 'own-1'))
+    })
+    expect(refreshChat).toHaveBeenCalledWith('c1')
+    await waitFor(() => expect(screen.queryByText('Before the blip, and after')).not.toBeInTheDocument())
+  })
+
+  it('re-reads the chat when the per-request stream dies after the run already ended', async () => {
+    await ready()
+    await send()
+    await act(async () => {
+      runs().applyEvent(ev('run_started', { run: runState({ runId: 'own-1' }) }, 'own-1'))
+      cbs?.onRun?.({ runId: 'own-1' })
+      cbs?.onPartial?.({ text: 'Answer' })
+      // The terminal event reached the account stream, but never the per-request stream
+      runs().applyEvent(ev('complete', { text: 'Answer', messageId: 'm' }, 'own-1'))
+    })
+    refreshChat.mockClear()
+    await act(async () => {
+      cbs?.onStreamLost?.({ runId: 'own-1', error: 'network error' })
+    })
+    expect(refreshChat).toHaveBeenCalledWith('c1')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('Answer')).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/send message/i)).toBeInTheDocument()
+  })
+
+  it('messages_added: the saved part leaves the bubble once the chat reload is done', async () => {
+    let finishReload: () => void = () => {}
+    await ready()
+    await send()
+    await act(async () => {
+      cbs?.onRun?.({ runId: 'own-1' })
+      cbs?.onPartial?.({ text: 'Let me check.' })
+      cbs?.onToolCall?.({ toolId: 't1', toolName: 'get_date_time', parameters: {} })
+      cbs?.onToolResult?.({ toolId: 't1', success: true, output: 'now' })
+    })
+    loadChat.mockImplementation(() => new Promise<void>((resolve) => { finishReload = resolve }))
+    await act(async () => {
+      cbs?.onMessagesAdded?.({})
+      cbs?.onPartial?.({ text: 'It is noon.' })
+    })
+    // Until the reload brings the saved messages, both parts are on screen
+    expect(loadChat).toHaveBeenCalledWith('c1')
+    expect(screen.getByText('Let me check.')).toBeInTheDocument()
+    expect(screen.getByText('It is noon.')).toBeInTheDocument()
+
+    await act(async () => { finishReload() })
+    expect(screen.queryByText('Let me check.')).not.toBeInTheDocument()
+    expect(screen.queryAllByText('get_date_time')).toHaveLength(0)
+    expect(screen.getByText('It is noon.')).toBeInTheDocument()
+  })
+
+  it('leaving the chat stops reading the stream but not the run', async () => {
+    await ready()
+    await send()
+    await act(async () => {
+      cbs?.onRun?.({ runId: 'own-1' })
+    })
+    expect(runs().ownRunIds).toEqual({ 'own-1': true })
+    fireEvent.click(screen.getByLabelText(/back to chats/i))
+    await waitFor(() => screen.getByTestId('home'))
+    expect(abortFn).toHaveBeenCalled()
+    expect(runsModule.cancelRun).not.toHaveBeenCalled()
+    expect(runs().ownRunIds).toEqual({})
   })
 })

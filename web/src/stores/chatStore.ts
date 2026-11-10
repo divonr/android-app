@@ -30,6 +30,13 @@ interface ChatState {
    * dropped with error 'Chat not found'.
    */
   refreshFromSync: () => Promise<void>
+  /**
+   * Silently re-read [chatId] if it is the open chat (a run of another device changed it).
+   * No loading flag; a failed read keeps what is shown.
+   */
+  refreshChat: (chatId: string) => Promise<void>
+  /** Silently re-read the chat list, if it is loaded (new chat / new title from a run). */
+  refreshHistory: () => Promise<void>
 }
 
 export const CHAT_NOT_FOUND = 'Chat not found'
@@ -88,6 +95,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearCurrentChat: () => set({ currentChat: null }),
 
   setStreaming: (streaming: boolean) => set({ streaming }),
+
+  refreshChat: async (chatId: string) => {
+    if (get().currentChat?.chat_id !== chatId) return
+    try {
+      const fresh = await chatsApi.get(chatId)
+      if (fresh && get().currentChat?.chat_id === chatId) set({ currentChat: fresh })
+    } catch {
+      // Keep the chat as shown: the next event or sync refresh reads it again
+    }
+  },
+
+  refreshHistory: async () => {
+    if (!get().history) return
+    try {
+      const fresh = await chatsApi.list()
+      if (get().history) set({ history: fresh })
+    } catch {
+      // Keep the list
+    }
+  },
 
   refreshFromSync: async () => {
     const { history, currentChat } = get()

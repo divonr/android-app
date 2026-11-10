@@ -32,6 +32,18 @@ import {
 } from '../utils/toolCatalog'
 import { sendStream, resendStream } from '../api/stream'
 import type { StreamCallbacks } from '../api/stream'
+import { cancelRun } from '../api/runs'
+import { useRunsStore, selectForeignRun } from '../stores/runsStore'
+import {
+  EMPTY_STREAM,
+  dropSettled,
+  isEmptySegment,
+  nextSegmentId,
+  reduceStream,
+  settleSegment,
+  streamSegments,
+} from '../utils/streamState'
+import type { StreamState } from '../utils/streamState'
 import type {
   Message,
   ProviderModel_Flat,
@@ -62,83 +74,14 @@ import { messageDayKey, formatDayLabel } from '../utils/chatDates'
 
 // ─── Streaming state ──────────────────────────────────────────────────────────
 
-interface StreamState {
-  partialText: string
-  thinkingText: string
-  thinkingOpen: boolean
-  thinkingDone: boolean
-  thinkingStartTime: number | null
-  thinkingDurationSeconds: number | null
-  toolCalls: Array<{
-    toolId: string
-    toolName: string
-    parameters: Record<string, unknown>
-    result?: string
-    success?: boolean
-    executing: boolean
-  }>
-  streaming: boolean
-}
-
-const EMPTY_STREAM: StreamState = {
-  partialText: '',
-  thinkingText: '',
-  thinkingOpen: false,
-  thinkingDone: false,
-  thinkingStartTime: null,
-  thinkingDurationSeconds: null,
-  toolCalls: [],
-  streaming: false,
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function makeStreamCallbacks(
-  setStream: React.Dispatch<React.SetStateAction<StreamState>>,
-  onComplete: () => void,
-  onError: (msg: string) => void,
-  onMessagesAdded?: () => void,
-): StreamCallbacks {
-  return {
-    onPartial: (e) =>
-      setStream((s) => ({ ...s, partialText: s.partialText + e.text })),
-    onThinkingStarted: () =>
-      setStream((s) => ({ ...s, thinkingOpen: true, thinkingStartTime: Date.now() })),
-    onThinkingPartial: (e) =>
-      setStream((s) => ({ ...s, thinkingText: s.thinkingText + e.text })),
-    onThinkingComplete: (e) =>
-      setStream((s) => ({
-        ...s,
-        thinkingDone: true,
-        thinkingDurationSeconds: e.durationSeconds,
-      })),
-    onToolCall: (e) =>
-      setStream((s) => ({
-        ...s,
-        toolCalls: [
-          ...s.toolCalls,
-          { toolId: e.toolId, toolName: e.toolName, parameters: e.parameters, executing: true },
-        ],
-      })),
-    onToolResult: (e) =>
-      setStream((s) => ({
-        ...s,
-        toolCalls: s.toolCalls.map((tc) =>
-          tc.toolId === e.toolId
-            ? { ...tc, result: e.output, success: e.success, executing: false }
-            : tc,
-        ),
-      })),
-    onMessagesAdded: onMessagesAdded ? () => onMessagesAdded() : undefined,
-    onComplete: () => {
-      setStream(EMPTY_STREAM)
-      onComplete()
-    },
-    onError: (e) => {
-      setStream(EMPTY_STREAM)
-      onError(e.error)
-    },
-  }
+/** The tab's own request: the per-request stream it is reading, and the run executing it. */
+interface OwnStream {
+  chatId: string
+  handle: { abort: () => void } | null
+  /** Known from the stream's first event */
+  runId: string | null
+  /** Stop was pressed before the run id arrived: cancel as soon as it does */
+  stopRequested: boolean
 }
 
 // ─── Main ChatPage ────────────────────────────────────────────────────────────
@@ -184,8 +127,16 @@ const ChatPage: React.FC = () => {
   const [editingMsg, setEditingMsg] = useState<Message | null>(null)
 
   // ── Streaming state ──────────────────────────────────────────────────────
+  // The tab's own request (per-request stream) …
   const [stream, setStream] = useState<StreamState>(EMPTY_STREAM)
-  const streamHandleRef = useRef<{ abort: () => void } | null>(null)
+  const ownStreamRef = useRef<OwnStream | null>(null)
+  // … or a run of this chat the tab is not reading itself (another device, this tab before a
+  // reload, a per-request stream that broke): followed through the account-level stream
+  const foreignRun = useRunsStore(selectForeignRun(chatId))
+  const foreignError = useRunsStore((s) => (chatId ? s.errors[chatId] : undefined))
+  /** The reply streaming into this chat, whoever reads it. */
+  const live: StreamState | null = stream.streaming ? stream : foreignRun
+  const busy = live !== null
 
   // ── UI state ─────────────────────────────────────────────────────────────
   const [error, setError] = useState<string | null>(null)
@@ -230,22 +181,41 @@ const ChatPage: React.FC = () => {
     [providersDetailed, activeKeyProviders],
   )
 
-  // Tell the store a reply is streaming: live sync refreshes wait until it ends
+  // Tell the store the tab's own reply is streaming: live sync refreshes wait until it ends.
+  // (Not for a foreign run: its question arrives through such a refresh.)
   useEffect(() => {
     setStreaming(stream.streaming)
   }, [stream.streaming, setStreaming])
   useEffect(() => () => setStreaming(false), [setStreaming])
 
+  // Leaving the chat (or the page) while the tab's own reply streams: stop reading it — the
+  // run goes on at the server and is followed through the account-level stream from here on
+  useEffect(() => () => {
+    const own = ownStreamRef.current
+    if (!own) return
+    ownStreamRef.current = null
+    own.handle?.abort()
+    if (own.runId) useRunsStore.getState().release(own.runId, own.chatId)
+    setStream(EMPTY_STREAM)
+  }, [chatId])
+
+  // A foreign run of this chat failed
+  useEffect(() => {
+    if (!chatId || !foreignError) return
+    setError(foreignError)
+    useRunsStore.getState().clearError(chatId)
+  }, [chatId, foreignError])
+
   // ── Autoscroll while streaming ───────────────────────────────────────────
 
   useEffect(() => {
-    if (stream.streaming) {
+    if (busy) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [stream.partialText, stream.streaming])
+  }, [live?.partialText, busy])
 
   useEffect(() => {
-    if (!stream.streaming) {
+    if (!busy) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
   }, [currentChat?.messages?.length]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -322,6 +292,87 @@ const ChatPage: React.FC = () => {
     })
   }, [])
 
+  // ── Streams and runs ─────────────────────────────────────────────────────
+
+  /**
+   * Stop a run, keeping what streamed so far as the reply (like the Android stop button).
+   * The run's `cancelled` event — not this call — ends the streaming state.
+   */
+  const requestCancel = useCallback((runId: string) => {
+    cancelRun(runId, true).catch((err) => {
+      // 404: the server no longer knows the run, i.e. it is over; its end reaches the tab anyway
+      if ((err as { status?: unknown } | null)?.status === 404) return
+      setError(apiErrorMessage(err, 'Failed to stop the reply'))
+    })
+  }, [])
+
+  /**
+   * Start one of the tab's own requests and follow its per-request stream.
+   * [start] opens the stream (send / resend) with the callbacks built here.
+   */
+  const beginStream = useCallback(
+    (start: (cbs: StreamCallbacks) => { abort: () => void }) => {
+      if (!chatId) return
+      const forChat = chatId
+      const own: OwnStream = { chatId: forChat, handle: null, runId: null, stopRequested: false }
+      ownStreamRef.current = own
+      setStream({ ...EMPTY_STREAM, streaming: true })
+
+      const active = () => ownStreamRef.current === own
+      const content = (type: string) => (e: object) => {
+        if (active()) setStream((s) => reduceStream(s, type, e as Record<string, unknown>))
+      }
+      /** The run's terminal event arrived. Returns whether this stream was still shown. */
+      const end = (): boolean => {
+        if (own.runId) useRunsStore.getState().finishOwn(own.runId)
+        if (!active()) return false
+        ownStreamRef.current = null
+        setStream(EMPTY_STREAM)
+        return true
+      }
+
+      const cbs: StreamCallbacks = {
+        onRun: (e) => {
+          own.runId = e.runId
+          if (!active()) return
+          // From here on the account-level stream's copy of this run is ignored
+          useRunsStore.getState().claim(e.runId)
+          if (own.stopRequested) requestCancel(e.runId)
+        },
+        onPartial: content('partial'),
+        onThinkingStarted: content('thinking_started'),
+        onThinkingPartial: content('thinking_partial'),
+        onThinkingComplete: content('thinking_complete'),
+        onToolCall: content('tool_call'),
+        onToolResult: content('tool_result'),
+        onMessagesAdded: () => {
+          if (!active()) return
+          // What streamed so far is saved: keep showing it until the reload brings it as
+          // messages, then drop it (the stream goes on with a new segment)
+          const segment = nextSegmentId()
+          setStream((s) => settleSegment(s, segment))
+          void Promise.resolve(loadChat(forChat)).finally(() => {
+            setStream((s) => dropSettled(s, segment))
+          })
+        },
+        onComplete: () => { if (end()) loadChat(forChat) },
+        // Stopped: what the server kept (the partial reply, tool messages) is in the chat
+        onCancelled: () => { if (end()) loadChat(forChat) },
+        onError: (e) => { if (end()) setError(e.error) },
+        onStreamLost: (e) => {
+          // The connection broke, not the run: follow it through the account-level stream
+          if (!active()) return
+          ownStreamRef.current = null
+          setStream(EMPTY_STREAM)
+          useRunsStore.getState().release(e.runId, forChat)
+        },
+      }
+
+      own.handle = start(cbs)
+    },
+    [chatId, loadChat, requestCancel],
+  )
+
   // ── Send message ─────────────────────────────────────────────────────────
 
   const doSend = useCallback(
@@ -349,19 +400,9 @@ const ChatPage: React.FC = () => {
         projectAttachments: [],
       }
 
-      setStream({ ...EMPTY_STREAM, streaming: true })
-
-      const cbs = makeStreamCallbacks(
-        setStream,
-        () => { if (chatId) loadChat(chatId) },
-        setError,
-        () => { if (chatId) loadChat(chatId) },
-      )
-
-      const handle = sendStream(req, cbs)
-      streamHandleRef.current = handle
+      beginStream((cbs) => sendStream(req, cbs))
     },
-    [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, loadChat],
+    [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, beginStream],
   )
 
   // Multi-message mode: persist the user message WITHOUT calling the LLM;
@@ -384,7 +425,7 @@ const ChatPage: React.FC = () => {
   // Mirrors MessageSendingManager.sendBufferedBatch(): stream a reply for the
   // already-persisted conversation without re-persisting any user message.
   const sendBufferedBatch = useCallback(() => {
-    if (!chatId || stream.streaming) return
+    if (!chatId || busy) return
     setError(null)
     setShowReplyButton(false)
 
@@ -406,20 +447,11 @@ const ChatPage: React.FC = () => {
       persistUserMessage: false,
     }
 
-    setStream({ ...EMPTY_STREAM, streaming: true })
-
-    const cbs = makeStreamCallbacks(
-      setStream,
-      () => { if (chatId) loadChat(chatId) },
-      setError,
-      () => { if (chatId) loadChat(chatId) },
-    )
-
-    streamHandleRef.current = sendStream(req, cbs)
-  }, [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, stream.streaming, loadChat])
+    beginStream((cbs) => sendStream(req, cbs))
+  }, [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, busy, beginStream])
 
   const handleSubmit = useCallback(() => {
-    if (!inputText.trim() || stream.streaming) return
+    if (!inputText.trim() || busy) return
 
     if (editingMsg) {
       handleEditSubmit(editingMsg, inputText, attachments)
@@ -433,7 +465,7 @@ const ChatPage: React.FC = () => {
     }
     setInputText('')
     setAttachments([])
-  }, [inputText, attachments, stream.streaming, editingMsg, multiMessageMode, bufferMessage, doSend]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [inputText, attachments, busy, editingMsg, multiMessageMode, bufferMessage, doSend]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Edit / resend ─────────────────────────────────────────────────────────
 
@@ -462,7 +494,6 @@ const ChatPage: React.FC = () => {
 
         // The resend route accepts the new variant's id: it replies into that variant
         const newMsgId = result.newVariantId
-        setStream({ ...EMPTY_STREAM, streaming: true })
 
         const resendReq = {
           provider,
@@ -474,20 +505,12 @@ const ChatPage: React.FC = () => {
           temperature,
         }
 
-        const cbs = makeStreamCallbacks(
-          setStream,
-          () => { if (chatId) loadChat(chatId) },
-          setError,
-          () => { if (chatId) loadChat(chatId) },
-        )
-
-        const handle = resendStream(chatId, newMsgId, resendReq, cbs)
-        streamHandleRef.current = handle
+        beginStream((cbs) => resendStream(chatId, newMsgId, resendReq, cbs))
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Edit failed')
       }
     },
-    [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, updateChat, loadChat],
+    [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, updateChat, beginStream],
   )
 
   // ── Regenerate ────────────────────────────────────────────────────────────
@@ -496,9 +519,8 @@ const ChatPage: React.FC = () => {
 
   const handleRegenerate = useCallback(
     (msg: Message) => {
-      if (!chatId || stream.streaming) return
+      if (!chatId || busy) return
       setError(null)
-      setStream({ ...EMPTY_STREAM, streaming: true })
 
       const resendReq = {
         provider,
@@ -510,17 +532,9 @@ const ChatPage: React.FC = () => {
         temperature,
       }
 
-      const cbs = makeStreamCallbacks(
-        setStream,
-        () => { if (chatId) loadChat(chatId) },
-        setError,
-        () => { if (chatId) loadChat(chatId) },
-      )
-
-      const handle = resendStream(chatId, msg.id, resendReq, cbs)
-      streamHandleRef.current = handle
+      beginStream((cbs) => resendStream(chatId, msg.id, resendReq, cbs))
     },
-    [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, stream.streaming, loadChat],
+    [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, busy, beginStream],
   )
 
   // ── Delete message ────────────────────────────────────────────────────────
@@ -616,12 +630,20 @@ const ChatPage: React.FC = () => {
     }
   }, [])
 
-  // ── Abort ─────────────────────────────────────────────────────────────────
+  // ── Stop ──────────────────────────────────────────────────────────────────
+  // The request is a server-owned run: closing the stream would not stop it. Stop = cancel the
+  // run, keeping the partial reply (Android's stop button: stopStreamingAndSave). The streamed
+  // text stays on screen until the run's `cancelled` event, then the chat is re-read.
 
-  const handleAbort = useCallback(() => {
-    streamHandleRef.current?.abort()
-    setStream(EMPTY_STREAM)
-  }, [])
+  const handleStop = useCallback(() => {
+    const own = ownStreamRef.current
+    if (own) {
+      if (own.runId) requestCancel(own.runId)
+      else own.stopRequested = true
+      return
+    }
+    if (foreignRun) requestCancel(foreignRun.runId)
+  }, [foreignRun, requestCancel])
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
 
@@ -656,7 +678,7 @@ const ChatPage: React.FC = () => {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  if (!currentChat && !stream.streaming) {
+  if (!currentChat && !busy) {
     return (
       <div className={styles.loading}>
         {chatId && storeError !== CHAT_NOT_FOUND ? 'Loading chat…' : 'Chat not found'}
@@ -754,7 +776,7 @@ const ChatPage: React.FC = () => {
 
       {/* ── Message list ─── */}
       <div className={styles.messages} ref={messagesRef}>
-        {messages.length === 0 && !stream.streaming && (
+        {messages.length === 0 && !busy && (
           <div className={styles.emptyChat}>
             <div className={styles.emptyChatIcon}>💬</div>
             <p>{t('empty_chat_message')}</p>
@@ -786,7 +808,7 @@ const ChatPage: React.FC = () => {
         })}
 
         {/* ── Multi-message mode: "השב" reply bubble (ReplyPromptBubble) ─── */}
-        {showReplyButton && !stream.streaming && (
+        {showReplyButton && !busy && (
           <div className={styles.replyPromptWrap}>
             <div className={styles.replyPromptBubble}>
               <button
@@ -801,47 +823,51 @@ const ChatPage: React.FC = () => {
         )}
 
         {/* ── Streaming partial assistant bubble ─── */}
-        {stream.streaming && (
+        {live && (
           <div className={styles.streamingBubble}>
-            {/* ThoughtsBubble during / after thinking */}
-            {stream.thinkingOpen && (
-              <ThoughtsBubble
-                text={stream.thinkingText}
-                done={stream.thinkingDone}
-                activelyThinking={!stream.thinkingDone}
-                startTime={stream.thinkingStartTime}
-                durationSeconds={stream.thinkingDurationSeconds}
-              />
-            )}
+            {streamSegments(live).map((seg, si, all) => (
+              <React.Fragment key={si === all.length - 1 ? 'live' : `settled-${live.settled[si].id}`}>
+                {/* ThoughtsBubble during / after thinking */}
+                {seg.thinkingOpen && (
+                  <ThoughtsBubble
+                    text={seg.thinkingText}
+                    done={seg.thinkingDone}
+                    activelyThinking={!seg.thinkingDone}
+                    startTime={seg.thinkingStartTime}
+                    durationSeconds={seg.thinkingDurationSeconds}
+                  />
+                )}
 
-            {/* Inline tool calls */}
-            {stream.toolCalls.map((tc, i) => (
-              <ToolCallBlock
-                key={i}
-                toolName={tc.toolName}
-                parameters={tc.parameters}
-                result={tc.result}
-                success={tc.success}
-                executing={tc.executing}
-              />
+                {/* Inline tool calls */}
+                {seg.toolCalls.map((tc, i) => (
+                  <ToolCallBlock
+                    key={i}
+                    toolName={tc.toolName}
+                    parameters={tc.parameters}
+                    result={tc.result}
+                    success={tc.success}
+                    executing={tc.executing}
+                  />
+                ))}
+
+                {/* Partial markdown text */}
+                {seg.partialText && (
+                  <div
+                    style={{ fontSize: 15, lineHeight: '18px', color: 'var(--color-text)' }}
+                    dir="auto"
+                  >
+                    {/* Use plain text for streaming to avoid parsing lag */}
+                    <span style={{ whiteSpace: 'pre-wrap' }}>{seg.partialText}</span>
+                  </div>
+                )}
+              </React.Fragment>
             ))}
 
-            {/* Partial markdown text */}
-            {stream.partialText ? (
-              <div
-                style={{ fontSize: 15, lineHeight: '18px', color: 'var(--color-text)' }}
-                dir="auto"
-              >
-                {/* Use plain text for streaming to avoid parsing lag */}
-                <span style={{ whiteSpace: 'pre-wrap' }}>{stream.partialText}</span>
+            {/* Typing indicator dots when waiting for the (next) first token */}
+            {isEmptySegment(live) && (
+              <div className={styles.streamingDots}>
+                <span /><span /><span />
               </div>
-            ) : (
-              /* Typing indicator dots when waiting for first token */
-              !stream.thinkingOpen && !stream.toolCalls.length && (
-                <div className={styles.streamingDots}>
-                  <span /><span /><span />
-                </div>
-              )
             )}
           </div>
         )}
@@ -900,13 +926,13 @@ const ChatPage: React.FC = () => {
         uploading={uploading}
         onRemoveAttachment={(idx) => setAttachments((prev) => prev.filter((_, j) => j !== idx))}
         onAttachFile={() => fileInputRef.current?.click()}
-        streaming={stream.streaming}
+        streaming={busy}
         editingMsg={!!editingMsg}
         webSearch={webSearch}
         showWebSearch={true} // always show; future: check model capabilities
         onToggleWebSearch={() => setWebSearch((v) => !v)}
         onSend={handleSubmit}
-        onStop={handleAbort}
+        onStop={handleStop}
         onConfirmEdit={() => {
           if (editingMsg) handleEditSubmit(editingMsg, inputText, attachments)
         }}

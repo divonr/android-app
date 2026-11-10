@@ -380,6 +380,43 @@ export interface SseMessagesAddedEvent {
   // empty payload — client reloads the chat from its own context
 }
 
+/** First event of a per-request stream: the id of the server-owned run that executes it. */
+export interface SseRunEvent {
+  runId: string
+}
+
+/** Terminal event of a run that was stopped through the cancel endpoint. */
+export interface SseCancelledEvent {
+  // empty object
+}
+
+// ---------------------------------------------------------------------------
+// Cloud runs (GET /api/runs/stream, POST /api/runs/{runId}/cancel)
+// ---------------------------------------------------------------------------
+
+export type RunStatus = 'running' | 'complete' | 'error' | 'cancelled'
+
+/** A run as the server describes it in `snapshot` and `run_started`. */
+export interface RunState {
+  runId: string
+  chatId: string
+  provider: string
+  modelName: string
+  status: RunStatus
+  /** Text accumulated since the last `messages_added` */
+  text: string
+  thinkingActive: boolean
+  /** Thinking text accumulated since the last `messages_added` */
+  thinkingText: string
+  error: string | null
+  startedAt: number
+}
+
+export interface RunCancelResponse {
+  runId: string
+  status: RunStatus
+}
+
 // ---------------------------------------------------------------------------
 // Send request shape
 // ---------------------------------------------------------------------------

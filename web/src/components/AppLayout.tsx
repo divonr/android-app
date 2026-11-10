@@ -10,16 +10,19 @@
  *   .frame   — max-width 520px centered column, full min-height, bg --bg
  *              (all protected pages render here via <Outlet />)
  *
- * Also runs the live sync refresh (useSyncRefresh) for every signed-in page.
+ * Also runs the live sync refresh (useSyncRefresh) and the account-level runs stream
+ * (useRunsStream: live replies of requests sent from other devices) for every signed-in page.
  */
 
 import React from 'react'
 import { Outlet } from 'react-router-dom'
 import styles from './AppLayout.module.css'
 import { useSyncRefresh } from '../hooks/useSyncRefresh'
+import { useRunsStream } from '../hooks/useRunsStream'
 
 const AppLayout: React.FC = () => {
   useSyncRefresh()
+  useRunsStream()
   return (
     <div className={styles.shell}>
       <div className={styles.frame}>
