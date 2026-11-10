@@ -94,12 +94,15 @@ describe('connectRunsStream', () => {
     body.send(': ping\n\n')
     body.send('event: partial\ndata: {"runId":"r1","chatId":"c1","te')
     body.send('xt":"hi"}\n\n: ping\n\nevent: complete\ndata: {"runId":"r1","chatId":"c1","text":"hi","messageId":"m"}\n\n')
+    // After the run's terminal event: its chat got its title
+    body.send('event: chat_updated\ndata: {"runId":"r1","chatId":"c1"}\n\n')
     await flush()
 
     expect(snapshots).toEqual([[{ runId: 'r1', chatId: 'c1', status: 'running' }]])
     expect(events.map((e) => [e.type, e.runId, e.chatId])).toEqual([
       ['partial', 'r1', 'c1'],
       ['complete', 'r1', 'c1'],
+      ['chat_updated', 'r1', 'c1'],
     ])
     expect(events[0].data.text).toBe('hi')
     expect(disconnects).toBe(0)

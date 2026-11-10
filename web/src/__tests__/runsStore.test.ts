@@ -154,6 +154,62 @@ describe('runsStore', () => {
     expect(runs().errors).toEqual({})
   })
 
+  describe('chat_updated (the title, generated after the run ended)', () => {
+    it('refreshes the chat list and the open chat\'s name, not its messages', async () => {
+      runs().applyEvent(ev('run_started', { run: run() }))
+      runs().applyEvent(ev('complete', { text: 'a', messageId: 'm' }))
+      await flush()
+      vi.clearAllMocks()
+      const messages = useChatStore.getState().currentChat?.messages
+
+      runs().applyEvent(ev('chat_updated'))
+      await flush()
+      expect(list).toHaveBeenCalledTimes(1)
+      expect(get).not.toHaveBeenCalled()
+      expect(useChatStore.getState().history?.chat_history[0].preview_name).toBe('New title')
+      expect(useChatStore.getState().currentChat?.preview_name).toBe('New title')
+      expect(useChatStore.getState().currentChat?.messages).toBe(messages)
+      expect(runs().runs).toEqual({})
+    })
+
+    it('for the tab\'s own run too: its per-request stream ended before the title existed', async () => {
+      runs().applyEvent(ev('run_started', { run: run() }))
+      runs().claim('r1')
+      runs().finishOwn('r1') // the per-request stream delivered `complete`
+      await flush()
+      vi.clearAllMocks()
+
+      runs().applyEvent(ev('chat_updated'))
+      await flush()
+      expect(list).toHaveBeenCalledTimes(1)
+      expect(useChatStore.getState().currentChat?.preview_name).toBe('New title')
+      expect(runs().ownRunIds).toEqual({})
+    })
+
+    it('of a chat that is not open: only the list; while another reply streams: the stream is untouched', async () => {
+      runs().applyEvent(ev('run_started', { run: run({ runId: 'r2' }) }, 'r2'))
+      runs().applyEvent(ev('partial', { text: 'next reply' }, 'r2'))
+      await flush()
+      vi.clearAllMocks()
+
+      runs().applyEvent(ev('chat_updated', {}, 'r-old', 'c2'))
+      runs().applyEvent(ev('chat_updated', {}, 'r1', 'c1'))
+      await flush()
+      expect(get).not.toHaveBeenCalled()
+      expect(useChatStore.getState().history?.chat_history.map((c) => c.preview_name)).toEqual(['New title', 'From the phone'])
+      expect(useChatStore.getState().currentChat?.preview_name).toBe('New title')
+      expect(shown()?.partialText).toBe('next reply')
+    })
+
+    it('a failed read keeps what is shown', async () => {
+      list.mockRejectedValueOnce(new Error('offline'))
+      runs().applyEvent(ev('chat_updated'))
+      await flush()
+      expect(useChatStore.getState().history?.chat_history[0].preview_name).toBe('Old title')
+      expect(useChatStore.getState().currentChat?.preview_name).toBe('Old title')
+    })
+  })
+
   it('events of an unknown run are ignored', async () => {
     runs().applyEvent(ev('partial', { text: 'ghost' }))
     runs().applyEvent(ev('complete', { text: 'ghost', messageId: 'm' }))

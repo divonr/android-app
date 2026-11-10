@@ -13,6 +13,9 @@
  *    chat the tab navigated away from, a per-request stream that broke): ChatPage shows the
  *    store's state as the streaming bubble of the run's chat, and the store reloads the open
  *    chat / the chat list when the run starts, saves messages and ends.
+ *
+ * `chat_updated` is not about a run's state: after a run ended (own or foreign) the server
+ * generated the chat's title. It only refreshes the chat list and the open chat's name.
  */
 
 import { create } from 'zustand'
@@ -135,6 +138,13 @@ export const useRunsStore = create<RunsStoreState>((set, get) => {
         set({ runs: { ...get().runs, [runId]: liveRun(run) } })
         // The question (or the whole chat) may be another device's: show it
         if (!isOwn(runId)) void reloadFor(chatId)
+        return
+      }
+
+      if (type === 'chat_updated') {
+        // The title arrives after the run's terminal event (the run may be forgotten here by
+        // now, and the tab's own per-request stream has ended): for own and foreign runs alike
+        void useChatStore.getState().refreshTitle(chatId)
         return
       }
 

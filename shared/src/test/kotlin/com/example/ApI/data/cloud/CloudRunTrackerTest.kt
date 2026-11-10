@@ -146,6 +146,43 @@ class CloudRunTrackerTest {
         )
     }
 
+    // ── chat_updated (the title, after a run ended) ───────────────────────────
+
+    @Test
+    fun `chat_updated asks for a refresh of the chat whatever is known about its run`() {
+        val tracker = CloudRunTracker()
+        val refresh = listOf(CloudRunAction.ChatUpdated("c1"))
+
+        // A run that ended here a moment ago
+        tracker.registerLocal("r1", "c1")
+        tracker.confirmLocal("r1")
+        tracker.onEvent(CloudRunEvent.Complete("r1", "c1", "x", "m"))
+        assertEquals(refresh, tracker.onEvent(CloudRunEvent.ChatUpdated("r1", "c1")))
+        // The run stays over: nothing is adopted, the chat displays nothing
+        assertFalse(tracker.isTracked("r1"))
+        assertNull(tracker.displayedRun("c1"))
+
+        // A run of another device this client never saw, and one it gave up for an on-device fallback
+        assertEquals(refresh, tracker.onEvent(CloudRunEvent.ChatUpdated("r-unknown", "c1")))
+        assertFalse(tracker.isTracked("r-unknown"))
+        tracker.registerLocal("r2", "c1")
+        tracker.abandon("r2")
+        assertEquals(refresh, tracker.onEvent(CloudRunEvent.ChatUpdated("r2", "c1")))
+        assertFalse(tracker.isTracked("r2"))
+    }
+
+    @Test
+    fun `chat_updated does not disturb another run the chat is displaying`() {
+        val tracker = CloudRunTracker()
+        tracker.registerLocal("r2", "c1")
+        tracker.confirmLocal("r2")
+        tracker.onEvent(CloudRunEvent.Partial("r2", "c1", "He"))
+        // The title of the previous reply arrives while the next one streams
+        assertEquals(listOf(CloudRunAction.ChatUpdated("c1")), tracker.onEvent(CloudRunEvent.ChatUpdated("r1", "c1")))
+        assertEquals("r2", tracker.displayedRun("c1"))
+        assertEquals(listOf(partial("r2", "c1", "llo")), tracker.onEvent(CloudRunEvent.Partial("r2", "c1", "llo")))
+    }
+
     // ── Snapshots ─────────────────────────────────────────────────────────────
 
     @Test

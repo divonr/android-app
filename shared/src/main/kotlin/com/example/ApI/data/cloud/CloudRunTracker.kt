@@ -40,6 +40,9 @@ sealed class CloudRunAction {
 
     /** The run failed with [error] (nothing was saved by that). */
     data class Failed(val runId: String, val chatId: String, val displayed: Boolean, val error: String) : CloudRunAction()
+
+    /** The server changed [chatId] after a run ended (its automatic title): pull and refresh the chat list. */
+    data class ChatUpdated(val chatId: String) : CloudRunAction()
 }
 
 /**
@@ -197,6 +200,9 @@ class CloudRunTracker(private val isChatBusyLocally: (chatId: String) -> Boolean
             }
             is CloudRunEvent.Cancelled -> terminal(event.runId, event.chatId, out) { run -> finish(run, null, out) }
             is CloudRunEvent.Error -> terminal(event.runId, event.chatId, out) { run -> fail(run, event.error, out) }
+            // About the chat, not the run (which is over): never adopts or changes a run. Also
+            // reported for a run given up for an on-device fallback: the title is news all the same
+            is CloudRunEvent.ChatUpdated -> out += CloudRunAction.ChatUpdated(event.chatId)
         }
         return out
     }

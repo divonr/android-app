@@ -62,7 +62,8 @@ Body (`RunRequest`, superset of today's `SendRequest`):
   "messages": [Message...],            // the chat path, last = message being answered
   "systemPrompt", "webSearchEnabled", "enabledToolIds": [..],
   "thinkingBudget": "<string>", "temperature": <float|null>,
-  "projectAttachments": [Attachment...] }
+  "projectAttachments": [Attachment...],
+  "groupId": "<the chat's group on the device>|null" }   // optional (S5), see Tools
 ```
 `thinkingBudget` (this route and the web send/resend routes; shared `ThinkingBudgetWire`): the
 legacy forms `none` | `low` | `medium` | `high` | `max` (= high) | `<integer>` (token budget), plus
@@ -85,7 +86,9 @@ server copy yet saves its reply under the restored question, and after the devic
 copies converge to one chat with one question and one reply (no duplicate node/variant; the device's
 chat name and system prompt win over the restored placeholder). No bounded wait was needed.
 
-`runId` is unique per user. `enabledToolIds` are the ids of the shared `ToolRegistry`.
+`runId` is unique per user. `enabledToolIds` are tool ids as the shared `ToolRegistry` names them
+(a device sends the ids of the tool specifications it would have sent to the provider itself); which
+of them the server can run is the Tools section.
 
 Responses:
 - `202 {"runId","status":"running"}` — accepted.
@@ -95,9 +98,8 @@ Responses:
   are forgotten by a server restart (a retry after that starts a new run).
 - `409 {"error": "<human text>", "code": "<code>"}` — cloud cannot run it; client falls back locally.
   Codes, checked in this order: `unknown_provider`, `no_api_key` (no active key for the provider in
-  the server copy), `unsupported_tools` (an enabled tool id that is not registered in the server's
-  `ToolRegistry` — today the server only has `get_date_time`; GitHub / Google Workspace / skills /
-  Python tools are device-only), `attachments_unsupported` (the request needs attachment bytes the
+  the server copy), `unsupported_tools` (an enabled tool id the server has no tool for in this
+  run — see Tools; the error text names the ids), `attachments_unsupported` (the request needs attachment bytes the
   server does not have — see Attachments).
 - `400 {"error"}` — malformed body, or blank `runId` / `chatId`, or empty `messages`.
 - `401` — bad/missing auth.
@@ -113,14 +115,27 @@ whenever nothing was sent for 15 s. The stream never ends by itself (only on ser
   - `tool_call` → `{"toolId","toolName","parameters"}`, `tool_result` → `{"toolId","success","output"}`
   - `messages_added` → `{}` (the text before a tool call + the tool messages are saved; accumulated
     text and thinking text reset)
-  - terminal, exactly one per run, nothing of the run follows it:
+  - terminal, exactly one per run, no event of the run's state follows it:
     `complete` → `{"text","messageId"}` (`messageId` is `""` if the reply could not be attached
     because the chat was deleted on the server), `error` → `{"error"}` (nothing saved by this event),
     `cancelled` → `{}`
+  - `chat_updated` → `{}` (S5; only `runId` + `chatId`): not about the run's state — after the run
+    ended, the server changed its chat (the automatic title) and uploaded it. At most one per run,
+    always after the run's terminal event, possibly many seconds later (or never: no title was due,
+    the generation failed, or it gave the same name). A client refreshes its chat list and the
+    chat's title; it must not treat the run as running again. Clients that do not know the event
+    ignore it (unknown event types are ignored by both clients).
 - Snapshot + subscription are atomic (no event lost or duplicated between them).
 - `messages_added`, `complete` and `cancelled` are emitted only after the save (if any) AND a bounded
-  (≈3 s) flush of the sync upload, so a client can pull immediately. (Before `complete` the server
-  also runs the automatic title generation, bounded to 20 s, so the title is uploaded with the reply.)
+  (≈3 s) flush of the sync upload, so a client can pull immediately.
+- **Order at the end of a run (S5):** save the reply → flush the upload → terminal event → only then
+  the automatic title generation (server-owned, in the registry's scope, given up after 20 s) → if
+  it renamed the chat: flush the upload → `chat_updated`. The terminal event never waits for the
+  title. Title generation runs after a saved `complete` reply and after a `cancelled` run whose
+  partial reply was kept; not after `error`, and not on server shutdown.
+- A run's retention and its `RunState` in snapshots are not affected by the title: a client that
+  connects after the title was generated gets it through its normal sync / reload, not through an
+  event.
 
 `RunState`: `{"runId","chatId","provider","modelName","status":"running|complete|error|cancelled",
 "text": "<text accumulated since the last messages_added>", "thinkingActive": bool,
@@ -136,8 +151,8 @@ tool call) is saved with its thoughts (`thoughts`, `thinkingDurationSeconds`, `t
 Body `{"keepPartial": true|false}` (no body = `false`). Mirrors Android's two stop behaviours
 (`StreamingService.cancelRequest` vs `stopAndComplete` + the ViewModel's partial save):
 `keepPartial=true` saves the text accumulated since the last `messages_added` (if not blank) as the
-assistant reply (no thoughts), then title generation as for a completed reply; `false` saves
-nothing. Tool messages saved earlier stay in both modes.
+assistant reply (no thoughts); after the `cancelled` event the title generation runs as for a
+completed reply (→ `chat_updated`); `false` saves nothing. Tool messages saved earlier stay in both modes.
 
 Responses: `200 {"runId","status"}` — accepted, or the run had already finished (then nothing
 changes; the first cancel of a run wins); `404` — unknown run (also: another user's run, or
@@ -156,9 +171,64 @@ and ends the response after the run's terminal event. New on this stream: the `r
 `cancelled` → `{}` terminal event (when the run was cancelled through the cancel endpoint), and
 `: ping` comment frames. Closing this response does NOT cancel the run (until S3 the web's stop
 button therefore no longer stops anything: the reply is still saved). Title generation after
-completion stays (server side) for every run. The pre-validation errors of these routes are
+completion stays (server side) for every run; since S5 it runs after the terminal event, so this
+response has ended by then and the title is announced only on the user-level stream
+(`chat_updated`). The pre-validation errors of these routes are
 unchanged (400 unknown provider, 404 chat not found…): the 409 codes belong to `POST /api/runs` only,
-and so does the attachments rule.
+and so does the attachments rule. Tools: these routes use the same per-user tool set as
+`POST /api/runs` (Tools section), but an enabled tool id the server has no tool for is — as before —
+silently not offered to the model instead of a 409.
+
+## Tools (S5)
+The server is multi-user, so it never uses the process-wide `ToolRegistry.getInstance()` (that
+singleton belongs to the single-user clients, Android and desktop, and is unchanged). Every run
+gets its **own** `ToolRegistry` instance (`RunTools`, `server/.../runs/RunTools.kt`), built by the
+user's `UserTools` (owned by `UserContext`) from that user's data **at the start of the run** — so a
+connection that just synced, a disconnect and a refreshed token are picked up by the next run, and
+one user's tools / tokens cannot serve another user's run. The same `RunTools` instance is used for
+the capability check (`409 unsupported_tools`), the specifications sent to the provider, the
+`toolName` of the `tool_call` event and the execution. A family is only built when the request
+enables one of its ids. A run keeps the tools (and tokens) it started with until it ends.
+
+| Family (tool ids) | Runs on the server when | Otherwise |
+|---|---|---|
+| `get_date_time` | always | — |
+| GitHub (`github_*`, 8 tools) | the user's synced `github_auth_<user>.json` holds a connection whose token is not expired | 409 |
+| Google Workspace (`gmail_*`, `calendar_*`, `drive_*`) | the user's synced `google_workspace_auth_<user>.json` holds a connection, the tool's service is enabled in it (`enabledServices`), and its access token is valid (after a refresh, below) | 409 |
+| `get_current_group_conversations` | the run's chat is in a group of the user (below) | 409 |
+| Skills (`read_skill`, `read_skill_file`, `write_skill_file`, `edit_skill_file`) | never | 409 |
+| `python_interpreter` | never | 409 |
+
+- **Group tool context.** On Android the tool is built from the open chat and its group. On the
+  server it is built for the run: `currentChatId` = the run's `chatId`; the group is the request's
+  `groupId` when the device sent one (a chat created a moment ago is not in the server copy yet),
+  else the `group` of the server copy's chat; it must be one of the user's groups in the server
+  copy (its name goes into the tool description). The tool reads the user's chat history at
+  execution time, from the user's own repository. The web routes send no `groupId`.
+- **Google token refresh.** Android never refreshes: its access token (from `GoogleAuthUtil`) lives
+  about an hour, after which the tools are unregistered until the user reconnects; the
+  `refreshToken` field of an Android-made connection holds a one-time *server auth code*, not a
+  refresh token. A connection made on the web (`/oauth/google/start`, `access_type=offline`) holds
+  a real refresh token of the server's OAuth client. At run start, when a Google tool is enabled
+  and the access token expires within 5 minutes, the server refreshes it (`grant_type=refresh_token`
+  with `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`, one refresh at a time per user) and
+  saves the new access token + expiry into the connection file (locked load-modify-save), which
+  syncs to the user's devices. So: web-made connections keep working; Android-made ones run in the
+  cloud for the hour their token lives, then answer 409 (Google refuses the auth code; a refused
+  token is not tried again until the connection changes) — exactly when the device itself has lost
+  the tools too. A token that expires in the middle of a run is not refreshed for that run.
+- **GitHub tokens** of the OAuth app do not expire; an expiring one (`expiresIn` set) is not
+  refreshed (neither on the server nor on Android).
+- **Why skills stay on the device:** sync carries only `skills_enabled.json` / `skills_sources.json`;
+  the skill folders (`skills/<name>/SKILL.md` …) are not synced, so the server copy does not have
+  the device's skills (it has the ones made on the web), and the skills catalog in the request's
+  system prompt is the device's. A device with enabled skills therefore still falls back for every
+  request. Needs skill-folder sync first.
+- **Why Python stays on the device:** `PythonInterpreterTool` is never in a registry — Android
+  builds it per request from the open chat. It only calls the remote executor, so a JVM could run
+  it, but its input files are attachment paths on the device and its output files are saved next
+  to the app and attached to the next message by `StreamingService`; attachment files are not
+  synced, so a file generated in the cloud could not be shown on the phone.
 
 ## Attachments (v1)
 Device-local attachment files are not on the server. The server answers
@@ -211,7 +281,7 @@ event stream with reconnect), `CloudRunTracker` (the runs' client-side state →
   (`ChatViewModel.startStreamingRequest`, now `suspend`): effective → `POST /api/runs` (whole call
   ≤ 15 s, connect ≤ 5 s; the request id is the `runId`). Accepted (202/200) → the run is a "cloud
   run": NO foreground service is started; UI state is driven by the event stream through the same
-  `StreamingEvent` handling. Anything else → the unchanged service path, plus a short toast
+  `StreamingEvent` handling. The request carries the chat's `groupId` (for the group tool). Anything else → the unchanged service path, plus a short toast
   ("הבקשה נשלחת מהמכשיר"); the reason goes to the app log. A request whose user messages lack
   `nodeId`/`variantId` is not offered to the cloud at all.
   Fallback classification: a 4xx answer (401, 409…) and a connection that was never made
@@ -232,10 +302,11 @@ event stream with reconnect), `CloudRunTracker` (the runs' client-side state →
   that streamed after a `messages_added` stays. A locally known cloud run that is absent from a
   fresh snapshot (or finished in it) is treated as finished (pull + clear); one that failed in it
   shows its error. `error` is shown like an on-device error (snackbar) + a pull.
+  `chat_updated` → a pull; the ordinary reload after a sync refreshes the chat list and the open
+  chat's title. It never adopts, shows or ends a run (also handled for a run the device gave up).
 - Stop button on a cloud run → cancel endpoint with `keepPartial=true` (the device's stop button is
   `stopStreamingAndSave`); the text stops growing at once and the overlay goes with the `cancelled`
-  event (which can lag by the title generation, ≤ 20 s, when the kept partial is the chat's first
-  reply). Stop while the start request is still in flight is applied when it returns. If the cancel
+  event (which no longer waits for the title generation). Stop while the start request is still in flight is applied when it returns. If the cancel
   cannot reach the server (or answers 404) the chat is given back at once; a run that is in fact
   still going shows again with its next event.
 - No local save of replies, no local title generation for cloud runs (the server does both). No
@@ -253,6 +324,10 @@ event stream with reconnect), `CloudRunTracker` (the runs' client-side state →
   `run_started` (another device's question / new chat), `messages_added` and terminal events. A
   fresh snapshot is the truth: known runs missing from it (or finished in it) are cleared and their
   chat re-read.
+- `chat_updated` (own and foreign runs alike, also for a run the store no longer knows): re-read the
+  chat list and take the new name into the open chat (`chatStore.refreshTitle`) — only the name, so
+  a reply that is streaming into the chat is not disturbed. The per-request stream of an own send
+  ends at the terminal event, before the title exists; the title always arrives this way.
 - Own sends keep using the per-request SSE. A per-request stream that breaks before the terminal
   event (after the `run` event), and leaving the chat while it streams, hand the run over to the
   account-level stream (no error; the fetch is closed, the run goes on).
@@ -261,8 +336,7 @@ event stream with reconnect), `CloudRunTracker` (the runs' client-side state →
 - Stop button → `POST /api/runs/{runId}/cancel` with `keepPartial: true` (Android's stop button is
   `stopStreamingAndSave`), for own and foreign runs; the fetch is not aborted. The streamed text stays
   until the run's `cancelled` event, then the chat is re-read. Stop pressed before the `run` event
-  arrives cancels as soon as it does. `cancelled` can lag by the title generation (≤ 20 s) when the
-  kept partial reply is the chat's first reply.
+  arrives cancels as soon as it does.
 - `web/dist` is what production serves (`WEB_STATIC_DIR`): `npm --prefix web run build` IS the web
   deploy. The S3 client needs the S1 server (against an older server the stop button does nothing,
   because there is no `run` event) — build only together with the server restart.
@@ -270,3 +344,5 @@ event stream with reconnect), `CloudRunTracker` (the runs' client-side state →
 ## Stages
 - S1 server: sync-server whoami; llm-web bearer auth, run registry, routes, web routes on registry, tests.
 - S2 Android + shared client. S3 web client. S4 deploy + live test.
+- S5: per-user / per-run tools on the server (GitHub, Google Workspace, group tool), terminal event
+  before the title generation + `chat_updated`.

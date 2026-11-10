@@ -3,7 +3,9 @@
  * (GET /api/runs/stream) open while a signed-in page is mounted, and feeds runsStore with it.
  *
  * That is what makes a reply stream live in this tab when the request was sent from another
- * device (or from this tab before a reload). The connection re-opens with backoff; every new
+ * device (or from this tab before a reload), and what brings a chat's automatic title: it is
+ * generated after the run's terminal event and announced here as `chat_updated` (the tab's own
+ * per-request stream has ended by then). The connection re-opens with backoff; every new
  * connection starts with a snapshot, which the store treats as the truth.
  */
 

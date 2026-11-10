@@ -12,7 +12,6 @@ import com.example.ApI.server.UserContext
 import com.example.ApI.server.streaming.maybeGenerateTitle
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
-import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -70,7 +69,12 @@ data class RunState(
     val startedAt: Long
 )
 
-/** One event of a run: [payload] is the event's own data (without `runId` / `chatId`). */
+/**
+ * One event of a run: [payload] is the event's own data (without `runId` / `chatId`).
+ *
+ * `chat_updated` is the one event that can follow a run's terminal event: it is about the run's
+ * chat (its automatic title was generated and uploaded), not about the run's state.
+ */
 class RunEvent(val type: String, val runId: String, val chatId: String, val payload: JsonObject) {
     val isTerminal: Boolean get() = type == "complete" || type == "error" || type == "cancelled"
 
@@ -90,13 +94,20 @@ class RunSpec(
     val systemPrompt: String,
     val webSearchEnabled: Boolean,
     val enabledToolIds: List<String>,
-    val enabledTools: List<ToolSpecification>,
+    /**
+     * The run's own tools, resolved for its user and chat by `UserTools.forRun`: the only tools
+     * the run can describe to the provider or execute.
+     */
+    val tools: RunTools,
     val thinkingBudget: ThinkingBudgetValue,
     val temperature: Float?,
     val projectAttachments: List<Attachment>,
     /** Where the run's responses are saved (see [ReplyAnchor]). */
     val anchor: ReplyAnchor
-)
+) {
+    /** The specifications sent to the provider: the enabled tools this run has. */
+    val enabledTools: List<ToolSpecification> = tools.specifications(enabledToolIds, provider.provider)
+}
 
 /**
  * A subscription to the runs of one user: [snapshot] is the state of every run at the moment of
@@ -122,6 +133,10 @@ class RunSubscription internal constructor(
  *
  * `messages_added`, `complete` and `cancelled` are emitted only after the save and a bounded
  * flush of the pending sync uploads, so a client told about them can pull right away.
+ *
+ * The automatic title generation runs after the terminal event (a slow title never delays the
+ * end of a run); when it changed the chat's name, the upload is flushed and `chat_updated` is
+ * published to the user's subscribers.
  *
  * Finished runs stay visible for [retentionMs]; a start with a run id seen before never starts a
  * second run.
@@ -349,10 +364,11 @@ class RunRegistry(
                 stopIfCancelled()
                 emit(run, "tool_call", buildJsonObject {
                     put("toolId", toolCall.toolId)
-                    put("toolName", ToolRegistry.getInstance().getToolDisplayName(toolCall.toolId))
+                    put("toolName", spec.tools.displayName(toolCall.toolId))
                     put("parameters", toolCall.parameters)
                 })
-                val result = ToolRegistry.getInstance().executeTool(toolCall, spec.enabledToolIds)
+                // The run's own tools: never another user's, never the process-wide registry
+                val result = spec.tools.execute(toolCall, spec.enabledToolIds)
                 emit(run, "tool_result", buildJsonObject {
                     put("toolId", toolCall.toolId)
                     when (result) {
@@ -470,20 +486,20 @@ class RunRegistry(
             return finishFailed(run, "Failed to save response: ${e.message}")
         }
         // null: the chat was deleted on this server meanwhile — the reply is dropped, like on a device
-        if (saved != null) {
-            generateTitle(run)
-            flushUploads(repo)
-        }
+        if (saved != null) flushUploads(repo)
         val payload = buildJsonObject {
             put("text", fullText)
             put("messageId", if (saved != null) message.id else "")
         }
         emit(run, "complete", payload) { it.copy(status = RunStatus.COMPLETE, thinkingActive = false) }
+        // After the terminal event: the end of the run never waits for the title
+        if (saved != null) generateTitleAfter(run)
     }
 
     private suspend fun finishCancelled(run: Run, keepPartial: Boolean) = withContext(NonCancellable) {
         val spec = run.spec
         val repo = run.ctx.repository
+        var replySaved = false
         try {
             run.saveMutex.withLock {
                 // Read after any tool-message save in flight: only what is not saved yet
@@ -493,7 +509,7 @@ class RunRegistry(
                         run.ctx.username, spec.chatId, assistantMessage(spec, text, null), spec.anchor
                     )
                     if (saved != null) {
-                        generateTitle(run)
+                        replySaved = true
                         flushUploads(repo)
                     }
                 }
@@ -502,19 +518,37 @@ class RunRegistry(
             log.warn("Saving the partial reply of run ${spec.runId} failed: ${e.message}")
         }
         emit(run, "cancelled") { it.copy(status = RunStatus.CANCELLED, thinkingActive = false) }
+        // The kept partial is a reply like any other: it may be the one that names the chat
+        if (replySaved) generateTitleAfter(run)
     }
 
-    /** Automatic title generation after a saved reply (bounded: the run's ending waits for it). */
-    private suspend fun generateTitle(run: Run) {
+    /**
+     * Automatic title generation for the reply [run] just saved, in the registry's scope and
+     * after the run's terminal event: nothing waits for it.  Bounded by [titleTimeoutMs] (a
+     * generation that takes longer is given up).  When it changed the chat's name, the upload is
+     * flushed and `chat_updated` tells the user's clients to re-read the chat list / title.
+     */
+    private fun generateTitleAfter(run: Run) {
         val repo = run.ctx.repository
-        try {
-            val settings = repo.loadAppSettings().titleGenerationSettings
-            val work = scope.launch { maybeGenerateTitle(repo, run.ctx.username, run.spec.chatId, settings) }
-            if (withTimeoutOrNull(titleTimeoutMs) { work.join() } == null) {
-                log.warn("Title generation for run ${run.spec.runId} still running after ${titleTimeoutMs}ms; not waiting")
+        val spec = run.spec
+        // On shutdown the scope is cancelled: no title then
+        scope.launch {
+            try {
+                val settings = repo.loadAppSettings().titleGenerationSettings
+                val renamed = withTimeoutOrNull(titleTimeoutMs) {
+                    maybeGenerateTitle(repo, run.ctx.username, spec.chatId, settings, run.ctx.titleGenerator)
+                }
+                if (renamed == null) {
+                    log.warn("Title generation for run ${spec.runId} gave up after ${titleTimeoutMs}ms")
+                } else if (renamed) {
+                    flushUploads(repo)
+                    synchronized(lock) { publish(run, "chat_updated", EMPTY) }
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                log.warn("Title generation for run ${spec.runId} failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            log.warn("Title generation for run ${run.spec.runId} failed: ${e.message}")
         }
     }
 

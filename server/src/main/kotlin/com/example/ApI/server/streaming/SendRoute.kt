@@ -9,10 +9,10 @@ import com.example.ApI.data.model.TitleGenerationSettings
 import com.example.ApI.data.model.Chat
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.ReplyAnchor
+import com.example.ApI.server.TitleGenerator
 import com.example.ApI.server.runs.RunSpec
 import com.example.ApI.server.runs.startAndStreamRun
 import com.example.ApI.server.userContext
-import com.example.ApI.tools.ToolRegistry
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
@@ -86,18 +86,20 @@ internal fun parseBudget(raw: String): ThinkingBudgetValue = ThinkingBudgetWire.
 
 /**
  * Mirrors [TitleGenerationManager.handleTitleGeneration]:
- * Generates a title when the chat has exactly 1 or 3 assistant messages
- * (depending on [TitleGenerationSettings.updateOnExtension]).
+ * Generates a title (with [generator], the user's [TitleGenerator]) when the chat has exactly
+ * 1 or 3 assistant messages (depending on [TitleGenerationSettings.updateOnExtension]).
+ * Returns whether the chat's name was changed.
  */
 internal suspend fun maybeGenerateTitle(
     repo: DataRepository,
     username: String,
     chatId: String,
-    settings: TitleGenerationSettings
-) {
-    if (!settings.enabled) return
+    settings: TitleGenerationSettings,
+    generator: TitleGenerator
+): Boolean {
+    if (!settings.enabled) return false
 
-    val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId } ?: return
+    val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId } ?: return false
     val assistantCount = chat.messages.count { it.role == "assistant" }
 
     val shouldGenerate = when {
@@ -105,25 +107,32 @@ internal suspend fun maybeGenerateTitle(
         assistantCount == 3 && settings.updateOnExtension -> true
         else -> false
     }
-    if (!shouldGenerate) return
+    if (!shouldGenerate) return false
 
     try {
         val providerToUse = if (settings.provider == "auto") null else settings.provider
-        val title = repo.generateConversationTitle(username, chatId, providerToUse)
+        val title = generator.generate(username, chatId, providerToUse)
         // TitleGenerationService answers "שיחה חדשה" when generation failed (Android skips it too):
         // never overwrite the chat's name with it
-        if (title.isNotBlank() && title != "New chat" && title != "שיחה חדשה") {
-            repo.updateChatHistory(username) { history ->
-                history.copy(
-                    chat_history = history.chat_history.map { c ->
-                        if (c.chat_id == chatId) c.copy(preview_name = title) else c
-                    }
-                )
-            }
+        if (title.isBlank() || title == "New chat" || title == "שיחה חדשה") return false
+        var renamed = false
+        repo.updateChatHistory(username) { history ->
+            history.copy(
+                chat_history = history.chat_history.map { c ->
+                    if (c.chat_id == chatId && c.preview_name != title) {
+                        renamed = true
+                        c.copy(preview_name = title)
+                    } else c
+                }
+            )
         }
+        return renamed
+    } catch (ce: kotlinx.coroutines.CancellationException) {
+        throw ce
     } catch (e: Exception) {
         // Title generation failure is non-fatal — log and continue.
         println("[SendRoute] Title generation failed: ${e.message}")
+        return false
     }
 }
 
@@ -158,9 +167,6 @@ fun Route.sendRoute() {
             return@post
         }
 
-        val enabledTools = ToolRegistry.getInstance()
-            .getEnabledToolsSpecifications(body.enabledToolIds, body.provider)
-
         val userMessage = body.messages.lastOrNull { it.role == "user" }
         val savedChat: Chat? = if (userMessage != null && body.persistUserMessage) {
             repo.addUserMessageAsNewNode(username, body.chatId, userMessage)
@@ -176,6 +182,10 @@ fun Route.sendRoute() {
         // Pin the replies to the saved user message (multi-message mode: the chat's last message)
         val anchor = anchorAfter(savedChat, userMessage?.takeIf { body.persistUserMessage }?.id)
 
+        // The user's own tools for this chat. As before, an enabled tool the server has no tool
+        // for is simply not offered to the model (no 409 on this route)
+        val tools = ctx.tools.forRun(body.chatId, body.enabledToolIds)
+
         call.startAndStreamRun(
             ctx,
             RunSpec(
@@ -187,7 +197,7 @@ fun Route.sendRoute() {
                 systemPrompt = body.systemPrompt,
                 webSearchEnabled = body.webSearchEnabled,
                 enabledToolIds = body.enabledToolIds,
-                enabledTools = enabledTools,
+                tools = tools,
                 thinkingBudget = parseBudget(body.thinkingBudget),
                 temperature = body.temperature,
                 projectAttachments = body.projectAttachments,
@@ -265,9 +275,6 @@ fun Route.resendRoute() {
             return@post
         }
 
-        val enabledTools = ToolRegistry.getInstance()
-            .getEnabledToolsSpecifications(body.enabledToolIds, body.provider)
-
         // The variant the reply goes to, made the chat's current path
         val prepared: Pair<Chat, String>? = when (target) {
             is ResendTarget.Existing -> {
@@ -306,7 +313,8 @@ fun Route.resendRoute() {
                 systemPrompt = body.systemPrompt,
                 webSearchEnabled = body.webSearchEnabled,
                 enabledToolIds = body.enabledToolIds,
-                enabledTools = enabledTools,
+                // The user's own tools for this chat (unavailable ones are not offered, as before)
+                tools = ctx.tools.forRun(chatId, body.enabledToolIds),
                 thinkingBudget = parseBudget(body.thinkingBudget),
                 temperature = body.temperature,
                 projectAttachments = emptyList(),

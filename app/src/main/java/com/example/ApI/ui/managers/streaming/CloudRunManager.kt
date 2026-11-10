@@ -180,7 +180,8 @@ class CloudRunManager(
             enabledToolIds = enabledTools.map { it.name },
             thinkingBudget = ThinkingBudgetWire.encode(thinkingBudget),
             temperature = temperature,
-            projectAttachments = projectAttachments.toList()
+            projectAttachments = projectAttachments.toList(),
+            groupId = groupOf(chatId)
         )
 
         tracker.registerLocal(runId, chatId)
@@ -217,6 +218,13 @@ class CloudRunManager(
                 }
             }
         }
+    }
+
+    /** The group of [chatId] as this device knows it (what its group-conversations tool runs for). */
+    private fun groupOf(chatId: String): String? {
+        val state = deps.uiState.value
+        val chat = state.currentChat?.takeIf { it.chat_id == chatId } ?: state.chatHistory.find { it.chat_id == chatId }
+        return chat?.group
     }
 
     /** Best-effort cancel of a run the device answers itself (a few attempts, nothing kept). */
@@ -325,6 +333,8 @@ class CloudRunManager(
                 // Tool messages saved before the error
                 deps.repository.pullNow()
             }
+            // The chat's new title is uploaded: the pull's reload refreshes the chat list and the open chat
+            is CloudRunAction.ChatUpdated -> deps.repository.pullNow()
         }
     }
 

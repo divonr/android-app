@@ -37,7 +37,12 @@ data class CloudRunRequest(
     val enabledToolIds: List<String> = emptyList(),
     val thinkingBudget: String = "none",
     val temperature: Float? = null,
-    val projectAttachments: List<Attachment> = emptyList()
+    val projectAttachments: List<Attachment> = emptyList(),
+    /**
+     * The group of the chat on this device, when it has one: what the group-conversations tool
+     * runs for.  The server's copy of a chat that was just created may not have it yet.
+     */
+    val groupId: String? = null
 )
 
 /** A run as the server reports it (snapshot / `run_started`). */
@@ -112,6 +117,12 @@ sealed class CloudRunEvent {
     /** Terminal. */
     data class Cancelled(val runId: String, val chatId: String) : CloudRunEvent()
 
+    /**
+     * Not an event of the run's state: after the run [runId] ended, the server changed its
+     * chat (the automatic title) and uploaded it.
+     */
+    data class ChatUpdated(val runId: String, val chatId: String) : CloudRunEvent()
+
     companion object {
         /**
          * The event of an SSE frame, or null for an unknown event type or unusable data (ignored:
@@ -166,6 +177,7 @@ sealed class CloudRunEvent {
                 "complete" -> Complete(runId, chatId, obj.string("text") ?: "", obj.string("messageId") ?: "")
                 "error" -> Error(runId, chatId, obj.string("error") ?: "Unknown error")
                 "cancelled" -> Cancelled(runId, chatId)
+                "chat_updated" -> ChatUpdated(runId, chatId)
                 else -> null
             }
         }

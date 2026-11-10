@@ -37,6 +37,12 @@ interface ChatState {
   refreshChat: (chatId: string) => Promise<void>
   /** Silently re-read the chat list, if it is loaded (new chat / new title from a run). */
   refreshHistory: () => Promise<void>
+  /**
+   * The server renamed [chatId] (the automatic title, generated after a run ended): re-read the
+   * chat list (if loaded) and take the new name into the open chat (if it is [chatId]). Only
+   * the name of the open chat changes — its messages are left to whatever is streaming into it.
+   */
+  refreshTitle: (chatId: string) => Promise<void>
 }
 
 export const CHAT_NOT_FOUND = 'Chat not found'
@@ -113,6 +119,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (get().history) set({ history: fresh })
     } catch {
       // Keep the list
+    }
+  },
+
+  refreshTitle: async (chatId: string) => {
+    if (!get().history && get().currentChat?.chat_id !== chatId) return
+    try {
+      const fresh = await chatsApi.list()
+      if (get().history) set({ history: fresh })
+      const name = fresh.chat_history.find((c) => c.chat_id === chatId)?.preview_name
+      const open = get().currentChat
+      if (name !== undefined && open?.chat_id === chatId && open.preview_name !== name) {
+        set({ currentChat: { ...open, preview_name: name } })
+      }
+    } catch {
+      // Keep what is shown: the next sync refresh brings the name
     }
   },
 

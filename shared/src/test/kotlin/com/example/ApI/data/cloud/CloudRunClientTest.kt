@@ -249,6 +249,8 @@ class CloudRunClientTest {
         stream.event("complete", """{"text":"Hello","messageId":"msg-9","runId":"r1","chatId":"c1"}""")
         stream.event("error", """{"error":"boom","runId":"r2","chatId":"c2"}""")
         stream.event("cancelled", """{"runId":"r3","chatId":"c3"}""")
+        // After a run's terminal event: the title of its chat
+        stream.event("chat_updated", """{"runId":"r1","chatId":"c1"}""")
 
         assertEquals("r1", assertIs<CloudRunEvent.RunStarted>(collected.next()).run.runId)
         assertEquals(CloudRunEvent.ThinkingStarted("r1", "c1"), collected.next())
@@ -262,6 +264,7 @@ class CloudRunClientTest {
         assertEquals(CloudRunEvent.Complete("r1", "c1", "Hello", "msg-9"), collected.next())
         assertEquals(CloudRunEvent.Error("r2", "c2", "boom"), collected.next())
         assertEquals(CloudRunEvent.Cancelled("r3", "c3"), collected.next())
+        assertEquals(CloudRunEvent.ChatUpdated("r1", "c1"), collected.next())
         assertNull(collected.events.poll(150, TimeUnit.MILLISECONDS))
 
         collected.job.cancelAndJoin()

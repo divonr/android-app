@@ -95,6 +95,29 @@ class CloudRunWireTest {
     }
 
     @Test
+    fun `chat_updated names the chat whose title the server changed`() {
+        assertEquals(
+            CloudRunEvent.ChatUpdated("r", "c"),
+            CloudRunEvent.parse("chat_updated", """{"runId":"r","chatId":"c"}""")
+        )
+        assertNull(CloudRunEvent.parse("chat_updated", """{"runId":"r"}"""))
+    }
+
+    @Test
+    fun `the request carries the chat's group only when it has one`() {
+        val base = CloudRunRequest(runId = "r", chatId = "c", provider = "openai", modelName = "m", messages = emptyList())
+        val json = kotlinx.serialization.json.Json { encodeDefaults = true }
+        fun groupOf(request: CloudRunRequest) =
+            json.parseToJsonElement(json.encodeToString(CloudRunRequest.serializer(), request))
+                .let { it as kotlinx.serialization.json.JsonObject }["groupId"]
+        assertEquals(kotlinx.serialization.json.JsonNull, groupOf(base))
+        assertEquals(kotlinx.serialization.json.JsonPrimitive("g1"), groupOf(base.copy(groupId = "g1")))
+        // A request of a client that predates the field
+        val old = """{"runId":"r","chatId":"c","provider":"openai","modelName":"m","messages":[]}"""
+        assertNull(json.decodeFromString(CloudRunRequest.serializer(), old).groupId)
+    }
+
+    @Test
     fun `a snapshot tolerates fields this client does not know and missing optional ones`() {
         val event = CloudRunEvent.parse(
             "snapshot",

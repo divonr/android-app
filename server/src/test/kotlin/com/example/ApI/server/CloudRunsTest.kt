@@ -16,6 +16,7 @@ import com.example.ApI.server.runs.RunRegistry
 import com.example.ApI.server.runs.RunRequest
 import com.example.ApI.server.runs.RunSpec
 import com.example.ApI.server.runs.RunStatus
+import com.example.ApI.server.runs.RunTools
 import com.example.ApI.server.runs.unservableAttachment
 import com.example.ApI.server.streaming.ChatEngine
 import com.example.ApI.tools.ToolCall
@@ -893,7 +894,7 @@ class CloudRunsTest {
         val messages = seed.path()
         return RunSpec(
             runId = runId, chatId = seed.chatId, provider = provider, modelName = "gpt-4o", messages = messages,
-            systemPrompt = "", webSearchEnabled = false, enabledToolIds = emptyList(), enabledTools = emptyList(),
+            systemPrompt = "", webSearchEnabled = false, enabledToolIds = emptyList(), tools = RunTools.builtIn(),
             thinkingBudget = ThinkingBudgetValue.None, temperature = null, projectAttachments = emptyList(),
             anchor = ReplyAnchor.forRequest(messages)
         )

@@ -7,7 +7,6 @@ import com.example.ApI.server.UserContext
 import com.example.ApI.server.appModule
 import com.example.ApI.server.streaming.parseBudget
 import com.example.ApI.server.userContext
-import com.example.ApI.tools.ToolRegistry
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
@@ -43,7 +42,12 @@ data class RunRequest(
     val enabledToolIds: List<String> = emptyList(),
     val thinkingBudget: String = "none",
     val temperature: Float? = null,
-    val projectAttachments: List<Attachment> = emptyList()
+    val projectAttachments: List<Attachment> = emptyList(),
+    /**
+     * The chat's group as the device knows it (optional): what the group-conversations tool
+     * runs for when this server's copy of the chat has not arrived yet.
+     */
+    val groupId: String? = null
 )
 
 @Serializable
@@ -251,8 +255,9 @@ fun Route.runRoutes() {
             return@post reject(RunRejectionCode.NO_API_KEY, "No active API key for ${body.provider} on the server")
         }
 
-        val tools = ToolRegistry.getInstance()
-        val unknownTools = body.enabledToolIds.filter { tools.getTool(it) == null }
+        // The user's own tools for this run, from the user's connections as they are right now
+        val tools = ctx.tools.forRun(body.chatId, body.enabledToolIds, body.groupId)
+        val unknownTools = tools.missing(body.enabledToolIds)
         if (unknownTools.isNotEmpty()) {
             return@post reject(RunRejectionCode.UNSUPPORTED_TOOLS, "Tools not available on the server: ${unknownTools.joinToString()}")
         }
@@ -275,7 +280,7 @@ fun Route.runRoutes() {
                 systemPrompt = body.systemPrompt,
                 webSearchEnabled = body.webSearchEnabled,
                 enabledToolIds = body.enabledToolIds,
-                enabledTools = tools.getEnabledToolsSpecifications(body.enabledToolIds, body.provider),
+                tools = tools,
                 thinkingBudget = parseBudget(body.thinkingBudget),
                 temperature = body.temperature,
                 projectAttachments = body.projectAttachments,

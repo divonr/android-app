@@ -130,6 +130,9 @@ fun ApplicationTestBuilder.startWithFakeGoogleAuth(
             loginPullTimeoutMs = loginPullTimeoutMs,
             syncWhoamiClient = syncWhoamiClient,
             runPingIntervalMs = runPingIntervalMs,
+            // Never the real GitHub / Google APIs from a test
+            integrationTools = FakeIntegrationTools(),
+            googleTokenRefresher = FakeGoogleTokenRefresher(),
             chatEngineFactory = chatEngineFactory,
             titleGeneratorFactory = titleGeneratorFactory
         )

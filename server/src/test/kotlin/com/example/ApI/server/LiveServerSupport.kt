@@ -36,7 +36,12 @@ internal class LiveServer(
     startRegistry: Boolean = false,
     syncAuthClient: SyncAuthClient = FakeSyncAuthClient(),
     syncServerUrl: String = UNREACHABLE_SYNC_URL,
-    pullIntervalSeconds: Long = 3_600L
+    pullIntervalSeconds: Long = 3_600L,
+    integrationTools: com.example.ApI.server.runs.IntegrationTools = FakeIntegrationTools(),
+    googleTokenRefresher: com.example.ApI.server.oauth.GoogleTokenRefresher = FakeGoogleTokenRefresher(),
+    // No title by default: the real generator would call a provider
+    titleGenerator: TitleGenerator = TitleGenerator { _, _, _ -> "" },
+    runRegistry: com.example.ApI.server.runs.RunRegistry = com.example.ApI.server.runs.RunRegistry()
 ) : AutoCloseable {
 
     private val server = embeddedServer(Netty, port = 0, host = "127.0.0.1") {
@@ -51,6 +56,10 @@ internal class LiveServer(
             pullIntervalSeconds = pullIntervalSeconds,
             syncWhoamiClient = whoami,
             runPingIntervalMs = runPingIntervalMs,
+            integrationTools = integrationTools,
+            googleTokenRefresher = googleTokenRefresher,
+            titleGeneratorFactory = { _ -> titleGenerator },
+            runRegistry = runRegistry,
             chatEngineFactory = { _ -> engine }
         )
     }.start(wait = false)

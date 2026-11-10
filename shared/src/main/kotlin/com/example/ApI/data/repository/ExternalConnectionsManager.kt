@@ -251,6 +251,34 @@ class ExternalConnectionsManager(
     }
 
     /**
+     * Replace the tokens of the stored Google Workspace connection (a token refresh) with
+     * [transform] of the current ones.  Load-modify-save under the auth file's lock, so a
+     * concurrent change of the connection (enabled services, a sync merge) is kept.
+     * @return the updated connection, or null when there is none
+     */
+    fun updateGoogleWorkspaceAuth(
+        username: String,
+        transform: (com.example.ApI.data.model.GoogleWorkspaceAuth) -> com.example.ApI.data.model.GoogleWorkspaceAuth
+    ): GoogleWorkspaceConnection? {
+        return try {
+            val file = googleWorkspaceFile(username)
+            var changed = false
+            val updated = FileLocks.withLock(file) {
+                val connection = loadGoogleWorkspaceConnection(username) ?: return null
+                val auth = transform(connection.auth)
+                if (auth == connection.auth) return@withLock connection
+                changed = true
+                connection.copy(auth = auth).also { AtomicFiles.write(file, json.encodeToString(it)) }
+            }
+            if (changed) onFileWritten(file)
+            updated
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
      * Get Google Workspace API services with the user's access token
      * @param username The app username
      * @return Triple of (GmailApiService?, GoogleCalendarApiService?, GoogleDriveApiService?) or null if not connected

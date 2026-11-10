@@ -4,7 +4,9 @@
  *  - `cancelRun`        — POST /api/runs/{runId}/cancel (the stop button).
  *  - `connectRunsStream` — GET /api/runs/stream: ONE account-level SSE connection per tab. Its
  *    first event is a `snapshot` of all runs, then the live events of all runs (started by this
- *    tab, another tab, or the phone); every data object carries `runId` and `chatId`. The stream
+ *    tab, another tab, or the phone); every data object carries `runId` and `chatId`. Besides
+ *    the events of a run (up to its terminal `complete` / `error` / `cancelled`) there is
+ *    `chat_updated`: after a run ended, the server generated its chat's title. The stream
  *    never ends by itself, so the connection is re-opened (with backoff) whenever it breaks;
  *    each connection starts with a fresh snapshot.
  */

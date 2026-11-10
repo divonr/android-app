@@ -122,6 +122,9 @@ fun main() {
  * @param syncWhoamiClient      Asks the sync server who a bearer token belongs to (bearer auth
  *                              of `/api`).  Tests pass a fake.
  * @param runPingIntervalMs     How often an idle run event stream sends a ping comment.
+ * @param integrationTools      Creates the GitHub / Google Workspace tools of a run.  Tests pass a fake.
+ * @param googleTokenRefresher  Refreshes a Google Workspace access token.  Tests pass a fake.
+ * @param runRegistry           Owns the runs.  Tests may pass one with short timeouts.
  */
 fun Application.module(
     storage: ServerPlatformStorage = ServerPlatformStorage(),
@@ -137,6 +140,9 @@ fun Application.module(
     loginPullTimeoutMs: Long = UserRegistry.LOGIN_PULL_TIMEOUT_MS,
     syncWhoamiClient: SyncWhoamiClient? = null,
     runPingIntervalMs: Long = 15_000L,
+    integrationTools: com.example.ApI.server.runs.IntegrationTools? = null,
+    googleTokenRefresher: com.example.ApI.server.oauth.GoogleTokenRefresher? = null,
+    runRegistry: RunRegistry = RunRegistry(),
     // Keep last so that `module(storage, authConfig) { repo -> engine }` trailing-lambda syntax works.
     chatEngineFactory: ((DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null
 ) {
@@ -154,15 +160,15 @@ fun Application.module(
             TitleGenerator { username, chatId, provider ->
                 repo.generateConversationTitle(username, chatId, provider)
             }
-        }
+        },
+        integrationTools = integrationTools ?: com.example.ApI.server.runs.RealIntegrationTools,
+        googleTokenRefresher = googleTokenRefresher ?: com.example.ApI.server.oauth.RealGoogleTokenRefresher()
     )
 
     // Keep syncing every signed-in user from startup, before their first request
     if (startRegistry) {
         kotlinx.coroutines.runBlocking { registry.rehydrateAll() }
     }
-
-    val runRegistry = RunRegistry()
 
     // On shutdown: end the runs first (what they streamed so far is saved), then stop all user
     // pull loops and sync engines (which flushes those saves)

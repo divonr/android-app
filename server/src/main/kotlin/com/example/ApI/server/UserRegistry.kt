@@ -3,6 +3,11 @@ package com.example.ApI.server
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.MigrationResult
+import com.example.ApI.server.oauth.GoogleTokenRefresher
+import com.example.ApI.server.oauth.RealGoogleTokenRefresher
+import com.example.ApI.server.runs.IntegrationTools
+import com.example.ApI.server.runs.RealIntegrationTools
+import com.example.ApI.server.runs.UserTools
 import com.example.ApI.server.streaming.ChatEngine
 import com.example.ApI.server.streaming.RepositoryChatEngine
 import com.example.ApI.util.JsonConfig
@@ -20,14 +25,16 @@ import java.io.File
  * Each [UserContext] owns an isolated [ServerPlatformStorage] and [DataRepository]
  * rooted at `{dataRoot}/users/{username}/`.  The [chatEngine] and [titleGenerator]
  * are created from the same factory lambdas used at application startup so tests
- * can inject fakes uniformly.
+ * can inject fakes uniformly.  [tools] resolves, per run, the tools this user's runs may use
+ * (never a process-wide registry: see [UserTools]).
  */
 data class UserContext(
     val username: String,
     val storage: ServerPlatformStorage,
     val repository: DataRepository,
     val chatEngine: ChatEngine,
-    val titleGenerator: TitleGenerator
+    val titleGenerator: TitleGenerator,
+    val tools: UserTools = UserTools(username, repository)
 )
 
 // ── UserRegistry ──────────────────────────────────────────────────────────────
@@ -61,6 +68,8 @@ data class UserContext(
  *                             callback redirects (the pull itself keeps running).
  * @param chatEngineFactory    Factory that creates a [ChatEngine] from a [DataRepository].
  * @param titleGeneratorFactory Factory that creates a [TitleGenerator] from a [DataRepository].
+ * @param integrationTools     Creates the GitHub / Google Workspace tools of a user's runs.
+ * @param googleTokenRefresher Refreshes a user's Google Workspace access token.
  */
 class UserRegistry(
     private val baseDir: File,
@@ -73,7 +82,9 @@ class UserRegistry(
         TitleGenerator { username, chatId, provider ->
             repo.generateConversationTitle(username, chatId, provider)
         }
-    }
+    },
+    private val integrationTools: IntegrationTools = RealIntegrationTools,
+    private val googleTokenRefresher: GoogleTokenRefresher = RealGoogleTokenRefresher()
 ) {
     companion object {
         /** Bounded wait of a login for the user's first pull (plan §6). */
@@ -131,7 +142,8 @@ class UserRegistry(
             storage = storage,
             repository = repository,
             chatEngine = chatEngine,
-            titleGenerator = titleGenerator
+            titleGenerator = titleGenerator,
+            tools = UserTools(username, repository, integrationTools, googleTokenRefresher)
         )
     }
 
