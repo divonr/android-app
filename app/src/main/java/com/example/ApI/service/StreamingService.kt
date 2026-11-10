@@ -61,15 +61,9 @@ class StreamingService : Service() {
         const val EXTRA_REQUEST_ID = "request_id"
         const val EXTRA_CHAT_ID = "chat_id"
         const val EXTRA_USERNAME = "username"
-        const val EXTRA_PROVIDER_JSON = "provider_json"
         const val EXTRA_MODEL_NAME = "model_name"
-        const val EXTRA_SYSTEM_PROMPT = "system_prompt"
         const val EXTRA_WEB_SEARCH_ENABLED = "web_search_enabled"
-        const val EXTRA_MESSAGES_JSON = "messages_json"
-        const val EXTRA_PROJECT_ATTACHMENTS_JSON = "project_attachments_json"
-        const val EXTRA_ENABLED_TOOLS_JSON = "enabled_tools_json"
         const val EXTRA_TOOL_RESULT_JSON = "tool_result_json"
-        const val EXTRA_THINKING_BUDGET_JSON = "thinking_budget_json"
         const val EXTRA_TEMPERATURE = "temperature"
         /** The variant the reply belongs to (the variant of the last message sent). */
         const val EXTRA_TARGET_VARIANT_ID = "target_variant_id"
@@ -141,49 +135,49 @@ class StreamingService : Service() {
     }
 
     private fun handleStartRequest(intent: Intent) {
+        // Started via startForegroundService: go foreground on every path (also the ones
+        // that fail below), otherwise the system reports the app as not responding
+        startForeground(NOTIFICATION_ID, buildNotification())
+
         val requestId = intent.getStringExtra(EXTRA_REQUEST_ID) ?: UUID.randomUUID().toString()
-        val chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return
-        val username = intent.getStringExtra(EXTRA_USERNAME) ?: return
-        val providerJson = intent.getStringExtra(EXTRA_PROVIDER_JSON) ?: return
-        val modelName = intent.getStringExtra(EXTRA_MODEL_NAME) ?: return
-        val systemPrompt = intent.getStringExtra(EXTRA_SYSTEM_PROMPT) ?: ""
+        val chatId = intent.getStringExtra(EXTRA_CHAT_ID)
+        val username = intent.getStringExtra(EXTRA_USERNAME)
+        val modelName = intent.getStringExtra(EXTRA_MODEL_NAME)
         val webSearchEnabled = intent.getBooleanExtra(EXTRA_WEB_SEARCH_ENABLED, false)
-        val messagesJson = intent.getStringExtra(EXTRA_MESSAGES_JSON) ?: return
-        val projectAttachmentsJson = intent.getStringExtra(EXTRA_PROJECT_ATTACHMENTS_JSON) ?: "[]"
-        val enabledToolsJson = intent.getStringExtra(EXTRA_ENABLED_TOOLS_JSON) ?: "[]"
-        val thinkingBudgetJson = intent.getStringExtra(EXTRA_THINKING_BUDGET_JSON)
         val temperature = if (intent.hasExtra(EXTRA_TEMPERATURE)) {
             intent.getFloatExtra(EXTRA_TEMPERATURE, 1.0f)
         } else {
             null
         }
+        // The conversation is handed over in-process (too large for Intent extras)
+        val payload = StreamingRequestPayloads.take(requestId)
 
-        Log.d(TAG, "Starting request: requestId=$requestId, chatId=$chatId, temperature=$temperature")
-
-        // Parse data from JSON
-        val provider: Provider
-        val messages: List<Message>
-        val projectAttachments: List<Attachment>
-        val enabledTools: List<ToolSpecification>
-        val thinkingBudget: ThinkingBudgetValue
-
-        try {
-            provider = JsonConfig.standard.decodeFromString<Provider>(providerJson)
-            messages = JsonConfig.standard.decodeFromString<List<Message>>(messagesJson)
-            projectAttachments = JsonConfig.standard.decodeFromString<List<Attachment>>(projectAttachmentsJson)
-            enabledTools = JsonConfig.standard.decodeFromString<List<ToolSpecification>>(enabledToolsJson)
-            thinkingBudget = if (thinkingBudgetJson != null) {
-                JsonConfig.standard.decodeFromString<ThinkingBudgetValue>(thinkingBudgetJson)
-            } else {
-                ThinkingBudgetValue.None
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse request data", e)
+        if (chatId == null || username == null || modelName == null || payload == null) {
+            val reason = if (payload == null) "request data is no longer available" else "missing request parameters"
+            Log.e(TAG, "Cannot start request $requestId: $reason")
+            AppLogger.w("Streaming request $requestId not started by service: $reason.")
             serviceScope.launch {
-                _streamingEvents.emit(StreamingEvent.Error(requestId, chatId, "Failed to parse request: ${e.message}"))
+                if (chatId != null) {
+                    _streamingEvents.emit(StreamingEvent.Error(requestId, chatId, "Failed to start request: $reason"))
+                    _streamingEvents.emit(StreamingEvent.StatusChange(requestId, chatId, RequestStatus.FAILED))
+                }
+                checkAndStopSelf()
             }
             return
         }
+
+        val provider = payload.provider
+        val messages = payload.messages
+        val systemPrompt = payload.systemPrompt
+        val projectAttachments = payload.projectAttachments
+        val enabledTools = payload.enabledTools
+        val thinkingBudget = payload.thinkingBudget
+
+        Log.d(TAG, "Starting request: requestId=$requestId, chatId=$chatId, temperature=$temperature")
+        AppLogger.d(
+            "Streaming request $requestId picked up by service: ${messages.size} messages, " +
+                "~${payload.approxTextChars()} chars of text."
+        )
 
         // Create request tracking object
         val request = StreamingRequest(
@@ -207,8 +201,7 @@ class StreamingService : Service() {
             messages
         )
 
-        // Start foreground with notification
-        startForeground(NOTIFICATION_ID, buildNotification())
+        // Already in the foreground; show the updated request count
         updateNotification()
 
         // Emit status change

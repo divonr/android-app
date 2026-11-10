@@ -29,6 +29,8 @@ import com.example.ApI.data.sync.ForegroundSyncTicker
 import com.example.ApI.data.sync.SyncReload
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.ParentalControlManager
+import com.example.ApI.service.StreamingRequestPayload
+import com.example.ApI.service.StreamingRequestPayloads
 import com.example.ApI.service.StreamingService
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
@@ -62,8 +64,7 @@ import androidx.core.content.FileProvider
 import androidx.core.app.PendingIntentCompat
 import android.app.PendingIntent
 import android.os.Environment
-import com.example.ApI.util.JsonConfig
-import kotlinx.serialization.encodeToString
+import com.example.ApI.util.AppLogger
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.InputStream
@@ -353,27 +354,21 @@ class ChatViewModel(
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         temperature: Float? = null
     ) {
+        // The Intent carries only small scalars. The conversation itself is handed over
+        // in-process: as Intent extras a long chat exceeds the binder transaction limit,
+        // the start command is never delivered and the app stops responding.
         val intent = Intent(context, StreamingService::class.java).apply {
             action = StreamingService.ACTION_START_REQUEST
             putExtra(StreamingService.EXTRA_REQUEST_ID, requestId)
             putExtra(StreamingService.EXTRA_CHAT_ID, chatId)
             putExtra(StreamingService.EXTRA_USERNAME, username)
-            putExtra(StreamingService.EXTRA_PROVIDER_JSON, JsonConfig.standard.encodeToString(provider))
             putExtra(StreamingService.EXTRA_MODEL_NAME, modelName)
-            putExtra(StreamingService.EXTRA_SYSTEM_PROMPT, systemPrompt)
             putExtra(StreamingService.EXTRA_WEB_SEARCH_ENABLED, webSearchEnabled)
-            putExtra(StreamingService.EXTRA_MESSAGES_JSON, JsonConfig.standard.encodeToString(messages))
             // Pin the reply to the variant of the message it answers, after that message
             // (survives a variant switch or a sync merge while streaming)
             messages.lastOrNull()?.let { last ->
                 last.variantId?.let { putExtra(StreamingService.EXTRA_TARGET_VARIANT_ID, it) }
                 putExtra(StreamingService.EXTRA_EXPECTED_TAIL_ID, last.id)
-            }
-            putExtra(StreamingService.EXTRA_PROJECT_ATTACHMENTS_JSON, JsonConfig.standard.encodeToString(projectAttachments))
-            putExtra(StreamingService.EXTRA_ENABLED_TOOLS_JSON, JsonConfig.standard.encodeToString(enabledTools))
-            // Add thinking budget if not None
-            if (thinkingBudget != ThinkingBudgetValue.None) {
-                putExtra(StreamingService.EXTRA_THINKING_BUDGET_JSON, JsonConfig.standard.encodeToString(thinkingBudget))
             }
             // Add temperature if set
             if (temperature != null) {
@@ -381,10 +376,30 @@ class ChatViewModel(
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+        val payload = StreamingRequestPayload(
+            provider = provider,
+            messages = messages.toList(),
+            systemPrompt = systemPrompt,
+            projectAttachments = projectAttachments.toList(),
+            enabledTools = enabledTools.toList(),
+            thinkingBudget = thinkingBudget
+        )
+        StreamingRequestPayloads.put(requestId, payload)
+        AppLogger.d(
+            "Streaming request $requestId handed to service: ${payload.messages.size} messages, " +
+                "~${payload.approxTextChars()} chars of text."
+        )
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            StreamingRequestPayloads.take(requestId)
+            AppLogger.w("Streaming request $requestId: failed to start service: ${e.message}")
+            throw e
         }
     }
 
