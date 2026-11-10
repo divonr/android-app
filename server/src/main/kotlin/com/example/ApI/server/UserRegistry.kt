@@ -211,8 +211,14 @@ class UserRegistry(
      * @param username  Canonical username from the sync server.
      * @param email     Google account email (stored for display).
      * @param syncToken Bearer token minted by the sync server.
+     * @param enableApiKeySync Also turn this device's API-key sync on (see [ensureUserSync]).
      */
-    suspend fun bootstrapUserSync(username: String, email: String, syncToken: String) {
+    suspend fun bootstrapUserSync(
+        username: String,
+        email: String,
+        syncToken: String,
+        enableApiKeySync: Boolean = false
+    ) {
         val ctx = context(username)
         val repo = ctx.repository
         val engine = repo.syncEngine
@@ -228,8 +234,9 @@ class UserRegistry(
                     enabled = true,
                     serverBaseUrl = syncServerUrl,
                     authToken = syncToken,
-                    accountEmail = email
+                    accountEmail = email,
                     // syncApiKeys: the user's per-device opt-in survives re-login
+                    syncApiKeys = current.remoteSync.syncApiKeys || enableApiKeySync
                 ),
                 current_user = username
             )
@@ -245,6 +252,36 @@ class UserRegistry(
         val firstPull = scope.launch { engine.pull() }
         val finished = withTimeoutOrNull(loginPullTimeoutMs) { firstPull.join() } != null
         if (!finished) log.warn("First pull for '$username' still running after ${loginPullTimeoutMs}ms; continuing login")
+    }
+
+    // ── Sync bootstrap for bearer-authenticated devices (cloud runs) ──────────
+
+    private val bearerBootstrapMutex = Mutex()
+
+    /**
+     * Make sure the server copy of [username] syncs, for a request authenticated with the sync
+     * token [syncToken] of one of the user's devices.  A no-op when the user's sync is running
+     * with accepted credentials; otherwise [bootstrapUserSync] with the presented token:
+     *  - the user never logged in on the web (no sync credentials here): the copy starts
+     *    syncing, with API-key sync on — the device asks the server to run its requests, which
+     *    needs the account's keys, and there is no earlier web choice to respect;
+     *  - the stored token was rejected (`needsReauth`) or the pull loop is not running: sync
+     *    resumes with the presented token; the user's API-key sync choice is kept.
+     */
+    suspend fun ensureUserSync(username: String, email: String, syncToken: String) {
+        suspend fun state(): Pair<Boolean, Boolean> {
+            val repo = context(username).repository
+            val remote = repo.loadAppSettings().remoteSync
+            val hasCredentials = remote.enabled && remote.authToken.isNotBlank()
+            val running = !startEngine || username in syncingUsers()
+            return hasCredentials to (hasCredentials && running && !repo.needsReauth.value)
+        }
+        if (state().second) return
+        bearerBootstrapMutex.withLock {
+            val (hasCredentials, syncing) = state()
+            if (syncing) return
+            bootstrapUserSync(username, email, syncToken, enableApiKeySync = !hasCredentials)
+        }
     }
 
     // ── Pull loop ─────────────────────────────────────────────────────────────

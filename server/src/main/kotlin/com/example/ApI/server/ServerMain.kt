@@ -4,7 +4,13 @@ import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.server.auth.GoogleTokenVerifier
 import com.example.ApI.server.auth.RealGoogleTokenVerifier
 import com.example.ApI.server.auth.RealSyncAuthClient
+import com.example.ApI.server.auth.RealSyncWhoamiClient
+import com.example.ApI.server.auth.SYNC_BEARER_AUTH
 import com.example.ApI.server.auth.SyncAuthClient
+import com.example.ApI.server.auth.SyncBearerAuth
+import com.example.ApI.server.auth.SyncBearerAuthProvider
+import com.example.ApI.server.auth.SyncWhoamiClient
+import com.example.ApI.server.runs.RunRegistry
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -113,6 +119,9 @@ fun main() {
  *                              so they never reach the live sync server.
  * @param pullIntervalSeconds   Seconds between a user's periodic background pulls.
  * @param loginPullTimeoutMs    How long the login callback waits for the user's first pull.
+ * @param syncWhoamiClient      Asks the sync server who a bearer token belongs to (bearer auth
+ *                              of `/api`).  Tests pass a fake.
+ * @param runPingIntervalMs     How often an idle run event stream sends a ping comment.
  */
 fun Application.module(
     storage: ServerPlatformStorage = ServerPlatformStorage(),
@@ -126,6 +135,8 @@ fun Application.module(
     syncServerUrl: String = resolveSyncServerUrl(),
     pullIntervalSeconds: Long = resolvePullIntervalSeconds(),
     loginPullTimeoutMs: Long = UserRegistry.LOGIN_PULL_TIMEOUT_MS,
+    syncWhoamiClient: SyncWhoamiClient? = null,
+    runPingIntervalMs: Long = 15_000L,
     // Keep last so that `module(storage, authConfig) { repo -> engine }` trailing-lambda syntax works.
     chatEngineFactory: ((DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null
 ) {
@@ -151,8 +162,12 @@ fun Application.module(
         kotlinx.coroutines.runBlocking { registry.rehydrateAll() }
     }
 
-    // Stop all user pull loops and sync engines on shutdown
+    val runRegistry = RunRegistry()
+
+    // On shutdown: end the runs first (what they streamed so far is saved), then stop all user
+    // pull loops and sync engines (which flushes those saves)
     environment.monitor.subscribe(ApplicationStopping) {
+        runRegistry.shutdown()
         registry.stopAll()
     }
 
@@ -162,7 +177,9 @@ fun Application.module(
         oauthExchanger = oauthExchanger
             ?: com.example.ApI.server.oauth.RealOAuthTokenExchanger(),
         googleTokenVerifier = googleTokenVerifier ?: RealGoogleTokenVerifier(),
-        syncAuthClient = syncAuthClient ?: RealSyncAuthClient(syncServerUrl)
+        syncAuthClient = syncAuthClient ?: RealSyncAuthClient(syncServerUrl),
+        runRegistry = runRegistry,
+        runPingIntervalMs = runPingIntervalMs
     )
     installAppModule(appModule)
 
@@ -193,6 +210,19 @@ fun Application.module(
                 call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "unauthorized"))
             }
         }
+        // `Authorization: Bearer <sync token>` of a signed-in device (cloud runs)
+        register(
+            SyncBearerAuthProvider(
+                SyncBearerAuthProvider.Config(
+                    SYNC_BEARER_AUTH,
+                    SyncBearerAuth(
+                        whoami = syncWhoamiClient ?: RealSyncWhoamiClient(syncServerUrl),
+                        registry = registry,
+                        allowedEmails = allowedGoogleEmails
+                    )
+                )
+            )
+        )
     }
 
     // ── Plugins ──────────────────────────────────────────────────────────────

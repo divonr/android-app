@@ -26,6 +26,10 @@ class RepositoryChatEngine(private val repository: DataRepository) : ChatEngine 
         temperature: Float?,
         callback: StreamingCallback
     ) {
+        // The user's custom providers may have changed (here or on another device) since the
+        // last request: register them like Android's StreamingService does before every request
+        repository.initializeCustomProviders(username)
+        repository.initializeFullCustomProviders(username)
         repository.sendMessage(
             provider = provider,
             modelName = modelName,

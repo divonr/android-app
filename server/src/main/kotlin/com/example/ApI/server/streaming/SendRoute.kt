@@ -8,24 +8,18 @@ import com.example.ApI.data.model.TitleGenerationSettings
 import com.example.ApI.data.model.Chat
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.ReplyAnchor
+import com.example.ApI.server.runs.RunSpec
+import com.example.ApI.server.runs.startAndStreamRun
 import com.example.ApI.server.userContext
 import com.example.ApI.tools.ToolRegistry
-import com.example.ApI.tools.ToolSpecification
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import java.time.Instant
+import java.util.UUID
 
 // ── Request DTOs ──────────────────────────────────────────────────────────────
 
@@ -134,211 +128,17 @@ internal suspend fun maybeGenerateTitle(
     }
 }
 
-// ── Shared SSE plumbing ───────────────────────────────────────────────────────
-
-private val routeJson = Json { encodeDefaults = true; isLenient = true; ignoreUnknownKeys = true }
-
-/** SSE frame format: "event: <type>\ndata: <json>\n\n" */
-private fun sseFrame(eventType: String, data: String): String =
-    "event: $eventType\ndata: $data\n\n"
-
-private const val COMPLETE_SENTINEL = "__COMPLETE__"
-
-/**
- * Shared SSE streaming helper used by both POST /api/chat/send and
- * POST /api/chats/{chatId}/messages/{messageId}/resend.
- *
- * Sets SSE headers, builds a [StreamingCallback] that fans events into a
- * channel, launches the [ChatEngine.send] call, drains the channel into
- * the HTTP response, persists the assistant message on completion, and
- * triggers automatic title generation.
- *
- * Every save of the request (tool messages, final reply) goes to its [anchor]: the variant
- * of the user message the request answers, after the last message saved so far — never the
- * chat's current path at save time (a variant switch or a sync merge may have moved it).
- */
-internal suspend fun ApplicationCall.streamSseResponse(
-    chatId: String,
-    username: String,
-    messages: List<Message>,
-    provider: Provider,
-    modelName: String,
-    systemPrompt: String,
-    webSearchEnabled: Boolean,
-    enabledToolIds: List<String>,
-    projectAttachments: List<Attachment>,
-    enabledTools: List<ToolSpecification>,
-    thinkingBudget: ThinkingBudgetValue,
-    temperature: Float?,
-    repo: DataRepository,
-    engine: ChatEngine,
-    anchor: ReplyAnchor
-) {
-    response.headers.append(HttpHeaders.CacheControl, "no-cache")
-    response.headers.append(HttpHeaders.Connection, "keep-alive")
-    response.headers.append("X-Accel-Buffering", "no")
-
-    val sseChannel = Channel<String>(Channel.UNLIMITED)
-    var fullResponseText = ""
-
-    respondTextWriter(contentType = ContentType.parse("text/event-stream")) {
-        val callback = object : com.example.ApI.data.model.StreamingCallback {
-
-            override fun onPartialResponse(text: String) {
-                val payload = buildJsonObject { put("text", text) }
-                sseChannel.trySend(sseFrame("partial", routeJson.encodeToString(JsonObject.serializer(), payload)))
-            }
-
-            override fun onThinkingStarted() {
-                sseChannel.trySend(sseFrame("thinking_started", "{}"))
-            }
-
-            override fun onThinkingPartial(text: String) {
-                val payload = buildJsonObject { put("text", text) }
-                sseChannel.trySend(sseFrame("thinking_partial", routeJson.encodeToString(JsonObject.serializer(), payload)))
-            }
-
-            override fun onThinkingComplete(
-                thoughts: String?,
-                durationSeconds: Float,
-                status: com.example.ApI.data.model.ThoughtsStatus
-            ) {
-                val payload = buildJsonObject {
-                    if (thoughts != null) put("thoughts", thoughts) else put("thoughts", null as String?)
-                    put("durationSeconds", durationSeconds.toDouble())
-                    put("status", status.name)
-                }
-                sseChannel.trySend(sseFrame("thinking_complete", routeJson.encodeToString(JsonObject.serializer(), payload)))
-            }
-
-            override suspend fun onToolCall(
-                toolCall: com.example.ApI.tools.ToolCall,
-                precedingText: String
-            ): com.example.ApI.tools.ToolExecutionResult {
-                val callPayload = buildJsonObject {
-                    put("toolId", toolCall.toolId)
-                    put("toolName", ToolRegistry.getInstance().getToolDisplayName(toolCall.toolId))
-                    put("parameters", toolCall.parameters)
-                }
-                sseChannel.trySend(sseFrame("tool_call", routeJson.encodeToString(JsonObject.serializer(), callPayload)))
-
-                val result = ToolRegistry.getInstance().executeTool(toolCall, enabledToolIds)
-
-                val resultPayload = buildJsonObject {
-                    put("toolId", toolCall.toolId)
-                    when (result) {
-                        is com.example.ApI.tools.ToolExecutionResult.Success -> {
-                            put("success", true)
-                            put("output", result.result)
-                        }
-                        is com.example.ApI.tools.ToolExecutionResult.Error -> {
-                            put("success", false)
-                            put("output", result.error)
-                        }
-                    }
-                }
-                sseChannel.trySend(sseFrame("tool_result", routeJson.encodeToString(JsonObject.serializer(), resultPayload)))
-
-                return result
-            }
-
-            override suspend fun onSaveToolMessages(
-                toolCallMessage: Message,
-                toolResponseMessage: Message,
-                precedingText: String
-            ) {
-                if (precedingText.isNotBlank()) {
-                    val preceding = Message(
-                        role = "assistant",
-                        text = precedingText,
-                        model = modelName,
-                        datetime = Instant.now().toString()
-                    )
-                    repo.addAnchoredResponse(username, chatId, preceding, anchor)
-                }
-                repo.addAnchoredResponse(username, chatId, toolCallMessage, anchor)
-                repo.addAnchoredResponse(username, chatId, toolResponseMessage, anchor)
-                // Notify the client that new messages were persisted mid-stream so it
-                // can reload the chat history and clear the streaming overlay.
-                sseChannel.trySend(sseFrame("messages_added", "{}"))
-            }
-
-            override fun onComplete(fullText: String) {
-                fullResponseText = fullText
-                sseChannel.trySend(COMPLETE_SENTINEL)
-                sseChannel.close()
-            }
-
-            override fun onError(error: String) {
-                val payload = buildJsonObject { put("error", error) }
-                sseChannel.trySend(sseFrame("error", routeJson.encodeToString(JsonObject.serializer(), payload)))
-                sseChannel.close()
-            }
-        }
-
-        coroutineScope {
-            val engineJob = launch(Dispatchers.IO) {
-                try {
-                    engine.send(
-                        provider = provider,
-                        modelName = modelName,
-                        messages = messages,
-                        systemPrompt = systemPrompt,
-                        username = username,
-                        chatId = chatId,
-                        projectAttachments = projectAttachments,
-                        webSearchEnabled = webSearchEnabled,
-                        enabledTools = enabledTools,
-                        thinkingBudget = thinkingBudget,
-                        temperature = temperature,
-                        callback = callback
-                    )
-                } catch (e: Exception) {
-                    val payload = buildJsonObject { put("error", e.message ?: "Unknown error") }
-                    sseChannel.trySend(sseFrame("error", routeJson.encodeToString(JsonObject.serializer(), payload)))
-                    sseChannel.close()
-                }
-            }
-
-            for (frame in sseChannel) {
-                if (frame == COMPLETE_SENTINEL) {
-                    val assistantMessage = Message(
-                        role = "assistant",
-                        text = fullResponseText,
-                        model = modelName,
-                        datetime = Instant.now().toString()
-                    )
-                    val savedChat = repo.addAnchoredResponse(username, chatId, assistantMessage, anchor)
-                    val savedMessageId = if (savedChat != null) assistantMessage.id else ""
-
-                    val titleSettings = repo.loadAppSettings().titleGenerationSettings
-                    maybeGenerateTitle(repo, username, chatId, titleSettings)
-
-                    val completePayload = buildJsonObject {
-                        put("text", fullResponseText)
-                        put("messageId", savedMessageId)
-                    }
-                    write(sseFrame("complete", routeJson.encodeToString(JsonObject.serializer(), completePayload)))
-                    flush()
-                    break
-                } else {
-                    write(frame)
-                    flush()
-                }
-            }
-
-            engineJob.join()
-        }
-    }
-}
-
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 /**
  * Registers POST /api/chat/send inside the authenticated /api route block.
  *
- * Persists the incoming user message, then delegates all SSE streaming to
- * [streamSseResponse].
+ * Persists the incoming user message, starts a run in the [com.example.ApI.server.runs.RunRegistry]
+ * and relays its events as the response's SSE stream ([startAndStreamRun]): a first `run` event
+ * with the run id, then the run's events.  The run does not depend on this response: closing it
+ * does not stop the run (POST /api/runs/{runId}/cancel does), and its replies are saved at the
+ * request's anchor — the variant of the user message it answers, after the last message saved
+ * so far, never the chat's current path at save time.
  */
 fun Route.sendRoute() {
     post("/chat/send") {
@@ -351,7 +151,6 @@ fun Route.sendRoute() {
 
         val ctx = call.userContext()
         val repo = ctx.repository
-        val engine = ctx.chatEngine
         val username = ctx.username
 
         val provider = repo.loadProviders().find { it.provider == body.provider }
@@ -378,22 +177,23 @@ fun Route.sendRoute() {
         // Pin the replies to the saved user message (multi-message mode: the chat's last message)
         val anchor = anchorAfter(savedChat, userMessage?.takeIf { body.persistUserMessage }?.id)
 
-        call.streamSseResponse(
-            chatId = body.chatId,
-            username = username,
-            messages = body.messages,
-            provider = provider,
-            modelName = body.modelName,
-            systemPrompt = body.systemPrompt,
-            webSearchEnabled = body.webSearchEnabled,
-            enabledToolIds = body.enabledToolIds,
-            projectAttachments = body.projectAttachments,
-            enabledTools = enabledTools,
-            thinkingBudget = parseBudget(body.thinkingBudget),
-            temperature = body.temperature,
-            repo = repo,
-            engine = engine,
-            anchor = anchor
+        call.startAndStreamRun(
+            ctx,
+            RunSpec(
+                runId = UUID.randomUUID().toString(),
+                chatId = body.chatId,
+                provider = provider,
+                modelName = body.modelName,
+                messages = body.messages,
+                systemPrompt = body.systemPrompt,
+                webSearchEnabled = body.webSearchEnabled,
+                enabledToolIds = body.enabledToolIds,
+                enabledTools = enabledTools,
+                thinkingBudget = parseBudget(body.thinkingBudget),
+                temperature = body.temperature,
+                projectAttachments = body.projectAttachments,
+                anchor = anchor
+            )
         )
     }
 }
@@ -439,7 +239,6 @@ fun Route.resendRoute() {
 
         val ctx = call.userContext()
         val repo = ctx.repository
-        val engine = ctx.chatEngine
         val username = ctx.username
 
         // Verify the chat exists (a legacy chat is migrated, deterministically, to the tree)
@@ -497,22 +296,23 @@ fun Route.resendRoute() {
         }
         val requestMessages = updatedChat.messages.take(end + 1)
 
-        call.streamSseResponse(
-            chatId = chatId,
-            username = username,
-            messages = requestMessages,
-            provider = provider,
-            modelName = body.modelName,
-            systemPrompt = body.systemPrompt,
-            webSearchEnabled = body.webSearchEnabled,
-            enabledToolIds = body.enabledToolIds,
-            projectAttachments = emptyList(),
-            enabledTools = enabledTools,
-            thinkingBudget = parseBudget(body.thinkingBudget),
-            temperature = body.temperature,
-            repo = repo,
-            engine = engine,
-            anchor = ReplyAnchor.forRequest(requestMessages)
+        call.startAndStreamRun(
+            ctx,
+            RunSpec(
+                runId = UUID.randomUUID().toString(),
+                chatId = chatId,
+                provider = provider,
+                modelName = body.modelName,
+                messages = requestMessages,
+                systemPrompt = body.systemPrompt,
+                webSearchEnabled = body.webSearchEnabled,
+                enabledToolIds = body.enabledToolIds,
+                enabledTools = enabledTools,
+                thinkingBudget = parseBudget(body.thinkingBudget),
+                temperature = body.temperature,
+                projectAttachments = emptyList(),
+                anchor = ReplyAnchor.forRequest(requestMessages)
+            )
         )
     }
 }

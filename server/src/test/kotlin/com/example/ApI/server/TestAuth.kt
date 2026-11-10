@@ -95,6 +95,9 @@ class FakeGoogleLoginExchanger : OAuthTokenExchanger {
  * [syncServerUrl] is where login seeds the users' sync (default: [UNREACHABLE_SYNC_URL];
  * sync tests pass a [FakeCasSyncServer]'s URL) — never the live sync server.
  *
+ * [syncWhoamiClient] backs the bearer authentication of `/api` (default: a fake that knows no
+ * token, so nothing reaches a real sync server).
+ *
  * Pass a custom [oauthExchanger] when a test also exercises GitHub / Google
  * Workspace integration OAuth (P5 tests).  The exchanger MUST implement
  * [OAuthTokenExchanger.exchangeGoogleIdToken] so that [googleLogin] works.
@@ -110,7 +113,9 @@ fun ApplicationTestBuilder.startWithFakeGoogleAuth(
     titleGeneratorFactory: ((com.example.ApI.data.repository.DataRepository) -> TitleGenerator)? = null,
     syncServerUrl: String = UNREACHABLE_SYNC_URL,
     pullIntervalSeconds: Long = 20L,
-    loginPullTimeoutMs: Long = UserRegistry.LOGIN_PULL_TIMEOUT_MS
+    loginPullTimeoutMs: Long = UserRegistry.LOGIN_PULL_TIMEOUT_MS,
+    syncWhoamiClient: com.example.ApI.server.auth.SyncWhoamiClient = com.example.ApI.server.auth.FakeSyncWhoamiClient(),
+    runPingIntervalMs: Long = 15_000L
 ) {
     application {
         module(
@@ -123,6 +128,8 @@ fun ApplicationTestBuilder.startWithFakeGoogleAuth(
             syncServerUrl = syncServerUrl,
             pullIntervalSeconds = pullIntervalSeconds,
             loginPullTimeoutMs = loginPullTimeoutMs,
+            syncWhoamiClient = syncWhoamiClient,
+            runPingIntervalMs = runPingIntervalMs,
             chatEngineFactory = chatEngineFactory,
             titleGeneratorFactory = titleGeneratorFactory
         )

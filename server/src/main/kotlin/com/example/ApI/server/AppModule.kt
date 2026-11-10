@@ -6,6 +6,7 @@ import com.example.ApI.server.auth.RealSyncAuthClient
 import com.example.ApI.server.auth.SyncAuthClient
 import com.example.ApI.server.oauth.OAuthTokenExchanger
 import com.example.ApI.server.oauth.RealOAuthTokenExchanger
+import com.example.ApI.server.runs.RunRegistry
 import io.ktor.server.application.*
 
 /**
@@ -31,12 +32,19 @@ fun interface TitleGenerator {
  * - [oauthExchanger] — GitHub / Google Workspace token exchange.
  * - [googleTokenVerifier] — Google ID token validation (login flow).
  * - [syncAuthClient] — exchange ID token with the sync server for a bearer token.
+ *
+ * The sync-token bearer authentication of `/api` (its whoami seam included) is wired in
+ * [module] as a Ktor authentication provider.
  */
 class AppModule(
     val registry: UserRegistry,
     val oauthExchanger: OAuthTokenExchanger = RealOAuthTokenExchanger(),
     val googleTokenVerifier: GoogleTokenVerifier = RealGoogleTokenVerifier(),
-    val syncAuthClient: SyncAuthClient = RealSyncAuthClient()
+    val syncAuthClient: SyncAuthClient = RealSyncAuthClient(),
+    /** Owns every LLM run (cloud runs and the web's own sends). */
+    val runRegistry: RunRegistry = RunRegistry(),
+    /** How often (ms) an idle run event stream sends a ping comment. */
+    val runPingIntervalMs: Long = 15_000L
 )
 
 // Ktor attribute key for AppModule

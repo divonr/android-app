@@ -2,6 +2,8 @@ package com.example.ApI.server
 
 import com.example.ApI.data.model.ApiKey
 import com.example.ApI.data.model.AppSettings
+import com.example.ApI.server.auth.SYNC_BEARER_AUTH
+import com.example.ApI.server.runs.runRoutes
 import com.example.ApI.server.streaming.resendRoute
 import com.example.ApI.server.streaming.sendRoute
 import io.ktor.http.*
@@ -129,7 +131,7 @@ object GoogleClientIdTestHook {
  *   GET  /auth/google/start       ← Google login start
  *   GET  /auth/google/callback    ← Google login callback
  *
- * Authenticated routes (`authenticate("session") { route("/api") { ... } }`):
+ * Authenticated routes (session cookie or sync bearer token, `route("/api") { ... }`):
  *   GET  /api/session
  *   GET  /api/me
  *   ... (later phases add routes via [Route.apiRoutes])
@@ -205,7 +207,8 @@ fun Application.configureRouting(
         oauthCallbackRoutes()
 
         // ── Authenticated API ─────────────────────────────────────────────────
-        authenticate("session") {
+        // The session cookie of the web, or the sync token of a signed-in device
+        authenticate("session", SYNC_BEARER_AUTH) {
             route("/api") {
                 // P1: session check endpoint
                 get("/session") {
@@ -392,6 +395,9 @@ fun Route.apiRoutes() {
 
     // ── P4: Resend (SSE, same plumbing as sendRoute) ──────────────────────────
     resendRoute()
+
+    // ── Cloud runs: start / user-level event stream / cancel ──────────────────
+    runRoutes()
 
     // ── P4: Mutation APIs ─────────────────────────────────────────────────────
     mutationRoutes()

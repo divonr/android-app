@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * :server test source set can't see) with the CAS semantics of the real `server.py`: per-account
  * blobs chosen by bearer token, `base_version` compare-and-swap with the 409 `version_conflict`
  * body, sha-equal PUTs as idempotent no-ops, strictly increasing versions, `/sync/health` with
- * `"cas": true`.  `/auth/google` accepts the tests' `fake-id-token-{email}` id tokens (username =
+ * `"cas": true`, `/auth/whoami`.  `/auth/google` accepts the tests' `fake-id-token-{email}` id tokens (username =
  * the sanitized email, like the real server), so the real [com.example.ApI.server.auth.RealSyncAuthClient]
  * can log in against it.  JDK HttpServer on an ephemeral port: tests never reach the live server.
  */
@@ -43,6 +43,9 @@ class FakeCasSyncServer {
     private val tokens = ConcurrentHashMap<String, String>()        // token → user
     private val revoked = ConcurrentHashMap.newKeySet<String>()
     private val mintCounter = AtomicInteger()
+
+    /** The email `/auth/whoami` reports per user (default: `{user}@example.com`). */
+    val emails = ConcurrentHashMap<String, String>()
 
     /** Delay (ms) before answering any authenticated sync request (a hanging sync server). */
     @Volatile
@@ -141,9 +144,13 @@ class FakeCasSyncServer {
             val email = FakeSyncAuthClient.parseFakeTokenEmail(idToken)
             val user = FakeSyncAuthClient.sanitizeEmail(email)
             val token = tokenFor(user)
+            emails[user] = email
             return respond(exchange, 200, """{"token":"$token","username":"$user","email":${JsonPrimitive(email)}}""")
         }
         val user = userOf(exchange) ?: return respond(exchange, 401, """{"detail":"Unauthorized"}""")
+        if (path == "/auth/whoami" && method == "GET") {
+            return respond(exchange, 200, """{"username":"$user","email":${JsonPrimitive(emails[user] ?: "$user@example.com")}}""")
+        }
         if (syncDelayMs > 0) Thread.sleep(syncDelayMs)
         when {
             path == "/sync/manifest" -> {
