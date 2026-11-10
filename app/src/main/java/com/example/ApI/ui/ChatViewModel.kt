@@ -45,6 +45,7 @@ import com.example.ApI.ui.managers.organization.GroupManager
 import com.example.ApI.ui.managers.organization.SearchManager
 import com.example.ApI.ui.managers.provider.ModelSelectionManager
 import com.example.ApI.ui.managers.provider.TopBarManager
+import com.example.ApI.ui.managers.streaming.CloudRunManager
 import com.example.ApI.ui.managers.streaming.StreamingEventManager
 import com.example.ApI.ui.managers.streaming.TitleGenerationManager
 import com.example.ApI.ui.managers.io.AttachmentManager
@@ -271,6 +272,18 @@ class ChatViewModel(
         )
     }
 
+    // Cloud runs: requests executed by the web backend, followed through the account's event stream
+    private val cloudRunManager: CloudRunManager by lazy {
+        CloudRunManager(
+            deps = managerDeps,
+            getCurrentDateTimeISO = { getCurrentDateTimeISO() },
+            handleStreamingEvent = { event -> streamingEventManager.handleStreamingEvent(event) },
+            isServiceBusyWith = { chatId ->
+                streamingService?.getActiveRequests()?.values?.any { it.chatId == chatId } == true
+            }
+        )
+    }
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val localBinder = binder as StreamingService.LocalBinder
@@ -310,6 +323,7 @@ class ChatViewModel(
         sharedIntentManager.handleSharedFiles()
         bindToStreamingService()
         observeSyncChangeTick()
+        cloudRunManager  // follows the cloud-execution setting from now on
     }
 
     private fun getCurrentDateTimeISO(): String {
@@ -338,9 +352,47 @@ class ChatViewModel(
     }
 
     /**
+     * The single place a request is handed over for execution.  With "manage API requests in the
+     * cloud" effective the cloud is asked first; when it takes the request no service is started
+     * (the account's event stream drives the UI).  In every other case — the option is off, or
+     * the cloud did not take the request — the request goes to the foreground service exactly
+     * as it always did.
+     */
+    private suspend fun startStreamingRequest(
+        requestId: String,
+        chatId: String,
+        username: String,
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        webSearchEnabled: Boolean,
+        projectAttachments: List<Attachment>,
+        enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null
+    ) {
+        if (cloudRunManager.isEffective) {
+            val outcome = cloudRunManager.tryStart(
+                requestId, chatId, provider, modelName, messages, systemPrompt, webSearchEnabled,
+                projectAttachments, enabledTools, thinkingBudget, temperature
+            )
+            when (outcome) {
+                CloudRunManager.StartOutcome.CLOUD, CloudRunManager.StartOutcome.STOPPED -> return
+                CloudRunManager.StartOutcome.DEVICE ->
+                    Toast.makeText(context, R.string.cloud_execution_fallback_notice, Toast.LENGTH_SHORT).show()
+            }
+        }
+        startServiceStreamingRequest(
+            requestId, chatId, username, provider, modelName, messages, systemPrompt, webSearchEnabled,
+            projectAttachments, enabledTools, thinkingBudget, temperature
+        )
+    }
+
+    /**
      * Start a streaming request via the foreground service
      */
-    private fun startStreamingRequest(
+    private fun startServiceStreamingRequest(
         requestId: String,
         chatId: String,
         username: String,
@@ -407,6 +459,9 @@ class ChatViewModel(
      * Cancel a streaming request
      */
     fun cancelStreamingRequest(chatId: String) {
+        // A cloud run is stopped in the cloud (nothing of the partial reply is kept)
+        if (cloudRunManager.stop(chatId, keepPartial = false)) return
+
         // Find the request ID for this chat
         val activeRequests = streamingService?.getActiveRequests() ?: return
         val request = activeRequests.values.find { it.chatId == chatId } ?: return
@@ -430,6 +485,10 @@ class ChatViewModel(
         val chatId = currentChat.chat_id
         val currentUser = _appSettings.value.current_user
         val currentModel = _uiState.value.currentModel
+
+        // A cloud run is stopped in the cloud, which saves the partial reply itself (nothing is
+        // saved and no title is generated here)
+        if (cloudRunManager.stop(chatId, keepPartial = true)) return
 
         // Get the accumulated streaming text for this chat
         val accumulatedText = _uiState.value.streamingTextByChat[chatId] ?: ""
@@ -1214,18 +1273,24 @@ class ChatViewModel(
     fun onAppResume() {
         repository.pullNow()
         foregroundSyncTicker.start()
+        cloudRunManager.onForeground()
     }
 
     /** Called on Activity onPause: stop the periodic foreground pull. */
     fun onAppPause() {
         foregroundSyncTicker.stop()
+        cloudRunManager.onBackground()
     }
 
     /** Update the "Enable remote sync" toggle. Persists the change and starts sync if turned on. */
     fun updateRemoteSyncEnabled(enabled: Boolean) {
         val updatedSettings = repository.updateAppSettings {
             it.copy(
-                remoteSync = it.remoteSync.copy(enabled = enabled)
+                // Cloud execution needs sync: off with it
+                remoteSync = it.remoteSync.copy(
+                    enabled = enabled,
+                    cloudExecution = it.remoteSync.cloudExecution && enabled
+                )
             )
         }
         _appSettings.value = updatedSettings
@@ -1246,7 +1311,39 @@ class ChatViewModel(
     fun updateRemoteSyncApiKeys(syncApiKeys: Boolean) {
         val updatedSettings = repository.updateAppSettings {
             it.copy(
-                remoteSync = it.remoteSync.copy(syncApiKeys = syncApiKeys)
+                // Cloud execution needs the keys in the cloud: off with their sync
+                remoteSync = it.remoteSync.copy(
+                    syncApiKeys = syncApiKeys,
+                    cloudExecution = it.remoteSync.cloudExecution && syncApiKeys
+                )
+            )
+        }
+        _appSettings.value = updatedSettings
+    }
+
+    /**
+     * Update the "manage API requests in the cloud" checkbox. It can only be turned on while
+     * sync is on, signed in, and syncing the API keys (the cloud runs the requests with them).
+     */
+    fun updateCloudExecution(enabled: Boolean) {
+        if (enabled) {
+            val sync = repository.loadAppSettings().remoteSync
+            val missing = when {
+                !sync.enabled || sync.authToken.isBlank() -> R.string.cloud_execution_requires_sync
+                !sync.syncApiKeys -> R.string.cloud_execution_requires_api_keys
+                else -> null
+            }
+            if (missing != null) {
+                Toast.makeText(context, missing, Toast.LENGTH_LONG).show()
+                return
+            }
+        }
+        val updatedSettings = repository.updateAppSettings {
+            val sync = it.remoteSync
+            it.copy(
+                remoteSync = sync.copy(
+                    cloudExecution = enabled && sync.enabled && sync.authToken.isNotBlank() && sync.syncApiKeys
+                )
             )
         }
         _appSettings.value = updatedSettings

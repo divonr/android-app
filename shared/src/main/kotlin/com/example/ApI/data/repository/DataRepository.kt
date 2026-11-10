@@ -186,7 +186,9 @@ class DataRepository(private val platformStorage: PlatformStorage) {
                 remoteSync = current.remoteSync.copy(
                     enabled = false,
                     authToken = "",
-                    accountEmail = ""
+                    accountEmail = "",
+                    // Cloud execution needs the account: off with it
+                    cloudExecution = false
                 )
             )
         }

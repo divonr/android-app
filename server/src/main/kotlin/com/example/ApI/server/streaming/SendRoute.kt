@@ -1,5 +1,6 @@
 package com.example.ApI.server.streaming
 
+import com.example.ApI.data.cloud.ThinkingBudgetWire
 import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.Message
 import com.example.ApI.data.model.Provider
@@ -74,14 +75,12 @@ data class ResendRequest(
 
 // ── Thinking-budget parser ────────────────────────────────────────────────────
 
-internal fun parseBudget(raw: String): ThinkingBudgetValue = when (raw.lowercase()) {
-    "none"   -> ThinkingBudgetValue.None
-    "low"    -> ThinkingBudgetValue.Effort("low")
-    "medium" -> ThinkingBudgetValue.Effort("medium")
-    "high"   -> ThinkingBudgetValue.Effort("high")
-    "max"    -> ThinkingBudgetValue.Effort("high")
-    else     -> raw.toIntOrNull()?.let { ThinkingBudgetValue.Tokens(it) } ?: ThinkingBudgetValue.None
-}
+/**
+ * The legacy forms ("none" | "low" | "medium" | "high" | "max" | integer string) plus the
+ * explicit `effort:<level>` / `tokens:<count>` a device sends for values the legacy forms
+ * cannot carry (see [ThinkingBudgetWire]).
+ */
+internal fun parseBudget(raw: String): ThinkingBudgetValue = ThinkingBudgetWire.decode(raw)
 
 // ── Title-generation helper ────────────────────────────────────────────────────
 

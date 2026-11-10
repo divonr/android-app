@@ -30,6 +30,7 @@ fun RemoteSyncSection(
     onEnabledChange: (Boolean) -> Unit,
     onServerUrlChange: (String) -> Unit,
     onSyncApiKeysChange: (Boolean) -> Unit,
+    onCloudExecutionChange: (Boolean) -> Unit,
     onSyncNow: () -> Unit,
     onTestConnection: suspend () -> Boolean,
     onSignInClick: () -> Unit,
@@ -327,6 +328,44 @@ fun RemoteSyncSection(
                         uncheckedTrackColor = OnSurfaceVariant.copy(alpha = 0.2f)
                     )
                 )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ── "Manage API requests in the cloud" checkbox ───────────────────
+            // Never disabled: turning it on without key sync explains what is missing (a toast)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Checkbox(
+                    checked = settings.cloudExecution,
+                    onCheckedChange = { onCloudExecutionChange(it) },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Primary,
+                        uncheckedColor = OnSurfaceVariant
+                    )
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(top = 12.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.cloud_execution_title),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OnSurface,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = stringResource(R.string.cloud_execution_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurface.copy(alpha = 0.6f),
+                        lineHeight = 15.sp
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))

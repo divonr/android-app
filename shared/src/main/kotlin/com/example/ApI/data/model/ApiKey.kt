@@ -32,8 +32,27 @@ data class RemoteSyncSettings(
     val authToken: String = "",
     /** Google account email — display only. Cleared on sign-out. */
     val accountEmail: String = "",
-    val syncApiKeys: Boolean = false
-)
+    val syncApiKeys: Boolean = false,
+    /**
+     * "Manage API requests in the cloud" (CLOUD_RUNS_PLAN.md): LLM requests are executed by the
+     * web backend at [cloudBaseUrl] instead of by this device. Per device, like the rest of this
+     * object. Only meaningful together with [syncApiKeys] — see [cloudExecutionEffective].
+     */
+    val cloudExecution: Boolean = false,
+    /** Base URL of the web backend (llm-web) that executes cloud runs. */
+    val cloudBaseUrl: String = DEFAULT_CLOUD_BASE_URL
+) {
+    /**
+     * Whether requests are sent to the cloud right now: the option is on, sync is on and signed
+     * in, and the API keys are synced (the cloud has no keys otherwise).
+     */
+    val cloudExecutionEffective: Boolean
+        get() = cloudExecution && enabled && syncApiKeys && authToken.isNotBlank() && cloudBaseUrl.isNotBlank()
+
+    companion object {
+        const val DEFAULT_CLOUD_BASE_URL = "https://app.api-divonr.xyz"
+    }
+}
 
 @Serializable
 data class ApiKey(

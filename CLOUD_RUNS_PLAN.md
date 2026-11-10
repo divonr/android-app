@@ -64,6 +64,12 @@ Body (`RunRequest`, superset of today's `SendRequest`):
   "thinkingBudget": "<string>", "temperature": <float|null>,
   "projectAttachments": [Attachment...] }
 ```
+`thinkingBudget` (this route and the web send/resend routes; shared `ThinkingBudgetWire`): the
+legacy forms `none` | `low` | `medium` | `high` | `max` (= high) | `<integer>` (token budget), plus
+the explicit `effort:<level>` and `tokens:<count>`. A device sends `effort:<level>` for the effort
+levels the legacy forms cannot carry (`minimal`, `xhigh`, and the effort `none`, which a provider
+treats differently from "no budget").
+
 The server does NOT persist a user message for this route (the client already saved it and it
 arrives through sync). The reply anchor is `ReplyAnchor.forRequest(messages)`; `addAnchoredResponse`
 already restores the question path when the server copy does not have it yet. The server kicks a
@@ -187,35 +193,79 @@ once the device has uploaded it to that provider (the id is in the message it se
 in the cloud on Anthropic & co., and text-like files never run in the cloud on OpenAI.
 
 ## Android client
+Shared, no Android dependencies (`shared/.../data/cloud/`): `CloudRunClient` (start, cancel, the
+event stream with reconnect), `CloudRunTracker` (the runs' client-side state → UI actions),
+`ThinkingBudgetWire`. Android glue: `CloudRunManager` (`app/.../ui/managers/streaming/`).
+
 - `RemoteSyncSettings` gains `cloudExecution: Boolean = false` and
   `cloudBaseUrl: String = "https://app.api-divonr.xyz"` (`remoteSync` is device-local, not merged).
-- Settings UI (RemoteSyncSection, next to the sync toggles): checkbox "נהל ביצוע בקשות API בענן" with
-  small grey text below: "אם אפשרות זו מופעלת, שליחת הפרומפטים וקבלת התשובות תבוצע בענן, תסונכרן בין
-  מכשירים ולא תהיה תלויה בחיבור פעיל של האפליקציה בזמן הזרמת התשובות."
+  "Effective" = `cloudExecution` + sync enabled + a token + `syncApiKeys`
+  (`RemoteSyncSettings.cloudExecutionEffective`).
+- Settings UI (RemoteSyncSection, under the "sync API keys" toggle): checkbox "נהל ביצוע בקשות API
+  בענן" with small grey text below: "אם אפשרות זו מופעלת, שליחת הפרומפטים וקבלת התשובות תבוצע בענן,
+  תסונכרן בין מכשירים ולא תהיה תלויה בחיבור פעיל של האפליקציה בזמן הזרמת התשובות."
   It cannot be turned on unless API-key sync (`syncApiKeys`) is on: trying shows a toast saying the
-  option requires syncing the keys to the cloud. Turning key sync (or sync itself / sign-out) off
-  turns it off too.
+  option requires syncing the keys to the cloud (another toast when sync is off / signed out).
+  Turning key sync (or sync itself / sign-out) off turns it off too.
 - Routing at the single choke point where requests are handed to `StreamingService`
-  (`startStreamingRequest`): cloud effective (sync enabled + signed in + syncApiKeys + cloudExecution)
-  → `POST /api/runs` with short timeouts. Accepted → the run is a "cloud run": NO foreground service
-  is started; UI state is driven by the event stream through the same `StreamingEvent` handling.
-  Any failure → the unchanged service path, plus a brief unobtrusive notice that the request is
-  being sent from the device. On an ambiguous failure (timeout after the request may have reached
-  the server) send a best-effort cancel for that `runId` before falling back, to avoid two replies.
-- Event stream: connected while the app is in the foreground and the feature is effective; reconnect
-  with backoff. From the snapshot/events, chats with running runs show the streaming UI even when the
-  run was started by another device. On `messages_added` / terminal events: `pullNow()`, reload the
-  chat from the local repo, then clear the streaming overlay (keep showing the streamed text until
-  the pulled message is there; bounded wait). A locally known cloud run that is absent from a fresh
-  snapshot is treated as finished (pull + clear).
-- Stop button on a cloud run → cancel endpoint. No local save of replies, no local title generation
-  for cloud runs (the server does both). No push notifications.
+  (`ChatViewModel.startStreamingRequest`, now `suspend`): effective → `POST /api/runs` (whole call
+  ≤ 15 s, connect ≤ 5 s; the request id is the `runId`). Accepted (202/200) → the run is a "cloud
+  run": NO foreground service is started; UI state is driven by the event stream through the same
+  `StreamingEvent` handling. Anything else → the unchanged service path, plus a short toast
+  ("הבקשה נשלחת מהמכשיר"); the reason goes to the app log. A request whose user messages lack
+  `nodeId`/`variantId` is not offered to the cloud at all.
+  Fallback classification: a 4xx answer (401, 409…) and a connection that was never made
+  (refused, unknown host, no route) are definite; everything else (timeout, connection lost, 5xx)
+  is ambiguous → a best-effort cancel (`keepPartial=false`, up to 3 attempts in the background)
+  for that `runId` while the device answers, and every later event of that run is ignored.
+- Event stream: one connection while the app is resumed and the feature is effective; reconnect
+  with backoff 1 s → 30 s (reset by a snapshot); a connection silent for 45 s is dropped. From the
+  snapshot/events, chats with running runs show the streaming UI even when the run was started by
+  another device (and a run nobody announced is adopted from its first event). A chat displays one
+  run: a run in a chat that is busy with an on-device request (a fallback run) or with another
+  cloud run is followed silently (only pulls) until the display is free.
+  A run started by another device triggers a pull when it appears (and one more 3 s later): its
+  chat / question may not have synced yet.
+  On `messages_added` / terminal events: pull (awaited, up to 3 attempts of ≤ 6 s), reload the chat
+  from the local repo, then clear the streaming overlay in the same UI update — `complete` waits
+  until its `messageId` is in the chat, `messages_added` until the chat's messages changed; text
+  that streamed after a `messages_added` stays. A locally known cloud run that is absent from a
+  fresh snapshot (or finished in it) is treated as finished (pull + clear); one that failed in it
+  shows its error. `error` is shown like an on-device error (snackbar) + a pull.
+- Stop button on a cloud run → cancel endpoint with `keepPartial=true` (the device's stop button is
+  `stopStreamingAndSave`); the text stops growing at once and the overlay goes with the `cancelled`
+  event (which can lag by the title generation, ≤ 20 s, when the kept partial is the chat's first
+  reply). Stop while the start request is still in flight is applied when it returns. If the cancel
+  cannot reach the server (or answers 404) the chat is given back at once; a run that is in fact
+  still going shows again with its next event.
+- No local save of replies, no local title generation for cloud runs (the server does both). No
+  push notifications. Turning the feature off, or another account, forgets every followed run.
 
 ## Web client
-- Open `/api/runs/stream` while the tab is open; show live streaming for runs the tab did not start
-  (other device, or this tab before a reload); on `messages_added`/terminal events reload the chat.
-- Own sends keep using the per-request SSE; use the `run` event's `runId` to ignore duplicates from
-  the user-level stream. Stop button → cancel endpoint (aborting the fetch no longer stops the run).
+- One connection to `/api/runs/stream` per tab while a signed-in page is mounted (`useRunsStream` in
+  `AppLayout`; fetch reader, cookie auth). Reconnect with backoff 1 s → 30 s (reset by a snapshot);
+  also reconnects when nothing — not even a ping — arrived for 45 s; stops on 401.
+- `runsStore` follows EVERY run of the account from that stream. Runs whose per-request stream the
+  tab is reading are "own" (claimed by the `run` event's `runId`): the store keeps their state but
+  has no side effects for them, so the two streams never both act on one run. Every other run of the
+  open chat is shown with the same streaming bubble as an own stream (text, thinking, tool calls;
+  a snapshot carries no tool calls), and the store reloads the open chat + the chat list on
+  `run_started` (another device's question / new chat), `messages_added` and terminal events. A
+  fresh snapshot is the truth: known runs missing from it (or finished in it) are cleared and their
+  chat re-read.
+- Own sends keep using the per-request SSE. A per-request stream that breaks before the terminal
+  event (after the `run` event), and leaving the chat while it streams, hand the run over to the
+  account-level stream (no error; the fetch is closed, the run goes on).
+- `messages_added` (both paths): the streamed segment stays on screen until the chat reload finishes,
+  then it is dropped (the saved messages replace it) and a new segment starts.
+- Stop button → `POST /api/runs/{runId}/cancel` with `keepPartial: true` (Android's stop button is
+  `stopStreamingAndSave`), for own and foreign runs; the fetch is not aborted. The streamed text stays
+  until the run's `cancelled` event, then the chat is re-read. Stop pressed before the `run` event
+  arrives cancels as soon as it does. `cancelled` can lag by the title generation (≤ 20 s) when the
+  kept partial reply is the chat's first reply.
+- `web/dist` is what production serves (`WEB_STATIC_DIR`): `npm --prefix web run build` IS the web
+  deploy. The S3 client needs the S1 server (against an older server the stop button does nothing,
+  because there is no `run` event) — build only together with the server restart.
 
 ## Stages
 - S1 server: sync-server whoami; llm-web bearer auth, run registry, routes, web routes on registry, tests.

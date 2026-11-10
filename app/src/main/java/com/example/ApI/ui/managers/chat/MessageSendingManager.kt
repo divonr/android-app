@@ -18,7 +18,7 @@ class MessageSendingManager(
     private val getEffectiveSystemPrompt: () -> String,
     private val getCurrentChatProjectGroup: () -> ChatGroup?,
     private val getEnabledToolSpecifications: () -> List<ToolSpecification>,
-    private val startStreamingRequest: (
+    private val startStreamingRequest: suspend (
         requestId: String,
         chatId: String,
         username: String,

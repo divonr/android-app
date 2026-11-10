@@ -259,6 +259,7 @@ fun UserSettingsScreen(
                     onEnabledChange = { viewModel.updateRemoteSyncEnabled(it) },
                     onServerUrlChange = { viewModel.updateRemoteSyncServerUrl(it) },
                     onSyncApiKeysChange = { viewModel.updateRemoteSyncApiKeys(it) },
+                    onCloudExecutionChange = { viewModel.updateCloudExecution(it) },
                     onSyncNow = { viewModel.triggerSyncNow() },
                     onTestConnection = { viewModel.testSyncConnection() },
                     onSignInClick = {
