@@ -326,6 +326,7 @@ const strings = {
   image_viewer_share_failed: 'לא ניתן לשתף את התמונה',
   image_viewer_forward_failed: 'העברת התמונה נכשלה',
   image_viewer_zoom: 'הגדלה / הקטנה',
+  chat_picker_confirm: 'אישור',
   web_search_toggle: 'חיפוש ברשת',
   copy_code: 'העתק',
   copied: 'הועתק!',

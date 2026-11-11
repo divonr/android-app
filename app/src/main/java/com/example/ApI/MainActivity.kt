@@ -296,7 +296,6 @@ fun LLMChatApp(activity: ComponentActivity? = null, intentTrigger: Int = 0) {
         ImageViewerDialog(
             attachment = image,
             chats = uiState.chatHistory,
-            groups = uiState.groups,
             currentChatId = uiState.currentChat?.chat_id?.takeIf { effectiveScreen is Screen.Chat },
             onDismiss = { viewModel.closeImageViewer() },
             onForward = { file, chat, onFailed -> viewModel.forwardImageToChat(image, file, chat, onFailed) }
@@ -309,7 +308,6 @@ fun LLMChatApp(activity: ComponentActivity? = null, intentTrigger: Int = 0) {
         ChatPickerDialog(
             title = stringResource(R.string.share_into_chat_title),
             chats = uiState.chatHistory,
-            groups = uiState.groups,
             onDismiss = { viewModel.cancelPendingShare() },
             onPick = { chat -> viewModel.placePendingShare(chat) }
         )

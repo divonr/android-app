@@ -89,123 +89,137 @@ fun ChatHistoryItem(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Model initial circle or logo
-            val lastAssistantMessage = chat.messages.lastOrNull { it.role == "assistant" }
-            val modelName = lastAssistantMessage?.model ?: chat.model
-            val logoPath = ModelLogoUtils.getModelLogoPath(modelName)
-            val initial = getModelInitial(modelName)
+            ChatRowContent(chat = chat, isRenaming = isRenaming, isStreaming = isStreaming)
+        }
+    }
+}
 
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(Primary.copy(alpha = 0.1f)),
-                contentAlignment = Alignment.Center
+/**
+ * What a chat's row shows, on the main screen and wherever else a chat is listed (the chat
+ * picker): the model's logo or initial, the title over the last message, and the time of the
+ * last message over the number of messages. To be placed in a [Row].
+ */
+@Composable
+fun RowScope.ChatRowContent(
+    chat: Chat,
+    isRenaming: Boolean = false,
+    isStreaming: Boolean = false
+) {
+    // Model initial circle or logo
+    val lastAssistantMessage = chat.messages.lastOrNull { it.role == "assistant" }
+    val modelName = lastAssistantMessage?.model ?: chat.model
+    val logoPath = ModelLogoUtils.getModelLogoPath(modelName)
+    val initial = getModelInitial(modelName)
+
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(Primary.copy(alpha = 0.1f)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (logoPath != null) {
+           AsyncImage(
+                model = logoPath,
+                contentDescription = "Model Logo",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+           )
+        } else {
+            Text(
+                text = initial,
+                color = Primary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.width(12.dp))
+
+    // Chat content
+    Column(
+        modifier = Modifier.weight(1f)
+    ) {
+        if (isRenaming) {
+            // Show loading spinner when renaming
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.height(24.dp)
             ) {
-                if (logoPath != null) {
-                   AsyncImage(
-                        model = logoPath,
-                        contentDescription = "Model Logo",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                   )
-                } else {
-                    Text(
-                        text = initial,
-                        color = Primary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Chat content
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                if (isRenaming) {
-                    // Show loading spinner when renaming
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.height(24.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            color = Primary,
-                            strokeWidth = 2.dp
-                        )
-                    }
-                } else {
-                    Text(
-                        text = chat.title,
-                        color = OnSurface,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 16.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                val lastMessage = chat.messages.lastOrNull()
-                if (lastMessage != null) {
-                    Text(
-                        text = lastMessage.content.take(100),
-                        color = OnSurfaceVariant,
-                        fontSize = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Streaming indicator - show when this chat is receiving a response
-            if (isStreaming) {
                 CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(16.dp),
                     color = Primary,
                     strokeWidth = 2.dp
                 )
-                Spacer(modifier = Modifier.width(8.dp))
             }
+        } else {
+            Text(
+                text = chat.title,
+                color = OnSurface,
+                fontWeight = FontWeight.Medium,
+                fontSize = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
 
-            // Timestamp
-            Column(
-                horizontalAlignment = Alignment.End
+        Spacer(modifier = Modifier.height(4.dp))
+
+        val lastMessage = chat.messages.lastOrNull()
+        if (lastMessage != null) {
+            Text(
+                text = lastMessage.content.take(100),
+                color = OnSurfaceVariant,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.width(8.dp))
+
+    // Streaming indicator - show when this chat is receiving a response
+    if (isStreaming) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(20.dp),
+            color = Primary,
+            strokeWidth = 2.dp
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+    }
+
+    // Timestamp
+    Column(
+        horizontalAlignment = Alignment.End
+    ) {
+        val ts = getLastTimestampOrNull(chat)
+        if (ts != null) {
+            Text(
+                text = formatTimestamp(ts),
+                color = OnSurfaceVariant,
+                fontSize = 12.sp
+            )
+        }
+
+        if (chat.messages.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                val ts = getLastTimestampOrNull(chat)
-                if (ts != null) {
-                    Text(
-                        text = formatTimestamp(ts),
-                        color = OnSurfaceVariant,
-                        fontSize = 12.sp
-                    )
-                }
-
-                if (chat.messages.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Forum,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = OnSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = chat.messages.size.toString(),
-                            color = OnSurfaceVariant,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
+                Icon(
+                    Icons.Default.Forum,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = OnSurfaceVariant
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = chat.messages.size.toString(),
+                    color = OnSurfaceVariant,
+                    fontSize = 12.sp
+                )
             }
         }
     }

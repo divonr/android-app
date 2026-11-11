@@ -117,12 +117,33 @@ describe('ImageViewer', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'העברה לשיחה אחרת' }))
     expect(screen.queryByRole('menu')).toBeNull()
 
-    const picker = screen.getByTestId('forward-chat-picker')
-    const rows = Array.from(picker.querySelectorAll('button')).map((b) => b.textContent)
-    // (close button), new chat, then the chats without the current one
-    expect(rows.slice(1)).toEqual(['שיחה חדשה', 'חדשה', 'ישנה'])
+    // A full-screen list: new chat, then the chats without the current one
+    const picker = screen.getByTestId('chat-picker')
+    expect(screen.getByRole('heading', { name: 'העברת התמונה לשיחה' })).toBeInTheDocument()
+    const rows = screen.getAllByRole('radio')
+    expect(rows.map((r) => r.getAttribute('aria-label'))).toEqual(['שיחה חדשה', 'חדשה', 'ישנה'])
+    // Each chat's row is the history page's: title, last message, number of messages
+    expect(rows[2]).toHaveTextContent('ישנה')
+    expect(rows[2]).toHaveTextContent('x')
 
-    fireEvent.click(screen.getByRole('button', { name: 'ישנה' }))
+    // A click only selects; the confirm button is there once a row is selected
+    expect(screen.queryByRole('button', { name: 'אישור' })).toBeNull()
+    fireEvent.click(screen.getByRole('radio', { name: 'חדשה' }))
+    expect(screen.getByRole('radio', { name: 'חדשה' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: 'אישור' })).toBeInTheDocument()
+    expect(screen.getByTestId('where')).toHaveTextContent('/chat/current')
+    // One row at a time
+    fireEvent.click(screen.getByRole('radio', { name: 'ישנה' }))
+    expect(screen.getByRole('radio', { name: 'חדשה' })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('radio', { name: 'ישנה' })).toHaveAttribute('aria-checked', 'true')
+    // A second click on the selected row clears it
+    fireEvent.click(screen.getByRole('radio', { name: 'ישנה' }))
+    expect(screen.getByRole('radio', { name: 'ישנה' })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.queryByRole('button', { name: 'אישור' })).toBeNull()
+    expect(picker).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('radio', { name: 'ישנה' }))
+    fireEvent.click(screen.getByRole('button', { name: 'אישור' }))
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/chat/old'))
     expect(screen.queryByTestId('image-viewer')).toBeNull()
 
@@ -142,10 +163,32 @@ describe('ImageViewer', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'אפשרויות' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'העברה לשיחה אחרת' }))
     expect(screen.queryByRole('menu')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'שיחה חדשה' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'שיחה חדשה' }))
+    expect(clientModule.chats.create).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'אישור' }))
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/chat/made'))
     const forwarded = peekForwardedFile('made')!
     expect(forwarded.name).toBe('cat.png')
     clearForwardedFile(forwarded)
+  })
+
+  it('the picker\'s back arrow and Escape return to the image without forwarding', async () => {
+    renderApp()
+    fireEvent.click(screen.getByRole('link', { name: /פתיחת התמונה/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'אפשרויות' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'העברה לשיחה אחרת' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'ישנה' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.queryByTestId('chat-picker')).toBeNull()
+    expect(screen.getByTestId('image-viewer')).toBeInTheDocument()
+
+    // Opened again, nothing is selected; Escape closes the picker only
+    fireEvent.click(screen.getByRole('button', { name: 'אפשרויות' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'העברה לשיחה אחרת' }))
+    expect(screen.getByRole('radio', { name: 'ישנה' })).toHaveAttribute('aria-checked', 'false')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByTestId('chat-picker')).toBeNull()
+    expect(screen.getByTestId('image-viewer')).toBeInTheDocument()
+    expect(screen.getByTestId('where')).toHaveTextContent('/chat/current')
   })
 })

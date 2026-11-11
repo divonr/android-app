@@ -154,6 +154,7 @@
     <string name="image_viewer_share_failed">לא ניתן לשתף את התמונה</string>
     <string name="image_viewer_forward_failed">העברת התמונה נכשלה</string>
     <string name="share_into_chat_title">לאיזו שיחה לשתף?</string>
+    <string name="chat_picker_confirm">אישור</string>
     <string name="image_viewer_storage_permission">נדרשת הרשאת אחסון כדי לשמור את התמונה</string>
 
     <!-- Full Custom Provider Feature -->
