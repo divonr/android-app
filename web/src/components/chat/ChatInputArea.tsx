@@ -31,17 +31,13 @@ import {
 } from '../../ui/icons'
 import type { DraftAttachment } from '../../hooks/useDraftAttachments'
 import { t } from '../../i18n/he'
+import { COMPOSER_MAX_HEIGHT, fitTextarea } from './textareaAutosize'
 
 // The picker and its emoji data load on first opening, as a chunk of their own
 const EmojiPanel = React.lazy(() => import('./EmojiPanel'))
 
 /** The panel's height, held while its chunk loads so the composer does not jump. */
 const EMOJI_PANEL_HEIGHT = 320
-
-const resizeTextarea = (ta: HTMLTextAreaElement) => {
-  ta.style.height = 'auto'
-  ta.style.height = Math.min(ta.scrollHeight, 150) + 'px'
-}
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -432,8 +428,28 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     if (caret === null || !ta) return
     pendingCaret.current = null
     ta.setSelectionRange(caret, caret)
-    resizeTextarea(ta)
   }, [inputText])
+
+  // The textarea's height follows its text however the text changed: typing, an emoji, a send
+  // or a cancelled edit clearing it, an edit loading a message. (Sizing it only in onChange
+  // left an emptied composer as tall as the text that was sent.)
+  useLayoutEffect(() => {
+    if (ownTextareaRef.current) fitTextarea(ownTextareaRef.current)
+  }, [inputText])
+
+  // The same text wraps differently at another width: a window resize, the buttons stacking
+  useEffect(() => {
+    const ta = ownTextareaRef.current
+    if (!ta || typeof ResizeObserver === 'undefined') return
+    let width = ta.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (ta.clientWidth === width) return
+      width = ta.clientWidth
+      fitTextarea(ta)
+    })
+    observer.observe(ta)
+    return () => observer.disconnect()
+  }, [])
 
   const closeEmoji = useCallback((focusText: boolean) => {
     setEmojiOpen(false)
@@ -625,11 +641,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             ref={setTextareaRef}
             placeholder={t('type_message')}
             value={inputText}
-            onChange={(e) => {
-              onInputChange(e.target.value)
-              // Auto-resize
-              resizeTextarea(e.target)
-            }}
+            onChange={(e) => onInputChange(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
             style={{
@@ -644,7 +656,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
               lineHeight: '22px',
               padding: '6px 4px',
               minHeight: 34,
-              maxHeight: 150,
+              maxHeight: COMPOSER_MAX_HEIGHT,
               direction: 'auto' as unknown as undefined,
               overflowY: 'auto',
             }}
