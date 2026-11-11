@@ -1,7 +1,7 @@
 /**
  * ImageViewer — an image of a conversation, full screen inside the app (mirrors Android's
- * ImageViewer.kt): dark background, close button / Escape, click to zoom, and a small side
- * menu that
+ * ImageViewer.kt): dark background, close button / Escape, click to zoom, and a menu behind
+ * the three dots at the top that
  *  - shares the image with other apps (Web Share API with files; hidden where the browser
  *    cannot share files — "save" covers it there),
  *  - saves it (a browser download through the file route),
@@ -14,7 +14,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { useMatch, useNavigate } from 'react-router-dom'
 import { create } from 'zustand'
-import { MdAdd, MdClose, MdFileDownload, MdForward, MdShare } from '../../ui/icons'
+import { MdAdd, MdClose, MdFileDownload, MdForward, MdMoreVert, MdShare } from '../../ui/icons'
 import type { Attachment, Chat, UserChatHistory } from '../../api/types'
 import { chats as chatsApi } from '../../api/client'
 import { useChatStore } from '../../stores/chatStore'
@@ -95,6 +95,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ att, onClose }) => {
   const currentChatId = useMatch('/chat/:id')?.params.id
   const src = attachmentUrl(att)!
   const [zoomed, setZoomed] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -127,16 +128,17 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ att, onClose }) => {
     return () => { live = false }
   }, [loadFile])
 
-  // Escape: closes the chat picker first, then the viewer
+  // Escape closes what is on top first: the chat picker, then the menu, then the viewer
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       if (pickerOpen) setPickerOpen(false)
+      else if (menuOpen) setMenuOpen(false)
       else onClose()
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [pickerOpen, onClose])
+  }, [pickerOpen, menuOpen, onClose])
 
   // The page behind does not scroll while the viewer is open
   useEffect(() => {
@@ -147,6 +149,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ att, onClose }) => {
 
   const handleShare = () => {
     if (!file) return
+    setMenuOpen(false)
     setError(null)
     navigator.share({ files: [file], title: file.name }).catch((err) => {
       // Dismissing the share sheet is not a failure
@@ -155,6 +158,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ att, onClose }) => {
   }
 
   const openPicker = () => {
+    setMenuOpen(false)
     setError(null)
     setPickerOpen(true)
     // The chat list is in the store only once the history page was visited
@@ -243,48 +247,76 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ att, onClose }) => {
         <MdClose size={24} />
       </button>
 
-      {/* Side menu */}
+      {/* While the menu is open, a click anywhere else only closes it */}
+      {menuOpen && (
+        <div
+          data-testid="image-viewer-menu-backdrop"
+          onClick={() => setMenuOpen(false)}
+          style={{ position: 'absolute', inset: 0 }}
+        />
+      )}
+
+      {/* The menu, behind the three dots */}
       <div
         style={{
           position: 'absolute',
           insetInlineEnd: 12,
-          top: '50%',
-          transform: 'translateY(-50%)',
+          top: 12,
           display: 'flex',
           flexDirection: 'column',
           gap: 12,
         }}
       >
-        {shareable && (
-          <button
-            type="button"
-            onClick={handleShare}
-            disabled={!file}
-            title={t('image_viewer_share')}
-            aria-label={t('image_viewer_share')}
-            style={{ ...roundButton, opacity: file ? 1 : 0.5 }}
-          >
-            <MdShare size={22} />
-          </button>
-        )}
-        <a
-          href={attachmentUrl(att, true)!}
-          download={att.file_name}
-          title={t('image_viewer_save')}
-          aria-label={t('image_viewer_save')}
-          style={roundButton}
-        >
-          <MdFileDownload size={24} />
-        </a>
         <button
           type="button"
-          onClick={openPicker}
-          title={t('image_viewer_forward')}
-          aria-label={t('image_viewer_forward')}
+          onClick={() => setMenuOpen((open) => !open)}
+          title={t('image_viewer_menu')}
+          aria-label={t('image_viewer_menu')}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
           style={roundButton}
         >
-          <MdForward size={24} />
+          <MdMoreVert size={24} />
         </button>
+        {menuOpen && (
+          <div role="menu" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {shareable && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={handleShare}
+                disabled={!file}
+                title={t('image_viewer_share')}
+                aria-label={t('image_viewer_share')}
+                style={{ ...roundButton, opacity: file ? 1 : 0.5 }}
+              >
+                <MdShare size={22} />
+              </button>
+            )}
+            <a
+              role="menuitem"
+              href={attachmentUrl(att, true)!}
+              download={att.file_name}
+              // Closed only after the click: the browser starts the download from this link
+              onClick={() => setTimeout(() => setMenuOpen(false), 0)}
+              title={t('image_viewer_save')}
+              aria-label={t('image_viewer_save')}
+              style={roundButton}
+            >
+              <MdFileDownload size={24} />
+            </a>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={openPicker}
+              title={t('image_viewer_forward')}
+              aria-label={t('image_viewer_forward')}
+              style={roundButton}
+            >
+              <MdForward size={24} />
+            </button>
+          </div>
+        )}
       </div>
 
       {error && !pickerOpen && (

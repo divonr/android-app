@@ -40,8 +40,7 @@ import javax.crypto.spec.SecretKeySpec
 class ExportImportManager(
     private val deps: ManagerDependencies,
     private val selectChat: (Chat) -> Unit,
-    private val navigateToScreen: (Screen) -> Unit,
-    private val addFileFromUri: (Uri, String, String) -> Unit
+    private val navigateToScreen: (Screen) -> Unit
 ) {
 
     // ==================== Chat Export ====================
@@ -702,11 +701,15 @@ class ExportImportManager(
     fun attachPendingJsonAsFile() {
         val pending = deps.uiState.value.pendingChatImport ?: return
 
-        // Clear the pending import
-        deps.updateUiState(deps.uiState.value.copy(pendingChatImport = null))
-
-        // Add as regular file attachment
-        addFileFromUri(pending.uri, pending.fileName, pending.mimeType)
+        // Like any other shared file: it waits for the user to choose the chat it goes to
+        val file = Triple(pending.uri, pending.fileName, pending.mimeType)
+        val share = deps.uiState.value.pendingShare
+        deps.updateUiState(
+            deps.uiState.value.copy(
+                pendingChatImport = null,
+                pendingShare = PendingShare(share?.text, share?.files.orEmpty() + file)
+            )
+        )
     }
 
     /**

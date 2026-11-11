@@ -1,6 +1,7 @@
 /**
- * The in-app image viewer: a thumbnail click opens it, Escape closes it, "save" is a download
- * link, and "forward" hands the image to the chosen chat's draft.
+ * The in-app image viewer: a thumbnail click opens it, Escape closes it, its actions are in a
+ * menu behind the three dots, "save" is a download link, and "forward" hands the image to the
+ * chosen chat's draft.
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -69,14 +70,38 @@ describe('ImageViewer', () => {
     const viewer = await screen.findByTestId('image-viewer')
     expect(viewer).toBeInTheDocument()
 
-    const save = screen.getByRole('link', { name: 'שמירה להורדות' })
+    // The actions are hidden until the three dots are clicked
+    expect(screen.queryByRole('menuitem', { name: 'שמירה להורדות' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'העברה לשיחה אחרת' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'אפשרויות' }))
+    expect(screen.getByRole('menuitem', { name: 'העברה לשיחה אחרת' })).toBeInTheDocument()
+
+    const save = screen.getByRole('menuitem', { name: 'שמירה להורדות' })
     expect(save.getAttribute('href')).toContain('download=1')
     expect(save).toHaveAttribute('download', 'cat.png')
     // jsdom cannot share files: the action is hidden
-    expect(screen.queryByRole('button', { name: 'שיתוף' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'שיתוף' })).toBeNull()
 
+    // Escape closes the menu first, then the viewer
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menuitem', { name: 'שמירה להורדות' })).toBeNull()
+    expect(screen.getByTestId('image-viewer')).toBeInTheDocument()
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByTestId('image-viewer')).toBeNull())
+  })
+
+  it('a click outside the open menu closes the menu only', async () => {
+    renderApp()
+    fireEvent.click(screen.getByRole('link', { name: /פתיחת התמונה/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'אפשרויות' }))
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('image-viewer-menu-backdrop'))
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.getByTestId('image-viewer')).toBeInTheDocument()
+    // The three dots toggle it
+    fireEvent.click(screen.getByRole('button', { name: 'אפשרויות' }))
+    fireEvent.click(screen.getByRole('button', { name: 'אפשרויות' }))
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 
   it('a modified click is left to the browser (new tab)', () => {
@@ -88,7 +113,9 @@ describe('ImageViewer', () => {
   it('forwards the image to another chat: the other chats, newest first, then that chat opens', async () => {
     renderApp()
     fireEvent.click(screen.getByRole('link', { name: /פתיחת התמונה/ }))
-    fireEvent.click(await screen.findByRole('button', { name: 'העברה לשיחה אחרת' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'אפשרויות' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'העברה לשיחה אחרת' }))
+    expect(screen.queryByRole('menu')).toBeNull()
 
     const picker = screen.getByTestId('forward-chat-picker')
     const rows = Array.from(picker.querySelectorAll('button')).map((b) => b.textContent)
@@ -112,7 +139,9 @@ describe('ImageViewer', () => {
     vi.mocked(clientModule.chats.list).mockResolvedValue({ user_name: 'u', groups: [], chat_history: [] } as never)
     renderApp()
     fireEvent.click(screen.getByRole('link', { name: /פתיחת התמונה/ }))
-    fireEvent.click(await screen.findByRole('button', { name: 'העברה לשיחה אחרת' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'אפשרויות' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'העברה לשיחה אחרת' }))
+    expect(screen.queryByRole('menu')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'שיחה חדשה' }))
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/chat/made'))
     const forwarded = peekForwardedFile('made')!
