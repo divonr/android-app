@@ -11,7 +11,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import kotlinx.coroutines.launch
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,11 +41,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -63,7 +57,6 @@ import com.example.ApI.ui.components.RenameGroupDialog
 import com.example.ApI.ui.components.DeleteGroupConfirmationDialog
 import com.example.ApI.ui.components.dialogs.ChatExportDialog
 import com.example.ApI.ui.theme.*
-import com.example.ApI.util.AppLogger
 import com.example.ApI.ui.screen.createHighlightedText
 import com.example.ApI.ui.screen.getModelInitial
 import com.example.ApI.ui.screen.formatTimestamp
@@ -215,7 +208,6 @@ fun ChatHistoryScreen(
                                     modifier = Modifier.padding(start = 42.dp)
                                 )
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    PersonalWakeSwitch()
                                     IconButton(onClick = { viewModel.enterSearchMode() }) {
                                         Icon(
                                             Icons.Default.Search,
@@ -577,209 +569,3 @@ fun ChatHistoryScreen(
         }
     }
 }
-
-@Composable
-private fun PersonalWakeSwitch() {
-        val javaPrefs = remember { java.util.prefs.Preferences.userRoot().node("wake_switch_prefs") }
-    
-    val models = listOf("gemma", "qwen", "deepseek", "hebatron")
-    var expanded by remember { mutableStateOf(false) }
-    var selectedModel by remember {
-        // Default to the first model that is currently in keep-alive/awake state
-        val awakeModel = models.firstOrNull { javaPrefs.getBoolean("is_awake_$it", false) }
-        mutableStateOf(awakeModel ?: models[0])
-    }
-
-    var containerState by remember { mutableStateOf("off") }
-    var startTime by remember { mutableStateOf(0L) }
-    var secondsElapsed by remember { mutableStateOf(0L) }
-
-    LaunchedEffect(selectedModel) {
-        val oldAwake = javaPrefs.getBoolean("is_awake_$selectedModel", false)
-        val defaultState = if (oldAwake) "ready" else "off"
-        containerState = javaPrefs.get("container_state_$selectedModel", defaultState) ?: defaultState
-        startTime = javaPrefs.getLong("wake_start_time_$selectedModel", 0L)
-    }
-
-    LaunchedEffect(containerState, startTime) {
-        if ((containerState == "starting" || containerState == "ready") && startTime > 0) {
-            while (true) {
-                secondsElapsed = (System.currentTimeMillis() - startTime) / 1000
-                if (secondsElapsed < 0) secondsElapsed = 0
-                kotlinx.coroutines.delay(1000L)
-            }
-        } else {
-            secondsElapsed = 0
-        }
-    }
-
-    LaunchedEffect(containerState, selectedModel) {
-        if (containerState == "starting") {
-            while (true) {
-                kotlinx.coroutines.delay(5000L)
-                var shouldBreak = false
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    try {
-                        val urlStr = "http://100.90.227.8:8082/v1/cloud/$selectedModel/status"
-                        val url = java.net.URL(urlStr)
-                        val connection = url.openConnection() as java.net.HttpURLConnection
-                        connection.connectTimeout = 3000
-                        connection.readTimeout = 3000
-                        connection.requestMethod = "GET"
-                        connection.setRequestProperty("Authorization", "Bearer abc123")
-                        
-                        val responseCode = connection.responseCode
-                        if (responseCode == 200) {
-                            val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
-                            AppLogger.i("[Polling] $urlStr -> 200 OK: $responseBody")
-                            if (responseBody.contains("\"ready\"")) {
-                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                    containerState = "ready"
-                                    javaPrefs.put("container_state_$selectedModel", "ready")
-                                    shouldBreak = true
-                                }
-                            }
-                        } else {
-                            AppLogger.e("[Polling] $urlStr -> failed with code $responseCode")
-                        }
-                    } catch (e: Exception) {
-                        AppLogger.e("[Polling] Status check failed: ${e.message}")
-                    }
-                }
-                if (shouldBreak) break
-            }
-        }
-    }
-
-    val infiniteTransition = rememberInfiniteTransition()
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(700),
-            repeatMode = RepeatMode.Reverse
-        )
-    )
-
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box {
-            Text(
-                text = selectedModel,
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .padding(end = 4.dp)
-                    .clickable { expanded = true }
-                    .padding(4.dp)
-            )
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
-                models.forEach { model ->
-                    DropdownMenuItem(
-                        text = { Text(model) },
-                        onClick = {
-                            selectedModel = model
-                            expanded = false
-                        }
-                    )
-                }
-            }
-        }
-
-        if (containerState != "off") {
-            val hours = secondsElapsed / 3600
-            val minutes = (secondsElapsed % 3600) / 60
-            val secs = secondsElapsed % 60
-            Text(
-                text = String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, secs),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(end = 8.dp)
-            )
-        }
-        
-        val dotColor = when (containerState) {
-            "ready" -> Color(0xFF4CAF50)
-            "starting" -> Color(0xFFFF9800)
-            else -> Color(0xFFF44336)
-        }
-        val currentAlpha = if (containerState == "starting") alpha else 1f
-
-        Box(
-            modifier = Modifier
-                .padding(end = 8.dp)
-                .size(16.dp)
-                .clip(CircleShape)
-                .background(dotColor.copy(alpha = currentAlpha))
-                .clickable {
-                    val modelToUse = selectedModel
-                    if (containerState == "off") {
-                        val currentStartTime = System.currentTimeMillis()
-                        containerState = "starting"
-                        startTime = currentStartTime
-                        javaPrefs.put("container_state_$modelToUse", "starting"); javaPrefs.putLong("wake_start_time_$modelToUse", currentStartTime); javaPrefs.putBoolean("is_awake_$modelToUse", true)
-                            
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            try {
-                                val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/wake"
-                                AppLogger.i("[Wake] Sending request to $urlStr")
-                                val url = java.net.URL(urlStr)
-                                val connection = url.openConnection() as java.net.HttpURLConnection
-                                connection.connectTimeout = 3000
-                                connection.readTimeout = 3000
-                                connection.requestMethod = "GET"
-                                connection.setRequestProperty("Authorization", "Bearer abc123")
-                                
-                                val responseCode = connection.responseCode
-                                val responseBody = if (responseCode == 200) {
-                                    connection.inputStream.bufferedReader().use { it.readText() }
-                                } else {
-                                    connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-                                }
-                                AppLogger.i("[Wake] Response $responseCode: $responseBody")
-                            } catch (e: Exception) {
-                                AppLogger.e("[Wake] failed: ${e.message}")
-                            }
-                        }
-                    } else {
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            try {
-                                val urlStr = "http://100.90.227.8:8082/v1/cloud/$modelToUse/idle"
-                                AppLogger.i("[Idle] Sending request to $urlStr")
-                                val url = java.net.URL(urlStr)
-                                val connection = url.openConnection() as java.net.HttpURLConnection
-                                connection.connectTimeout = 3000
-                                connection.readTimeout = 3000
-                                connection.requestMethod = "GET"
-                                connection.setRequestProperty("Authorization", "Bearer abc123")
-                                
-                                val responseCode = connection.responseCode
-                                val responseBody = if (responseCode == 200) {
-                                    connection.inputStream.bufferedReader().use { it.readText() }
-                                } else {
-                                    connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-                                }
-                                AppLogger.i("[Idle] Response $responseCode: $responseBody")
-                                
-                                if (responseCode == 200) {
-                                    containerState = "off"
-                                    startTime = 0L
-                                    javaPrefs.put("container_state_$modelToUse", "off"); javaPrefs.putLong("wake_start_time_$modelToUse", 0L); javaPrefs.putBoolean("is_awake_$modelToUse", false)
-                                }
-                            } catch (e: Exception) {
-                                AppLogger.e("[Idle] failed: ${e.message}")
-                            }
-                        }
-                    }
-                }
-        )
-    }
-}
-
-
-
-
-
-
