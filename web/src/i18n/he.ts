@@ -318,6 +318,7 @@ const strings = {
   attachment_unavailable: 'הקובץ אינו זמין כרגע',
   // In-app image viewer (mirrors Android's image_viewer_* strings)
   image_viewer_close: 'סגירה',
+  image_viewer_menu: 'אפשרויות',
   image_viewer_share: 'שיתוף',
   image_viewer_save: 'שמירה להורדות',
   image_viewer_forward: 'העברה לשיחה אחרת',

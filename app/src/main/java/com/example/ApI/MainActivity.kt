@@ -13,6 +13,8 @@ import android.app.Activity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -22,6 +24,7 @@ import com.example.ApI.data.AndroidPlatformStorage
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.ui.ChatViewModel
+import com.example.ApI.ui.components.ChatPickerDialog
 import com.example.ApI.ui.components.ImageViewerDialog
 import com.example.ApI.ui.screen.ApiKeysScreen
 import com.example.ApI.ui.screen.ChatHistoryScreen
@@ -65,7 +68,6 @@ class MainActivity : ComponentActivity() {
                     color = Background
                 ) {
                     LLMChatApp(
-                        sharedIntent = intent,
                         activity = this,
                         intentTrigger = intentState.value
                     )
@@ -101,10 +103,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null, intentTrigger: Int = 0) {
+fun LLMChatApp(activity: ComponentActivity? = null, intentTrigger: Int = 0) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val repository = remember { DataRepository(AndroidPlatformStorage(context)) }
-    val viewModel: ChatViewModel = viewModel { ChatViewModel(repository, context, sharedIntent) }
+    val viewModel: ChatViewModel = viewModel { ChatViewModel(repository, context) }
 
     val currentScreen by viewModel.currentScreen.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
@@ -147,6 +149,20 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
                 intent.removeExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_CODE)
                 intent.removeExtra(GitHubOAuthCallbackActivity.EXTRA_AUTH_STATE)
             }
+        }
+    }
+
+    // Content shared into the app from another app: with the intent that started the activity, or
+    // with one received while it runs (onNewIntent). The starting intent is taken in once: not
+    // again when the activity is recreated (rotation, restore), nor when it is reopened from the
+    // recent apps, where the system hands the old share over again.
+    var launchIntentHandled by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(intentTrigger) {
+        val intent = activity?.intent ?: return@LaunchedEffect
+        val isNew = intentTrigger > 0 || !launchIntentHandled
+        launchIntentHandled = true
+        if (isNew && intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) {
+            viewModel.handleSharedIntent(intent)
         }
     }
 
@@ -284,6 +300,18 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
             currentChatId = uiState.currentChat?.chat_id?.takeIf { effectiveScreen is Screen.Chat },
             onDismiss = { viewModel.closeImageViewer() },
             onForward = { file, chat, onFailed -> viewModel.forwardImageToChat(image, file, chat, onFailed) }
+        )
+    }
+
+    // Content shared into the app: choose the chat it goes to (not over the child lock, which
+    // would show the chats; it waits there until the app is unlocked)
+    if (uiState.pendingShare != null && effectiveScreen !is Screen.ChildLock) {
+        ChatPickerDialog(
+            title = stringResource(R.string.share_into_chat_title),
+            chats = uiState.chatHistory,
+            groups = uiState.groups,
+            onDismiss = { viewModel.cancelPendingShare() },
+            onPick = { chat -> viewModel.placePendingShare(chat) }
         )
     }
 }

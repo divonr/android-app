@@ -81,8 +81,7 @@ import java.util.UUID
 
 class ChatViewModel(
     private val repository: DataRepository,
-    private val context: Context,
-    private val sharedIntent: Intent? = null
+    private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -178,8 +177,7 @@ class ChatViewModel(
         ExportImportManager(
             deps = managerDeps,
             selectChat = { chat -> selectChat(chat) },
-            navigateToScreen = { screen -> navigateToScreen(screen) },
-            addFileFromUri = { uri, name, mime -> attachmentManager.addFileFromUri(uri, name, mime) }
+            navigateToScreen = { screen -> navigateToScreen(screen) }
         )
     }
 
@@ -267,9 +265,7 @@ class ChatViewModel(
     private val sharedIntentManager: SharedIntentManager by lazy {
         SharedIntentManager(
             deps = managerDeps,
-            sharedIntent = sharedIntent,
-            currentScreen = _currentScreen,
-            addFileFromUri = { uri, name, mime -> attachmentManager.addFileFromUri(uri, name, mime) }
+            currentScreen = _currentScreen
         )
     }
 
@@ -332,7 +328,6 @@ class ChatViewModel(
         )
 
         loadInitialData()
-        sharedIntentManager.handleSharedFiles()
         bindToStreamingService()
         observeSyncChangeTick()
         cloudRunManager  // follows the cloud-execution setting from now on
@@ -883,6 +878,35 @@ class ChatViewModel(
         }
     }
     fun hideFileSelection() = attachmentManager.hideFileSelection()
+
+    // ==================== Content shared into the app ====================
+    /** An intent of the activity: a share from another app waits for the user to choose its chat. */
+    fun handleSharedIntent(intent: Intent) = sharedIntentManager.handleIntent(intent)
+    fun cancelPendingShare() = sharedIntentManager.cancelPendingShare()
+
+    /**
+     * Put the content shared into the app in [target] — null: a new chat — and open it, ready to
+     * send. The message being written is global and is kept: shared text goes under what was
+     * already typed, shared files join the ones already attached.
+     */
+    fun placePendingShare(target: Chat?) {
+        val share = _uiState.value.pendingShare ?: return
+        _uiState.value = _uiState.value.copy(pendingShare = null)
+        // An edit in progress belongs to the chat being left
+        if (_uiState.value.isEditMode) cancelEditingMessage()
+        share.text?.let { text ->
+            val typed = _uiState.value.currentMessage
+            updateMessage(if (typed.isBlank()) text else typed.trimEnd() + "\n" + text)
+        }
+        if (share.files.isNotEmpty()) addMultipleFilesFromUris(share.files)
+        // The chat as it is now (it may have changed while the picker was open)
+        val chat = target?.let { t -> _uiState.value.chatHistory.find { it.chat_id == t.chat_id } }
+        if (chat != null) {
+            selectChatFromSearch(chat)
+        } else {
+            createNewChat(context.getString(R.string.new_chat))
+        }
+    }
 
     // ==================== Settings Management ====================
     fun updateMultiMessageMode(enabled: Boolean) {

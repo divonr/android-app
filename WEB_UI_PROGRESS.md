@@ -14,6 +14,7 @@ Branch: `web-ui`
 ## R10 — In-app image viewer (2026-11-11)
 
 - [x] **Image viewer** — mirrors Android's `ImageViewer.kt`. Image thumbnails (message attachments in `AttachmentView`, project files in `GroupPage`) open `components/chat/ImageViewer.tsx` full screen (host in `AppLayout`; a ctrl/middle click still opens a new tab): close button / Escape, click to zoom, side menu with Share (Web Share API with files, hidden where unsupported), Save (download through the file route) and Forward (chat picker incl. "new chat"; the image goes through `utils/forwardedFile.ts` into the target chat's draft as a normal upload, ready to send). Strings `image_viewer_*` in `he.ts`. Tests: `ImageViewer.test.tsx` + one in `ChatAttachments.test.tsx`; vitest 243/243, `npm run build` clean. Not yet checked in a real browser. commit bf13091
+- [x] **Viewer menu behind three dots** — the three actions (share / save / forward) are no longer always visible at the side: a three-dots button at the top end opens them (`role="menu"`); a click outside or Escape closes the menu before the viewer, like the chat picker. String `image_viewer_menu`. Tests updated in `ImageViewer.test.tsx`; vitest 244/244. Not yet checked in a real browser. Android's new chat picker for content shared into the app has no web counterpart: the web has no incoming-share mechanism (no `share_target` in `manifest.webmanifest`).
 
 ## R9 — User-reported web/Android parity bugs (2026-06-10)
 

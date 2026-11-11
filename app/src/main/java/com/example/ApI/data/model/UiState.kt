@@ -71,6 +71,7 @@ data class ChatUiState(
     val textDirectionMode: TextDirectionMode = TextDirectionMode.AUTO, // Text direction mode for message bubbles
     val renamingChatIds: Set<String> = emptySet(), // Track chats currently being renamed with AI
     val pendingChatImport: PendingChatImport? = null, // Pending chat JSON file that needs user decision
+    val pendingShare: PendingShare? = null,       // Content shared into the app, waiting for the user to choose its chat
     // Thinking budget state
     val showThinkingBudgetPopup: Boolean = false,
     val thinkingBudgetPopupAnchor: DpOffset = DpOffset.Zero, // Position anchor for the popup
@@ -158,6 +159,15 @@ data class ExecutingToolInfo(
     val toolId: String,
     val toolName: String,
     val startTime: String // ISO 8601 format
+)
+
+/**
+ * Text and files another app shared into this one (each file: its uri, name and mime type).
+ * They are attached to the message being written only once the user has chosen a chat.
+ */
+data class PendingShare(
+    val text: String?,
+    val files: List<Triple<Uri, String, String>>
 )
 
 data class PendingChatImport(
