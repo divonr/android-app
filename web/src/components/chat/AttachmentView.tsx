@@ -2,7 +2,8 @@
  * How a saved attachment is shown on the web (messages and project files).
  *
  *  - has a store hash + a safe image type → the image itself, loaded from the file route only
- *    once it scrolls into view; a click opens it, a second control downloads it
+ *    once it scrolls into view; a click opens it full screen in the app (ImageViewer), a
+ *    second control downloads it
  *  - has a store hash, any other type → a download link (never rendered in the page: the server
  *    serves those as downloads, and the UI never turns their bytes into a document)
  *  - no hash (attached before the store existed, or by a device that has not uploaded it) →
@@ -13,6 +14,7 @@ import { MdAttachFile, MdFileDownload, MdPhoto } from '../../ui/icons'
 import type { Attachment } from '../../api/types'
 import { attachmentKind, attachmentUrl, formatFileSize } from '../../utils/attachments'
 import { t } from '../../i18n/he'
+import { openImageOnClick } from './ImageViewer'
 
 // ─── Lazy image ───────────────────────────────────────────────────────────────
 
@@ -155,11 +157,13 @@ const AttachmentView: React.FC<AttachmentViewProps> = ({ att, onPrimary = false 
         data-attachment-state="image"
         style={{ position: 'relative', display: 'inline-block', maxWidth: '100%' }}
       >
-        {/* The thumbnail opens the image (served inline, sandboxed); the corner button downloads it */}
+        {/* The thumbnail opens the image in the in-app viewer (a modified click: in a new tab,
+            served inline, sandboxed); the corner button downloads it */}
         <a
           href={attachmentUrl(att)!}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={(e) => openImageOnClick(e, att)}
           title={att.file_name}
           aria-label={`${t('attachment_open_image')}: ${att.file_name}`}
           style={{ display: 'block' }}

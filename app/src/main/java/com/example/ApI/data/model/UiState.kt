@@ -37,6 +37,7 @@ data class ChatUiState(
     val isShareLinkActive: Boolean = false,       // Whether a share link exists for current chat
     val showShareLinkMenu: Boolean = false,       // Whether the link floating menu is visible
     val selectedFiles: List<SelectedFile> = emptyList(),
+    val viewedImage: Attachment? = null,          // Image shown full-screen in the in-app viewer
     val currentChat: Chat? = null,
     val availableProviders: List<Provider> = emptyList(),
     val currentProvider: Provider? = null,

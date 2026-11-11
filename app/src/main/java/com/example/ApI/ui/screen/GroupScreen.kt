@@ -799,6 +799,8 @@ fun ProjectArea(
                                 onClick = {
                                     if (transfer is AttachmentTransferState.Failed) {
                                         attachment.local_file_path?.let { viewModel.retryAttachmentUpload(it) }
+                                    } else if (attachment.mime_type.startsWith("image/")) {
+                                        viewModel.openImageViewer(attachment)
                                     } else {
                                         attachmentFile.open()
                                     }

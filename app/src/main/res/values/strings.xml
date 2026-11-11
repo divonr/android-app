@@ -143,6 +143,16 @@
     <string name="attachment_unavailable">הקובץ אינו זמין כרגע</string>
     <string name="attachment_downloading">מוריד את הקובץ…</string>
     <string name="attachment_download_failed_retry">טעינת הקובץ נכשלה · הקישו לניסיון חוזר</string>
+    <string name="image_viewer_close">סגירה</string>
+    <string name="image_viewer_share">שיתוף</string>
+    <string name="image_viewer_save">שמירה להורדות</string>
+    <string name="image_viewer_forward">העברה לשיחה אחרת</string>
+    <string name="image_viewer_forward_title">העברת התמונה לשיחה</string>
+    <string name="image_viewer_saved">התמונה נשמרה בתיקיית ההורדות</string>
+    <string name="image_viewer_save_failed">שמירת התמונה נכשלה</string>
+    <string name="image_viewer_share_failed">לא ניתן לשתף את התמונה</string>
+    <string name="image_viewer_forward_failed">העברת התמונה נכשלה</string>
+    <string name="image_viewer_storage_permission">נדרשת הרשאת אחסון כדי לשמור את התמונה</string>
 
     <!-- Full Custom Provider Feature -->
     <!-- Note: The following UI components use hardcoded Hebrew strings and do not reference string resources:

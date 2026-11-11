@@ -378,7 +378,7 @@ fun MessageBubble(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = 120.dp, max = 200.dp)
-                                    .clickable { imageFile.open() },
+                                    .clickable { viewModel.openImageViewer(attachment) },
                                 contentScale = ContentScale.Crop
                             )
                         } else {
