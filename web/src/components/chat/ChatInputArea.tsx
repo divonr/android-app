@@ -4,15 +4,18 @@
  * Layout:
  *  - Outer Surface: SurfaceVariant bg, elevation shadow, padding h:20 v:16
  *  - Inner pill: Surface bg (#1A1B26), radius 24, padding 4
- *  - Row: attach (+) | text field (flex 1) | [WebSearchToggle] | [SendButton / EditButtons]
+ *  - Row: emoji toggle | text field (flex 1) | attach (+) | [WebSearchToggle] | [SendButton / EditButtons]
  *  - ≥3 lines → stacked vertical layout: web search above send/edit
  *  - SelectedFilesPreview (single=list row, multi=thumbnail grid) above the pill
+ *  - Emoji panel under the pill (lazy-loaded): the emoji toggle opens and closes it, showing a
+ *    keyboard icon while it is open; Escape and a click outside the composer close it; a picked
+ *    emoji goes in at the textarea's caret and the panel stays open
  *
  * Send button: 40px primary circle; streaming → spinner + stop icon
  * Edit mode: ConfirmEdit (check) + ConfirmAndResend (send) buttons
  */
 
-import React, { useRef, useCallback } from 'react'
+import React, { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   MdAdd,
   MdSend,
@@ -23,9 +26,22 @@ import {
   MdAttachFile,
   MdRefresh,
   MdErrorOutline,
+  MdOutlineEmojiEmotions,
+  MdOutlineKeyboard,
 } from '../../ui/icons'
 import type { DraftAttachment } from '../../hooks/useDraftAttachments'
 import { t } from '../../i18n/he'
+
+// The picker and its emoji data load on first opening, as a chunk of their own
+const EmojiPanel = React.lazy(() => import('./EmojiPanel'))
+
+/** The panel's height, held while its chunk loads so the composer does not jump. */
+const EMOJI_PANEL_HEIGHT = 320
+
+const resizeTextarea = (ta: HTMLTextAreaElement) => {
+  ta.style.height = 'auto'
+  ta.style.height = Math.min(ta.scrollHeight, 150) + 'px'
+}
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -382,6 +398,71 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
   const hasText = inputText.trim().length > 0
   const canSend = (hasText || (!editingMsg && attachments.length > 0)) && !uploadsBlock
 
+  // ── Emoji panel ──────────────────────────────────────────────────────────
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const ownTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const setTextareaRef = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      ownTextareaRef.current = el
+      if (typeof textareaRef === 'function') textareaRef(el)
+      else if (textareaRef) (textareaRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el
+    },
+    [textareaRef],
+  )
+  /** Where the caret goes once the text with the inserted emoji has rendered */
+  const pendingCaret = useRef<number | null>(null)
+
+  // A textarea keeps its selection while the panel has the focus, so every emoji goes in at
+  // the caret, in place of the selection if there is one
+  const insertEmoji = useCallback(
+    (emoji: string) => {
+      const ta = ownTextareaRef.current
+      const start = Math.min(ta?.selectionStart ?? inputText.length, inputText.length)
+      const end = Math.min(Math.max(ta?.selectionEnd ?? start, start), inputText.length)
+      pendingCaret.current = start + emoji.length
+      onInputChange(inputText.slice(0, start) + emoji + inputText.slice(end))
+    },
+    [inputText, onInputChange],
+  )
+
+  useLayoutEffect(() => {
+    const caret = pendingCaret.current
+    const ta = ownTextareaRef.current
+    if (caret === null || !ta) return
+    pendingCaret.current = null
+    ta.setSelectionRange(caret, caret)
+    resizeTextarea(ta)
+  }, [inputText])
+
+  const closeEmoji = useCallback((focusText: boolean) => {
+    setEmojiOpen(false)
+    if (focusText) ownTextareaRef.current?.focus()
+  }, [])
+
+  // Escape and a click outside the composer close the panel. (The picker takes an Escape for
+  // itself first when it has a search query or a skin-tone popup to dismiss.)
+  useEffect(() => {
+    if (!emojiOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        closeEmoji(true)
+      }
+    }
+    const onPointer = (e: MouseEvent) => {
+      if (rootRef.current && e.target instanceof Node && !rootRef.current.contains(e.target)) {
+        closeEmoji(false)
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    document.addEventListener('mousedown', onPointer)
+    return () => {
+      document.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('mousedown', onPointer)
+    }
+  }, [emojiOpen, closeEmoji])
+
   // Action buttons (right side of pill)
   const actionButtons = () => {
     if (streaming) {
@@ -452,6 +533,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
 
   return (
     <div
+      ref={rootRef}
       style={{
         background: 'var(--surface-variant)',
         borderTop: '1px solid var(--color-border)',
@@ -513,7 +595,62 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             padding: 4,
           }}
         >
-          {/* Attach (+) button */}
+          {/* Emoji toggle: a smiley, or a keyboard while the emoji panel is open */}
+          <button
+            type="button"
+            onClick={() => (emojiOpen ? closeEmoji(true) : setEmojiOpen(true))}
+            aria-label={emojiOpen ? t('emoji_keyboard_show_keyboard') : t('emoji_keyboard_open')}
+            aria-expanded={emojiOpen}
+            title={emojiOpen ? t('emoji_keyboard_show_keyboard') : t('emoji_keyboard_open')}
+            style={{
+              width: 36,
+              height: 36,
+              minWidth: 36,
+              borderRadius: '50%',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              color: 'var(--on-surface)',
+            }}
+          >
+            {emojiOpen ? <MdOutlineKeyboard size={24} /> : <MdOutlineEmojiEmotions size={24} />}
+          </button>
+
+          {/* Text field */}
+          <textarea
+            ref={setTextareaRef}
+            placeholder={t('type_message')}
+            value={inputText}
+            onChange={(e) => {
+              onInputChange(e.target.value)
+              // Auto-resize
+              resizeTextarea(e.target)
+            }}
+            onKeyDown={onKeyDown}
+            rows={1}
+            style={{
+              flex: 1,
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              resize: 'none',
+              color: 'var(--color-text)',
+              fontFamily: 'var(--font-sans)',
+              fontSize: 15,
+              lineHeight: '22px',
+              padding: '6px 4px',
+              minHeight: 34,
+              maxHeight: 150,
+              direction: 'auto' as unknown as undefined,
+              overflowY: 'auto',
+            }}
+          />
+
+          {/* Attach (+) button, next to the web-search toggle */}
           <button
             type="button"
             onClick={onAttachFile}
@@ -540,37 +677,6 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             />
           </button>
 
-          {/* Text field */}
-          <textarea
-            ref={textareaRef}
-            placeholder={t('type_message')}
-            value={inputText}
-            onChange={(e) => {
-              onInputChange(e.target.value)
-              // Auto-resize
-              e.target.style.height = 'auto'
-              e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px'
-            }}
-            onKeyDown={onKeyDown}
-            rows={1}
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              resize: 'none',
-              color: 'var(--color-text)',
-              fontFamily: 'var(--font-sans)',
-              fontSize: 15,
-              lineHeight: '22px',
-              padding: '6px 4px',
-              minHeight: 34,
-              maxHeight: 150,
-              direction: 'auto' as unknown as undefined,
-              overflowY: 'auto',
-            }}
-          />
-
           {/* Action buttons */}
           <div
             style={{
@@ -584,6 +690,13 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Emoji panel */}
+      {emojiOpen && (
+        <Suspense fallback={<div style={{ height: EMOJI_PANEL_HEIGHT }} />}>
+          <EmojiPanel onPick={insertEmoji} />
+        </Suspense>
+      )}
     </div>
   )
 }

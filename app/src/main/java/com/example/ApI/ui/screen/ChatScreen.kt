@@ -15,7 +15,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.*
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -48,7 +50,24 @@ fun ChatScreen(
     val coroutineScope = rememberCoroutineScope()
     val searchFocusRequester = remember { FocusRequester() }
     val appSettings by viewModel.appSettings.collectAsState()
-    
+
+    // This screen draws edge to edge and makes room for the keyboard itself (the area under the
+    // composer, which the emoji keyboard shares), so the window must not pan to the focused field.
+    val activity = LocalActivity.current
+    DisposableEffect(activity) {
+        val window = activity?.window
+        val previousMode = window?.attributes?.softInputMode
+        if (window != null && previousMode != null) {
+            window.setSoftInputMode(
+                (previousMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST.inv()) or
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            )
+        }
+        onDispose {
+            if (window != null && previousMode != null) window.setSoftInputMode(previousMode)
+        }
+    }
+
     LaunchedEffect(uiState.snackbarMessage) {
         uiState.snackbarMessage?.let {
             snackbarHostState.showSnackbar(

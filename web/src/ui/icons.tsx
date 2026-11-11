@@ -80,6 +80,9 @@ export {
   MdFormatAlignLeft,
   // Web / language
   MdLanguage,
+  // Emoji keyboard toggle
+  MdOutlineEmojiEmotions,
+  MdOutlineKeyboard,
   // Chat / groups
   MdChat,
   MdForum,
