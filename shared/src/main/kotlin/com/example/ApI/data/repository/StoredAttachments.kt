@@ -69,20 +69,8 @@ class StoredAttachments(private val chatHistoryManager: ChatHistoryManager) {
      */
     fun recordProviderIds(username: String, owner: AttachmentOwner, attachment: Attachment, uploaded: Attachment): Boolean =
         update(username, owner) { stored ->
-            if (!sameFile(stored, attachment)) stored
-            else stored.copy(
-                file_OPENAI_id = uploaded.file_OPENAI_id?.takeIf { it.isNotBlank() } ?: stored.file_OPENAI_id,
-                file_POE_url = uploaded.file_POE_url?.takeIf { it.isNotBlank() } ?: stored.file_POE_url,
-                file_GOOGLE_uri = uploaded.file_GOOGLE_uri?.takeIf { it.isNotBlank() } ?: stored.file_GOOGLE_uri
-            )
+            if (!sameFile(stored, attachment)) stored else stored.withProviderIdsOf(uploaded)
         } > 0
-
-    private fun sameDescription(a: Attachment, b: Attachment): Boolean =
-        a.local_file_path == b.local_file_path && a.file_name == b.file_name && a.mime_type == b.mime_type
-
-    private fun sameFile(stored: Attachment, requested: Attachment): Boolean =
-        if (stored.sha256 != null && requested.sha256 != null) stored.sha256 == requested.sha256
-        else sameDescription(stored, requested)
 
     /** [change] applied to every copy of the owner's message: in `messages` and in the tree. */
     private fun UserChatHistory.withMessage(owner: AttachmentOwner.ChatMessage, change: (Message) -> Message): UserChatHistory {
@@ -103,3 +91,18 @@ class StoredAttachments(private val chatHistoryManager: ChatHistoryManager) {
         })
     }
 }
+
+internal fun sameDescription(a: Attachment, b: Attachment): Boolean =
+    a.local_file_path == b.local_file_path && a.file_name == b.file_name && a.mime_type == b.mime_type
+
+/** The same file: the same hash when both have one, else the same path, name and mime type. */
+internal fun sameFile(stored: Attachment, requested: Attachment): Boolean =
+    if (stored.sha256 != null && requested.sha256 != null) stored.sha256 == requested.sha256
+    else sameDescription(stored, requested)
+
+/** [this] with the provider ids of [uploaded] (only the ones that are set); nothing else changes. */
+internal fun Attachment.withProviderIdsOf(uploaded: Attachment): Attachment = copy(
+    file_OPENAI_id = uploaded.file_OPENAI_id?.takeIf { it.isNotBlank() } ?: file_OPENAI_id,
+    file_POE_url = uploaded.file_POE_url?.takeIf { it.isNotBlank() } ?: file_POE_url,
+    file_GOOGLE_uri = uploaded.file_GOOGLE_uri?.takeIf { it.isNotBlank() } ?: file_GOOGLE_uri
+)

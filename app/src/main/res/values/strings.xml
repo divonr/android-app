@@ -138,6 +138,11 @@
     <string name="cloud_execution_requires_sync">אפשרות זו דורשת סנכרון פעיל עם חשבון מחובר</string>
     <string name="cloud_execution_fallback_notice">הבקשה נשלחת מהמכשיר</string>
     <string name="cloud_execution_stop_failed">לא ניתן היה לעצור את הבקשה בענן</string>
+    <string name="attachment_uploading">מעלה לענן…</string>
+    <string name="attachment_upload_failed_retry">ההעלאה לענן נכשלה · הקישו לניסיון חוזר</string>
+    <string name="attachment_unavailable">הקובץ אינו זמין כרגע</string>
+    <string name="attachment_downloading">מוריד את הקובץ…</string>
+    <string name="attachment_download_failed_retry">טעינת הקובץ נכשלה · הקישו לניסיון חוזר</string>
 
     <!-- Full Custom Provider Feature -->
     <!-- Note: The following UI components use hardcoded Hebrew strings and do not reference string resources:

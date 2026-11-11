@@ -427,9 +427,12 @@ fun ChatScreen(
                 }
 
                 // Selected Files Preview
+                val attachmentTransfers by viewModel.attachmentTransfers.collectAsState()
                 SelectedFilesPreview(
                     selectedFiles = uiState.selectedFiles,
-                    onRemoveFile = { viewModel.removeSelectedFile(it) }
+                    onRemoveFile = { viewModel.removeSelectedFile(it) },
+                    transfers = attachmentTransfers,
+                    onRetryUpload = { file -> file.localPath?.let { viewModel.retryAttachmentUpload(it) } }
                 )
 
                 // Modern Message Input Area

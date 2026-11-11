@@ -350,15 +350,20 @@ fun MessageBubble(
                     )
                 }
 
-                // Show image attachments first (like WhatsApp) - fill the bubble
+                // Show image attachments first (like WhatsApp) - fill the bubble.
+                // An image is shown when the device has its file or the account's store may
+                // (it has a hash: attached on another device, or generated in the cloud)
                 val imageAttachments = message.attachments.filter {
-                    it.mime_type.startsWith("image/") && it.local_file_path != null
+                    it.mime_type.startsWith("image/") && (it.local_file_path != null || it.sha256 != null)
                 }
                 val nonImageAttachments = message.attachments.filter {
-                    !it.mime_type.startsWith("image/") || it.local_file_path == null
+                    !it.mime_type.startsWith("image/") || (it.local_file_path == null && it.sha256 == null)
                 }
 
                 imageAttachments.forEach { attachment ->
+                    // Downloaded from the store (once, then cached) when the bubble is shown
+                    val imageFile = rememberAttachmentFile(attachment, autoDownload = true)
+                    val shownFile = imageFile.file
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = Color.Transparent,
@@ -366,29 +371,24 @@ fun MessageBubble(
                             .fillMaxWidth()
                             .padding(8.dp)
                     ) {
-                        AsyncImage(
-                            model = java.io.File(attachment.local_file_path!!),
-                            contentDescription = attachment.file_name,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 120.dp, max = 200.dp)
-                                .clickable {
-                                    attachment.local_file_path?.let { path ->
-                                        val file = File(path)
-                                        try {
-                                            val uri = FileProvider.getUriForFile(context, context.applicationContext.packageName + ".fileprovider", file)
-                                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                                setDataAndType(uri, attachment.mime_type)
-                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                            }
-                                            context.startActivity(intent)
-                                        } catch (e: Exception) {
-                                            // Handle exception if file provider fails or no app can handle the intent
-                                        }
-                                    }
-                                },
-                            contentScale = ContentScale.Crop
-                        )
+                        if (shownFile != null) {
+                            AsyncImage(
+                                model = shownFile,
+                                contentDescription = attachment.file_name,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 120.dp, max = 200.dp)
+                                    .clickable { imageFile.open() },
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            RemoteImagePlaceholder(
+                                fileName = attachment.file_name,
+                                loading = imageFile.loading,
+                                tint = if (isUser) Color.White.copy(alpha = 0.8f) else OnSurfaceVariant,
+                                onRetry = { imageFile.fetch() }
+                            )
+                        }
                     }
                 }
 
@@ -440,26 +440,14 @@ fun MessageBubble(
                             if (hasText || imageAttachments.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(8.dp))
                             }
+                            // Opened from this device, or downloaded from the store when tapped
+                            val attachmentFile = rememberAttachmentFile(attachment, autoDownload = false)
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = if (isUser) Color.White.copy(alpha = 0.1f) else SurfaceVariant,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        attachment.local_file_path?.let { path ->
-                                            val file = File(path)
-                                            try {
-                                                val uri = FileProvider.getUriForFile(context, context.applicationContext.packageName + ".fileprovider", file)
-                                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                                    setDataAndType(uri, attachment.mime_type)
-                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                }
-                                                context.startActivity(intent)
-                                            } catch (e: Exception) {
-                                                // Handle exception
-                                            }
-                                        }
-                                    }
+                                    .clickable { attachmentFile.open() }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(8.dp),
@@ -476,7 +464,12 @@ fun MessageBubble(
                                         text = attachment.file_name,
                                         color = if (isUser) Color.White.copy(alpha = 0.9f) else OnSurfaceVariant,
                                         style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 1
+                                        maxLines = 1,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    AttachmentFetchIndicator(
+                                        handle = attachmentFile,
+                                        tint = if (isUser) Color.White.copy(alpha = 0.8f) else OnSurfaceVariant
                                     )
                                 }
                             }

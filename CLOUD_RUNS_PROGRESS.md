@@ -258,3 +258,116 @@ Notes / open
 - A provider upload that fails in the run is tried once more by `sendMessage` itself; that second
   id is used for the request but not saved.
 - Not run against the real store, a real provider upload or the real Python executor (fakes only).
+
+## A3 — attachment store: Android (done, not committed, not installed on a device)
+
+Contract: the plan's "Android — A3" (written in this stage).
+
+shared
+- `data/attachments/DeviceAttachments.kt` (new): `DeviceAttachments` — drafts (`attach`, `transfers`,
+  `retry`, `remove`, `use`), requests (`prepareRequest`, `backfill`, `forgetStored`), files of other
+  devices (`localize`), `pythonFiles`; `KnownStoredFiles`, `providerReadsFile`,
+  `AttachmentTransferState`, `PreparedRequest`.
+- `ChatHistoryManager.updateChatWithNewAttachments`: writes only the provider ids onto the stored
+  attachment that is the same file (was: replace the message's attachment list with the request's
+  copy, which would drop a hash recorded meanwhile and save a cache path). `StoredAttachments`:
+  `sameFile` / `withProviderIdsOf` are shared helpers now. Desktop uses the same function.
+
+app
+- `data/DeviceAttachmentsProvider.kt` (new): the process-wide instance + scope, `fetch`.
+- `ui/components/AttachmentViews.kt` (new): `TransferOverlay`, `rememberAttachmentFile` /
+  `AttachmentFileHandle` (resolve, download on demand, open), `RemoteImagePlaceholder`,
+  `AttachmentFetchIndicator`, `openAttachmentFile`.
+- `AttachmentManager` (attach → upload, remove → discard, retry), `FilePreviewComponents` /
+  `ChatInputArea` / `ChatScreen` (greyed + spinner / failed + tap to retry).
+- `MessageSendingManager`: hash + commit at send; no provider pre-upload when cloud execution is
+  effective; the selected files leave the input area before the first suspension.
+- `CloudRunManager.tryStart`: bounded (20 s) `prepareRequest`, hashes in the request, device
+  fallback when not ready, `forgetStored` on `409 attachments_unsupported`.
+- `ChatViewModel`: `attachmentTransfers`, `retryAttachmentUpload`, background backfill on the device path.
+- `StreamingService`: `localize` before `sendMessage`. `ToolManager`: `pythonFiles` when sync is on.
+- `GroupManager` / `GroupScreen`: project files stored at add, state on the thumbnail, on-demand open.
+- `MessageBubbles`, `ToolCallComponents`: images / files through the resolver.
+- `strings.xml`: 5 strings.
+
+Tests (shared): `DeviceAttachmentsTest` (20, on `FakeAttachmentStoreServer`: upload state, attach /
+remove leaves nothing, removal mid-upload, failed + retry, over the limit, sync off = nothing, hash
+before the upload ends + commit, send while the store is down, cloud wait, timeout → device +
+background, backfill + recorded identity, only provider-read files block, device-only file, orphan
+hash, other device's file + `forgetStored`, `KnownStoredFiles`, `localize`, Python files, the
+provider rule); `StorageHardeningReviewTest` (+1: the write-back keeps hash and path).
+
+Results: `./gradlew :shared:test` 320 tests, 0 failures; `:app:assembleDebug` and
+`:desktop:compileKotlin` successful; `:server:test` 241 tests, 0 failures.
+
+Notes / open
+- Nothing ran on a device or against the live store: all Compose UI (overlay, placeholders, chips),
+  `DeviceAttachmentsProvider`, the routing in `CloudRunManager` / `ChatViewModel`, the service's
+  `localize` and the Python wiring are compiled only.
+- Uploads have no foreground service: they stop when Android kills the process (see "Lifetime").
+- A sent message shows no upload state in its bubble (only the input area and project files do).
+- The local copy of a removed draft is deleted at once, as before; the cache
+  (`attachments_cache`, `cache/opened_attachments`) is never evicted by the app.
+- The first cloud request of a chat with many old files that the provider reads waits up to 20 s,
+  falls back to the device and finishes the uploads in the background; later requests go to the cloud.
+- A stale UI copy of a chat (no hash yet) re-records an identity that is already stored (a no-op write lock).
+- Message editing adds no files (the edited message keeps its attachments), so there is nothing to upload there.
+
+## A4 — attachment store: web UI (done, not committed, not built, not deployed)
+
+Contract: the plan's "Web file routes" (implemented against as written; no change needed) and the
+new "Web UI — A4" section (written in this stage). Only `web/` was touched.
+
+web
+- `api/types.ts`: `Attachment.sha256` / `size`. `api/client.ts`: `files.upload(file, { signal })`
+  (no `provider` / `chatId` fields any more; a 401 announces the expired session),
+  `files.delete(sha256, { keepalive })` → `DELETE /api/files/{sha256}` (the path form is gone),
+  `files.commit(sha256)` (unused by the UI).
+- `utils/attachments.ts` (new): `MAX_FILE_BYTES` (95 MB), the inline-image list (same as the
+  server's), `attachmentUrl` / `attachmentKind`, `fileRejection`, `describeUploadError`.
+- `hooks/useDraftAttachments.ts` (new): the composer's draft — upload on attach, states
+  `uploading | ready | failed`, remove / retry / abort, delete on remove, on leaving the chat and
+  on `pagehide`, `takeForSend`.
+- `components/chat/ChatInputArea.tsx`: the files preview shows each file's state (greyed + spinner,
+  failed + reason + retry); send / confirm-edit disabled while an upload runs or failed, with the
+  reason under the files. The attach button stays usable during uploads; the picker takes several
+  files. `pages/ChatPage.tsx`: uses the draft hook.
+- `components/chat/AttachmentView.tsx` (new) + `MessageBubble.tsx`: image / download link /
+  device-only, lazy image loading. `pages/GroupPage.tsx` (+ css): project file tiles the same way,
+  an uploading tile, size limit, cleanup of an upload the group refused.
+- `i18n/he.ts`: the new strings. `ui/icons.tsx`: `MdErrorOutline`.
+
+Tests (web: 232 in all, 16 files; `npm --prefix web run lint` clean)
+- `attachments.test.tsx` (18): URL / kind rules (SVG and HTML are downloads, bad hashes have no
+  URL), the size limit, error descriptions, the client calls (multipart part, 413 / 502 / 401,
+  delete by hash with keepalive, commit), rendering by hash vs legacy, the broken-image fallback,
+  lazy loading (image requested only after the observer fires), user and assistant messages.
+- `ChatAttachments.test.tsx` (19): upload starts at once + the uploading state blocks sending
+  (button and Enter); the sent message carries the returned Attachment and is not deleted
+  afterwards; failed upload (502) → retry; 413 → no retry; 401; the client-side 95 MB refusal;
+  several files; delete on remove; attach / remove twice; removal during the upload (aborted; and
+  completed anyway → deleted); the same file twice; a file already sent is not deleted; leaving the
+  chat; `pagehide`; a failed delete is silent; the group page (by hash vs legacy, uploading tile,
+  limit, failed upload, refused by the group → deleted).
+
+Notes / open
+- **Not built**: `web/dist` is what production serves, so only `tsc` + vitest were run, plus a
+  `vite build` into a scratch directory (bundles). The deploy (`npm --prefix web run build`) must
+  go together with the A2 server: this client against the old server gets no hashes (every web
+  attachment would show as "device only"), and the old client against A2 sends `null` paths.
+- **Not seen in a browser.** The looks (the greyed thumbnail, the spinner, the tiles), the lazy
+  loading in the real scroll container, `pagehide` + `keepalive` on a tab close, aborting a large
+  upload, and a real 95 MB upload through Cloudflare are unverified.
+- An aborted upload that the server had already stored leaves a pending file the tab cannot name;
+  so does a draft whose tab crashed. Both wait for the store's 24 h sweep.
+- Race on the server (described, not changed): `DELETE` of a hash between a save and its
+  background commit deletes the file *and the server's cache copy*, so the commit's
+  "404 → upload again from the cache" has nothing to upload. The web avoids it for hashes the tab
+  itself sent; a second tab (or the phone) attaching and removing the same bytes within that
+  window can still lose the file.
+- A message cannot be sent with files only: `ChatPage` has always required text (the send button
+  looks enabled, nothing happens). Left as it was.
+- Editing a message cannot add files (as before); files in the draft at that moment are deleted.
+- The web's send still passes `projectAttachments: []` (as before A4): project files of the
+  chat's group are not sent with a web request.
+- Removing a project file never deletes it from the store (it is committed).

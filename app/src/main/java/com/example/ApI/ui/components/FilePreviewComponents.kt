@@ -19,6 +19,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.ApI.R
+import androidx.compose.ui.draw.alpha
+import com.example.ApI.data.attachments.AttachmentTransferState
 import com.example.ApI.data.model.SelectedFile
 import com.example.ApI.ui.theme.*
 
@@ -29,8 +31,13 @@ import com.example.ApI.ui.theme.*
 @Composable
 fun FilePreview(
     file: SelectedFile,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    /** Upload of the file to the account's store: in progress or failed (null: nothing to show). */
+    transfer: AttachmentTransferState? = null,
+    onRetryUpload: () -> Unit = {}
 ) {
+    // Greyed out until the upload to the store finishes
+    val contentAlpha = if (transfer != null) TRANSFER_CONTENT_ALPHA else 1f
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = SurfaceVariant,
@@ -43,13 +50,15 @@ fun FilePreview(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Modern file icon/thumbnail
+            // Modern file icon/thumbnail (with the upload state over it)
+            Box(modifier = Modifier.size(42.dp)) {
             if (file.mimeType.startsWith("image/")) {
                 AsyncImage(
                     model = file.uri,
                     contentDescription = file.name,
                     modifier = Modifier
                         .size(42.dp)
+                        .alpha(contentAlpha)
                         .background(
                             color = Surface,
                             shape = RoundedCornerShape(12.dp)
@@ -60,7 +69,7 @@ fun FilePreview(
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = Primary.copy(alpha = 0.1f),
-                    modifier = Modifier.size(42.dp)
+                    modifier = Modifier.size(42.dp).alpha(contentAlpha)
                 ) {
                     Box(
                         contentAlignment = Alignment.Center
@@ -74,10 +83,17 @@ fun FilePreview(
                     }
                 }
             }
+            TransferOverlay(transfer, onRetryUpload, RoundedCornerShape(12.dp), indicatorSize = 22.dp)
+            }
 
             // File info with modern typography
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .alpha(if (transfer is AttachmentTransferState.Uploading) TRANSFER_CONTENT_ALPHA else 1f)
+                    .then(
+                        if (transfer is AttachmentTransferState.Failed) Modifier.clickable(onClick = onRetryUpload) else Modifier
+                    ),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
@@ -88,8 +104,12 @@ fun FilePreview(
                     maxLines = 1
                 )
                 Text(
-                    text = file.mimeType,
-                    color = OnSurfaceVariant,
+                    text = when (transfer) {
+                        is AttachmentTransferState.Uploading -> stringResource(R.string.attachment_uploading)
+                        is AttachmentTransferState.Failed -> stringResource(R.string.attachment_upload_failed_retry)
+                        null -> file.mimeType
+                    },
+                    color = if (transfer is AttachmentTransferState.Failed) AccentRed else OnSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1
                 )
@@ -123,8 +143,13 @@ fun FilePreview(
 @Composable
 fun FilePreviewThumbnail(
     file: SelectedFile,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    /** Upload of the file to the account's store: in progress or failed (null: nothing to show). */
+    transfer: AttachmentTransferState? = null,
+    onRetryUpload: () -> Unit = {}
 ) {
+    // Greyed out until the upload to the store finishes
+    val contentAlpha = if (transfer != null) TRANSFER_CONTENT_ALPHA else 1f
     Box(
         modifier = Modifier
             .size(80.dp)
@@ -140,6 +165,7 @@ fun FilePreviewThumbnail(
                 contentDescription = file.name,
                 modifier = Modifier
                     .fillMaxSize()
+                    .alpha(contentAlpha)
                     .background(
                         color = Surface,
                         shape = RoundedCornerShape(12.dp)
@@ -149,7 +175,7 @@ fun FilePreviewThumbnail(
         } else {
             // Non-image file icon
             Box(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().alpha(contentAlpha),
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
@@ -168,6 +194,9 @@ fun FilePreviewThumbnail(
                 }
             }
         }
+
+        // Upload state: spinning circle while uploading, error mark (tap to retry) after a failure
+        TransferOverlay(transfer, onRetryUpload, RoundedCornerShape(12.dp), indicatorSize = 28.dp)
 
         // File name overlay (bottom)
         Surface(

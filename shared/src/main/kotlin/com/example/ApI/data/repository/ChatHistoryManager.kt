@@ -310,8 +310,17 @@ class ChatHistoryManager(
     fun updateChatWithNewAttachments(username: String, chatId: String, updatedMessages: List<Message>) {
         val attachmentsById = updatedMessages.filter { it.id.isNotBlank() }.associate { it.id to it.attachments }
         if (attachmentsById.isEmpty()) return
-        fun Message.withNewAttachments(): Message =
-            attachmentsById[id]?.takeIf { it != attachments }?.let { copy(attachments = it) } ?: this
+        // Only the provider ids are taken from the request's copy, onto the stored attachment
+        // that is the same file. The request may be older than the stored message (a hash
+        // recorded meanwhile) or carry this device's path of a file from the store: neither
+        // may be written back.
+        fun Message.withNewAttachments(): Message {
+            val updated = attachmentsById[id] ?: return this
+            val merged = attachments.map { stored ->
+                updated.firstOrNull { sameFile(stored, it) }?.let { stored.withProviderIdsOf(it) } ?: stored
+            }
+            return if (merged == attachments) this else copy(attachments = merged)
+        }
         try {
             updateChatHistory(username) { chatHistory ->
                 chatHistory.copy(chat_history = chatHistory.chat_history.map { chat ->

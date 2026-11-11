@@ -59,6 +59,8 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.min
 import com.example.ApI.R
+import androidx.compose.ui.draw.alpha
+import com.example.ApI.data.attachments.AttachmentTransferState
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.theme.*
@@ -225,10 +227,7 @@ fun GroupScreen(
                             group = group,
                             viewModel = viewModel,
                             onInstructionsClick = { viewModel.openProjectInstructionsDialog() },
-                            onAddFileClick = { filePickerLauncher.launch("*/*") },
-                            onFileClick = { attachment ->
-                                openAttachmentFile(context, attachment)
-                            }
+                            onAddFileClick = { filePickerLauncher.launch("*/*") }
                         )
                     }
                 }
@@ -670,7 +669,6 @@ fun ProjectArea(
     viewModel: ChatViewModel,
     onInstructionsClick: () -> Unit,
     onAddFileClick: () -> Unit,
-    onFileClick: (Attachment) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showFileMenu by remember { mutableStateOf(false) }
@@ -741,6 +739,9 @@ fun ProjectArea(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
+            // Project files uploading to the account's store, or whose upload failed (by local path)
+            val attachmentTransfers by viewModel.attachmentTransfers.collectAsState()
+
             if (group.group_attachments.isEmpty()) {
                 // Empty files area
                 Surface(
@@ -790,10 +791,21 @@ fun ProjectArea(
                     // File thumbnails with delete functionality
                     group.group_attachments.forEachIndexed { index, attachment ->
                         item {
+                            // Opened from this device, or downloaded from the account's store when tapped
+                            val attachmentFile = rememberAttachmentFile(attachment, autoDownload = false)
+                            val transfer = attachment.local_file_path?.let { attachmentTransfers[it] }
                             FileThumbnail(
                                 attachment = attachment,
-                                onClick = { onFileClick(attachment) },
-                                onDelete = { viewModel.removeFileFromProject(group.group_id, index) }
+                                onClick = {
+                                    if (transfer is AttachmentTransferState.Failed) {
+                                        attachment.local_file_path?.let { viewModel.retryAttachmentUpload(it) }
+                                    } else {
+                                        attachmentFile.open()
+                                    }
+                                },
+                                onDelete = { viewModel.removeFileFromProject(group.group_id, index) },
+                                transfer = transfer,
+                                fetching = attachmentFile.loading
                             )
                         }
                     }
@@ -808,7 +820,11 @@ fun FileThumbnail(
     attachment: Attachment,
     onClick: () -> Unit,
     onDelete: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Upload of the file to the account's store: in progress or failed (null: nothing to show). */
+    transfer: AttachmentTransferState? = null,
+    /** The file is being downloaded from the store to be opened. */
+    fetching: Boolean = false
 ) {
     Surface(
         shape = RoundedCornerShape(8.dp),
@@ -820,7 +836,9 @@ fun FileThumbnail(
         Box(contentAlignment = Alignment.Center) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                // Greyed out until the upload to the store finishes
+                modifier = Modifier.alpha(if (transfer != null || fetching) TRANSFER_CONTENT_ALPHA else 1f)
             ) {
                 // File icon based on type
                 val icon = when {
@@ -847,6 +865,14 @@ fun FileThumbnail(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            // Spinning circle while uploading / downloading; error mark (tap to retry) after a failed upload
+            TransferOverlay(
+                transfer = transfer ?: if (fetching) AttachmentTransferState.Uploading(0, 0) else null,
+                onRetry = onClick,
+                shape = RoundedCornerShape(8.dp),
+                indicatorSize = 28.dp
+            )
 
             // Delete button (X) in top-right corner
             Surface(
@@ -881,25 +907,4 @@ private fun getFileNameFromUri(context: android.content.Context, uri: android.ne
         }
     }
     return fileName
-}
-
-// Helper function to open attachment file
-private fun openAttachmentFile(context: android.content.Context, attachment: Attachment) {
-    attachment.local_file_path?.let { path ->
-        val file = java.io.File(path)
-        try {
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                context,
-                context.applicationContext.packageName + ".fileprovider",
-                file
-            )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, attachment.mime_type)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            // Handle file opening error
-        }
-    }
 }

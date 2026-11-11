@@ -84,12 +84,24 @@ class ToolManager(
             val pythonTool = PythonInterpreterTool(
                 platformStorage = AndroidPlatformStorage(deps.context),
                 currentChat = currentChat,
-                currentGroup = currentGroup
+                currentGroup = currentGroup,
+                files = pythonToolFiles()
             )
             specifications.add(pythonTool.getSpecification(currentProvider))
         }
 
         return specifications
+    }
+
+    /**
+     * With sync on, the Python tool also reads attachments of other devices (from the account's
+     * store) and its generated files get a hash and are uploaded for the other devices. With
+     * sync off (null) the tool works with the device's files exactly as before.
+     */
+    private fun pythonToolFiles(): com.example.ApI.tools.PythonToolFiles? {
+        val attachments = com.example.ApI.data.DeviceAttachmentsProvider.get(deps.context)
+        if (!attachments.enabled) return null
+        return attachments.pythonFiles(java.io.File(deps.context.filesDir, "attachments"))
     }
 
     /**
@@ -133,7 +145,8 @@ class ToolManager(
             val pythonTool = PythonInterpreterTool(
                 platformStorage = AndroidPlatformStorage(deps.context),
                 currentChat = currentChat,
-                currentGroup = currentGroup
+                currentGroup = currentGroup,
+                files = pythonToolFiles()
             )
             return pythonTool.execute(toolCall.parameters)
         }

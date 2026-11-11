@@ -48,6 +48,8 @@ import com.example.ApI.ui.managers.provider.TopBarManager
 import com.example.ApI.ui.managers.streaming.CloudRunManager
 import com.example.ApI.ui.managers.streaming.StreamingEventManager
 import com.example.ApI.ui.managers.streaming.TitleGenerationManager
+import com.example.ApI.data.DeviceAttachmentsProvider
+import com.example.ApI.data.attachments.AttachmentTransferState
 import com.example.ApI.ui.managers.io.AttachmentManager
 import com.example.ApI.ui.managers.io.ExportImportManager
 import com.example.ApI.ui.managers.io.SharedIntentManager
@@ -117,6 +119,15 @@ class ChatViewModel(
             updateUiState = { newState -> _uiState.value = newState }
         )
     }
+
+    /** The account's attachment store on this device (process-wide; does nothing while sync is off). */
+    private val deviceAttachments by lazy { DeviceAttachmentsProvider.get(context) }
+
+    /** By local file path: attached files that are uploading to the store, or whose upload failed. */
+    val attachmentTransfers: StateFlow<Map<String, AttachmentTransferState>> get() = deviceAttachments.transfers
+
+    /** Start a failed upload again (tap on the failed file). */
+    fun retryAttachmentUpload(localPath: String) = deviceAttachments.retry(localPath)
 
     // Service binding for streaming requests
     private var streamingService: StreamingService? = null
@@ -206,7 +217,8 @@ class ChatViewModel(
             startStreamingRequest = { requestId, chatId, username, provider, modelName, messages, systemPrompt, webSearchEnabled, projectAttachments, enabledTools, thinkingBudget, temperature ->
                 startStreamingRequest(requestId, chatId, username, provider, modelName, messages, systemPrompt, webSearchEnabled, projectAttachments, enabledTools, thinkingBudget, temperature)
             },
-            createNewChat = { previewName -> createNewChat(previewName) }
+            createNewChat = { previewName -> createNewChat(previewName) },
+            isCloudExecutionEffective = { cloudRunManager.isEffective }
         )
     }
 
@@ -383,10 +395,20 @@ class ChatViewModel(
                     Toast.makeText(context, R.string.cloud_execution_fallback_notice, Toast.LENGTH_SHORT).show()
             }
         }
+        // The device runs it. With sync on, its files still go to the account's store (in the
+        // background: hash + upload + commit, the hash recorded on the stored attachment), so
+        // the other devices can show them and the chat can run in the cloud next time.
+        deviceAttachments.backfill(username, chatId, groupIdOf(chatId), messages, projectAttachments)
         startServiceStreamingRequest(
             requestId, chatId, username, provider, modelName, messages, systemPrompt, webSearchEnabled,
             projectAttachments, enabledTools, thinkingBudget, temperature
         )
+    }
+
+    private fun groupIdOf(chatId: String): String? {
+        val state = _uiState.value
+        val chat = state.currentChat?.takeIf { it.chat_id == chatId } ?: state.chatHistory.find { it.chat_id == chatId }
+        return chat?.group
     }
 
     /**

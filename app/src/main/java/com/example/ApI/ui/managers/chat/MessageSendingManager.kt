@@ -1,6 +1,7 @@
 package com.example.ApI.ui.managers.chat
 
 import android.util.Log
+import com.example.ApI.data.DeviceAttachmentsProvider
 import com.example.ApI.data.model.*
 import com.example.ApI.tools.ToolSpecification
 import com.example.ApI.ui.managers.ManagerDependencies
@@ -32,8 +33,12 @@ class MessageSendingManager(
         thinkingBudget: ThinkingBudgetValue,
         temperature: Float?
     ) -> Unit,
-    private val createNewChat: (String) -> Chat
+    private val createNewChat: (String) -> Chat,
+    /** Requests are handed to the cloud first ("manage API requests in the cloud" is effective). */
+    private val isCloudExecutionEffective: () -> Boolean = { false }
 ) {
+    /** The account's attachment store (does nothing while sync is off). */
+    private val attachments by lazy { DeviceAttachmentsProvider.get(deps.context) }
 
     /**
      * Send a new user message.
@@ -59,6 +64,9 @@ class MessageSendingManager(
 
         deps.scope.launch {
             val multiModeEnabled = deps.appSettings.value.multiMessageMode
+            // The files of this message leave the input area together with its text: waiting
+            // for a file's hash below suspends, and a second tap on send must not send them again
+            val filesToSend = deps.uiState.value.selectedFiles
             // In multi-message mode we do not start streaming immediately
             if (!multiModeEnabled) {
                 // Use per-chat loading state
@@ -66,22 +74,29 @@ class MessageSendingManager(
                     loadingChatIds = deps.uiState.value.loadingChatIds + chatId,
                     streamingChatIds = deps.uiState.value.streamingChatIds + chatId,
                     streamingTextByChat = deps.uiState.value.streamingTextByChat + (chatId to ""),
-                    currentMessage = ""
+                    currentMessage = "",
+                    selectedFiles = emptyList()
                 ))
             } else {
                 deps.updateUiState(deps.uiState.value.copy(
-                    currentMessage = ""
+                    currentMessage = "",
+                    selectedFiles = emptyList()
                 ))
             }
 
             val userMessage = Message(
                 role = "user",
                 text = if (message.isNotEmpty()) message else "[קובץ מצורף]",
-                attachments = deps.uiState.value.selectedFiles.map { file ->
-                    Attachment(
-                        local_file_path = file.localPath,
-                        file_name = file.name,
-                        mime_type = file.mimeType
+                attachments = filesToSend.map { file ->
+                    // With sync on: the file's hash + size (known once it is hashed, the upload
+                    // may still be running) and a commit of the file in the account's store
+                    attachments.use(
+                        file.localPath,
+                        Attachment(
+                            local_file_path = file.localPath,
+                            file_name = file.name,
+                            mime_type = file.mimeType
+                        )
                     )
                 },
                 model = null, // User messages don't have a model
@@ -100,7 +115,6 @@ class MessageSendingManager(
 
             deps.updateUiState(deps.uiState.value.copy(
                 currentChat = updatedChat,
-                selectedFiles = emptyList(),
                 chatHistory = updatedChatHistory,
                 showReplyButton = multiModeEnabled || deps.uiState.value.showReplyButton
             ))
@@ -119,7 +133,10 @@ class MessageSendingManager(
                 try {
                     // Handle file uploads first (lazy upload)
                     var finalUserMessage = userMessage
-                    if (userMessage.attachments.isNotEmpty()) {
+                    // A cloud run uploads the files to the provider itself (and writes the ids
+                    // back); if the cloud does not take the request, the device path uploads
+                    // them lazily (DataRepository.sendMessage) as for any re-sent file
+                    if (userMessage.attachments.isNotEmpty() && !isCloudExecutionEffective()) {
                         val uploadedAttachments = mutableListOf<Attachment>()
 
                         for (attachment in userMessage.attachments) {
@@ -134,7 +151,10 @@ class MessageSendingManager(
                                 )
 
                                 if (uploadedAttachment != null) {
-                                    uploadedAttachments.add(uploadedAttachment)
+                                    // Keep the file's identity (the upload answer has none)
+                                    uploadedAttachments.add(
+                                        uploadedAttachment.copy(sha256 = attachment.sha256, size = attachment.size)
+                                    )
                                 } else {
                                     // Upload failed, keep original attachment
                                     uploadedAttachments.add(attachment)

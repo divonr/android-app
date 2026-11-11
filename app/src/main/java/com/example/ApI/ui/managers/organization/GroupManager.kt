@@ -3,6 +3,7 @@ package com.example.ApI.ui.managers.organization
 import android.net.Uri
 import androidx.compose.ui.unit.DpOffset
 import com.example.ApI.data.model.*
+import com.example.ApI.data.DeviceAttachmentsProvider
 import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -191,10 +192,17 @@ class GroupManager(
                     val localPath = deps.repository.saveFileLocally(fileName, fileData)
 
                     if (localPath != null) {
-                        val attachment = Attachment(
-                            local_file_path = localPath,
-                            file_name = fileName,
-                            mime_type = mimeType
+                        // With sync on: the file goes to the account's store now (background
+                        // upload, committed when it is there) and the attachment carries its hash
+                        val store = DeviceAttachmentsProvider.get(deps.context)
+                        store.attach(java.io.File(localPath))
+                        val attachment = store.use(
+                            localPath,
+                            Attachment(
+                                local_file_path = localPath,
+                                file_name = fileName,
+                                mime_type = mimeType
+                            )
                         )
 
                         deps.repository.addAttachmentToGroup(currentUser, groupId, attachment)
@@ -228,8 +236,9 @@ class GroupManager(
             // Remove from JSON registry
             deps.repository.removeAttachmentFromGroup(currentUser, groupId, attachmentIndex)
 
-            // Delete the actual file from internal storage
+            // Delete the actual file from internal storage (stopping an upload still in flight)
             attachmentToRemove?.local_file_path?.let { path ->
+                DeviceAttachmentsProvider.get(deps.context).remove(path)
                 deps.repository.deleteFile(path)
             }
 

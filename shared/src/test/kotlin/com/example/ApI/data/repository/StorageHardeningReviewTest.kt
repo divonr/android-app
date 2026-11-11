@@ -105,6 +105,34 @@ class StorageHardeningReviewTest {
     }
 
     @Test
+    fun `attachment rewrite takes only the provider ids - a hash recorded meanwhile and the stored path stay`() {
+        val m = ChatHistoryManager(dir, json)
+        val mbm = MessageBranchingManager(m)
+        val chatId = m.createNewChat("u", "c").chat_id
+        val sha = "a".repeat(64)
+        val mine = Attachment(local_file_path = "/phone/f.png", file_name = "f.png", mime_type = "image/png")
+        val fromWeb = Attachment(local_file_path = null, file_name = "w.png", mime_type = "image/png", sha256 = "b".repeat(64), size = 7)
+        val snapshot = mbm.addUserMessageAsNewNode("u", chatId, Message(id = "q", role = "user", text = "q", attachments = listOf(mine, fromWeb)))!!.messages
+        // While the request uploads to the provider, the backfill records the file's identity
+        StoredAttachments(m).recordIdentity("u", AttachmentOwner.ChatMessage(chatId, "q"), mine, com.example.ApI.data.attachments.FileDigest(sha, 5))
+        // The request's copy: no hash on the first, this device's cache path on the second
+        val uploaded = snapshot.map { msg ->
+            msg.copy(attachments = listOf(
+                msg.attachments[0].copy(file_OPENAI_id = "id-1"),
+                msg.attachments[1].copy(local_file_path = "/phone/attachments_cache/bbb", file_OPENAI_id = "id-2")
+            ))
+        }
+        m.updateChatWithNewAttachments("u", chatId, uploaded)
+        val expected = listOf(
+            mine.copy(sha256 = sha, size = 5, file_OPENAI_id = "id-1"),
+            fromWeb.copy(file_OPENAI_id = "id-2")
+        )
+        val chat = m.loadChatHistory("u").chat_history.single()
+        assertEquals(expected, chat.messages.single().attachments)
+        assertEquals(expected, chat.messageNodes.single().variants.single().userMessage.attachments)
+    }
+
+    @Test
     fun `attachment rewrite updates the tree as well as messages`() {
         val m = ChatHistoryManager(dir, json)
         val mbm = MessageBranchingManager(m)

@@ -2,6 +2,8 @@ package com.example.ApI.ui.managers.streaming
 
 import android.widget.Toast
 import com.example.ApI.R
+import com.example.ApI.data.DeviceAttachmentsProvider
+import com.example.ApI.data.attachments.providerReadsFile
 import com.example.ApI.data.cloud.CloudCancelResult
 import com.example.ApI.data.cloud.CloudRunAction
 import com.example.ApI.data.cloud.CloudRunClient
@@ -60,6 +62,7 @@ class CloudRunManager(
     }
 
     private val client = CloudRunClient(config = { config() })
+    private val attachments by lazy { DeviceAttachmentsProvider.get(deps.context) }
     private val tracker = CloudRunTracker { chatId -> isChatBusyLocally(chatId) }
 
     private var foreground = false
@@ -168,24 +171,58 @@ class CloudRunManager(
             return StartOutcome.DEVICE
         }
 
+        tracker.registerLocal(runId, chatId)
+        resetOverlay(chatId)
+
+        // The server reads the files from the account's store: wait (bounded) for the uploads of
+        // the files the provider reads — just attached ones, and ones saved before the store
+        // existed (hashed, uploaded and recorded now). The request carries the hashes.
+        val groupId = groupOf(chatId)
+        val prepared = try {
+            attachments.prepareRequest(
+                username = deps.appSettings.value.current_user,
+                chatId = chatId,
+                groupId = groupId,
+                messages = messages,
+                projectAttachments = projectAttachments,
+                needsFile = { providerReadsFile(provider.provider, it) },
+                timeoutMs = ATTACHMENTS_WAIT_MS
+            )
+        } catch (e: Exception) {
+            tracker.abandon(runId)
+            pendingStops.remove(runId)
+            throw e
+        }
+        if (!prepared.ready) {
+            // Not in the store in time (or not storable): the device runs it, the uploads go on
+            AppLogger.w("Cloud run $runId not attempted: files not in the store (${prepared.missing.joinToString()}); sending from the device.")
+            val stopRequested = pendingStops.remove(runId)
+            if (stopRequested != null) {
+                apply(tracker.forceFinish(runId))
+                tracker.abandon(runId)
+                return StartOutcome.STOPPED
+            }
+            tracker.abandon(runId)
+            noteDeviceStart(chatId)
+            return StartOutcome.DEVICE
+        }
+
         val request = CloudRunRequest(
             runId = runId,
             chatId = chatId,
             provider = provider.provider,
             modelName = modelName,
-            messages = messages.toList(),
+            messages = prepared.messages,
             systemPrompt = systemPrompt,
             webSearchEnabled = webSearchEnabled,
             // A tool's specification is named by its id in the tool registry
             enabledToolIds = enabledTools.map { it.name },
             thinkingBudget = ThinkingBudgetWire.encode(thinkingBudget),
             temperature = temperature,
-            projectAttachments = projectAttachments.toList(),
-            groupId = groupOf(chatId)
+            projectAttachments = prepared.projectAttachments,
+            groupId = groupId
         )
 
-        tracker.registerLocal(runId, chatId)
-        resetOverlay(chatId)
         val result = try {
             client.startRun(request)
         } catch (e: Exception) {
@@ -205,6 +242,8 @@ class CloudRunManager(
             }
             is CloudStartResult.Fallback -> {
                 AppLogger.w("Cloud did not take run $runId (${result.reason}); sending from the device.")
+                // The server could not get a file this device believed stored: ask the store again next time
+                if ("attachments_unsupported" in result.reason) attachments.forgetStored(prepared.messages, prepared.projectAttachments)
                 // It may be running there after all: stop it so the chat does not get two replies
                 if (result.mayHaveStarted) cancelAbandoned(runId)
                 if (stopRequested != null) {
@@ -526,5 +565,7 @@ class CloudRunManager(
         const val DEVICE_START_GRACE_MS = 5_000L
         const val ABANDON_CANCEL_ATTEMPTS = 3
         const val ABANDON_CANCEL_RETRY_MS = 2_000L
+        /** How long a cloud run waits for the uploads of the files its provider reads. */
+        const val ATTACHMENTS_WAIT_MS = 20_000L
     }
 }

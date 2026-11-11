@@ -417,6 +417,73 @@ above; results, never exceptions), `AttachmentResolver`, `AttachmentUploader` / 
 - Web: uploads go through llm-web (cookie auth) into the store; attachments from any device are
   viewable/downloadable in the web UI.
 
+## Android — A3
+Shared, testable (`shared/.../data/attachments/DeviceAttachments.kt`): `DeviceAttachments` (the
+device's whole side of the store), `KnownStoredFiles`, `providerReadsFile` (the server's
+`attachmentNeedsFile` rule), `AttachmentTransferState`. Android glue: `DeviceAttachmentsProvider`
+(`app/.../data/`: one instance per process, its own scope — shared by the UI and `StreamingService`),
+`ui/components/AttachmentViews.kt`. Everything below applies while sync is enabled and signed in
+(`RemoteSyncSettings.attachmentStoreConfig()`), with or without cloud execution; with sync off no
+upload, hash, state or network call happens and the app behaves as before.
+
+- **Attach** (every entry point goes through `AttachmentManager.addFileFromUri` /
+  `addMultipleFilesFromUris`: file picker, gallery, camera, share intent, "attach this JSON instead
+  of importing it"): the upload starts at once (`DeviceAttachments.attach`). The input area draws
+  the file greyed with a spinning circle until the store has it (`transfers`, by local path); a
+  failed upload shows a red error mark and "upload failed · tap to retry" (`retry`). A file over
+  95 MB is not uploaded, shows nothing and stays device-only (no hash).
+- **Remove before sending** → the upload is stopped and the pending file deleted from the store
+  (`DeviceAttachments.remove` → `AttachmentUploader.discard`).
+- **Send** (`MessageSendingManager`): the attachment is saved with `sha256` + `size`
+  (`DeviceAttachments.use`: waits for the hash only — local I/O, at most 10 s, else the message is
+  saved without it and the backfill below adds it) and the file is committed when the store has it;
+  a commit / upload that cannot reach the store is tried again after 2 s, 10 s and 30 s. A failed
+  upload is restarted by the send. With cloud execution effective the device does **not** upload the
+  new files to the provider first (the server does and writes the ids back); when the request falls
+  back, `DataRepository.sendMessage` uploads them lazily as for any other file.
+- **Cloud run** (`CloudRunManager.tryStart`): before `POST /api/runs`, `prepareRequest` waits at most
+  **20 s** for the files the provider reads (user-message attachments and project attachments, by
+  `providerReadsFile`) to be in the store: an upload in flight is awaited; a hashed file this device
+  has and has not seen committed is committed (uploaded when the store lacks it); a file without a
+  hash is backfilled (below). The request carries the hashes. Not ready in time (or a device-only
+  file is needed) → the device runs the request ("הבקשה נשלחת מהמכשיר"), the uploads go on in the
+  background. An attachment with a hash and no file here (another device's) is assumed stored; one
+  without a hash and without a file here is left to the server. `409 attachments_unsupported` →
+  the ordinary fallback, and the hashes of the request are forgotten from `KnownStoredFiles`, so the
+  next request asks the store again. Stop during the wait works as during the start request.
+- **Lazy backfill**: an attachment without a hash whose file is on this device is hashed, uploaded,
+  committed and its identity recorded (`DataRepository.recordAttachmentIdentity`, chat message or
+  group) — awaited for the files a cloud run needs, in the background for the rest of the request
+  (assistant attachments, files sent by provider id). When the device runs a request (sync on),
+  `ChatViewModel.startStreamingRequest` starts the same backfill without waiting. Hashes seen
+  committed are remembered per account (`files/attachments_state/known_<key>.txt`), so each file is
+  asked about once.
+- **Project files** (`GroupManager`): uploaded + committed when added, saved with their hash; the
+  thumbnail shows the same uploading / failed state. Removing one stops an upload still in flight
+  (a committed file stays in the store).
+- **Files this device does not have** (web / another device / the cloud's Python tool):
+  `rememberAttachmentFile` resolves through `AttachmentResolver` — `resolveLocal` at once; an image
+  in a message bubble or among a tool call's generated files is downloaded when it is shown
+  (spinner, "tap to retry" on failure); any other file, and a project file, when it is tapped
+  (spinner on the chip). Downloads go to `files/attachments_cache/<sha256>` once and run in the
+  process scope. A cached file is opened through a copy that carries the attachment's name
+  (`cache/opened_attachments/`).
+- **Device path** (`StreamingService`): `DeviceAttachments.localize` gives the request a copy whose
+  user-message / project attachments point at this device's file (the cache copy, downloaded now if
+  needed), so the provider upload and the inlining providers work for files of other devices. The
+  copy is never saved: `ChatHistoryManager.updateChatWithNewAttachments` now writes only the three
+  provider ids onto the stored attachment that is the same file (hash, else path + name + mime
+  type) — never a path, and never over a hash recorded meanwhile.
+- **Python tool on the device** (`ToolManager`): with sync on it gets `DeviceAttachments.pythonFiles`
+  — input files also from the store; generated files saved in `files/attachments` as always, with
+  `sha256` + `size`, and uploaded + committed in the background. With sync off: unchanged.
+- **Lifetime**: uploads / downloads belong to the process, not to a screen: they survive rotation
+  and leaving the chat, and go on while the app is in the background as long as the process lives
+  (there is no foreground service for them). After a process death a draft's pending file is swept
+  by the store (24 h); a sent message's file is stored by the next request that includes the
+  message (it has the hash, or gets it by backfill).
+- Desktop: no attachment sync (compiles; the shared write-back change applies to it too).
+
 ## Server (llm-web) — A2
 Per user (`UserContext.attachments`, `server/.../attachments/UserAttachments.kt`): an
 `AttachmentStoreClient` with the sync token of the user's server copy, the user's cache
@@ -524,6 +591,41 @@ message / group — the server commits; show any attachment that has `sha256` (f
 through `GET /api/files/{sha256}?name=&mime=`. An attachment without `sha256` exists only on the
 device that attached it.
 
+## Web UI — A4
+- **Composer** (`useDraftAttachments`, one draft per open chat, in memory only). A picked file
+  (several can be picked at once) starts uploading immediately and is shown greyed with a spinner
+  until the upload answers; a failed upload stays in the draft in its own state with the reason
+  (`store_unavailable`, expired session, `file_too_large`…) and a retry button (no retry for a
+  file the server called too large / empty). A file over 95 MB, or an empty one, is refused before
+  any request (error banner). **Sending is disabled** (button and Enter) while a file of the draft
+  is uploading or failed — the failed one has to be retried or removed; a line under the files
+  says why. Nothing is sent without its files and nothing is queued.
+- **Deleting un-sent uploads.** Removing a file from the draft → `DELETE /api/files/{sha256}` at
+  once; while it is still uploading the request is aborted, and if the upload completed anyway the
+  file is deleted when its hash arrives. Leaving the chat (or the page) with un-sent files deletes
+  them; closing / reloading the tab does the same with `keepalive` requests (`pagehide`). The
+  draft itself is not kept over a reload. Failed deletes are silent (the store's 24 h sweep is the
+  net — also for an aborted upload the server had in fact stored, whose hash the tab never saw).
+  The delete is skipped when the store's single copy is still needed: another entry of the draft
+  has the same hash (the same file attached twice), another upload of the same size is still
+  running (it may be the same file), or the tab already put that hash into a message / project
+  (the server commits in the background — until it has, the store would still delete it).
+- **Send** puts the `Attachment`s as returned by the upload into the message (send and the
+  multi-message buffer); the web never calls `commit`. An edit keeps the message's own attachments;
+  files in the draft at that moment are discarded (deleted).
+- **Showing attachments** (`AttachmentView`; messages of every role — user, and assistant for the
+  Python tool's files — and the project files of a group): with a `sha256` (64 lowercase hex) and a
+  `mime_type` of the server's inline image list → the image, `<img src>` = the file route, requested
+  only when its placeholder comes near the viewport (IntersectionObserver); a click opens the route
+  in a new tab, a corner button downloads (`download=1`). Any other type with a hash — SVG, HTML,
+  PDF, audio, video included — is a download link (`download=1`), never rendered in the page and
+  never fetched into a blob. Without a hash: the name with "זמין רק במכשיר שממנו צורף", no request.
+  An image the route cannot serve (404 / 502) falls back to its name with "הקובץ אינו זמין כרגע".
+  There are no server-made thumbnails: a thumbnail is the full image, scaled by the browser.
+- **Project files** (`GroupPage`): upload → `POST /api/groups/{id}/attachments` (the server
+  commits); a tile with a spinner meanwhile; the same size limit and error texts; an upload the
+  group route refused (4xx) is deleted again.
+
 ## Stages
 A1 sync-server store + shared model/client/resolver · A2 llm-web (runs, Python tool, web file routes)
-· A3 Android · A4 web UI · A5 deploy + live test (llm-web A2 needs the sync-server of A1 running).
+· A3 Android · A4 web UI (the section above) · A5 deploy + live test (llm-web A2 needs the sync-server of A1 running).

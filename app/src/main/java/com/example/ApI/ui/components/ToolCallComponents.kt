@@ -39,6 +39,7 @@ import coil.compose.AsyncImage
 import com.example.ApI.data.model.ExecutingToolInfo
 import com.example.ApI.data.model.Message
 import com.example.ApI.data.model.ThoughtsStatus
+import com.example.ApI.tools.PythonInterpreterTool
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.theme.*
@@ -551,11 +552,14 @@ fun ToolCallBubble(
                                 fontWeight = FontWeight.SemiBold
                             )
 
-                            outputFiles.forEach { fileJson ->
-                                val fileObj = fileJson.jsonObject
-                                val fileName = fileObj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@forEach
-                                val localPath = fileObj["local_file_path"]?.jsonPrimitive?.contentOrNull
-                                val mimeType = fileObj["mime_type"]?.jsonPrimitive?.contentOrNull ?: ""
+                            // The same files, as attachments: with this device's path and / or
+                            // their hash in the account's store (generated in the cloud)
+                            PythonInterpreterTool.outputAttachments(toolCallInfo.result).forEach { attachment ->
+                                val fileName = attachment.file_name
+                                val mimeType = attachment.mime_type
+                                val isImage = mimeType.startsWith("image/")
+                                // An image is fetched from the store when shown, other files when tapped
+                                val outputFile = rememberAttachmentFile(attachment, autoDownload = isImage)
 
                                 // File chip with click to open
                                 Surface(
@@ -564,25 +568,7 @@ fun ToolCallBubble(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(vertical = 4.dp)
-                                        .clickable {
-                                            localPath?.let { path ->
-                                                try {
-                                                    val file = File(path)
-                                                    val uri = FileProvider.getUriForFile(
-                                                        context,
-                                                        context.packageName + ".fileprovider",
-                                                        file
-                                                    )
-                                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                                        setDataAndType(uri, mimeType)
-                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                    }
-                                                    context.startActivity(intent)
-                                                } catch (e: Exception) {
-                                                    // Handle error silently
-                                                }
-                                            }
-                                        }
+                                        .clickable { outputFile.open() }
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(12.dp),
@@ -590,7 +576,7 @@ fun ToolCallBubble(
                                     ) {
                                         Icon(
                                             imageVector = when {
-                                                mimeType.startsWith("image/") -> Icons.Default.Image
+                                                isImage -> Icons.Default.Image
                                                 else -> Icons.Default.InsertDriveFile
                                             },
                                             contentDescription = null,
@@ -601,15 +587,18 @@ fun ToolCallBubble(
                                         Text(
                                             text = fileName,
                                             style = MaterialTheme.typography.bodyMedium,
-                                            color = OnSurface
+                                            color = OnSurface,
+                                            modifier = Modifier.weight(1f)
                                         )
+                                        AttachmentFetchIndicator(handle = outputFile, tint = OnSurfaceVariant)
                                     }
                                 }
 
                                 // Image preview if applicable
-                                if (mimeType.startsWith("image/") && localPath != null) {
+                                val previewFile = outputFile.file
+                                if (isImage && previewFile != null) {
                                     AsyncImage(
-                                        model = File(localPath),
+                                        model = previewFile,
                                         contentDescription = fileName,
                                         modifier = Modifier
                                             .fillMaxWidth()
