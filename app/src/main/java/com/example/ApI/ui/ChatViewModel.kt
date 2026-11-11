@@ -52,6 +52,7 @@ import com.example.ApI.data.DeviceAttachmentsProvider
 import com.example.ApI.data.attachments.AttachmentTransferState
 import com.example.ApI.ui.managers.io.AttachmentManager
 import com.example.ApI.ui.managers.io.ExportImportManager
+import com.example.ApI.ui.managers.io.PickerReturn
 import com.example.ApI.ui.managers.io.SharedIntentManager
 import com.example.ApI.ui.managers.integration.AuthManager
 import com.example.ApI.ui.managers.integration.ToolManager
@@ -61,6 +62,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import androidx.core.content.FileProvider
@@ -314,6 +316,9 @@ class ChatViewModel(
         }
     }
 
+    /** The first load of settings and chats (it also removes abandoned empty chats). */
+    private val initialLoad: Job
+
     init {
         // Set a default provider immediately
         val defaultProvider = Provider(
@@ -327,7 +332,7 @@ class ChatViewModel(
             currentModel = "gpt-4o"
         )
 
-        loadInitialData()
+        initialLoad = loadInitialData()
         bindToStreamingService()
         observeSyncChangeTick()
         cloudRunManager  // follows the cloud-execution setting from now on
@@ -568,7 +573,7 @@ class ChatViewModel(
         unbindFromStreamingService()
     }
 
-    private fun loadInitialData() {
+    private fun loadInitialData(): Job =
         viewModelScope.launch {
             val settings = repository.loadAppSettings()
             _appSettings.value = settings
@@ -661,7 +666,6 @@ class ChatViewModel(
             // Start remote sync (no-op if disabled)
             repository.startSync()
         }
-    }
 
     /**
      * Register skill tools and auto-enable them if there are installed skills.
@@ -827,6 +831,9 @@ class ChatViewModel(
     // ==================== Empty Chat Cleanup ====================
     fun cleanupEmptyChatsOnScreen() {
         viewModelScope.launch {
+            // Asked for by the chat list as it appears. When a chat was opened before this got
+            // to run (a picker's result arriving as the app starts over), that chat is in use
+            if (_currentScreen.value is Screen.Chat) return@launch
             val currentUser = _appSettings.value.current_user
             repository.cleanupEmptyChats(currentUser)
 
@@ -843,6 +850,27 @@ class ChatViewModel(
     fun addFileFromUri(uri: Uri, fileName: String, mimeType: String) = attachmentManager.addFileFromUri(uri, fileName, mimeType)
     fun addMultipleFilesFromUris(filesList: List<Triple<Uri, String, String>>) = attachmentManager.addMultipleFilesFromUris(filesList)
     fun removeSelectedFile(file: SelectedFile) = attachmentManager.removeSelectedFile(file)
+
+    /**
+     * The camera or the file picker came back with [files] (uri, name, mime type) for the message
+     * being written; it was launched from the chat [originChatId]. Normally that chat is still on
+     * screen. When the process was killed meanwhile, the app has started over on the chat list
+     * and may have removed the chat as an abandoned empty one: the user is taken back to it, or
+     * to a new chat, with the files attached ([PickerReturn]).
+     */
+    fun attachPickedFiles(files: List<Triple<Uri, String, String>>, originChatId: String?) {
+        if (files.isEmpty()) return
+        addMultipleFilesFromUris(files)
+        viewModelScope.launch {
+            initialLoad.join()  // the chats, and the screen the app starts on, are settled
+            val onChatScreen = _currentScreen.value is Screen.Chat
+            when (val target = PickerReturn.of(onChatScreen, originChatId, _uiState.value.chatHistory)) {
+                PickerReturn.Stay -> Unit
+                is PickerReturn.Open -> selectChatFromSearch(target.chat)
+                PickerReturn.NewChat -> createNewChat(context.getString(R.string.new_chat))
+            }
+        }
+    }
     fun showFileSelection() = attachmentManager.showFileSelection()
 
     // ==================== In-app image viewer ====================
