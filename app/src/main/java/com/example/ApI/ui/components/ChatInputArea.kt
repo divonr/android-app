@@ -1,6 +1,5 @@
 package com.example.ApI.ui.components
 
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -102,8 +101,6 @@ fun ChatInputArea(
     onStopStreaming: () -> Unit,
     onFinishEditing: () -> Unit,
     onConfirmEditAndResend: () -> Unit,
-    onFileSelected: (Uri, String, String) -> Unit,
-    onMultipleFilesSelected: (List<Triple<Uri, String, String>>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Estimate line count based on newlines and text length
@@ -143,9 +140,7 @@ fun ChatInputArea(
                 ) {
                     // Add Files Button
                     FileAttachmentButton(
-                        hasFiles = selectedFiles.isNotEmpty(),
-                        onFileSelected = onFileSelected,
-                        onMultipleFilesSelected = onMultipleFilesSelected
+                        hasFiles = selectedFiles.isNotEmpty()
                     )
 
                     // Message Input Field
@@ -226,8 +221,6 @@ fun ChatInputArea(
 @Composable
 fun FileAttachmentButton(
     hasFiles: Boolean,
-    onFileSelected: (Uri, String, String) -> Unit,
-    onMultipleFilesSelected: (List<Triple<Uri, String, String>>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showFileMenu by remember { mutableStateOf(false) }
@@ -251,9 +244,7 @@ fun FileAttachmentButton(
         }
         FileSelectionDropdown(
             expanded = showFileMenu,
-            onDismiss = { showFileMenu = false },
-            onFileSelected = onFileSelected,
-            onMultipleFilesSelected = onMultipleFilesSelected
+            onDismiss = { showFileMenu = false }
         )
     }
 }

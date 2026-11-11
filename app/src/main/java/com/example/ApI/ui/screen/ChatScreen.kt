@@ -449,9 +449,7 @@ fun ChatScreen(
                     onSendMessage = { viewModel.sendMessage() },
                     onStopStreaming = { viewModel.stopStreamingAndSave() },
                     onFinishEditing = { viewModel.finishEditingMessage() },
-                    onConfirmEditAndResend = { viewModel.confirmEditAndResend() },
-                    onFileSelected = { uri, name, mime -> viewModel.addFileFromUri(uri, name, mime) },
-                    onMultipleFilesSelected = { filesList -> viewModel.addMultipleFilesFromUris(filesList) }
+                    onConfirmEditAndResend = { viewModel.confirmEditAndResend() }
                 )
             }
 
@@ -528,12 +526,6 @@ fun ChatScreen(
             // File Selection Dialog
             if (uiState.showFileSelection) {
                 FileSelectionDialog(
-                    onFileSelected = { uri, fileName, mimeType ->
-                        viewModel.addFileFromUri(uri, fileName, mimeType)
-                    },
-                    onMultipleFilesSelected = { filesList ->
-                        viewModel.addMultipleFilesFromUris(filesList)
-                    },
                     onDismiss = { viewModel.hideFileSelection() }
                 )
             }

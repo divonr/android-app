@@ -2,6 +2,7 @@ package com.example.ApI.ui.components
 
 import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,6 +14,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -22,64 +24,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.example.ApI.R
 import com.example.ApI.ui.theme.*
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.isGranted
-import com.google.accompanist.permissions.rememberPermissionState
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun FileSelectionDialog(
-    onFileSelected: (Uri, String, String) -> Unit,
-    onMultipleFilesSelected: (List<Triple<Uri, String, String>>) -> Unit = { },
     onDismiss: () -> Unit
 ) {
-    val context = LocalContext.current
-    
-    // Camera permission state
-    val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
-    
-    // File to store camera photo
-    var photoUri by remember { mutableStateOf<Uri?>(null) }
-    
-    // Camera launcher
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success && photoUri != null) {
-            onFileSelected(photoUri!!, "camera_photo_${System.currentTimeMillis()}.jpg", "image/jpeg")
-            onDismiss()
-        }
-    }
-    
-    // File picker launcher (supports both single and multiple files)
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            if (uris.size == 1) {
-                // Single file selected
-                val uri = uris[0]
-                val fileName = getFileName(context, uri)
-                val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
-                onFileSelected(uri, fileName, mimeType)
-            } else {
-                // Multiple files selected
-                val filesList = uris.map { uri ->
-                    val fileName = getFileName(context, uri)
-                    val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
-                    Triple(uri, fileName, mimeType)
-                }
-                onMultipleFilesSelected(filesList)
-            }
-            onDismiss()
-        }
-    }
+    val pickers = LocalAttachmentPickers.current
 
     Dialog(onDismissRequest = onDismiss) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -103,14 +60,8 @@ fun FileSelectionDialog(
                     // Take Photo Option
                     Button(
                         onClick = {
-                            if (cameraPermissionState.status.isGranted) {
-                                photoUri = createImageUri(context)
-                                photoUri?.let { uri ->
-                                    cameraLauncher.launch(uri)
-                                }
-                            } else {
-                                cameraPermissionState.launchPermissionRequest()
-                            }
+                            onDismiss()
+                            pickers.takePhoto()
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -140,7 +91,8 @@ fun FileSelectionDialog(
                     // Upload Files Option (supports both single and multiple)
                     Button(
                         onClick = {
-                            filePickerLauncher.launch("*/*")
+                            onDismiss()
+                            pickers.pickFiles()
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -181,65 +133,14 @@ fun FileSelectionDialog(
             }
         }
     }
-    
-    // Handle camera permission result
-    LaunchedEffect(cameraPermissionState.status) {
-        if (cameraPermissionState.status.isGranted && photoUri != null) {
-            // Permission was just granted, launch camera
-            cameraLauncher.launch(photoUri!!)
-        }
-    }
 }
 
-@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun FileSelectionDropdown(
     expanded: Boolean,
-    onDismiss: () -> Unit,
-    onFileSelected: (Uri, String, String) -> Unit,
-    onMultipleFilesSelected: (List<Triple<Uri, String, String>>) -> Unit = { }
+    onDismiss: () -> Unit
 ) {
-    val context = LocalContext.current
-
-    // Camera permission state
-    val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
-
-    // File to store camera photo
-    var photoUri by remember { mutableStateOf<Uri?>(null) }
-
-    // Camera launcher
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success && photoUri != null) {
-            onFileSelected(photoUri!!, "camera_photo_${System.currentTimeMillis()}.jpg", "image/jpeg")
-            onDismiss()
-        }
-    }
-
-    // File picker launcher (supports both single and multiple files)
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            if (uris.size == 1) {
-                // Single file selected
-                val uri = uris[0]
-                val fileName = getFileName(context, uri)
-                val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
-                onFileSelected(uri, fileName, mimeType)
-            } else {
-                // Multiple files selected
-                val filesList = uris.map { uri ->
-                    val fileName = getFileName(context, uri)
-                    val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
-                    Triple(uri, fileName, mimeType)
-                }
-                onMultipleFilesSelected(filesList)
-            }
-            onDismiss()
-        }
-    }
+    val pickers = LocalAttachmentPickers.current
 
     DropdownMenu(
         expanded = expanded,
@@ -268,14 +169,8 @@ fun FileSelectionDropdown(
                 }
             },
             onClick = {
-                if (cameraPermissionState.status.isGranted) {
-                    photoUri = createImageUri(context)
-                    photoUri?.let { uri ->
-                        cameraLauncher.launch(uri)
-                    }
-                } else {
-                    cameraPermissionState.launchPermissionRequest()
-                }
+                onDismiss()
+                pickers.takePhoto()
             }
         )
 
@@ -299,16 +194,92 @@ fun FileSelectionDropdown(
                 }
             },
             onClick = {
-                filePickerLauncher.launch("*/*")
+                onDismiss()
+                pickers.pickFiles()
             }
         )
     }
+}
 
-    // Handle camera permission result
-    LaunchedEffect(cameraPermissionState.status) {
-        if (cameraPermissionState.status.isGranted && photoUri != null) {
-            cameraLauncher.launch(photoUri!!)
+/**
+ * The camera and the file picker of the message being written. Offered by the app's root
+ * ([rememberAttachmentPickers]) and not by the menu that shows them: the app's activity, and
+ * often its whole process, is destroyed while the camera is in front, and the result must still
+ * find its launcher and the file the photo was written to when the app comes back.
+ */
+class AttachmentPickers(val takePhoto: () -> Unit, val pickFiles: () -> Unit)
+
+val LocalAttachmentPickers = staticCompositionLocalOf { AttachmentPickers({}, {}) }
+
+/**
+ * The pickers, for a composable that is part of every screen. What a launch needs when its
+ * result arrives (the photo's file, the chat it was started from) is saved with the activity's
+ * state, so it outlives the activity and the process. [onPicked] gets the files (uri, name, mime
+ * type) and the id of the chat that was open when the picker was launched.
+ */
+@Composable
+fun rememberAttachmentPickers(
+    currentChatId: () -> String?,
+    onPicked: (files: List<Triple<Uri, String, String>>, originChatId: String?) -> Unit
+): AttachmentPickers {
+    val context = LocalContext.current
+    val chatId by rememberUpdatedState(currentChatId)
+
+    var pendingPhotoUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var originChatId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val photo = pendingPhotoUri
+        pendingPhotoUri = null
+        if (success && photo != null) {
+            onPicked(
+                listOf(Triple(Uri.parse(photo), "camera_photo_${System.currentTimeMillis()}.jpg", "image/jpeg")),
+                originChatId
+            )
         }
+    }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            onPicked(
+                uris.map { uri ->
+                    Triple(uri, getFileName(context, uri), context.contentResolver.getType(uri) ?: "application/octet-stream")
+                },
+                originChatId
+            )
+        }
+    }
+
+    fun launchCamera() {
+        val uri = createImageUri(context)
+        pendingPhotoUri = uri.toString()
+        cameraLauncher.launch(uri)
+    }
+
+    // The manifest declares the camera permission, so the camera app needs it granted
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) launchCamera()
+    }
+
+    return remember(context, cameraLauncher, filePickerLauncher, cameraPermissionLauncher) {
+        AttachmentPickers(
+            takePhoto = {
+                originChatId = chatId()
+                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                    PackageManager.PERMISSION_GRANTED
+                if (granted) launchCamera() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            },
+            pickFiles = {
+                originChatId = chatId()
+                filePickerLauncher.launch("*/*")
+            }
+        )
     }
 }
 

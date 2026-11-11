@@ -26,6 +26,8 @@ import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.ui.ChatViewModel
 import com.example.ApI.ui.components.ChatPickerDialog
 import com.example.ApI.ui.components.ImageViewerDialog
+import com.example.ApI.ui.components.LocalAttachmentPickers
+import com.example.ApI.ui.components.rememberAttachmentPickers
 import com.example.ApI.ui.screen.ApiKeysScreen
 import com.example.ApI.ui.screen.ChatHistoryScreen
 import com.example.ApI.ui.screen.GroupScreen
@@ -166,6 +168,14 @@ fun LLMChatApp(activity: ComponentActivity? = null, intentTrigger: Int = 0) {
         }
     }
 
+    // The camera and the file picker of the message being written live here, in every screen's
+    // composition: their result still arrives when the activity or the process was destroyed
+    // while they were in front, which the chat screen's own composition does not survive
+    val attachmentPickers = rememberAttachmentPickers(
+        currentChatId = { viewModel.uiState.value.currentChat?.chat_id },
+        onPicked = { files, originChatId -> viewModel.attachPickedFiles(files, originChatId) }
+    )
+
     // Check for child lock on app start
     val isChildLockActive = viewModel.isChildLockActive()
     val effectiveScreen = if (isChildLockActive && currentScreen != Screen.ChildLock) {
@@ -212,82 +222,84 @@ fun LLMChatApp(activity: ComponentActivity? = null, intentTrigger: Int = 0) {
         }
     }
 
-    when (effectiveScreen) {
-        is Screen.Welcome -> {
-            WelcomeScreen(
-                onNavigateToApiKeys = { viewModel.navigateToScreen(Screen.ApiKeys) },
-                onNavigateToMain = { viewModel.navigateToScreen(Screen.ChatHistory) },
-                onSkipWelcomeChanged = { skip -> viewModel.updateSkipWelcomeScreen(skip) },
-                repository = repository,
-                currentUser = appSettings.current_user,
-                providers = repository.loadProviders(),
-                initialSkipWelcome = appSettings.skipWelcomeScreen
-            )
-        }
-        is Screen.ChatHistory -> {
-            ChatHistoryScreen(
-                viewModel = viewModel,
-                uiState = uiState
-            )
-        }
-        is Screen.Chat -> {
-            ChatScreen(
-                viewModel = viewModel,
-                uiState = uiState
-            )
-        }
-        is Screen.ApiKeys -> {
-            ApiKeysScreen(
-                repository = repository,
-                currentUser = appSettings.current_user,
-                providers = repository.loadProviders(),
-                onBackClick = { viewModel.navigateToScreen(Screen.ChatHistory) },
-                onSkipWelcomeChanged = { skip -> viewModel.updateSkipWelcomeScreen(skip) }
-            )
-        }
-        is Screen.UserSettings -> {
-            UserSettingsScreen(
-                viewModel = viewModel,
-                appSettings = appSettings,
-                onBackClick = { viewModel.navigateToScreen(Screen.ChatHistory) }
-            )
-        }
-        is Screen.Group -> {
-            GroupScreen(
-                viewModel = viewModel,
-                uiState = uiState
-            )
-        }
-        is Screen.ChildLock -> {
-            ChildLockScreen(
-                viewModel = viewModel
-            )
-        }
-        is Screen.Integrations -> {
-            IntegrationsScreen(
-                viewModel = viewModel,
-                appSettings = appSettings,
-                onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) }
-            )
-        }
-        is Screen.Logs -> {
-            LogsScreen(
-                onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) }
-            )
-        }
-        is Screen.Skills -> {
-            SkillsScreen(
-                viewModel = viewModel,
-                onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) },
-                onEditSkill = { dirName -> viewModel.navigateToScreen(Screen.SkillEditor(dirName)) }
-            )
-        }
-        is Screen.SkillEditor -> {
-            SkillEditorScreen(
-                viewModel = viewModel,
-                skillDirectoryName = (effectiveScreen as Screen.SkillEditor).skillDirectoryName,
-                onBackClick = { viewModel.navigateToScreen(Screen.Skills) }
-            )
+    CompositionLocalProvider(LocalAttachmentPickers provides attachmentPickers) {
+        when (effectiveScreen) {
+            is Screen.Welcome -> {
+                WelcomeScreen(
+                    onNavigateToApiKeys = { viewModel.navigateToScreen(Screen.ApiKeys) },
+                    onNavigateToMain = { viewModel.navigateToScreen(Screen.ChatHistory) },
+                    onSkipWelcomeChanged = { skip -> viewModel.updateSkipWelcomeScreen(skip) },
+                    repository = repository,
+                    currentUser = appSettings.current_user,
+                    providers = repository.loadProviders(),
+                    initialSkipWelcome = appSettings.skipWelcomeScreen
+                )
+            }
+            is Screen.ChatHistory -> {
+                ChatHistoryScreen(
+                    viewModel = viewModel,
+                    uiState = uiState
+                )
+            }
+            is Screen.Chat -> {
+                ChatScreen(
+                    viewModel = viewModel,
+                    uiState = uiState
+                )
+            }
+            is Screen.ApiKeys -> {
+                ApiKeysScreen(
+                    repository = repository,
+                    currentUser = appSettings.current_user,
+                    providers = repository.loadProviders(),
+                    onBackClick = { viewModel.navigateToScreen(Screen.ChatHistory) },
+                    onSkipWelcomeChanged = { skip -> viewModel.updateSkipWelcomeScreen(skip) }
+                )
+            }
+            is Screen.UserSettings -> {
+                UserSettingsScreen(
+                    viewModel = viewModel,
+                    appSettings = appSettings,
+                    onBackClick = { viewModel.navigateToScreen(Screen.ChatHistory) }
+                )
+            }
+            is Screen.Group -> {
+                GroupScreen(
+                    viewModel = viewModel,
+                    uiState = uiState
+                )
+            }
+            is Screen.ChildLock -> {
+                ChildLockScreen(
+                    viewModel = viewModel
+                )
+            }
+            is Screen.Integrations -> {
+                IntegrationsScreen(
+                    viewModel = viewModel,
+                    appSettings = appSettings,
+                    onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) }
+                )
+            }
+            is Screen.Logs -> {
+                LogsScreen(
+                    onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) }
+                )
+            }
+            is Screen.Skills -> {
+                SkillsScreen(
+                    viewModel = viewModel,
+                    onBackClick = { viewModel.navigateToScreen(Screen.UserSettings) },
+                    onEditSkill = { dirName -> viewModel.navigateToScreen(Screen.SkillEditor(dirName)) }
+                )
+            }
+            is Screen.SkillEditor -> {
+                SkillEditorScreen(
+                    viewModel = viewModel,
+                    skillDirectoryName = (effectiveScreen as Screen.SkillEditor).skillDirectoryName,
+                    onBackClick = { viewModel.navigateToScreen(Screen.Skills) }
+                )
+            }
         }
     }
 
