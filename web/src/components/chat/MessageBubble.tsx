@@ -190,6 +190,31 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 
 // ─── MessageBubble ────────────────────────────────────────────────────────────
 
+/**
+ * Branch info of a user message, like Android's getBranchInfoForMessage: the node holding the
+ * message, and which of its variants is on the chat's current path. The variants of a node
+ * usually share the user message's id (an edit, a resend and a regenerate all keep it), so the
+ * current variant is read from currentVariantPath and never matched by message id.
+ * Null when the node has a single variant or is not on the current path.
+ */
+export function branchInfoForMessage(chat: Chat, msg: Message): BranchInfo | null {
+  const nodes = chat.messageNodes ?? []
+  const node =
+    (msg.nodeId ? nodes.find((n) => n.nodeId === msg.nodeId) : undefined) ??
+    nodes.find((n) => n.variants.some((v) => v.userMessage.id === msg.id))
+  if (!node || node.variants.length <= 1) return null
+  const currentVariantId = (chat.currentVariantPath ?? []).find((id) =>
+    node.variants.some((v) => v.variantId === id),
+  )
+  if (!currentVariantId) return null
+  return {
+    nodeId: node.nodeId,
+    currentVariantIndex: node.variants.findIndex((v) => v.variantId === currentVariantId),
+    totalVariants: node.variants.length,
+    currentVariantId,
+  }
+}
+
 interface MessageBubbleProps {
   msg: Message
   chat: Chat
@@ -245,23 +270,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isToolResponse = msg.role === 'tool_response'
 
   // Branch info for user messages
-  const branchInfo = useMemo((): BranchInfo | null => {
-    if (!isUser || !msg.nodeId) return null
-    for (const node of chat.messageNodes ?? []) {
-      if (node.nodeId === msg.nodeId && node.variants.length > 1) {
-        const idx = node.variants.findIndex(
-          (v) => v.variantId === msg.variantId || v.userMessage.id === msg.id,
-        )
-        return {
-          nodeId: node.nodeId,
-          currentVariantIndex: idx >= 0 ? idx : 0,
-          totalVariants: node.variants.length,
-          currentVariantId: msg.variantId ?? node.variants[0].variantId,
-        }
-      }
-    }
-    return null
-  }, [chat, msg, isUser])
+  const branchInfo = useMemo(
+    () => (isUser ? branchInfoForMessage(chat, msg) : null),
+    [chat, msg, isUser],
+  )
 
   // Tool call / tool response → ToolCallBlock rendering
   if (isToolCall && msg.toolCall) {

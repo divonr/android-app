@@ -8,7 +8,12 @@
 
 import React from 'react'
 import type { IconType } from 'react-icons'
-import { MdArrowBack as MdArrowBackLtr, MdForward as MdForwardLtr } from 'react-icons/md'
+import {
+  MdArrowBack as MdArrowBackLtr,
+  MdForward as MdForwardLtr,
+  MdKeyboardArrowLeft as MdKeyboardArrowLeftLtr,
+  MdKeyboardArrowRight as MdKeyboardArrowRightLtr,
+} from 'react-icons/md'
 
 /**
  * Auto-mirrored back arrow — the document is RTL (dir="rtl" on <html>), so the
@@ -23,10 +28,24 @@ export const MdForward: IconType = ({ style, ...rest }) => (
   <MdForwardLtr style={{ transform: 'scaleX(-1)', ...style }} {...rest} />
 )
 
+/**
+ * Auto-mirrored Icons.AutoMirrored.Filled.KeyboardArrowLeft: the "towards the start" arrow,
+ * which points right in RTL (the branch navigator's "previous").
+ */
+export const MdKeyboardArrowLeft: IconType = ({ style, ...rest }) => (
+  <MdKeyboardArrowLeftLtr style={{ transform: 'scaleX(-1)', ...style }} {...rest} />
+)
+
+/**
+ * Auto-mirrored Icons.AutoMirrored.Filled.KeyboardArrowRight: the "towards the end" arrow,
+ * which points left in RTL (the branch navigator's "next").
+ */
+export const MdKeyboardArrowRight: IconType = ({ style, ...rest }) => (
+  <MdKeyboardArrowRightLtr style={{ transform: 'scaleX(-1)', ...style }} {...rest} />
+)
+
 export {
   // Navigation
-  MdChevronLeft,
-  MdChevronRight,
   MdExpandMore,
   MdExpandLess,
   MdClose,

@@ -1,10 +1,13 @@
 /**
- * BranchNavigator — ‹ n/m › variant switcher per BranchNavigator.kt.
+ * BranchNavigator — n/m variant switcher per BranchNavigator.kt.
  * Shown below user messages when node has multiple variants.
+ *
+ * Like Android's row in RTL: "previous" is the first item (on the right) and its auto-mirrored
+ * arrow points right; "next" is the last item (on the left) and its arrow points left.
  */
 
 import React, { useState } from 'react'
-import { MdChevronLeft, MdChevronRight } from '../../ui/icons'
+import { MdKeyboardArrowLeft, MdKeyboardArrowRight } from '../../ui/icons'
 import { branching } from '../../api/client'
 import type { Chat } from '../../api/types'
 import { t } from '../../i18n/he'
@@ -69,7 +72,7 @@ const BranchNavigator: React.FC<BranchNavigatorProps> = ({
         }}
         title={t('previous_variant')}
       >
-        <MdChevronLeft size={18} />
+        <MdKeyboardArrowLeft size={18} data-testid="branch-prev-icon" />
       </button>
       <span
         style={{
@@ -100,7 +103,7 @@ const BranchNavigator: React.FC<BranchNavigatorProps> = ({
         }}
         title={t('next_variant')}
       >
-        <MdChevronRight size={18} />
+        <MdKeyboardArrowRight size={18} data-testid="branch-next-icon" />
       </button>
     </div>
   )

@@ -11,6 +11,10 @@ Branch: `web-ui`
 
 ---
 
+## R11 — Branch navigator fix (2026-11-11)
+
+- [x] **Branch switching and arrow direction** — the navigator read the current variant by matching the user message's id, but the variants of a node share that id (edit / resend / regenerate keep it), so it always showed the first variant ("1/n", previous disabled) and "next" asked the server for a variant that was usually already shown. `branchInfoForMessage` in `MessageBubble.tsx` now reads the current variant from `currentVariantPath`, like Android's `getBranchInfo`. The arrows are the auto-mirrored `MdKeyboardArrowLeft` / `MdKeyboardArrowRight` of `ui/icons.tsx` (Android's `Icons.AutoMirrored.Filled.KeyboardArrow*`): previous on the right pointing right, next on the left pointing left. Web only; tests in `ChatPage.test.tsx`.
+
 ## R10 — In-app image viewer (2026-11-11)
 
 - [x] **Image viewer** — mirrors Android's `ImageViewer.kt`. Image thumbnails (message attachments in `AttachmentView`, project files in `GroupPage`) open `components/chat/ImageViewer.tsx` full screen (host in `AppLayout`; a ctrl/middle click still opens a new tab): close button / Escape, click to zoom, side menu with Share (Web Share API with files, hidden where unsupported), Save (download through the file route) and Forward (chat picker incl. "new chat"; the image goes through `utils/forwardedFile.ts` into the target chat's draft as a normal upload, ready to send). Strings `image_viewer_*` in `he.ts`. Tests: `ImageViewer.test.tsx` + one in `ChatAttachments.test.tsx`; vitest 243/243, `npm run build` clean. Not yet checked in a real browser. commit bf13091
