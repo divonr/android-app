@@ -346,3 +346,52 @@ event stream with reconnect), `CloudRunTracker` (the runs' client-side state →
 - S2 Android + shared client. S3 web client. S4 deploy + live test.
 - S5: per-user / per-run tools on the server (GitHub, Google Workspace, group tool), terminal event
   before the title generation + `chat_updated`.
+
+---
+
+# Attachment store (round 2) — supersedes "Attachments (v1)" above
+
+Goal: attachment files are available to the server (cloud runs with files, Python tool) and to every
+client of the account (a file attached on the phone is viewable on the web and vice versa). Applies
+whenever sync is enabled, not only with cloud execution. The local fallback path stays intact.
+
+## Identity
+`Attachment` gains `sha256: String? = null` and `size: Long? = null` (backward compatible). The hash is
+the file's identity across devices; `local_file_path` stays a device-specific hint only.
+Resolution (one shared function used by every platform): local path exists → use it; else hash present →
+per-device cache `attachments_cache/<sha256>`; else download from the store into the cache; else unavailable.
+
+## Store (sync-server, per user, bearer auth)
+Files on disk (not in SQLite), metadata table with state `pending | committed`.
+- `PUT /files/{sha256}` — raw body, streamed to disk, hash verified, size limit `MAX_FILE_BYTES`
+  (env, default 95 MB — the public URL is behind Cloudflare, which caps a single request body at 100 MB).
+  New file → `pending`. Already present → 200 without re-upload. 413 over the limit.
+- `HEAD /files/{sha256}` → 200/404. `GET /files/{sha256}` → bytes (Range supported).
+- `POST /files/{sha256}/commit` — mark as used (idempotent). Done by whoever saves a message / project
+  attachment that references the file.
+- `DELETE /files/{sha256}` — deletes ONLY a `pending` file (attached, then removed before any use);
+  a committed file is left alone (`{"deleted": false}`).
+- Sweep: `pending` files older than 24 h are deleted (covers a client that died before its delete).
+No cross-user dedupe. Deleting chats does not delete committed files (cleanup job is out of scope).
+
+## Clients
+- Upload starts when the file is attached (background). Removing the attachment before sending → DELETE.
+  At send: bounded wait for the upload; on failure/timeout the request falls back to the device path
+  (upload keeps going so the file still reaches other devices). Sending commits the file.
+- Lazy backfill: attachments already in history have no hash; a device that has the file hashes +
+  uploads + commits it when a request needs it, and records the hash on the stored attachment.
+- Download only on demand (rendering / opening / using the file), cached per device.
+- Web: uploads go through llm-web (cookie auth) into the store; attachments from any device are
+  viewable/downloadable in the web UI.
+
+## Server (llm-web)
+- A run resolves needed attachment files from the store (cache in the user's dir). `409
+  attachments_unsupported` remains only for a file that has no hash and is not on the server.
+- The server may now upload files to the provider and write provider ids (matched by message id + hash)
+  into the synced history; it must still never write its own local paths there.
+- Python tool runs in cloud runs: inputs resolved from the store; generated files are stored, committed
+  and attached (with hash) to the saved tool message, as Android's service does locally.
+
+## Stages
+A1 sync-server store + shared model/client/resolver · A2 llm-web (runs, Python tool, web file routes)
+· A3 Android · A4 web UI · A5 deploy + live test.
