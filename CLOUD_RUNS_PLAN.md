@@ -358,28 +358,63 @@ whenever sync is enabled, not only with cloud execution. The local fallback path
 ## Identity
 `Attachment` gains `sha256: String? = null` and `size: Long? = null` (backward compatible). The hash is
 the file's identity across devices; `local_file_path` stays a device-specific hint only.
-Resolution (one shared function used by every platform): local path exists → use it; else hash present →
-per-device cache `attachments_cache/<sha256>`; else download from the store into the cache; else unavailable.
+Resolution (one shared function used by every platform, `AttachmentResolver`): local path exists → use
+it; else hash present → per-device cache `attachments_cache/<sha256>`
+(`PlatformStorage.attachmentsCacheDir`, under `filesDir`, so per user on the web server); else download
+from the store into the cache (verified, atomic rename; concurrent resolutions of one hash download
+once); else unavailable.
+- (A1) The server must not trust a `local_file_path` that a client sent: its resolver is built with a
+  `trustLocalPath` predicate (only files inside the user's own directory); an untrusted path is
+  skipped and the store copy is used.
+- (A1) **Merge / older clients.** The chat merge compares whole messages, and a client that predates
+  the fields rewrites the history without them — a plain 3-way merge would then drop the hashes (and
+  count every such message as "modified", which also beats a deletion made on another device).
+  `ChatHistoryMerger` therefore never loses `sha256` / `size` to a side that lacks them
+  (`AttachmentIdentityRestore`): an attachment without a hash takes it from the same attachment — same
+  chat or group, same message id, same `local_file_path`, name and mime type — of the base (before
+  the merge) and of any of the three copies (after it). The repaired file is uploaded, so the server
+  copy heals too. A hash can therefore never be removed from an attachment by sync; replace the
+  attachment (another path) instead.
 
 ## Store (sync-server, per user, bearer auth)
-Files on disk (not in SQLite), metadata table with state `pending | committed`.
-- `PUT /files/{sha256}` — raw body, streamed to disk, hash verified, size limit `MAX_FILE_BYTES`
-  (env, default 95 MB — the public URL is behind Cloudflare, which caps a single request body at 100 MB).
-  New file → `pending`. Already present → 200 without re-upload. 413 over the limit.
-- `HEAD /files/{sha256}` → 200/404. `GET /files/{sha256}` → bytes (Range supported).
-- `POST /files/{sha256}/commit` — mark as used (idempotent). Done by whoever saves a message / project
-  attachment that references the file.
-- `DELETE /files/{sha256}` — deletes ONLY a `pending` file (attached, then removed before any use);
-  a committed file is left alone (`{"deleted": false}`).
-- Sweep: `pending` files older than 24 h are deleted (covers a client that died before its delete).
+Files on disk (not in SQLite) under `SYNC_FILES_DIR` (env; default `sync_files/` next to the DB,
+git-ignored) as `<username>/<sha[:2]>/<sha256>`; metadata table `files` with state
+`pending | committed`. `{sha256}` must be exactly 64 lowercase hex digits (else `400`).
+- `PUT /files/{sha256}` — raw body, streamed to a private temp file, hash verified, then renamed into
+  place; size limit `MAX_FILE_BYTES` (env, default 95 MB — the public URL is behind Cloudflare, which
+  caps a single request body at 100 MB).
+  New file → `201 {"sha256","size","state":"pending","existed":false}`. Already present →
+  `200 {…,"existed":true}` without re-upload (the body is read and dropped; a pending file's 24 h
+  clock restarts). `413` over the limit. `422 {"detail":{"error":"hash_mismatch",…}}` when the body
+  is not the file the URL names. Nothing is kept after a failed or interrupted upload.
+- `HEAD /files/{sha256}` → 200/404 (`Content-Length`, `X-File-State: pending|committed`).
+  `GET /files/{sha256}` → bytes (Range supported).
+- `POST /files/{sha256}/commit` → `200 {"sha256","size","state":"committed"}` — mark as used
+  (idempotent). Done by whoever saves a message / project attachment that references the file.
+  `404` when the store does not have the file: the committer uploads it again, then commits.
+- `DELETE /files/{sha256}` — deletes ONLY a `pending` file (attached, then removed before any use):
+  `{"deleted": true}`; a committed file is left alone (`{"deleted": false, "state": "committed"}`);
+  `404` when the store does not have it.
+- Sweep (at startup and every hour, `FILES_SWEEP_INTERVAL_S`): `pending` files older than 24 h are
+  deleted (covers a client that died before its delete), and upload temp files idle for 1 h.
 No cross-user dedupe. Deleting chats does not delete committed files (cleanup job is out of scope).
+One copy per (user, hash): deleting a pending file also removes it for another draft that attached
+the same bytes — that draft's commit then gets `404` and uploads again (handled by the shared client).
+No per-user quota.
 
 ## Clients
-- Upload starts when the file is attached (background). Removing the attachment before sending → DELETE.
-  At send: bounded wait for the upload; on failure/timeout the request falls back to the device path
-  (upload keeps going so the file still reaches other devices). Sending commits the file.
+Shared, no Android dependencies (`shared/.../data/attachments/`): `AttachmentStoreClient` (the routes
+above; results, never exceptions), `AttachmentResolver`, `AttachmentUploader` / `AttachmentUpload`.
+- Upload starts when the file is attached (background: `uploader.start(file)`). Removing the attachment
+  before sending → DELETE (`uploader.discard(upload)`).
+  At send: bounded wait for the upload (`upload.awaitStored(timeoutMs)`); on failure/timeout the request
+  falls back to the device path (upload keeps going so the file still reaches other devices). The hash
+  is known as soon as the file is hashed (`upload.digest()`), before the upload ends, so the message is
+  saved with `sha256` + `size` either way. Sending commits the file (`upload.commitWhenStored()`:
+  commits when the store has the file, re-uploading if the store lost it meanwhile).
 - Lazy backfill: attachments already in history have no hash; a device that has the file hashes +
-  uploads + commits it when a request needs it, and records the hash on the stored attachment.
+  uploads + commits it when a request needs it (`uploader.ensureStored(file)`), and records the hash
+  on the stored attachment.
 - Download only on demand (rendering / opening / using the file), cached per device.
 - Web: uploads go through llm-web (cookie auth) into the store; attachments from any device are
   viewable/downloadable in the web UI.

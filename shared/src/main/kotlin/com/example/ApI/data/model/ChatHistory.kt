@@ -139,7 +139,16 @@ data class Attachment(
     val mime_type: String,
     val file_OPENAI_id: String? = null,
     val file_POE_url: String? = null,
-    val file_GOOGLE_uri: String? = null
+    val file_GOOGLE_uri: String? = null,
+    /**
+     * SHA-256 of the file's bytes (64 lowercase hex): its identity across devices and its name
+     * in the account's attachment store (CLOUD_RUNS_PLAN.md, "Attachment store").
+     * [local_file_path] is only a hint that is valid on the device that wrote it.
+     * null: attached before the store existed (or not hashed yet).
+     */
+    val sha256: String? = null,
+    /** Size of the file in bytes; set together with [sha256]. */
+    val size: Long? = null
 )
 
 @Serializable

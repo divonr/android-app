@@ -21,11 +21,22 @@ import com.example.ApI.util.AppLogger
  * - `currentVariantPath` is device view state: the local path is kept (repaired and extended
  *   to the leaf) and `messages` is recomputed from it.
  * - Without a base (first link of a device, lost state) everything is a 2-way union.
+ * - An attachment's `sha256` / `size` are never lost to a side that lacks them
+ *   ([AttachmentIdentityRestore]).
  */
 object ChatHistoryMerger {
     private const val TAG = "ChatHistoryMerger"
 
     fun merge(base: UserChatHistory?, local: UserChatHistory, remote: UserChatHistory): UserChatHistory {
+        // Attachment hashes dropped by a client that predates them: see AttachmentIdentityRestore
+        val baseHashes = AttachmentIdentityRestore.index(base)
+        val l = AttachmentIdentityRestore.restore(local, baseHashes)
+        val r = AttachmentIdentityRestore.restore(remote, baseHashes)
+        val merged = mergeRestored(base, l, r)
+        return AttachmentIdentityRestore.restore(merged, AttachmentIdentityRestore.index(base, l, r))
+    }
+
+    private fun mergeRestored(base: UserChatHistory?, local: UserChatHistory, remote: UserChatHistory): UserChatHistory {
         val baseChats = base?.let { dedupeChats(it.chat_history) }
         val localChats = dedupeChats(local.chat_history)
         val remoteChats = dedupeChats(remote.chat_history)

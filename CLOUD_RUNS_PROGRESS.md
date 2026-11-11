@@ -153,3 +153,45 @@ Notes
 - Deploy: server + web together as before (an S3 web client against an S5 server only misses the
   title refresh until the next sync refresh; an S5 Android client against an older server is fine —
   `groupId` is ignored there).
+
+## A1 — attachment store: sync-server + shared model / client / resolver (done, not committed, not deployed)
+
+Contract: the plan's "Attachment store (round 2)" (updated in this stage: answers of the routes,
+`SYNC_FILES_DIR`, the merge rule, the server's `trustLocalPath`, the shared API names).
+
+sync-server (`/home/divonr/ApI/sync-server`, separate repo)
+- `server.py`: `PUT` / `HEAD` / `GET` (Range) / `DELETE /files/{sha256}`, `POST /files/{sha256}/commit`,
+  table `files`, files under `SYNC_FILES_DIR` (default `sync_files/` beside the DB; in `.gitignore`),
+  `MAX_FILE_BYTES` (default 95 MB), `sweep_files()` at startup + hourly (FastAPI lifespan).
+  Streamed upload → temp file → hash check → rename under the DB write lock.
+- `tests/test_files.py` (24 test functions, 33 cases).
+
+shared
+- `Attachment.sha256` / `Attachment.size` (null by default; not written when null).
+- `PlatformStorage.attachmentsCacheDir` (default `filesDir/attachments_cache`; no platform class changed).
+- `data/attachments/`: `AttachmentStoreClient` (`exists`, `upload`, `commit`, `deletePending`,
+  `download`; `StoreResult` / `StoreError`), `AttachmentHash`, `FileDigest`,
+  `RemoteSyncSettings.attachmentStoreConfig()`, `Attachment.withDigest` / `.digest`;
+  `AttachmentResolver` (`resolve`, `resolveLocal`, `resolveHash`, `trustLocalPath`);
+  `AttachmentUploader` (`start`, `discard`, `ensureStored`, `commit`) and `AttachmentUpload`
+  (`state`, `digest()`, `awaitStored([timeout])`, `commitWhenStored()`, `cancel()`).
+- `data/sync/merge/AttachmentIdentityRestore` + `ChatHistoryMerger.merge`: hashes survive merges and
+  an older client's rewrite (see the plan, "Identity").
+
+Tests (shared): `data/attachments/` — `AttachmentStoreClientTest`, `AttachmentResolverTest`,
+`AttachmentUploaderTest` on `FakeAttachmentStoreServer` (JDK HttpServer, same answers as
+`server.py`); `data/sync/merge/AttachmentIdentityMergeTest`.
+
+Not done here (later stages)
+- Nothing calls the new API yet: no attachment gets a hash, nothing is uploaded or downloaded.
+  Android / desktop / web UI, `StreamingService`, the providers, `FileUploadManager`, llm-web's
+  attachment rule (`unservableAttachment`) and its file routes are untouched.
+- Writing a backfilled hash into the stored history (find the attachment by chat / message id and
+  save) has no shared helper yet — A2 / A3 need one in the repository.
+- The Python tool hands its output files on as JSON with `file_name` / `mime_type` /
+  `local_file_path` only (`PythonInterpreterTool` → `StreamingService` rebuilds the `Attachment`):
+  the hash has to be added on that path. `web/src/api/types.ts` `Attachment` lacks the two fields.
+- The store was exercised by pytest and by curl against a throwaway local instance (temp DB), not
+  through Cloudflare: a 95 MB upload through the public URL is untested.
+- Deploy: sync-server needs a restart to get the routes (it creates the `files` table and
+  `sync_files/` on start). Old clients are unaffected by the new server.
