@@ -3,6 +3,18 @@ package com.example.ApI.data.model
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
 
+/**
+ * Token counts a provider reported for one request.
+ * @param cachedTokens the part of [promptTokens] the provider served from its prompt cache
+ */
+data class TokenUsage(val promptTokens: Int, val cachedTokens: Int, val outputTokens: Int, val thoughtsTokens: Int) {
+    /** The counts as every log line shows them (the cached share of the prompt rounded down). */
+    fun describe(): String {
+        val percent = if (promptTokens > 0) cachedTokens * 100L / promptTokens else 0L
+        return "prompt=$promptTokens, cached=$cachedTokens ($percent%), output=$outputTokens, thoughts=$thoughtsTokens"
+    }
+}
+
 // Interface for streaming callbacks
 interface StreamingCallback {
     fun onPartialResponse(text: String)
@@ -53,6 +65,14 @@ interface StreamingCallback {
      * @param status Status indicating whether thoughts are present, unavailable, or none
      */
     fun onThinkingComplete(thoughts: String?, durationSeconds: Float, status: ThoughtsStatus) {
+        // Default implementation - no-op
+    }
+
+    /**
+     * Called once per provider request (each tool follow-up is its own request) when the
+     * provider reports token counts
+     */
+    fun onUsage(usage: TokenUsage) {
         // Default implementation - no-op
     }
 }

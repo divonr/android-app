@@ -395,6 +395,18 @@ export interface SseCancelledEvent {
   // empty object
 }
 
+/**
+ * The token counts of one provider request of the run (each tool follow-up is a request), from
+ * providers that report them. `cachedTokens` is the part of `promptTokens` the provider served
+ * from its prompt cache. Informational: not about the run's state.
+ */
+export interface SseUsageEvent {
+  promptTokens: number
+  cachedTokens: number
+  outputTokens: number
+  thoughtsTokens: number
+}
+
 // ---------------------------------------------------------------------------
 // Cloud runs (GET /api/runs/stream, POST /api/runs/{runId}/cancel)
 // ---------------------------------------------------------------------------

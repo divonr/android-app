@@ -57,7 +57,12 @@ data class ToolSpecification(
     val name: String,
     val description: String,
     val parameters: JsonObject? = null, // Parameters schema in provider format
-    val providerSpecific: JsonObject? = null // Any additional provider-specific data
+    val providerSpecific: JsonObject? = null, // Any additional provider-specific data
+    /**
+     * [description] without per-request content, for providers whose prompt cache covers the
+     * tool declarations. null when [description] is already stable.
+     */
+    val stableDescription: String? = null
 )
 
 /**

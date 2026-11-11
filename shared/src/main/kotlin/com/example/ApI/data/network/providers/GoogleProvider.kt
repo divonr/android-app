@@ -33,8 +33,10 @@ enum class GooglePlatform {
  * Handles streaming responses, tool calling, and thinking support.
  *
  * The same wire protocol serves both [GooglePlatform]s. Agent Platform differs in auth, in
- * attachments (no Files API: inline base64 only), and in being stricter about a few request
- * shapes; those differences are gated on [isAgentPlatform] and leave AI Studio untouched.
+ * attachments (no Files API: inline base64 only), in being stricter about a few request
+ * shapes, and in keeping the start of the request identical from one request to the next (its
+ * implicit prompt cache is a prefix match over system instruction, tools, then contents);
+ * those differences are gated on [isAgentPlatform] and leave AI Studio untouched.
  */
 class GoogleProvider(
     private val platform: GooglePlatform = GooglePlatform.AI_STUDIO
@@ -195,7 +197,7 @@ class GoogleProvider(
             }
 
             val reader = BufferedReader(InputStreamReader(connection.inputStream))
-            parseStreamingResponse(reader, connection, callback)
+            parseStreamingResponse(reader, connection, modelName, callback)
         } catch (e: Exception) {
             callback.onError("Failed to make Google streaming request: ${e.message}")
             ProviderStreamingResult.Error("Failed to make Google streaming request: ${e.message}")
@@ -230,11 +232,17 @@ class GoogleProvider(
         // Error tracking
         var errorMessage: String? = null
 
+        // Last usageMetadata with token counts: the final chunk's, earlier ones only name the traffic type
+        var lastUsage: JsonObject? = null
+
         init {
             AppLogger.d("[TOOL_CALL_DEBUG] Starting to read Google stream...")
         }
 
         override fun onEvent(eventType: String?, data: JsonObject): StreamAction {
+            // Read first: the chunk that ends a response in an error carries the counts too
+            (data["usageMetadata"] as? JsonObject)?.takeIf { "promptTokenCount" in it }?.let { lastUsage = it }
+
             // Check for error
             val error = data["error"]?.jsonObject
             if (error != null) {
@@ -408,6 +416,7 @@ class GoogleProvider(
     private fun parseStreamingResponse(
         reader: BufferedReader,
         connection: HttpURLConnection,
+        modelName: String,
         callback: StreamingCallback
     ): ProviderStreamingResult {
         val parser = DataOnlyStreamParser(
@@ -419,7 +428,12 @@ class GoogleProvider(
         )
         val handler = GoogleEventHandler(callback)
 
-        val result = parser.parse(reader, handler)
+        val result = try {
+            parser.parse(reader, handler)
+        } finally {
+            // Also when the connection drops after the counts arrived
+            reportTokenUsage(modelName, handler.lastUsage, callback)
+        }
 
         reader.close()
         connection.disconnect()
@@ -430,6 +444,29 @@ class GoogleProvider(
         }
 
         return handler.getResult()
+    }
+
+    /**
+     * Agent Platform caches prompts implicitly, with no request field: the cached count in the
+     * reply is the only sign that the request prefix was reused, so it is logged and handed on.
+     */
+    private fun reportTokenUsage(modelName: String, usage: JsonObject?, callback: StreamingCallback) {
+        if (!isAgentPlatform || usage == null) return
+        try {
+            fun count(field: String) = (usage[field] as? JsonPrimitive)?.intOrNull ?: 0
+            val counts = TokenUsage(
+                promptTokens = count("promptTokenCount"),
+                // Absent, not 0, when nothing was served from the cache
+                cachedTokens = count("cachedContentTokenCount"),
+                outputTokens = count("candidatesTokenCount"),
+                thoughtsTokens = count("thoughtsTokenCount")
+            )
+            AppLogger.i("Vertex token usage: model=$modelName, ${counts.describe()}")
+            callback.onUsage(counts)
+        } catch (e: Exception) {
+            // Bookkeeping only: it must not fail a request that otherwise worked
+            AppLogger.w("[GoogleProvider] Could not report token usage: ${e.message}")
+        }
     }
 
     private fun buildContents(messages: List<Message>, systemPrompt: String): List<JsonObject> {
@@ -456,7 +493,9 @@ class GoogleProvider(
                 "user" -> {
                     val parts = mutableListOf<JsonElement>()
 
-                    if (message.text.isNotBlank()) {
+                    // Agent Platform: the files go first, so that editing the end of the prompt
+                    // leaves them inside the prefix its prompt cache matches on
+                    if (!isAgentPlatform && message.text.isNotBlank()) {
                         parts.add(buildJsonObject {
                             put("text", message.text)
                         })
@@ -464,7 +503,7 @@ class GoogleProvider(
 
                     message.attachments.forEach { attachment ->
                         if (isAgentPlatform) {
-                            parts.add(buildAgentPlatformAttachmentPart(attachment, inlineAttachments))
+                            parts.addAll(buildAgentPlatformAttachmentParts(attachment, inlineAttachments))
                         } else if (!attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}") {
                             parts.add(buildJsonObject {
                                 put("file_data", buildJsonObject {
@@ -473,6 +512,12 @@ class GoogleProvider(
                                 })
                             })
                         }
+                    }
+
+                    if (isAgentPlatform && message.text.isNotBlank()) {
+                        parts.add(buildJsonObject {
+                            put("text", message.text)
+                        })
                     }
 
                     if (parts.isNotEmpty()) {
@@ -515,7 +560,7 @@ class GoogleProvider(
                                 put("functionResponse", buildJsonObject {
                                     put("name", message.toolResponseCallId?.let { findToolNameByCallId(messages, it) } ?: "unknown")
                                     put("response", buildJsonObject {
-                                        put("result", message.toolResponseOutput ?: "")
+                                        put("result", toolResponseResult(message))
                                     })
                                 })
                             })
@@ -529,6 +574,14 @@ class GoogleProvider(
 
         return contents
     }
+
+    /**
+     * The output a function response is replayed with. Agent Platform: a list sent by the web
+     * keeps a tool result only as the message's text, and the files a run generated are named
+     * there, where the Python tool's declaration says to look for them.
+     */
+    private fun toolResponseResult(message: Message): String =
+        message.toolResponseOutput ?: message.text.takeIf { isAgentPlatform } ?: ""
 
     private fun findToolNameByCallId(messages: List<Message>, callId: String): String? {
         return messages.find { it.role == "tool_call" && it.toolCallId == callId }
@@ -600,7 +653,7 @@ class GoogleProvider(
                             put("functionResponse", buildJsonObject {
                                 put("name", response.toolResponseCallId?.let { findToolNameByCallId(messages, it) } ?: "unknown")
                                 put("response", buildJsonObject {
-                                    put("result", response.toolResponseOutput ?: "")
+                                    put("result", toolResponseResult(response))
                                 })
                             })
                         })
@@ -632,11 +685,15 @@ class GoogleProvider(
         return selected
     }
 
-    /** One inlineData part, or a text note telling the model why this file isn't there. */
-    private fun buildAgentPlatformAttachmentPart(attachment: Attachment, inlineAttachments: Set<Attachment>): JsonObject {
-        fun note(reason: String) = buildJsonObject {
+    /**
+     * The file's name and its inlineData part, or a text note telling the model why this file
+     * isn't there. The name is what a tool taking file names needs; saying it here, not in the
+     * tool's description, keeps it the same on every later request.
+     */
+    private fun buildAgentPlatformAttachmentParts(attachment: Attachment, inlineAttachments: Set<Attachment>): List<JsonObject> {
+        fun note(reason: String) = listOf(buildJsonObject {
             put("text", "[Attachment \"${attachment.file_name}\" was not sent: $reason]")
-        }
+        })
 
         val mimeType = agentPlatformMimeType(attachment.mime_type)
             ?: return note("${attachment.mime_type} is not a supported file type")
@@ -651,12 +708,15 @@ class GoogleProvider(
             null
         } ?: return note("the file could not be read")
 
-        return buildJsonObject {
-            put("inlineData", buildJsonObject {
-                put("mimeType", mimeType)
-                put("data", base64)
-            })
-        }
+        return listOf(
+            buildJsonObject { put("text", "[Attached file: \"${attachment.file_name}\"]") },
+            buildJsonObject {
+                put("inlineData", buildJsonObject {
+                    put("mimeType", mimeType)
+                    put("data", base64)
+                })
+            }
+        )
     }
 
     /** The MIME type to send for an attachment, or null when Agent Platform can't accept it. */
@@ -726,10 +786,13 @@ class GoogleProvider(
             enabledTools.isNotEmpty() -> put("tools", buildJsonArray {
                 add(buildJsonObject {
                     put("functionDeclarations", buildJsonArray {
-                        enabledTools.forEach { toolSpec ->
+                        // The prompt cache matches the declarations as a prefix: sorted, since the
+                        // enabled-tools order differs between devices and sessions, and without
+                        // the per-request content some descriptions carry
+                        enabledTools.sortedBy { it.name }.forEach { toolSpec ->
                             add(buildJsonObject {
                                 put("name", toolSpec.name)
-                                put("description", toolSpec.description)
+                                put("description", toolSpec.stableDescription ?: toolSpec.description)
                                 toolSpec.parameters?.let { params ->
                                     sanitizeToolParameters(params)?.let { put("parameters", it) }
                                 }

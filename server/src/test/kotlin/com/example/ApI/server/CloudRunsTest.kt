@@ -1,5 +1,8 @@
 package com.example.ApI.server
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.example.ApI.data.model.ApiKey
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.Attachment
@@ -8,6 +11,7 @@ import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.model.ThinkingBudgetValue
 import com.example.ApI.data.model.ThoughtsStatus
+import com.example.ApI.data.model.TokenUsage
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.ReplyAnchor
 import com.example.ApI.server.auth.FakeSyncWhoamiClient
@@ -31,6 +35,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.*
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
@@ -612,6 +617,84 @@ class CloudRunsTest {
         val finalMessages = seed.chat().messages
         assertEquals(listOf("Q1", "Before", "date_time()", "now", "After"), finalMessages.map { it.text })
         assertNull(finalMessages.last().thoughts, "the thoughts belong to the message they preceded")
+    }
+
+    @Test
+    fun `usage is logged and relayed on both streams and changes nothing of the run`() {
+        val seed = seed()
+        val gate = CompletableDeferred<Unit>()
+        val engine = object : ChatEngine {
+            override suspend fun send(
+                provider: Provider, modelName: String, messages: List<Message>, systemPrompt: String,
+                username: String, chatId: String, projectAttachments: List<Attachment>, webSearchEnabled: Boolean,
+                enabledTools: List<ToolSpecification>, thinkingBudget: ThinkingBudgetValue, temperature: Float?,
+                callback: StreamingCallback
+            ) {
+                callback.onPartialResponse("Hel")
+                // One per provider request: a cache hit, then (the follow-up of a tool step, say) a miss
+                callback.onUsage(TokenUsage(promptTokens = 4436, cachedTokens = 4043, outputTokens = 372, thoughtsTokens = 12))
+                gate.await()
+                callback.onUsage(TokenUsage(promptTokens = 100, cachedTokens = 0, outputTokens = 5, thoughtsTokens = 0))
+                callback.onPartialResponse("lo")
+                callback.onComplete("Hello")
+            }
+        }
+        val logged = ListAppender<ILoggingEvent>().apply { start() }
+        val registryLog = LoggerFactory.getLogger(RunRegistry::class.java) as ch.qos.logback.classic.Logger
+        registryLog.addAppender(logged)
+        try {
+            live(seed, engine).use { server ->
+                val device = server.client()
+                val account = device.sse("/api/runs/stream")
+                account.expect("snapshot")
+                val sendBody = """{"chatId":"${seed.chatId}","provider":"openai","modelName":"gpt-4o","messages":[{"role":"user","text":"Q2","id":"q2"}]}"""
+                val own = server.login(TEST_USER_EMAIL).sse("/api/chat/send", method = "POST", body = sendBody)
+                val runId = own.expect("run").str("runId")
+
+                // The web's own stream: the counts only
+                assertEquals("Hel", own.expect("partial").str("text"))
+                assertEquals(
+                    buildJsonObject { put("promptTokens", 4436); put("cachedTokens", 4043); put("outputTokens", 372); put("thoughtsTokens", 12) },
+                    own.expect("usage")
+                )
+                // The account's stream: with the ids, like every event there
+                account.expect("run_started")
+                account.expect("partial")
+                val usage = account.expect("usage")
+                assertEquals(setOf("promptTokens", "cachedTokens", "outputTokens", "thoughtsTokens", "runId", "chatId"), usage.keys)
+                assertEquals(runId, usage.str("runId"))
+                assertEquals(seed.chatId, usage.str("chatId"))
+                assertEquals(4043, usage["cachedTokens"]!!.jsonPrimitive.int)
+
+                // Not a terminal event and nothing of the run's state: it runs on, its snapshot is the same
+                val midRun = device.snapshot().single()
+                assertEquals(RunStatus.RUNNING, midRun.str("status"))
+                assertEquals("Hel", midRun.str("text"))
+                assertEquals(
+                    setOf("runId", "chatId", "provider", "modelName", "status", "text", "thinkingActive", "thinkingText", "error", "startedAt"),
+                    midRun.keys
+                )
+
+                gate.complete(Unit)
+                assertEquals(0, own.expect("usage")["cachedTokens"]!!.jsonPrimitive.int)
+                assertEquals("lo", own.expect("partial").str("text"))
+                assertEquals("Hello", own.expect("complete").str("text"))
+                assertEquals(100, account.expect("usage")["promptTokens"]!!.jsonPrimitive.int)
+                account.expect("partial")
+                account.expect("complete")
+                assertEquals(listOf("Q1", "Q2", "Hello"), seed.texts())
+
+                assertEquals(
+                    listOf(
+                        "Run $runId openai/gpt-4o token usage: prompt=4436, cached=4043 (91%), output=372, thoughts=12",
+                        "Run $runId openai/gpt-4o token usage: prompt=100, cached=0 (0%), output=5, thoughts=0"
+                    ),
+                    logged.list.filter { it.level == Level.INFO }.map { it.formattedMessage }.filter { "token usage" in it }
+                )
+            }
+        } finally {
+            registryLog.detachAppender(logged)
+        }
     }
 
     @Test
