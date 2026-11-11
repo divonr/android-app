@@ -8,6 +8,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { groups as groupsApi, chats as chatsApi, files as filesApi } from '../api/client'
 import type { Attachment, ChatGroup, Chat } from '../api/types'
 import { StoreImage } from '../components/chat/AttachmentView'
+import { openImageOnClick } from '../components/chat/ImageViewer'
 import { markAttachmentsUsed } from '../hooks/useDraftAttachments'
 import {
   attachmentKind,
@@ -119,6 +120,7 @@ const ProjectFileTile: React.FC<{ att: Attachment; onRemove: () => void }> = ({ 
           href={attachmentUrl(att)!}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={(e) => openImageOnClick(e, att)}
           title={att.file_name}
           aria-label={`${t('attachment_open_image')}: ${att.file_name}`}
         >

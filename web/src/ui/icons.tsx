@@ -8,7 +8,7 @@
 
 import React from 'react'
 import type { IconType } from 'react-icons'
-import { MdArrowBack as MdArrowBackLtr } from 'react-icons/md'
+import { MdArrowBack as MdArrowBackLtr, MdForward as MdForwardLtr } from 'react-icons/md'
 
 /**
  * Auto-mirrored back arrow — the document is RTL (dir="rtl" on <html>), so the
@@ -16,6 +16,11 @@ import { MdArrowBack as MdArrowBackLtr } from 'react-icons/md'
  */
 export const MdArrowBack: IconType = ({ style, ...rest }) => (
   <MdArrowBackLtr style={{ transform: 'scaleX(-1)', ...style }} {...rest} />
+)
+
+/** Auto-mirrored forward arrow (Icons.AutoMirrored.Filled.Forward): points left in RTL. */
+export const MdForward: IconType = ({ style, ...rest }) => (
+  <MdForwardLtr style={{ transform: 'scaleX(-1)', ...style }} {...rest} />
 )
 
 export {

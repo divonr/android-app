@@ -34,6 +34,7 @@ import type { StreamCallbacks } from '../api/stream'
 import { cancelRun } from '../api/runs'
 import { useRunsStore, selectForeignRun } from '../stores/runsStore'
 import { useDraftAttachments } from '../hooks/useDraftAttachments'
+import { clearForwardedFile, peekForwardedFile } from '../utils/forwardedFile'
 import { FILE_ONLY_MESSAGE_TEXT } from '../utils/attachments'
 import {
   EMPTY_STREAM,
@@ -127,6 +128,20 @@ const ChatPage: React.FC = () => {
   // when removed — or when the chat is left with them un-sent
   const draft = useDraftAttachments(chatId)
   const draftBlocked = draft.uploading || draft.hasFailed
+
+  // An image forwarded to this chat from the image viewer: attached to the draft, ready to send.
+  // Forgotten only after the effect has settled (StrictMode runs it twice; the first draft is
+  // discarded with the first mount).
+  const addToDraft = draft.add
+  useEffect(() => {
+    if (!chatId) return
+    const forwarded = peekForwardedFile(chatId)
+    if (!forwarded) return
+    const rejected = addToDraft([forwarded])
+    if (rejected.length > 0) setError(rejected.join(' · '))
+    const timer = setTimeout(() => clearForwardedFile(forwarded), 0)
+    return () => clearTimeout(timer)
+  }, [chatId, addToDraft])
   const [editingMsg, setEditingMsg] = useState<Message | null>(null)
 
   // ── Streaming state ──────────────────────────────────────────────────────

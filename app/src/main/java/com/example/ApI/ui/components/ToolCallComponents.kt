@@ -568,7 +568,9 @@ fun ToolCallBubble(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(vertical = 4.dp)
-                                        .clickable { outputFile.open() }
+                                        .clickable {
+                                            if (isImage) viewModel.openImageViewer(attachment) else outputFile.open()
+                                        }
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(12.dp),
@@ -604,7 +606,8 @@ fun ToolCallBubble(
                                             .fillMaxWidth()
                                             .heightIn(max = 200.dp)
                                             .padding(vertical = 4.dp)
-                                            .clip(RoundedCornerShape(8.dp)),
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { viewModel.openImageViewer(attachment) },
                                         contentScale = ContentScale.Fit
                                     )
                                 }

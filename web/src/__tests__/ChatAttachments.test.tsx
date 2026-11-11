@@ -13,6 +13,7 @@ import * as chatStoreModule from '../stores/chatStore'
 import { useRunsStore } from '../stores/runsStore'
 import { resetUsedAttachments } from '../hooks/useDraftAttachments'
 import { MAX_FILE_BYTES } from '../utils/attachments'
+import { peekForwardedFile, setForwardedFile } from '../utils/forwardedFile'
 import type { Attachment, Chat, ChatGroup } from '../api/types'
 
 vi.mock('../pages/ChatPage.module.css', () => ({ default: new Proxy({}, { get: (_t, prop) => String(prop) }) }))
@@ -200,6 +201,28 @@ describe('ChatPage — attaching files', () => {
     expect(within(drafts()[0]).queryByRole('progressbar')).toBeNull()
     expect(sendButton()).not.toBeDisabled()
     expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('attaches an image forwarded from the image viewer when the chat opens, once (also under StrictMode)', async () => {
+    const forwarded = new File(['img'], 'cat.png', { type: 'image/png' })
+    setForwardedFile('c1', forwarded)
+    render(
+      <React.StrictMode>
+        <MemoryRouter initialEntries={['/chat/c1']}>
+          <Routes>
+            <Route path="/chat/:id" element={<ChatPage />} />
+          </Routes>
+        </MemoryRouter>
+      </React.StrictMode>,
+    )
+    await act(async () => { await new Promise((r) => setTimeout(r, 5)) })
+
+    expect(drafts()).toHaveLength(1)
+    expect(within(drafts()[0]).getByText('cat.png')).toBeInTheDocument()
+    expect(drafts()[0]).toHaveAttribute('data-upload-status', 'uploading')
+    expect(uploads[uploads.length - 1].file).toBe(forwarded)
+    // Collected: opening the chat again does not attach it a second time
+    expect(peekForwardedFile('c1')).toBeNull()
   })
 
   it('sends the uploaded Attachment as the server returned it, and does not delete it afterwards', async () => {

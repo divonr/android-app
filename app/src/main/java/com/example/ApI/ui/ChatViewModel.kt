@@ -849,6 +849,39 @@ class ChatViewModel(
     fun addMultipleFilesFromUris(filesList: List<Triple<Uri, String, String>>) = attachmentManager.addMultipleFilesFromUris(filesList)
     fun removeSelectedFile(file: SelectedFile) = attachmentManager.removeSelectedFile(file)
     fun showFileSelection() = attachmentManager.showFileSelection()
+
+    // ==================== In-app image viewer ====================
+    fun openImageViewer(attachment: Attachment) {
+        _uiState.value = _uiState.value.copy(viewedImage = attachment)
+    }
+
+    fun closeImageViewer() {
+        _uiState.value = _uiState.value.copy(viewedImage = null)
+    }
+
+    /**
+     * Forward the viewed image ([file] holds its bytes) to [target] — null: a new chat. The image
+     * is attached to the message being written and the chat is opened, ready to send.
+     */
+    fun forwardImageToChat(attachment: Attachment, file: File, target: Chat?, onFailed: () -> Unit = {}) {
+        attachmentManager.addFileCopy(file, attachment.file_name.ifBlank { file.name }, attachment.mime_type) { attached ->
+            if (!attached) {
+                Toast.makeText(context, R.string.image_viewer_forward_failed, Toast.LENGTH_SHORT).show()
+                onFailed()
+                return@addFileCopy
+            }
+            // An edit in progress belongs to the chat being left
+            if (_uiState.value.isEditMode) cancelEditingMessage()
+            closeImageViewer()
+            // The chat as it is now (it may have changed while the picker was open)
+            val chat = target?.let { t -> _uiState.value.chatHistory.find { it.chat_id == t.chat_id } }
+            if (chat != null) {
+                selectChatFromSearch(chat)
+            } else {
+                createNewChat(context.getString(R.string.new_chat))
+            }
+        }
+    }
     fun hideFileSelection() = attachmentManager.hideFileSelection()
 
     // ==================== Settings Management ====================

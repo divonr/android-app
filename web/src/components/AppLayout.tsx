@@ -19,6 +19,7 @@ import { Outlet } from 'react-router-dom'
 import styles from './AppLayout.module.css'
 import { useSyncRefresh } from '../hooks/useSyncRefresh'
 import { useRunsStream } from '../hooks/useRunsStream'
+import { ImageViewerHost } from './chat/ImageViewer'
 
 const AppLayout: React.FC = () => {
   useSyncRefresh()
@@ -28,6 +29,7 @@ const AppLayout: React.FC = () => {
       <div className={styles.frame}>
         <Outlet />
       </div>
+      <ImageViewerHost />
     </div>
   )
 }

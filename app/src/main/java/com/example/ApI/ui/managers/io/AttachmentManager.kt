@@ -4,7 +4,9 @@ import android.net.Uri
 import com.example.ApI.data.DeviceAttachmentsProvider
 import com.example.ApI.data.model.SelectedFile
 import com.example.ApI.ui.managers.ManagerDependencies
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
 
@@ -60,6 +62,35 @@ class AttachmentManager(
                 // Handle file error
                 println("Error adding file: ${e.message}")
             }
+        }
+    }
+
+    /**
+     * Attach a copy of [source] (a file this device already has, e.g. an image of another
+     * message) to the message being written. The copy is the draft's own: removing it from the
+     * draft deletes it, the original stays. [then] is told whether the file was attached.
+     */
+    fun addFileCopy(source: File, fileName: String, mimeType: String, then: (Boolean) -> Unit) {
+        deps.scope.launch {
+            val localPath = try {
+                withContext(Dispatchers.IO) { deps.repository.saveFileLocally(fileName, source.readBytes()) }
+            } catch (e: Exception) {
+                null
+            }
+            if (localPath != null) {
+                attachments.attach(File(localPath))
+                deps.updateUiState(
+                    deps.uiState.value.copy(
+                        selectedFiles = deps.uiState.value.selectedFiles + SelectedFile(
+                            uri = Uri.fromFile(File(localPath)),
+                            name = fileName,
+                            mimeType = mimeType,
+                            localPath = localPath
+                        )
+                    )
+                )
+            }
+            then(localPath != null)
         }
     }
 

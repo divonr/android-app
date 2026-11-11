@@ -22,6 +22,7 @@ import com.example.ApI.data.AndroidPlatformStorage
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.ui.ChatViewModel
+import com.example.ApI.ui.components.ImageViewerDialog
 import com.example.ApI.ui.screen.ApiKeysScreen
 import com.example.ApI.ui.screen.ChatHistoryScreen
 import com.example.ApI.ui.screen.GroupScreen
@@ -272,5 +273,17 @@ fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null
                 onBackClick = { viewModel.navigateToScreen(Screen.Skills) }
             )
         }
+    }
+
+    // In-app image viewer, over whichever screen opened it
+    uiState.viewedImage?.let { image ->
+        ImageViewerDialog(
+            attachment = image,
+            chats = uiState.chatHistory,
+            groups = uiState.groups,
+            currentChatId = uiState.currentChat?.chat_id?.takeIf { effectiveScreen is Screen.Chat },
+            onDismiss = { viewModel.closeImageViewer() },
+            onForward = { file, chat, onFailed -> viewModel.forwardImageToChat(image, file, chat, onFailed) }
+        )
     }
 }
