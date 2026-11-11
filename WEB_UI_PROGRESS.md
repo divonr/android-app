@@ -11,6 +11,10 @@ Branch: `web-ui`
 
 ---
 
+## R12 — Composer emoji keyboard (2026-11-11)
+
+- [x] **Emoji keyboard in the composer** — mirrors Android's `ui/components/emoji/`. In `ChatInputArea.tsx` the attach (+) button moved to the other side of the text field, next to the web-search toggle, and its old place holds an emoji toggle (smiley; a keyboard icon while the panel is open). The toggle opens `components/chat/EmojiPanel.tsx` under the pill: `emoji-picker-react` (new dependency) with native glyphs and its bundled data — nothing is fetched at run time — themed with the app's colours through `--epr-*` variables, Hebrew category names and labels, Android's tab order, recents first, search (English), the skin-tone picker by the search field and long press for an emoji's own tones (recents and tone kept by the picker in localStorage). The panel is `React.lazy`, a chunk of its own (about 300 kB, 75 kB gzipped) loaded on first opening. A picked emoji goes in at the textarea's caret (in place of the selection) and the panel stays open; Escape and a click outside the composer close it (the picker takes an Escape first when it has a query or a tone popup to dismiss). Unlike Android there is no system keyboard to swap with and no backspace key in the panel. Strings `emoji_*` in `he.ts`. Tests: `ChatEmoji.test.tsx`, `EmojiPanel.test.tsx`.
+
 ## R11 — Branch navigator fix (2026-11-11)
 
 - [x] **Branch switching and arrow direction** — the navigator read the current variant by matching the user message's id, but the variants of a node share that id (edit / resend / regenerate keep it), so it always showed the first variant ("1/n", previous disabled) and "next" asked the server for a variant that was usually already shown. `branchInfoForMessage` in `MessageBubble.tsx` now reads the current variant from `currentVariantPath`, like Android's `getBranchInfo`. The arrows are the auto-mirrored `MdKeyboardArrowLeft` / `MdKeyboardArrowRight` of `ui/icons.tsx` (Android's `Icons.AutoMirrored.Filled.KeyboardArrow*`): previous on the right pointing right, next on the left pointing left. Web only; tests in `ChatPage.test.tsx`.

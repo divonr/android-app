@@ -13,6 +13,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "emoji-picker-react": "^5.1.4",
     "highlight.js": "^11.10.0",
     "katex": "^0.16.11",
     "react": "^18.3.1",
