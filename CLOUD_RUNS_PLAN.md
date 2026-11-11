@@ -176,7 +176,19 @@ response has ended by then and the title is announced only on the user-level str
 (`chat_updated`). The pre-validation errors of these routes are
 unchanged (400 unknown provider, 404 chat not found…): the 409 codes belong to `POST /api/runs` only.
 Attachments are resolved as for `POST /api/runs` (round 2, Server), but there is no device to fall
-back to: a file the server cannot get is — as before — not sent to the provider. Tools: these routes use the same per-user tool set as
+back to: a file the server cannot get is — as before — not sent to the provider.
+(A6) **Project chats.** The web does not build the project context; these two routes take it from
+the server's own copy: when the chat's group is a project (`is_project` — Android's
+`getCurrentChatProjectGroup`; a plain group adds nothing) the request gets the group's
+`group_attachments` as its project attachments (the `projectAttachments` of the body is ignored
+then; outside a project it is used as sent) and the system prompt is the project's `system_prompt`,
+followed by a blank line and the request's `systemPrompt` (the chat's own prompt) when that is not
+empty. (Android adds the chat's prompt only while the dialog's "override" switch is on; the web has
+no switch, so a chat prompt is always added.) `POST /api/runs` is unchanged: the device sends its
+own list and its effective prompt.
+(A6) New pre-validation error of `POST /api/chat/send`: `409 {"error","code":"attachment_missing"}`
+— a file of the new message exists neither in the store nor on the server (round 2, Server, Commit);
+nothing is saved and no run starts. Tools: these routes use the same per-user tool set as
 `POST /api/runs` (Tools section), but an enabled tool id the server has no tool for is — as before —
 silently not offered to the model instead of a 409.
 
@@ -523,12 +535,41 @@ Per user (`UserContext.attachments`, `server/.../attachments/UserAttachments.kt`
   recorded with `DataRepository.recordAttachmentIdentity` (the shared helper A3 uses on the device:
   the attachment of that chat / group + message id without a hash and with the same path, name and
   mime type gets `sha256` + `size`; an attachment that has a hash is never changed).
-- **Commit.** Every server path that saves a user message or a project attachment commits the files
-  it references, in the background (`UserAttachments.commitInBackground`: idempotent; a store that
-  cannot be reached is retried after 1 s and 5 s; a `404` → upload again from the server's cache,
-  then commit): `POST /api/chat/send`, `POST /api/chats/{id}/messages`, `POST /api/chats/{id}/branch`,
-  `…/resend`, `POST /api/groups/{id}/attachments`. `POST /api/runs` does not (the device saved the
-  message and commits it).
+- **Commit — and a delete of the same bytes (A6).** A web upload's bytes exist only in the store
+  (pending) and in the server's cache, and `DELETE /api/files/{sha}` removes both. So a delete of
+  the same bytes (another tab, another draft, the phone through llm-web) must never win against a
+  save that references them. Every server path that saves a new user message or a project
+  attachment — `POST /api/chat/send`, `POST /api/chats/{id}/messages`, `POST /api/chats/{id}/branch`,
+  `POST /api/groups/{id}/attachments` — goes through `UserAttachments.beginSave`:
+  1. the hashes are **held** (in memory, per user) — taking the hold passes through the same
+     per-user mutex under which a delete does its whole work, so a delete is either completely
+     over before the hold exists or sees it;
+  2. the files are **committed before the save**, waiting at most 10 s for the first attempt of
+     each (a `404` → upload again from the server's cache, then commit; a store that cannot be
+     reached is retried after 1 s and 5 s in the background and does not stop the save);
+  3. a file that the store does not have (`404`, or the user has no store) and the server has no
+     copy of was deleted before the save: send / add-message / group-attachment answer
+     `409 {"error","code":"attachment_missing"}` and save nothing (the branch route saves anyway —
+     an edit keeps the attachments of an already saved message, possibly another device's);
+  4. the save; the hold ends when the save is over **and** the commits have ended.
+  The delete (`UserAttachments.deleteUnused`) refuses — `{"deleted":false,"state":"in_use"}` — a
+  hash that is held or that the user's stored history references (any message, variant or project
+  of the server copy); for a referenced file it starts a commit, which heals a commit that had
+  given up. After the hold the saved message is what protects the file, so no order of save,
+  commit and delete leaves a saved reference to a file this server deleted.
+  `…/resend` saves a copy of a message that is already in the history (so already protected) and
+  keeps the plain background commit (`commitInBackground`). `POST /api/runs` does not commit (the
+  device saved the message and commits it).
+  Not covered, by design: a delete that goes **directly to the sync server** (a device) knows only
+  pending / committed. For a device's own message that is no loss — the device keeps the bytes
+  and its commit uploads again on `404`, at the send and, after a restart, by the next request
+  that includes the message (tests in `DeviceAttachmentsTest`). For a web upload it is closed by
+  step 2 in the normal case (committed before the save). Only when the store was unreachable at
+  the save and for the two retries does the file stay pending: a direct device delete, or the
+  store's 24 h sweep, can then remove the store copy. The server's cache copy stays (only
+  llm-web's own delete removes it, and that one is refused), so the web still shows the file; the
+  store gets it again at the next refused delete or `POST /api/files/{sha}/commit` — there is no
+  periodic re-commit.
 - **Python tool** (`UserTools.pythonTool`): built per run when the request enables it and the user
   has a store. Input files: the attachments of the request and of the server copy's chat and group
   that have a hash (or are the user's own file here), fetched through the resolver when the code
@@ -576,8 +617,10 @@ A hash is not a capability: another user's request for it is a `404`.
   the store lost the file and the server still has it, it is uploaded again first. `404` when
   neither has it. Not needed after the send / add-message / group-attachment routes (they commit).
 - `DELETE /api/files/{sha256}` — remove an upload that was never used: `200 {"deleted":true}` (gone
-  from the store and from the server's cache) or `{"deleted":false,"state":"committed"|null}` — a
-  committed file is never deleted; `null`: the store does not have it.
+  from the store and from the server's cache) or `{"deleted":false,"state":"committed"|"in_use"|null}`
+  — a committed file is never deleted; `in_use` (A6): a save that references the file is in
+  progress, or a saved message / project of the user references it (it is then committed if it was
+  not); `null`: the store does not have it.
 - `DELETE /api/files` (legacy URL) with `{"sha256"}` → the same. With `{"filePath"}` (the old web
   client): only a file inside the user's own `files/llm_data/attachments` that no saved message /
   project uses is deleted (`204`); anything else is `404` (`409` when in use) — the old route
@@ -609,9 +652,15 @@ device that attached it.
   The delete is skipped when the store's single copy is still needed: another entry of the draft
   has the same hash (the same file attached twice), another upload of the same size is still
   running (it may be the same file), or the tab already put that hash into a message / project
-  (the server commits in the background — until it has, the store would still delete it).
+  (kept as a second line of defence; since A6 the server itself refuses such a delete — `in_use`).
 - **Send** puts the `Attachment`s as returned by the upload into the message (send and the
-  multi-message buffer); the web never calls `commit`. An edit keeps the message's own attachments;
+  multi-message buffer); the web never calls `commit`. (A6) A message may consist of files only:
+  it is sent (button and Enter, also in multi-message mode) with the text `[קובץ מצורף]`, the
+  same stored text as Android's; an edit still needs a text (the composer's files are not part of
+  an edit). The web has no first-message chat naming at all (a chat is created as "שיחה חדשה"
+  before its page opens and renamed by the title generation), so Android's "name a new chat after
+  its first file" has no counterpart. A send refused with `409 attachment_missing` shows the
+  server's text in the error banner; the file has to be attached again. An edit keeps the message's own attachments;
   files in the draft at that moment are discarded (deleted).
 - **Showing attachments** (`AttachmentView`; messages of every role — user, and assistant for the
   Python tool's files — and the project files of a group): with a `sha256` (64 lowercase hex) and a
@@ -628,4 +677,5 @@ device that attached it.
 
 ## Stages
 A1 sync-server store + shared model/client/resolver · A2 llm-web (runs, Python tool, web file routes)
-· A3 Android · A4 web UI (the section above) · A5 deploy + live test (llm-web A2 needs the sync-server of A1 running).
+· A3 Android · A4 web UI (the section above) · A5 deploy + live test (llm-web A2 needs the sync-server of A1 running)
+· A6 fixes: delete-vs-save race on the server, project context on web sends, files-only messages on the web.

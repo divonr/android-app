@@ -13,20 +13,56 @@ import com.example.ApI.data.repository.AttachmentOwner
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.server.ServerPlatformStorage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
 import java.util.UUID
+
+/**
+ * The files of a message / project attachment that is being saved ([UserAttachments.beginSave]).
+ * From its creation until [end] the files cannot be deleted through this server.
+ */
+class FileSave internal constructor(
+    /**
+     * Hashes whose file exists nowhere this server can reach — the store answered "not found"
+     * and the server has no copy: saving would reference a file that is gone.
+     */
+    val missing: Set<String>,
+    private val release: () -> Unit
+) {
+    private val ended = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** The save is over (done or given up): the files are let go once their commits have ended. */
+    fun end() {
+        if (ended.compareAndSet(false, true)) release()
+    }
+}
+
+/** What `DELETE /api/files/{sha256}` did ([UserAttachments.deleteUnused]). */
+sealed class UnusedFileDelete {
+    /** Gone from the store and from this server. */
+    object Deleted : UnusedFileDelete()
+    /** Kept: [state] is `committed`, `in_use` (a save in progress / a saved message references it) or null (no such file). */
+    class Kept(val state: String?) : UnusedFileDelete()
+    class Failed(val failure: StoreResult.Failed) : UnusedFileDelete()
+}
 
 /** An upload that is larger than the server accepts. */
 class FileTooLargeException(val maxBytes: Long) : IOException("The file is larger than $maxBytes bytes")
@@ -47,7 +83,9 @@ class UserAttachments(
     private val repository: DataRepository,
     /** The largest file accepted (the store's limit). */
     val maxFileBytes: Long = AttachmentStoreClient.DEFAULT_MAX_FILE_BYTES,
-    private val commitRetryDelaysMs: List<Long> = listOf(1_000L, 5_000L)
+    private val commitRetryDelaysMs: List<Long> = listOf(1_000L, 5_000L),
+    /** How long a save waits for the first commit attempt of its files ([beginSave]). */
+    private val saveCommitWaitMs: Long = 10_000L
 ) {
     private val log = LoggerFactory.getLogger(UserAttachments::class.java)
 
@@ -158,10 +196,129 @@ class UserAttachments(
         return uploader.ensureStored(file, FileDigest(sha256, file.length()))
     }
 
+    // ── A save and a delete of the same file ──────────────────────────────────
+    //
+    // A pending file is deleted by `DELETE /api/files/{sha}` (store copy and this server's copy),
+    // and the bytes of a web upload exist nowhere else.  A delete of the same bytes (another tab,
+    // another draft, the phone) must therefore never win against a save that references them:
+    //
+    //  - a save first HOLDS its hashes ([beginSave]) and only then commits and saves; the hold
+    //    ends when the save is over and the commits have ended;
+    //  - a delete ([deleteUnused]) runs under [gate] and refuses a hash that is held or that the
+    //    user's stored history references.
+    //
+    // Taking a hold also passes through [gate], so for one hash either the delete has completely
+    // finished before the hold exists — then the commit that precedes the save finds the file
+    // gone and the save is refused ([FileSave.missing]) instead of referencing nothing — or the
+    // delete sees the hold.  After the hold is released the saved message itself protects the file.
+
+    /** Orders a delete against the start of a save (per user; held across the store's delete call). */
+    private val gate = Mutex()
+    /** sha256 → number of saves in progress that reference it. */
+    private val holds = HashMap<String, Int>()
+
+    private fun isHeld(sha256: String): Boolean = synchronized(holds) { sha256 in holds }
+
+    private fun releaseHolds(hashes: Collection<String>) = synchronized(holds) {
+        for (sha in hashes) {
+            val left = (holds[sha] ?: continue) - 1
+            if (left <= 0) holds.remove(sha) else holds[sha] = left
+        }
+    }
+
+    /**
+     * A message / project attachment with [attachments] is about to be saved: hold their files
+     * against a delete and commit them, waiting (bounded) for the first attempt of every commit.
+     * A store that cannot be reached is retried in the background, as in [commitInBackground].
+     *
+     * The caller saves only when it accepts [FileSave.missing], and calls [FileSave.end] when the
+     * save is over, whatever its outcome.
+     */
+    suspend fun beginSave(attachments: Collection<Attachment>): FileSave {
+        val hashes = attachments.mapNotNull { it.sha256 }.filter(AttachmentHash::isValid).distinct()
+        if (hashes.isEmpty()) return FileSave(emptySet()) {}
+        gate.withLock {
+            synchronized(holds) { hashes.forEach { holds[it] = (holds[it] ?: 0) + 1 } }
+        }
+        val firstAttempts = hashes.associateWith { CompletableDeferred<StoreResult<*>>() }
+        val jobs = hashes.map { sha ->
+            scope.launch {
+                val first = firstAttempts.getValue(sha)
+                try {
+                    retrying("commit of $sha") { commit(sha).also { first.complete(it) } }
+                } finally {
+                    first.cancel()
+                }
+            }
+        }
+        val missing = HashSet<String>()
+        try {
+            withTimeoutOrNull(saveCommitWaitMs) {
+                for ((sha, first) in firstAttempts) {
+                    val result = try {
+                        first.await()
+                    } catch (ce: CancellationException) {
+                        currentCoroutineContext().ensureActive()
+                        continue        // the commit job died (shutdown), not the caller
+                    }
+                    // Not in the store (or there is no store) and not here: the file is gone
+                    val nowhere = result is StoreResult.Failed &&
+                        (result.error == StoreError.NOT_FOUND || result.error == StoreError.NOT_CONFIGURED) &&
+                        cached(sha) == null
+                    if (nowhere) missing.add(sha)
+                }
+            }
+        } catch (ce: CancellationException) {
+            releaseHolds(hashes)
+            throw ce
+        }
+        return FileSave(missing) {
+            // Held until the commits are over too: a file that could not be committed yet stays
+            // protected by the saved message that references it (see deleteUnused)
+            scope.launch {
+                try {
+                    jobs.joinAll()
+                } finally {
+                    releaseHolds(hashes)
+                }
+            }
+        }
+    }
+
+    /**
+     * Delete a file that was uploaded and never used: from the store (only a `pending` file) and
+     * from this server's cache.  Refused for a file a save in progress holds or the user's saved
+     * history references — such a file is committed instead, if it is not yet.
+     */
+    suspend fun deleteUnused(sha256: String): UnusedFileDelete = gate.withLock {
+        if (isHeld(sha256)) return@withLock UnusedFileDelete.Kept("in_use")
+        if (isReferenced { it.sha256 == sha256 }) {
+            // Its commit did not get through (yet): the reference is what keeps the file
+            commitInBackground(listOf(Attachment(file_name = "", mime_type = "", sha256 = sha256)))
+            return@withLock UnusedFileDelete.Kept("in_use")
+        }
+        when (val result = store.deletePending(sha256)) {
+            is StoreResult.Ok -> if (result.value) {
+                cached(sha256)?.delete()
+                UnusedFileDelete.Deleted
+            } else {
+                val present = store.exists(sha256)
+                UnusedFileDelete.Kept(if (present is StoreResult.Ok && present.value != null) "committed" else null)
+            }
+            is StoreResult.Failed -> when {
+                result.error != StoreError.NOT_CONFIGURED -> UnusedFileDelete.Failed(result)
+                // No store (sync is off): the file only lives here
+                cached(sha256)?.delete() == true -> UnusedFileDelete.Deleted
+                else -> UnusedFileDelete.Kept(null)
+            }
+        }
+    }
+
     /**
      * Whoever saves a message / project attachment commits its files: commit the files of
      * [attachments] in the background, retrying a store that cannot be reached.  Idempotent and
-     * best effort — the save never waits for it or fails because of it.
+     * best effort.  For files that the stored history already references (a resend); a save of
+     * new files goes through [beginSave].
      */
     fun commitInBackground(attachments: Collection<Attachment>): List<Job> =
         attachments.mapNotNull { it.sha256 }.filter(AttachmentHash::isValid).distinct().map { sha ->

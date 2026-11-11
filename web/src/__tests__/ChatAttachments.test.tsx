@@ -8,6 +8,7 @@ import { render, screen, waitFor, fireEvent, act, within } from '@testing-librar
 import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom'
 import ChatPage from '../pages/ChatPage'
 import GroupPage from '../pages/GroupPage'
+import ChatInputArea from '../components/chat/ChatInputArea'
 import * as chatStoreModule from '../stores/chatStore'
 import { useRunsStore } from '../stores/runsStore'
 import { resetUsedAttachments } from '../hooks/useDraftAttachments'
@@ -300,6 +301,115 @@ describe('ChatPage — attaching files', () => {
 })
 
 // ─── Composer: removal ────────────────────────────────────────────────────────
+
+// ─── Composer: a message of files only ────────────────────────────────────────
+
+describe('ChatPage — a message with files and no text', () => {
+  const mAdd = vi.mocked(clientModule.messages.add)
+  const ready = async (index = 0, sha = SHA_A) => {
+    await act(async () => { uploads[index].resolve(stored(uploads[index].file, sha)) })
+  }
+
+  it('is sent with the stand-in text Android uses, by the button', async () => {
+    renderChatPage()
+    expect(sendButton()).toBeDisabled()
+    attach(textFile())
+    expect(sendButton()).toBeDisabled()      // still uploading
+    await ready()
+    expect(sendButton()).not.toBeDisabled()
+
+    fireEvent.click(sendButton())
+
+    expect(streamModule.sendStream).toHaveBeenCalledTimes(1)
+    const req = vi.mocked(streamModule.sendStream).mock.calls[0][0]
+    expect(req.messages[req.messages.length - 1]).toEqual({
+      role: 'user',
+      text: '[קובץ מצורף]',
+      attachments: [{ file_name: 'notes.txt', mime_type: 'text/plain', sha256: SHA_A, size: 5 }],
+    })
+    expect(drafts()).toHaveLength(0)
+    expect(mDelete).not.toHaveBeenCalled()
+  })
+
+  it('is sent by Enter too, and whitespace alone counts as no text', async () => {
+    renderChatPage()
+    attach(textFile())
+    await ready()
+    typeText('   ')
+
+    fireEvent.keyDown(screen.getByPlaceholderText('הקלד הודעה...'), { key: 'Enter' })
+
+    expect(streamModule.sendStream).toHaveBeenCalledTimes(1)
+    const req = vi.mocked(streamModule.sendStream).mock.calls[0][0]
+    expect(req.messages[req.messages.length - 1].text).toBe('[קובץ מצורף]')
+    expect(screen.getByPlaceholderText('הקלד הודעה...')).toHaveValue('')
+  })
+
+  it('a text stays the text when there are files', async () => {
+    renderChatPage()
+    attach(textFile())
+    await ready()
+    typeText('see the file')
+    fireEvent.click(sendButton())
+    const req = vi.mocked(streamModule.sendStream).mock.calls[0][0]
+    expect(req.messages[req.messages.length - 1].text).toBe('see the file')
+  })
+
+  it('nothing is sent with neither text nor files, or while the only file failed', async () => {
+    renderChatPage()
+    fireEvent.keyDown(screen.getByPlaceholderText('הקלד הודעה...'), { key: 'Enter' })
+    expect(streamModule.sendStream).not.toHaveBeenCalled()
+
+    attach(textFile())
+    await act(async () => { uploads[0].reject(apiError(502, 'store_unavailable')) })
+    expect(sendButton()).toBeDisabled()
+    fireEvent.keyDown(screen.getByPlaceholderText('הקלד הודעה...'), { key: 'Enter' })
+    expect(streamModule.sendStream).not.toHaveBeenCalled()
+  })
+
+  it('an edit still needs a text: files in the composer do not enable its confirm buttons', () => {
+    const noop = () => {}
+    const file = textFile()
+    const props = {
+      onInputChange: noop, onRemoveAttachment: noop, onRetryAttachment: noop, onAttachFile: noop,
+      streaming: false, webSearch: false, showWebSearch: false, onToggleWebSearch: noop,
+      onSend: noop, onStop: noop, onConfirmEdit: noop, onConfirmEditAndResend: noop,
+      onCancelEdit: noop, onKeyDown: noop,
+      attachments: [{
+        id: 'd1', file, file_name: file.name, mime_type: file.type, size: file.size,
+        status: 'ready' as const, attachment: stored(file, SHA_A),
+      }],
+    }
+    const { rerender } = render(<ChatInputArea {...props} inputText="" editingMsg />)
+    expect(screen.getByRole('button', { name: 'Confirm edit' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Confirm edit and resend' })).toBeDisabled()
+    rerender(<ChatInputArea {...props} inputText="new text" editingMsg />)
+    expect(screen.getByRole('button', { name: 'Confirm edit' })).not.toBeDisabled()
+    rerender(<ChatInputArea {...props} inputText="" editingMsg={false} />)
+    expect(sendButton()).not.toBeDisabled()
+  })
+
+  it('in multi-message mode the files-only message is buffered with the same text', async () => {
+    vi.mocked(clientModule.settings.get).mockResolvedValueOnce({
+      current_user: 'u', selected_provider: 'openai', selected_model: 'gpt-4o',
+      multiMessageMode: true, enabledTools: [], excludedToolIds: [], starredModels: [],
+    } as never)
+    renderChatPage()
+    await waitFor(() => expect(clientModule.settings.get).toHaveBeenCalled())
+    await act(async () => {})
+    attach(textFile())
+    await ready()
+
+    await act(async () => { fireEvent.click(sendButton()) })
+
+    expect(streamModule.sendStream).not.toHaveBeenCalled()
+    expect(mAdd).toHaveBeenCalledWith('c1', {
+      role: 'user',
+      text: '[קובץ מצורף]',
+      attachments: [{ file_name: 'notes.txt', mime_type: 'text/plain', sha256: SHA_A, size: 5 }],
+    })
+  })
+})
 
 describe('ChatPage — removing un-sent attachments', () => {
   const removeButton = (i: number) => within(drafts()[i]).getByRole('button', { name: 'Remove attachment' })

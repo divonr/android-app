@@ -7,6 +7,7 @@ import com.example.ApI.data.attachments.StoreError
 import com.example.ApI.data.attachments.StoreResult
 import com.example.ApI.data.model.Attachment
 import com.example.ApI.server.attachments.FileTooLargeException
+import com.example.ApI.server.attachments.UnusedFileDelete
 import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.server.application.*
@@ -47,6 +48,21 @@ object FileErrorCode {
     const val NOT_FOUND = "not_found"
     const val STORE_UNAVAILABLE = "store_unavailable"
     const val RANGE_NOT_SATISFIABLE = "range_not_satisfiable"
+    /** A message / project attachment was not saved: a file it references exists nowhere (409). */
+    const val ATTACHMENT_MISSING = "attachment_missing"
+}
+
+/**
+ * Answer 409 `attachment_missing` when [save] found files that are gone (deleted before the save
+ * reached the server).  Returns whether it answered — the caller then does not save.
+ */
+internal suspend fun ApplicationCall.refuseMissingFiles(save: com.example.ApI.server.attachments.FileSave): Boolean {
+    if (save.missing.isEmpty()) return false
+    respond(
+        HttpStatusCode.Conflict,
+        FileError(error = "An attached file is no longer available. Attach it again.", code = FileErrorCode.ATTACHMENT_MISSING)
+    )
+    return true
 }
 
 // ── How a file is presented to a browser ──────────────────────────────────────
@@ -157,21 +173,15 @@ fun Route.fileRoutes() {
         return null
     }
 
-    /** Delete a file that was uploaded but never used; a committed file is left alone. */
+    /**
+     * Delete a file that was uploaded but never used; a committed file, and one a save in
+     * progress or a saved message / project references, is left alone.
+     */
     suspend fun ApplicationCall.deletePending(sha: String) {
-        val attachments = userContext().attachments
-        when (val result = attachments.store.deletePending(sha)) {
-            is StoreResult.Ok -> {
-                if (result.value) attachments.cached(sha)?.delete()
-                respond(HttpStatusCode.OK, DeleteFileResponse(deleted = result.value, state = if (result.value) null else stateAfterNoDelete(sha)))
-            }
-            is StoreResult.Failed -> {
-                if (result.error != StoreError.NOT_CONFIGURED) return storeFailure(result)
-                // No store (sync is off): the file only lives here — keep it when a saved message uses it
-                val used = attachments.isReferenced { it.sha256 == sha }
-                val deleted = !used && (attachments.cached(sha)?.delete() ?: false)
-                respond(HttpStatusCode.OK, DeleteFileResponse(deleted = deleted, state = if (used) "committed" else null))
-            }
+        when (val outcome = userContext().attachments.deleteUnused(sha)) {
+            is UnusedFileDelete.Deleted -> respond(HttpStatusCode.OK, DeleteFileResponse(deleted = true))
+            is UnusedFileDelete.Kept -> respond(HttpStatusCode.OK, DeleteFileResponse(deleted = false, state = outcome.state))
+            is UnusedFileDelete.Failed -> storeFailure(outcome.failure)
         }
     }
 
@@ -341,12 +351,5 @@ fun Route.fileRoutes() {
         call.respond(HttpStatusCode.NoContent)
     }
 }
-
-/** What the store says about a file that was not deleted: `committed`, or null when it has none. */
-private suspend fun ApplicationCall.stateAfterNoDelete(sha: String): String? =
-    when (val present = userContext().attachments.store.exists(sha)) {
-        is StoreResult.Ok -> if (present.value != null) "committed" else null
-        is StoreResult.Failed -> null
-    }
 
 private const val MULTIPART_SLACK_BYTES = 1024L * 1024

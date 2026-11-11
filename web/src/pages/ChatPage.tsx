@@ -34,6 +34,7 @@ import type { StreamCallbacks } from '../api/stream'
 import { cancelRun } from '../api/runs'
 import { useRunsStore, selectForeignRun } from '../stores/runsStore'
 import { useDraftAttachments } from '../hooks/useDraftAttachments'
+import { FILE_ONLY_MESSAGE_TEXT } from '../utils/attachments'
 import {
   EMPTY_STREAM,
   dropSettled,
@@ -379,7 +380,7 @@ const ChatPage: React.FC = () => {
 
   const doSend = useCallback(
     (text: string, atts: Attachment[]) => {
-      if (!chatId || !text.trim()) return
+      if (!chatId || (!text.trim() && atts.length === 0)) return
       setError(null)
 
       const req = {
@@ -454,19 +455,24 @@ const ChatPage: React.FC = () => {
 
   const handleSubmit = useCallback(() => {
     // Files still uploading (or failed): the message waits — it must not go out without them
-    if (!inputText.trim() || busy || draftBlocked) return
+    if (busy || draftBlocked) return
 
     if (editingMsg) {
-      handleEditSubmit(editingMsg, inputText)
+      // An edit takes no files from the composer: it needs a text
+      if (inputText.trim()) handleEditSubmit(editingMsg, inputText)
       return
     }
+    // A message is a text, files, or both
+    if (!inputText.trim() && draft.items.length === 0) return
 
     // From here the files belong to the message: the server commits them when it saves it
     const atts = draft.takeForSend()
+    // Files without a text go out with Android's stand-in text (MessageSendingManager.sendMessage)
+    const text = inputText.trim() ? inputText : FILE_ONLY_MESSAGE_TEXT
     if (multiMessageMode) {
-      bufferMessage(inputText, atts)
+      bufferMessage(text, atts)
     } else {
-      doSend(inputText, atts)
+      doSend(text, atts)
     }
     setInputText('')
   }, [inputText, draft, draftBlocked, busy, editingMsg, multiMessageMode, bufferMessage, doSend]) // eslint-disable-line react-hooks/exhaustive-deps

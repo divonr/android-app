@@ -377,7 +377,10 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
   const blockedReason = uploading
     ? t('attachment_wait_for_uploads')
     : uploadFailed ? t('attachment_fix_failed_uploads') : undefined
-  const canSend = (inputText.trim().length > 0 || attachments.length > 0) && !uploadsBlock
+  // A new message is a text, files, or both; an edit keeps the message's own files and takes
+  // none from the composer, so it needs a text
+  const hasText = inputText.trim().length > 0
+  const canSend = (hasText || (!editingMsg && attachments.length > 0)) && !uploadsBlock
 
   // Action buttons (right side of pill)
   const actionButtons = () => {

@@ -11,6 +11,12 @@ import { t } from '../i18n/he'
 export const MAX_FILE_BYTES = 95 * 1024 * 1024
 
 /**
+ * The text of a message that was sent with files only. The same stored text as Android's
+ * (`MessageSendingManager.sendMessage`) — data shared by every device, not a UI string.
+ */
+export const FILE_ONLY_MESSAGE_TEXT = '[קובץ מצורף]'
+
+/**
  * The image types the server serves inline (`Content-Disposition: inline`, their own type).
  * Only these are ever put into an `<img>`; everything else — SVG and HTML included — is a download.
  */

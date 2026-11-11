@@ -371,3 +371,81 @@ Notes / open
 - The web's send still passes `projectAttachments: []` (as before A4): project files of the
   chat's group are not sent with a web request.
 - Removing a project file never deletes it from the store (it is committed).
+
+## A6 — fixes: delete-vs-save race, project context on web sends, files-only messages (done, not committed, not built, not deployed)
+
+Contract: the plan's "Existing web routes" (project chats, `409 attachment_missing`), "Server — A2"
+(Commit — and a delete of the same bytes), "Web file routes" (`state: "in_use"`) and "Web UI — A4"
+(Send) — all updated in this stage. Changed: `server/` and `web/` only (plus one test in `shared/`).
+No change to `sync-server`, to `shared/src/main` or to `app/`: no new APK, no sync-server deploy.
+
+server
+- `attachments/UserAttachments.kt`: `beginSave` (hold the hashes → commit before the save, bounded
+  10 s for the first attempt, retries in the background → `FileSave.missing` / `end()`),
+  `deleteUnused` (under the per-user mutex: refuses a held hash and a hash the stored history
+  references, committing the latter), `FileSave`, `UnusedFileDelete`. `commitInBackground` stays for
+  the resend (its files are already referenced).
+- `FileRoutes.kt`: both delete routes go through `deleteUnused` (`"state":"in_use"`);
+  `refuseMissingFiles` → `409 attachment_missing`.
+- `streaming/SendRoute.kt`: send uses `beginSave`; send and resend take the project's files and
+  instructions from the server copy (`projectOf`, `effectiveSystemPrompt`) — the tools get the
+  project attachments too (Python tool input files).
+- `MutationRoutes.kt`: add-message, branch and group-attachment use `beginSave` (branch never refuses).
+
+web
+- `pages/ChatPage.tsx`, `components/chat/ChatInputArea.tsx`, `utils/attachments.ts`
+  (`FILE_ONLY_MESSAGE_TEXT`): a message of files only is sent with `[קובץ מצורף]` (button, Enter,
+  multi-message buffer); the edit buttons are enabled by a text only (they used to look enabled
+  with files and no text and do nothing).
+
+Conclusions
+- **Device ↔ store window: no loss, nothing changed.** The sync server's file operations each run in
+  one write transaction, so a commit after a delete is a clean `404`; the device keeps the bytes of
+  its own message and `commitStored` uploads again on `404` — in `commitWhenStored` at the send,
+  in the retries, and after a restart in `storeHashed` (the next request that includes the
+  message: cloud wait or background backfill). A committed file is never deleted. What remains is
+  the known lifetime limit (plan, "Android — A3", Lifetime): a file whose commit gave up reaches
+  the store only with the next request of that chat — unavailable to other devices until then,
+  not lost.
+- **Project system prompt:** the web lacked it as well (it sent only the chat's own prompt), so
+  the server now composes it for the web routes. Deviation from Android, on purpose: the chat's
+  prompt is always appended (Android: only while the dialog's "override" switch is on; the web
+  has no switch). Android's skills catalog in the system prompt is still not on the web.
+- **Preview name:** the web has no first-message naming (not for texts either), nothing to mirror.
+
+Tests
+- server `AttachmentSaveRaceTest` (5): the delete after the save and before the (retried) commit;
+  the delete during the commit that precedes the save, for send / add-message / group; the delete
+  that came first → `409` and nothing saved, for the three routes; a save that starts while the
+  delete is inside the store; a commit that gave up → the stored reference refuses the delete and
+  the file is committed. Three of them fail with the guard removed (checked by mutation).
+  `WebProjectSendTest` (3): send / resend / multi-message reply in a project chat carry the files
+  (the bytes reach the provider code) and the prompt; a plain group and no group add nothing and
+  an explicit list is still used; `POST /api/runs` keeps the device's own (empty) list and prompt.
+  `FakeFileStore.beforeRequest` holds a request at the store's door.
+- shared `DeviceAttachmentsTest` (+1): a pending file deleted by another client before the commit
+  is uploaded again at the send, and — after the commit gave up and a restart — by the next request.
+- web `ChatAttachments.test.tsx` (+6): files-only by button / Enter / whitespace, text kept,
+  nothing sent when empty or while the only file failed, the edit buttons, the multi-message buffer.
+
+Results: `./gradlew :server:test` 249 tests, 0 failures; `./gradlew :shared:test` 321 tests,
+0 failures; `:app:assembleDebug` and `:desktop:compileKotlin` successful; web `npm run lint` clean,
+`npm test` 238 tests in 16 files. sync-server untouched (its suite was not run).
+
+Notes / open
+- Deploy: llm-web restart + `npm --prefix web run build`; both can go separately (the old web
+  against the new server only gains the project context; the new web needs nothing new).
+- A web send now waits for the commit's first attempt before it saves (one request to the sync
+  server per file; with the store unreachable: until that attempt fails, at most 10 s).
+- `409 attachment_missing`: the banner shows the server's English text; the files of that message
+  are gone from the composer (they were taken at the send) and have to be attached again.
+- A project chat on the web: a chat prompt is appended to the project's instructions (see above) —
+  to be confirmed by the product owner; one line in `effectiveSystemPrompt` either way.
+- The holds are in memory: after a restart of llm-web only the stored reference protects a file
+  (enough for everything already saved; a save cut by the restart saved nothing).
+- An upload racing a delete of the same bytes can answer `201` for a file that is gone again; the
+  send then gets `409 attachment_missing` (visible, nothing dangling).
+- A commit that gave up (store down for the save and both retries) is retried only by a refused
+  delete or the commit route; the pending store copy is then open to the 24 h sweep while the
+  server keeps its cache copy (as before A6).
+- Nothing was seen in a browser or run against the live store.

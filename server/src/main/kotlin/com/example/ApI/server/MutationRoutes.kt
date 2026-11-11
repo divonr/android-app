@@ -278,16 +278,23 @@ fun Route.mutationRoutes() {
             attachments = body.attachments,
             datetime = java.time.Instant.now().toString()
         )
-        val updatedChat = if (message.role == "user") {
-            repo.addUserMessageAsNewNode(username, chatId, message)
-        } else {
-            repo.addResponseToCurrentVariant(username, chatId, message)
+        // Whoever saves a message commits its files — before the save, and holding them against
+        // a delete of the same bytes meanwhile (UserAttachments.beginSave)
+        val fileSave = ctx.attachments.beginSave(message.attachments)
+        val updatedChat = try {
+            // A file that is gone (deleted before this save): the message is not saved without it
+            if (call.refuseMissingFiles(fileSave)) return@post
+            if (message.role == "user") {
+                repo.addUserMessageAsNewNode(username, chatId, message)
+            } else {
+                repo.addResponseToCurrentVariant(username, chatId, message)
+            }
+        } finally {
+            fileSave.end()
         }
         if (updatedChat == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
         } else {
-            // Whoever saves a message commits its files (idempotent, in the background)
-            ctx.attachments.commitInBackground(message.attachments)
             val saved = updatedChat.messageNodes.asSequence()
                 .flatMap { node -> node.variants.asSequence() }
                 .flatMap { v -> sequenceOf(v.userMessage) + v.responses.asSequence() }
@@ -380,12 +387,19 @@ fun Route.mutationRoutes() {
             else findNodeOfMessage(chat, body.nodeId)
         } ?: body.nodeId
 
-        val result = repo.createBranch(username, chatId, nodeId, body.newUserMessage)
+        // The files of the branch's message are held and committed like any saved message's. An
+        // edit keeps the attachments of a message that is already saved (possibly another
+        // device's, whose upload has not reached the store): never refused for a missing file
+        val fileSave = ctx.attachments.beginSave(body.newUserMessage.attachments)
+        val result = try {
+            repo.createBranch(username, chatId, nodeId, body.newUserMessage)
+        } finally {
+            fileSave.end()
+        }
         if (result == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat or node not found"))
         } else {
             val (updatedChat, newVariantId) = result
-            ctx.attachments.commitInBackground(body.newUserMessage.attachments)
             call.respond(HttpStatusCode.Created, CreateBranchResponse(updatedChat, newVariantId))
         }
     }
@@ -578,12 +592,18 @@ fun Route.mutationRoutes() {
         val ctx = call.userContext()
         val repo = ctx.repository
         val username = ctx.username
-        val ok = repo.addAttachmentToGroup(username, groupId, attachment)
+        // Whoever saves a project attachment commits its file — before the save, and holding it
+        // against a delete of the same bytes meanwhile (UserAttachments.beginSave)
+        val fileSave = ctx.attachments.beginSave(listOf(attachment))
+        val ok = try {
+            if (call.refuseMissingFiles(fileSave)) return@post
+            repo.addAttachmentToGroup(username, groupId, attachment)
+        } finally {
+            fileSave.end()
+        }
         if (!ok) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found"))
         } else {
-            // Whoever saves a project attachment commits its file (idempotent, in the background)
-            ctx.attachments.commitInBackground(listOf(attachment))
             val updatedGroup = repo.loadChatHistory(username).groups.find { it.group_id == groupId }
             call.respond(HttpStatusCode.Created, updatedGroup!!)
         }

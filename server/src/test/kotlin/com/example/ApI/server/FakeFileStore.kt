@@ -45,6 +45,12 @@ class FakeFileStore {
 
     @Volatile var maxFileBytes = 95L * 1024 * 1024
 
+    /**
+     * Called for every request before it is handled, with "METHOD" (`COMMIT` for the commit
+     * route) and the hash: a test blocks in it to hold a request at the store's door.
+     */
+    @Volatile var beforeRequest: ((method: String, sha256: String) -> Unit)? = null
+
     private val users = ConcurrentHashMap<String, ConcurrentHashMap<String, Stored>>()
 
     /** The files of [account] (a token, or what [accounts] maps it to). */
@@ -95,6 +101,8 @@ class FakeFileStore {
         }
         val commit = parts.size == 2 && parts[1] == "commit"
         if (parts.size > 2 || (parts.size == 2 && !commit)) return json(exchange, 404, "{}")
+
+        beforeRequest?.invoke(if (commit) "COMMIT" else method, sha)
 
         fun state(s: Stored) = if (s.committed) "committed" else "pending"
         when {

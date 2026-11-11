@@ -7,9 +7,11 @@ import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.ThinkingBudgetValue
 import com.example.ApI.data.model.TitleGenerationSettings
 import com.example.ApI.data.model.Chat
+import com.example.ApI.data.model.ChatGroup
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.ReplyAnchor
 import com.example.ApI.server.TitleGenerator
+import com.example.ApI.server.refuseMissingFiles
 import com.example.ApI.server.runs.AttachmentFiles
 import com.example.ApI.server.runs.RunSpec
 import com.example.ApI.server.runs.WEB_ATTACHMENTS_TIMEOUT_MS
@@ -35,7 +37,8 @@ import java.util.UUID
  * server persists the new user message and streams the assistant response.
  *
  * [messages] — full conversation history INCLUDING the new user message at the end.
- * [projectAttachments] — optional group/project context attachments.
+ * [projectAttachments] — group/project context attachments; only used when the chat is not in a
+ *                        project of the server's copy (a project chat gets the project's own files).
  * [thinkingBudget] — "none" | "low" | "medium" | "high" | "max" | integer string
  *                    (maps to [ThinkingBudgetValue]; see [parseBudget]).
  */
@@ -171,10 +174,20 @@ fun Route.sendRoute() {
         }
 
         val userMessage = body.messages.lastOrNull { it.role == "user" }
-        val savedChat: Chat? = if (userMessage != null && body.persistUserMessage) {
-            repo.addUserMessageAsNewNode(username, body.chatId, userMessage)
-        } else {
-            repo.loadChatHistory(username).chat_history.find { it.chat_id == body.chatId }
+        val persist = userMessage != null && body.persistUserMessage
+        // Whoever saves a message commits its files — before the save, and holding them against
+        // a delete of the same bytes meanwhile (UserAttachments.beginSave)
+        val fileSave = ctx.attachments.beginSave(if (persist) userMessage!!.attachments else emptyList())
+        val savedChat: Chat? = try {
+            // A file that is gone (deleted before this save): nothing is saved or sent without it
+            if (call.refuseMissingFiles(fileSave)) return@post
+            if (persist) {
+                repo.addUserMessageAsNewNode(username, body.chatId, userMessage!!)
+            } else {
+                repo.loadChatHistory(username).chat_history.find { it.chat_id == body.chatId }
+            }
+        } finally {
+            fileSave.end()
         }
         if (savedChat == null) {
             // Deleted (e.g. on another device) before the send: nothing to save the reply to —
@@ -182,8 +195,12 @@ fun Route.sendRoute() {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
             return@post
         }
-        // Whoever saves a message commits its files (idempotent, in the background)
-        if (userMessage != null && body.persistUserMessage) ctx.attachments.commitInBackground(userMessage.attachments)
+
+        // A chat of a project gets the project's files and instructions from the server's own
+        // copy, whatever the client sent (Android's getCurrentChatProjectGroup / effective prompt)
+        val project = projectOf(repo, username, savedChat)
+        val projectAttachments = project?.group_attachments ?: body.projectAttachments
+        val systemPrompt = effectiveSystemPrompt(project, body.systemPrompt)
 
         // Pin the replies to the saved user message (multi-message mode: the chat's last message)
         val anchor = anchorAfter(savedChat, userMessage?.takeIf { body.persistUserMessage }?.id)
@@ -191,14 +208,14 @@ fun Route.sendRoute() {
         // The user's own tools for this chat. As before, an enabled tool the server has no tool
         // for is simply not offered to the model (no 409 on this route)
         val tools = ctx.tools.forRun(
-            body.chatId, body.enabledToolIds, messages = body.messages, projectAttachments = body.projectAttachments
+            body.chatId, body.enabledToolIds, messages = body.messages, projectAttachments = projectAttachments
         )
 
         // This server's files of the request's attachments (the user's own files, the cache, the
         // store). Unlike POST /api/runs there is no device to fall back to: a file that cannot
         // be had is — as before — not sent
         val files = ctx.attachmentsForRun(
-            body.provider, body.chatId, savedChat.group, body.messages, body.projectAttachments, WEB_ATTACHMENTS_TIMEOUT_MS
+            body.provider, body.chatId, savedChat.group, body.messages, projectAttachments, WEB_ATTACHMENTS_TIMEOUT_MS
         )?.files ?: AttachmentFiles.NONE
 
         call.startAndStreamRun(
@@ -209,18 +226,44 @@ fun Route.sendRoute() {
                 provider = provider,
                 modelName = body.modelName,
                 messages = body.messages,
-                systemPrompt = body.systemPrompt,
+                systemPrompt = systemPrompt,
                 webSearchEnabled = body.webSearchEnabled,
                 enabledToolIds = body.enabledToolIds,
                 tools = tools,
                 thinkingBudget = parseBudget(body.thinkingBudget),
                 temperature = body.temperature,
-                projectAttachments = body.projectAttachments,
+                projectAttachments = projectAttachments,
                 anchor = anchor,
                 attachmentFiles = files,
                 groupId = savedChat.group
             )
         )
+    }
+}
+
+/**
+ * The project [chat] belongs to in the server's copy: its group, when that group is a project
+ * (`is_project`) — Android's `SystemPromptManager.getCurrentChatProjectGroup`.  A plain group
+ * (a folder) adds nothing to a request.
+ */
+internal fun projectOf(repo: DataRepository, username: String, chat: Chat): ChatGroup? {
+    val groupId = chat.group ?: return null
+    return repo.loadChatHistory(username).groups.find { it.group_id == groupId && it.is_project }
+}
+
+/**
+ * The system prompt of a web request in a chat of [project]: the project's instructions, then
+ * the chat's own prompt ([chatPrompt], what the web sends) when it has one.  On Android the chat's
+ * prompt is added only while the dialog's "override" switch is on; the web has no such switch,
+ * so a prompt the user gave the chat is not dropped.  Not a project chat: [chatPrompt] as it is.
+ */
+internal fun effectiveSystemPrompt(project: ChatGroup?, chatPrompt: String): String {
+    if (project == null) return chatPrompt
+    val projectPrompt = project.system_prompt.orEmpty()
+    return when {
+        chatPrompt.isEmpty() -> projectPrompt
+        projectPrompt.isEmpty() -> chatPrompt
+        else -> "$projectPrompt\n\n$chatPrompt"
     }
 }
 
@@ -318,10 +361,14 @@ fun Route.resendRoute() {
             return@post
         }
         val requestMessages = updatedChat.messages.take(end + 1)
-        // The branch's user message is saved (again): its files are in use
+        // The branch's user message is saved (again): its files are in use. The stored history
+        // referenced them before this request, so no delete can take them (deleteUnused)
         requestMessages.lastOrNull()?.let { ctx.attachments.commitInBackground(it.attachments) }
+        // The project's files and instructions, as for a send
+        val project = projectOf(repo, username, updatedChat)
+        val projectAttachments = project?.group_attachments ?: emptyList()
         val files = ctx.attachmentsForRun(
-            body.provider, chatId, updatedChat.group, requestMessages, emptyList(), WEB_ATTACHMENTS_TIMEOUT_MS
+            body.provider, chatId, updatedChat.group, requestMessages, projectAttachments, WEB_ATTACHMENTS_TIMEOUT_MS
         )?.files ?: AttachmentFiles.NONE
 
         call.startAndStreamRun(
@@ -332,14 +379,16 @@ fun Route.resendRoute() {
                 provider = provider,
                 modelName = body.modelName,
                 messages = requestMessages,
-                systemPrompt = body.systemPrompt,
+                systemPrompt = effectiveSystemPrompt(project, body.systemPrompt),
                 webSearchEnabled = body.webSearchEnabled,
                 enabledToolIds = body.enabledToolIds,
                 // The user's own tools for this chat (unavailable ones are not offered, as before)
-                tools = ctx.tools.forRun(chatId, body.enabledToolIds, messages = requestMessages),
+                tools = ctx.tools.forRun(
+                    chatId, body.enabledToolIds, messages = requestMessages, projectAttachments = projectAttachments
+                ),
                 thinkingBudget = parseBudget(body.thinkingBudget),
                 temperature = body.temperature,
-                projectAttachments = emptyList(),
+                projectAttachments = projectAttachments,
                 anchor = ReplyAnchor.forRequest(requestMessages),
                 attachmentFiles = files,
                 groupId = updatedChat.group

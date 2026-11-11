@@ -354,6 +354,48 @@ class DeviceAttachmentsTest {
     }
 
     @Test
+    fun `a pending file that another client deleted before the commit is uploaded again - at the send and after a restart`() = runBlocking {
+        // The store only knows pending / committed: another client that attached the same bytes
+        // and removed them deletes this device's pending file too. The device still has the bytes.
+        val otherClient = AttachmentStoreClient({ config }, controlTimeoutMs = 5_000, transferIdleTimeoutMs = 5_000)
+
+        // 1. Deleted between the upload and the send's commit
+        val first = Random(31).nextBytes(9_000)
+        val firstSha = FakeAttachmentStoreServer.sha256(first)
+        val f1 = file("first.png", first)
+        device.attach(f1)
+        until("the upload") { stored()[firstSha] != null && device.transfers.value.isEmpty() }
+        assertEquals(true, otherClient.deletePending(firstSha).getOrNull())
+        assertNull(stored()[firstSha])
+        assertEquals(firstSha, device.use(f1.path, attachment(f1)).sha256)
+        until("the re-upload + commit") { stored()[firstSha]?.committed == true }
+        assertTrue(first.contentEquals(stored().getValue(firstSha).bytes))
+
+        // 2. The message is saved while the store is down; the commit gives up; the file is
+        //    deleted meanwhile; the app restarts
+        val second = Random(32).nextBytes(9_000)
+        val secondSha = FakeAttachmentStoreServer.sha256(second)
+        val f2 = file("second.png", second)
+        device.attach(f2)
+        until("the upload") { stored()[secondSha] != null && device.transfers.value.isEmpty() }
+        server.failWith = 503
+        val saved = device.use(f2.path, attachment(f2))
+        assertEquals(secondSha, saved.sha256)
+        until("the commit to give up") { server.count("POST", secondSha) >= 3 }
+        delay(150)
+        server.failWith = null
+        assertEquals(false, stored().getValue(secondSha).committed)
+        assertEquals(true, otherClient.deletePending(secondSha).getOrNull())
+
+        device = newDevice()        // a new process: nothing remembered but the saved message
+        val message = Message(id = "q", role = "user", text = "q", attachments = listOf(saved))
+        val prepared = device.prepareRequest("u", "c", null, listOf(message), emptyList(), { true }, 5_000)
+        assertTrue(prepared.ready, "the next request that includes the message stores the file: ${prepared.missing}")
+        assertEquals(true, stored()[secondSha]?.committed)
+        assertTrue(second.contentEquals(stored().getValue(secondSha).bytes))
+    }
+
+    @Test
     fun `an attachment of another device is trusted to be in the store, and asked about again after the server refused`() = runBlocking {
         val sha = "c".repeat(64)
         val foreign = Attachment(local_file_path = null, file_name = "web.png", mime_type = "image/png", sha256 = sha, size = 3)
