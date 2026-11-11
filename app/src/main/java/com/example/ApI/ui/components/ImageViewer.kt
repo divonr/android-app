@@ -70,7 +70,6 @@ import com.example.ApI.R
 import com.example.ApI.data.attachments.AttachmentHash
 import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.Chat
-import com.example.ApI.data.model.ChatGroup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -90,7 +89,6 @@ private const val DOUBLE_TAP_ZOOM = 2.5f
 fun ImageViewerDialog(
     attachment: Attachment,
     chats: List<Chat>,
-    groups: List<ChatGroup>,
     /** The chat the image was opened from (left out of the chats to forward to), if any. */
     currentChatId: String?,
     onDismiss: () -> Unit,
@@ -240,7 +238,6 @@ fun ImageViewerDialog(
                     ChatPicker(
                         title = stringResource(R.string.image_viewer_forward_title),
                         chats = chats.filter { it.chat_id != currentChatId },
-                        groups = groups,
                         busy = forwarding,
                         onDismiss = { showChatPicker = false },
                         onPick = { chat ->

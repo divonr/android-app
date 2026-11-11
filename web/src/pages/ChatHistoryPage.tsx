@@ -51,27 +51,11 @@ import {
   MdRemove,
 } from '../ui/icons'
 import styles from './ChatHistoryPage.module.css'
-import { getModelInitial, getModelLogoPath, formatTimestamp } from '../utils/chatUtils'
+import { getModelInitial, getModelLogoPath } from '../utils/chatUtils'
+import { ChatRowBody, getChatModel, getLastTimestamp } from '../components/chat/ChatRow'
 
 // ─── Helpers (ported from ChatUtils.kt + ChatListOrganizer.kt) ────────────────
 // getModelInitial and formatTimestamp are now in utils/chatUtils.ts
-
-/** Mirror of ChatUtils.kt getLastTimestampOrNull */
-function getLastTimestamp(chat: Chat): number | null {
-  const msgs = chat.messages
-  if (!msgs || msgs.length === 0) return null
-  const iso = msgs[msgs.length - 1].datetime
-  if (!iso) return null
-  const ts = Date.parse(iso)
-  return isNaN(ts) ? null : ts
-}
-
-/** Get model from last assistant message (mirrors ChatHistoryItems.kt logic, incl. Chat.model fallback) */
-function getChatModel(chat: Chat): string {
-  const reversed = [...(chat.messages ?? [])].reverse()
-  const last = reversed.find((m) => m.role === 'assistant')
-  return last?.model ?? 'gpt-4o'
-}
 
 // ─── organizeAndSortAllItems (ported from ChatListOrganizer.kt) ───────────────
 
@@ -178,13 +162,6 @@ const ChatItemCard: React.FC<ChatItemCardProps> = ({
     onContextMenu(e.clientX, e.clientY)
   }
 
-  const model = getChatModel(chat)
-  const logoPath = getModelLogoPath(model)
-  const initial = getModelInitial(model)
-  const ts = getLastTimestamp(chat)
-  const msgs = chat.messages ?? []
-  const lastMsg = msgs[msgs.length - 1]
-
   return (
     <div
       className={`${styles.chatCard}${indented ? ` ${styles.chatCardIndented}` : ''}`}
@@ -197,42 +174,7 @@ const ChatItemCard: React.FC<ChatItemCardProps> = ({
       onPointerMove={handlePointerMove}
     >
       <div className={styles.chatCardInner}>
-        {/* Avatar */}
-        <div className={styles.avatar}>
-          {isAIRenaming ? (
-            <div className={styles.avatarSpinner} />
-          ) : logoPath ? (
-            <img src={logoPath} alt="Model Logo" className={styles.avatarLogo} />
-          ) : (
-            <span className={styles.avatarText}>{initial}</span>
-          )}
-        </div>
-
-        {/* Content */}
-        <div className={styles.chatContent}>
-          <span className={styles.chatTitle}>
-            {chat.preview_name || t('new_chat')}
-          </span>
-          {lastMsg && (
-            <span className={styles.chatPreview}>
-              {lastMsg.text?.slice(0, 100)}
-            </span>
-          )}
-        </div>
-
-        {/* Trailing meta */}
-        <div className={styles.chatMeta}>
-          {ts !== null && (
-            <span className={styles.timestamp}>{formatTimestamp(ts)}</span>
-          )}
-          {msgs.length > 0 && (
-            <span className={styles.msgCount}>
-              <MdForum size={12} />
-              {' '}
-              {msgs.length}
-            </span>
-          )}
-        </div>
+        <ChatRowBody chat={chat} isAIRenaming={isAIRenaming} />
       </div>
     </div>
   )

@@ -5,7 +5,7 @@
  *  - shares the image with other apps (Web Share API with files; hidden where the browser
  *    cannot share files — "save" covers it there),
  *  - saves it (a browser download through the file route),
- *  - forwards it to another chat: a chat picker, then that chat opens with the image attached
+ *  - forwards it to another chat: a chat picker (ChatPicker.tsx), then that chat opens with the image attached
  *    to its draft, ready to send (see utils/forwardedFile.ts).
  *
  * Any image thumbnail opens it with `openImageOnClick`; `ImageViewerHost` (in AppLayout) shows it.
@@ -14,13 +14,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { useMatch, useNavigate } from 'react-router-dom'
 import { create } from 'zustand'
-import { MdAdd, MdClose, MdFileDownload, MdForward, MdMoreVert, MdShare } from '../../ui/icons'
+import { MdClose, MdFileDownload, MdForward, MdMoreVert, MdShare } from '../../ui/icons'
 import type { Attachment, Chat, UserChatHistory } from '../../api/types'
 import { chats as chatsApi } from '../../api/client'
 import { useChatStore } from '../../stores/chatStore'
 import { markAttachmentsUsed } from '../../hooks/useDraftAttachments'
 import { attachmentUrl, isAbortError } from '../../utils/attachments'
 import { setForwardedFile } from '../../utils/forwardedFile'
+import ChatPicker from './ChatPicker'
 import { t } from '../../i18n/he'
 
 // ─── Which image is open ──────────────────────────────────────────────────────
@@ -59,13 +60,6 @@ function canShareFiles(mime: string): boolean {
   } catch {
     return false
   }
-}
-
-function lastTimestamp(chat: Chat): number {
-  const msgs = chat.messages
-  const iso = msgs && msgs.length > 0 ? msgs[msgs.length - 1].datetime : null
-  const ts = iso ? Date.parse(iso) : NaN
-  return isNaN(ts) ? Number.MIN_SAFE_INTEGER : ts
 }
 
 const roundButton: React.CSSProperties = {
@@ -191,14 +185,8 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ att, onClose }) => {
   }
 
   const targets = useMemo(
-    () => (history?.chat_history ?? [])
-      .filter((c) => c.chat_id !== currentChatId)
-      .sort((a, b) => lastTimestamp(b) - lastTimestamp(a)),
+    () => (history?.chat_history ?? []).filter((c) => c.chat_id !== currentChatId),
     [history, currentChatId],
-  )
-  const groupNames = useMemo(
-    () => new Map((history?.groups ?? []).map((g) => [g.group_id, g.group_name])),
-    [history],
   )
 
   return ReactDOM.createPortal(
@@ -340,110 +328,19 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ att, onClose }) => {
 
       {/* Chat picker */}
       {pickerOpen && (
-        <div
-          onClick={(e) => { if (e.target === e.currentTarget) setPickerOpen(false) }}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'rgba(0,0,0,0.6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1rem',
-          }}
-        >
-          <div
-            data-testid="forward-chat-picker"
-            style={{
-              width: '100%',
-              maxWidth: 400,
-              maxHeight: '80%',
-              background: 'var(--surface)',
-              borderRadius: 'var(--radius-card)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.50)',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '16px 20px 8px',
-                fontSize: 'var(--fs-title-small)',
-                fontWeight: 'var(--fw-title-small)',
-                color: 'var(--on-surface)',
-              }}
-            >
-              <span style={{ flex: 1 }}>{t('image_viewer_forward_title')}</span>
-              <button
-                type="button"
-                onClick={() => setPickerOpen(false)}
-                title={t('cancel')}
-                aria-label={t('cancel')}
-                style={{ ...roundButton, width: 32, height: 32, background: 'transparent', color: 'var(--on-surface-variant)' }}
-              >
-                <MdClose size={20} />
-              </button>
-            </div>
-            {error && (
-              <div role="alert" style={{ padding: '0 20px 8px', color: 'var(--accent-red)', fontSize: 13 }}>{error}</div>
-            )}
-            <div style={{ overflowY: 'auto', opacity: busy ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}>
-              <PickerRow onClick={() => handleForward(null)} primary>
-                <MdAdd size={20} style={{ flexShrink: 0 }} />
-                <span>{t('new_chat')}</span>
-              </PickerRow>
-              {targets.map((chat) => (
-                <PickerRow key={chat.chat_id} onClick={() => handleForward(chat)}>
-                  <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {chat.preview_name}
-                    </span>
-                    {chat.group && groupNames.has(chat.group) && (
-                      <span style={{ fontSize: 12, color: 'var(--on-surface-variant)' }}>
-                        {groupNames.get(chat.group)}
-                      </span>
-                    )}
-                  </span>
-                </PickerRow>
-              ))}
-            </div>
-          </div>
-        </div>
+        <ChatPicker
+          title={t('image_viewer_forward_title')}
+          chats={targets}
+          busy={busy}
+          error={error}
+          onDismiss={() => setPickerOpen(false)}
+          onPick={handleForward}
+        />
       )}
     </div>,
     document.body,
   )
 }
-
-const PickerRow: React.FC<{ onClick: () => void; primary?: boolean; children: React.ReactNode }> = ({
-  onClick,
-  primary = false,
-  children,
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 12,
-      width: '100%',
-      padding: '12px 20px',
-      background: 'transparent',
-      border: 'none',
-      color: primary ? 'var(--primary)' : 'var(--on-surface)',
-      fontSize: 'var(--fs-body-medium)',
-      fontFamily: 'inherit',
-      textAlign: 'start',
-      cursor: 'pointer',
-    }}
-  >
-    {children}
-  </button>
-)
 
 /** Shows the image opened with `openImageOnClick`, over whichever page opened it. */
 export const ImageViewerHost: React.FC = () => {
