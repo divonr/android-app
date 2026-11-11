@@ -1,0 +1,553 @@
+/* =========================================================
+   GroupPage — R6 refactor
+   Mirrors Android GroupScreen.kt (dark, RTL, phone-width).
+   ========================================================= */
+
+/* ── Page shell ── */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  position: relative;
+}
+
+/* ── Loading / error ── */
+
+.loading {
+  padding: 2rem;
+  color: var(--on-surface-variant);
+  text-align: center;
+}
+
+/* ── Project toggle (inside ScreenTopBar actions) ── */
+
+.projectToggleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.projectToggleLabel {
+  font-size: var(--fs-label-medium);
+  color: var(--on-surface-variant);
+  font-weight: var(--fw-label-medium);
+  white-space: nowrap;
+}
+
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggleSlider {
+  width: 44px;
+  height: 24px;
+  background: rgba(189, 189, 189, 0.15);
+  border-radius: 12px;
+  position: relative;
+  transition: background 0.2s;
+}
+
+.toggleSlider::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(189, 189, 189, 0.35);
+  top: 3px;
+  inset-inline-start: 3px;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle input:checked + .toggleSlider {
+  background: rgba(108, 124, 231, 0.3);
+}
+
+.toggle input:checked + .toggleSlider::after {
+  background: var(--primary);
+  transform: translateX(20px);
+}
+
+[dir='rtl'] .toggle input:checked + .toggleSlider::after {
+  transform: translateX(-20px);
+}
+
+/* ── Scrollable content ── */
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 80px; /* FAB clearance */
+}
+
+/* ── Project area card ── */
+
+.projectCard {
+  margin: 16px 16px 0;
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Instructions row ── */
+
+.instructionsRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 4px;
+  transition: background 0.15s;
+}
+
+.instructionsRow:hover {
+  background: rgba(255,255,255,0.03);
+}
+
+.instructionsIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--primary-15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
+.instructionsText {
+  flex: 1;
+  min-width: 0;
+}
+
+.instructionsTitle {
+  font-size: var(--fs-title-small);
+  font-weight: var(--fw-title-small);
+  color: var(--on-surface);
+  margin: 0 0 2px;
+}
+
+.instructionsPreview {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* ── System prompt textarea ── */
+
+.promptArea {
+  width: 100%;
+  min-height: 100px;
+  padding: 10px 12px;
+  background: var(--surface-variant);
+  border: 1px solid rgba(232, 232, 242, 0.15);
+  border-radius: 8px;
+  color: var(--on-surface);
+  font-size: var(--fs-body-medium);
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.promptArea:focus {
+  border-color: var(--primary);
+}
+
+.savePromptRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+}
+
+.savedBadge {
+  font-size: var(--fs-body-small);
+  color: var(--accent-green);
+}
+
+/* ── Files section ── */
+
+.filesHeader {
+  font-size: var(--fs-title-small);
+  font-weight: var(--fw-title-small);
+  color: var(--on-surface);
+  margin: 0 0 8px;
+}
+
+.filesEmpty {
+  background: var(--surface-variant);
+  border-radius: 8px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.filesEmpty:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.filesEmptyText {
+  font-size: var(--fs-body-medium);
+  color: var(--on-surface-variant);
+}
+
+.filesGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fileThumb {
+  width: 100px;
+  height: 100px;
+  background: var(--surface-variant);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s;
+}
+
+.fileThumb:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.fileThumbAdd {
+  cursor: pointer;
+}
+
+.fileThumbIcon {
+  font-size: 24px;
+  color: var(--on-surface-variant);
+}
+
+.fileThumbName {
+  font-size: 10px;
+  color: var(--on-surface-variant);
+  text-align: center;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+/* A tile whose content is a link (open the image / download the file) */
+.fileThumbLink {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 8px;
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+}
+
+.fileThumbHint {
+  font-size: 9px;
+  line-height: 1.2;
+  color: var(--on-surface-variant);
+  opacity: 0.8;
+  text-align: center;
+  padding: 0 4px;
+}
+
+/* Not available on the web (device-only file, or gone from the store) */
+.fileThumbUnavailable {
+  cursor: default;
+}
+
+.fileThumbUnavailable .fileThumbIcon,
+.fileThumbUnavailable .fileThumbName {
+  opacity: 0.55;
+}
+
+/* Being uploaded */
+.fileThumbUploading {
+  cursor: progress;
+}
+
+.fileThumbUploading .fileThumbName {
+  opacity: 0.5;
+}
+
+.fileSpinner {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--primary);
+  border-top-color: transparent;
+  animation: fileSpin 0.75s linear infinite;
+}
+
+@keyframes fileSpin {
+  to { transform: rotate(360deg); }
+}
+
+.fileRemoveBtn {
+  position: absolute;
+  top: -4px;
+  inset-inline-end: -4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.7);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.fileInput {
+  display: none;
+}
+
+/* ── Chats section ── */
+
+.chatsSection {
+  padding: 8px 0;
+  flex: 1;
+}
+
+/* ── Empty state ── */
+
+.emptyState {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  gap: 12px;
+  text-align: center;
+}
+
+.emptyIcon {
+  font-size: 56px;
+  opacity: 0.4;
+}
+
+.emptyTitle {
+  font-size: 18px;
+  color: var(--on-surface-variant);
+  margin: 0;
+}
+
+.emptyHint {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+  opacity: 0.7;
+  margin: 0;
+}
+
+/* ── Chat item card ── */
+
+.chatCard {
+  margin: 4px 16px;
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  gap: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.chatCard:hover {
+  background: var(--surface-variant);
+}
+
+/* ── Model initial circle ── */
+
+.modelCircle {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--primary-15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+/* ── Chat item content ── */
+
+.chatInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.chatTitle {
+  font-size: var(--fs-body-large);
+  font-weight: 500;
+  color: var(--on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+}
+
+.chatSnippet {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+}
+
+/* ── Timestamp + count ── */
+
+.chatMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chatTimestamp {
+  font-size: var(--fs-body-small);
+  color: var(--on-surface-variant);
+}
+
+.chatCount {
+  font-size: var(--fs-label-small);
+  color: var(--on-surface-variant);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* ── FAB ── */
+
+.fab {
+  position: absolute;
+  bottom: 20px;
+  inset-inline-start: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px;
+  height: 48px;
+  border-radius: 24px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: var(--fs-body-medium);
+  font-weight: 500;
+  font-family: inherit;
+  box-shadow: 0 4px 12px rgba(108, 124, 231, 0.4);
+  transition: opacity 0.15s;
+  z-index: 10;
+}
+
+.fab:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.fab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Action button (primary) ── */
+
+.btnPrimary {
+  padding: 8px 16px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: var(--fs-body-small);
+  font-weight: 500;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.btnPrimary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Error banner ── */
+
+.error {
+  margin: 8px 16px;
+  padding: 10px 12px;
+  background: rgba(236, 112, 99, 0.12);
+  border: 1px solid var(--accent-red);
+  border-radius: 8px;
+  color: var(--accent-red);
+  font-size: var(--fs-body-small);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.errorClose {
+  background: none;
+  border: none;
+  color: var(--accent-red);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 14px;
+}

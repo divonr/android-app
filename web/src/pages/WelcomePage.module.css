@@ -1,0 +1,215 @@
+/* =========================================================
+   WelcomePage — R6 refactor
+   Mirrors Android WelcomeScreen.kt (dark, RTL, phone-width).
+   ========================================================= */
+
+/* ── Page shell ── */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* ── Close (X) top-right button ── */
+
+.closeRow {
+  display: flex;
+  justify-content: flex-start; /* RTL: visual right */
+  padding: 8px;
+  flex-shrink: 0;
+}
+
+.closeBtn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: none;
+  border: none;
+  color: var(--on-surface);
+  cursor: pointer;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.closeBtn:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+/* ── Scrollable content ── */
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 24px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+/* ── Welcome title ── */
+
+.title {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--on-surface);
+  text-align: center;
+  margin: 16px 0 0;
+}
+
+/* ── Subtitle ── */
+
+.subtitle {
+  font-size: 16px;
+  color: var(--on-surface-variant);
+  text-align: center;
+  line-height: 1.6;
+  margin: 16px 0 0;
+  max-width: 340px;
+}
+
+/* ── Section header ── */
+
+.sectionHeader {
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  width: 100%;
+  margin: 32px 0 16px;
+}
+
+.sectionHeaderFree {
+  color: var(--accent-green);
+}
+
+.sectionHeaderPaid {
+  color: var(--on-surface-variant);
+}
+
+/* ── Provider grid ── */
+
+.providerGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.providerRow {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+/* ── Provider card ── */
+
+.providerCard {
+  flex: 1;
+  height: 72px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  font-size: 16px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: opacity 0.15s, transform 0.1s;
+  padding: 8px;
+}
+
+.providerCard:hover {
+  opacity: 0.9;
+  transform: scale(0.98);
+}
+
+.providerCard:active {
+  transform: scale(0.96);
+}
+
+/* Provider-specific colors */
+
+.providerGoogle      { background: #ffffff; color: #333333; }
+.providerPoe         { background: #694BC2; color: #ffffff; }
+.providerCohere      { background: #c8c8c8; color: #222222; }
+.providerLlmstats    { background: #13131c; color: #ffffff; border: 1px solid rgba(255,255,255,0.1); }
+.providerOpenai      { background: #ffffff; color: #000000; }
+.providerAnthropic   { background: #d4a574; color: #000000; }
+.providerOpenrouter  { background: #ffffff; color: #000000; }
+
+/* Provider name placeholder (since we don't have logo images) */
+
+.providerName {
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* ── Bottom fixed section ── */
+
+.bottomSection {
+  flex-shrink: 0;
+  background: var(--surface);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── "I have an API key" button ── */
+
+.haveKeyBtn {
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 18px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.haveKeyBtn:hover {
+  background: var(--primary-15);
+}
+
+/* ── Skip welcome checkbox row ── */
+
+.skipRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.skipRow:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.skipRow input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.skipLabel {
+  font-size: 14px;
+  color: var(--on-surface-variant);
+}

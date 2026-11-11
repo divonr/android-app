@@ -1,0 +1,324 @@
+package com.example.ApI.desktop
+
+import com.example.ApI.data.model.*
+import com.example.ApI.data.network.GitHubApiService
+import com.example.ApI.data.network.GmailApiService
+import com.example.ApI.data.network.GoogleCalendarApiService
+import com.example.ApI.data.network.GoogleDriveApiService
+import com.example.ApI.data.network.LLMApiService
+import com.example.ApI.data.repository.*
+import com.example.ApI.data.sync.GoogleIdentity
+import com.example.ApI.data.sync.RemoteStorageClient
+import com.example.ApI.data.sync.SyncEngine
+import com.example.ApI.tools.ToolSpecification
+import com.example.ApI.util.JsonConfig
+import kotlinx.coroutines.flow.StateFlow
+import java.io.File
+
+class DesktopRepository(private val appDir: File) {
+    private val context = DesktopContext(File(appDir, "files").apply { mkdirs() })
+    private val internalDir = File(context.filesDir, "llm_data").apply { mkdirs() }
+    private val apiService = LLMApiService()
+
+    // ── Sync hook (stable lambda that delegates to syncEngine once wired) ─────
+    private var syncHookImpl: (File) -> Unit = {}
+    private val syncHook: (File) -> Unit = { f -> syncHookImpl(f) }
+
+    private val modelsCacheManager = ModelsCacheManager(internalDir, JsonConfig.prettyPrint)
+    private val localStorageManager = LocalStorageManager(internalDir, JsonConfig.prettyPrint, syncHook)
+    private val chatHistoryManager = ChatHistoryManager(internalDir, JsonConfig.prettyPrint, null, syncHook)
+    private val groupProjectManager = GroupProjectManager(chatHistoryManager)
+    private val messageBranchingManager = MessageBranchingManager(chatHistoryManager)
+    private val chatSearchService = ChatSearchService { username -> chatHistoryManager.loadChatHistory(username) }
+    private val fileUploadManager = FileUploadManager(JsonConfig.prettyPrint) { username ->
+        localStorageManager.loadApiKeys(username)
+    }
+    val skillsStorageManager = SkillsStorageManager(internalDir, JsonConfig.prettyPrint, syncHook)
+    private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager, syncHook)
+
+    // ── Sync engine (one per data dir per process, shared with any other repository) ─
+    val syncEngine = SyncEngine.forDir(internalDir, JsonConfig.prettyPrint) { localStorageManager.loadAppSettings() }
+    private val emptyChatCleanup = EmptyChatCleanup(chatHistoryManager, syncEngine)
+
+    private val titleGenerationService by lazy {
+        TitleGenerationService(
+            json = JsonConfig.prettyPrint,
+            apiService = apiService,
+            loadChatHistory = { username -> loadChatHistory(username) },
+            loadProviders = { loadProviders() },
+            loadApiKeys = { username -> localStorageManager.loadApiKeys(username) }
+        )
+    }
+
+    init {
+        // Wire syncHookImpl now that syncEngine is initialized
+        syncHookImpl = { f -> syncEngine.onFileWritten(f) }
+
+        modelsCacheManager.setCustomProvidersLoader {
+            localStorageManager.loadCustomProviders(loadAppSettings().current_user)
+        }
+        modelsCacheManager.setFullCustomProvidersLoader {
+            localStorageManager.loadFullCustomProviders(loadAppSettings().current_user)
+        }
+    }
+
+    // ==================== Remote Sync ====================
+    /** Start background sync. No-op if sync is disabled in settings. */
+    fun startSync() {
+        if (loadAppSettings().remoteSync.enabled) syncEngine.start()
+    }
+
+    /** Trigger an immediate pull (app focus, "Sync now" button, etc.). No-op if disabled. */
+    fun pullNow() = syncEngine.pullNow()
+
+    /** Increments whenever a pull overwrites local files; observe and reload visible data. */
+    val syncChangeTick: StateFlow<Long> get() = syncEngine.changeTick
+
+    /** True when the last authenticated call received 401; UI should prompt re-authentication. */
+    val needsReauth: StateFlow<Boolean> get() = syncEngine.needsReauth
+
+    /** True when the sync server lacks compare-and-swap uploads (too old): nothing syncs until it is updated. */
+    val syncServerLacksCas: StateFlow<Boolean> get() = syncEngine.serverLacksCas
+
+    /** Health-check the sync server with current settings. Returns true on success. */
+    suspend fun testSyncConnection(): Boolean = syncEngine.testConnection()
+
+    /**
+     * Full sign-in-to-sync flow (mirrors DataRepository.signInToSync):
+     * 1. Exchange Google identity for a server-minted token.
+     * 2. Under the sync lock: migrate the local `default` user's files to the canonical
+     *    username (another account only switches), reset the sync state for the account and
+     *    persist updated RemoteSyncSettings.
+     * 3. Clear the needsReauth flag and start sync.
+     */
+    suspend fun signInToSync(identity: GoogleIdentity): Result<String> {
+        return try {
+            val current = loadAppSettings()
+            val authResult = RemoteStorageClient(baseUrl = current.remoteSync.serverBaseUrl, token = "")
+                .authGoogle(identity.idToken)
+            syncEngine.runExclusive {
+                val migration = UserMigration.migrateToAccount(internalDir, JsonConfig.prettyPrint, authResult.username)
+                syncEngine.prepareForSignIn(authResult.username, migration)
+                // Applied after migration (current_user may have changed), under the settings file lock
+                updateAppSettings { postMigration ->
+                    postMigration.copy(
+                        remoteSync = postMigration.remoteSync.copy(
+                            enabled = true,
+                            authToken = authResult.token,
+                            accountEmail = authResult.email
+                        )
+                    )
+                }
+            }
+            syncEngine.clearReauth()
+            startSync()
+            Result.success(authResult.username)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Sign out of sync: disables sync and clears the minted token and account email. The sync
+     * state is kept (mirrors DataRepository.signOutOfSync): edits made while signed out are found
+     * by content on the next sign-in, and re-signing into the same account keeps 3-way deletion
+     * semantics; another account resets it at sign-in.
+     * Local data and the current username are preserved.
+     */
+    fun signOutOfSync() {
+        updateAppSettings { current ->
+            current.copy(
+                remoteSync = current.remoteSync.copy(
+                    enabled = false,
+                    authToken = "",
+                    accountEmail = ""
+                )
+            )
+        }
+    }
+
+    // ==================== Models ====================
+    suspend fun refreshModelsIfNeeded(): Boolean = modelsCacheManager.refreshModelsIfNeeded()
+    suspend fun forceRefreshModels(): Pair<Boolean, String?> = modelsCacheManager.forceRefreshModels()
+    fun loadProviders(): List<Provider> = modelsCacheManager.buildProviders()
+
+    // ==================== Chat History ====================
+    fun loadChatHistory(username: String): UserChatHistory = chatHistoryManager.loadChatHistory(username)
+    fun saveChatHistory(chatHistory: UserChatHistory) = chatHistoryManager.saveChatHistory(chatHistory)
+    fun saveChatHistory(username: String, chatHistory: UserChatHistory) = chatHistoryManager.saveChatHistory(username, chatHistory)
+    /** Load + [transform] + save under the chat history file lock (use for every read-modify-write). */
+    fun updateChatHistory(username: String, transform: (UserChatHistory) -> UserChatHistory): UserChatHistory =
+        chatHistoryManager.updateChatHistory(username, transform)
+    /** Like [updateChatHistory], with a result computed from the same locked load. */
+    fun <R> modifyChatHistory(username: String, block: (UserChatHistory) -> Pair<UserChatHistory, R>): R =
+        chatHistoryManager.modifyChatHistory(username, block)
+    fun getChatJson(username: String, chatId: String): String? = chatHistoryManager.getChatJson(username, chatId)
+    fun saveChatJsonToDownloads(chatId: String, content: String): String? = chatHistoryManager.saveChatJsonToDownloads(chatId, content)
+    fun addMessageToChat(username: String, chatId: String, message: Message): Chat? = chatHistoryManager.addMessageToChat(username, chatId, message)
+    fun createNewChat(username: String, previewName: String, systemPrompt: String = ""): Chat =
+        chatHistoryManager.createNewChat(username, previewName, systemPrompt).also { emptyChatCleanup.createdHere(it.chat_id) }
+    fun createNewChatInGroup(username: String, previewName: String, groupId: String, systemPrompt: String = ""): Chat =
+        chatHistoryManager.createNewChatInGroup(username, previewName, groupId, systemPrompt).also { emptyChatCleanup.createdHere(it.chat_id) }
+    fun updateChatSystemPrompt(username: String, chatId: String, systemPrompt: String): Chat? = chatHistoryManager.updateChatSystemPrompt(username, chatId, systemPrompt)
+    fun updateChatShareLink(username: String, chatId: String, shareLink: String, shareId: String): Chat? = chatHistoryManager.updateChatShareLink(username, chatId, shareLink, shareId)
+    fun replaceMessageInChat(username: String, chatId: String, oldMessage: Message, newMessage: Message): Chat? = chatHistoryManager.replaceMessageInChat(username, chatId, oldMessage, newMessage)
+    fun deleteMessagesFromPoint(username: String, chatId: String, fromMessage: Message): Chat? = chatHistoryManager.deleteMessagesFromPoint(username, chatId, fromMessage)
+    fun updateChatWithNewAttachments(username: String, chatId: String, updatedMessages: List<Message>) = chatHistoryManager.updateChatWithNewAttachments(username, chatId, updatedMessages)
+    fun importSingleChat(jsonContent: String, username: String): String? = chatHistoryManager.importSingleChat(jsonContent, username)
+    fun exportChatHistory(username: String): String? = chatHistoryManager.exportChatHistory(username)
+    fun importChatHistoryJson(raw: ByteArray, targetUsername: String) = chatHistoryManager.importChatHistoryJson(raw, targetUsername)
+    fun validateChatJson(jsonContent: String): Boolean = chatHistoryManager.validateChatJson(jsonContent)
+
+    /** Remove empty chats; with sync on, keeps empty chats from the synced base not created here (see [EmptyChatCleanup]). */
+    fun cleanupEmptyChats(username: String): Int = emptyChatCleanup.cleanup(username)
+
+    // ==================== Groups ====================
+    fun createNewGroup(username: String, groupName: String): ChatGroup = groupProjectManager.createNewGroup(username, groupName)
+    fun deleteGroup(username: String, groupId: String): Boolean = groupProjectManager.deleteGroup(username, groupId)
+    fun renameGroup(username: String, groupId: String, newName: String): Boolean = groupProjectManager.renameGroup(username, groupId, newName)
+    fun addChatToGroup(username: String, chatId: String, groupId: String): Boolean = groupProjectManager.addChatToGroup(username, chatId, groupId)
+    fun removeChatFromGroup(username: String, chatId: String): Boolean = groupProjectManager.removeChatFromGroup(username, chatId)
+    fun updateGroupProjectStatus(username: String, groupId: String, isProject: Boolean): Boolean = groupProjectManager.updateGroupProjectStatus(username, groupId, isProject)
+    fun addAttachmentToGroup(username: String, groupId: String, attachment: Attachment): Boolean = groupProjectManager.addAttachmentToGroup(username, groupId, attachment)
+    fun removeAttachmentFromGroup(username: String, groupId: String, attachmentIndex: Int): Boolean = groupProjectManager.removeAttachmentFromGroup(username, groupId, attachmentIndex)
+
+    // ==================== API Keys & Settings ====================
+    fun loadApiKeys(username: String): List<ApiKey> = localStorageManager.loadApiKeys(username)
+    fun saveApiKeys(username: String, apiKeys: List<ApiKey>) = localStorageManager.saveApiKeys(username, apiKeys)
+    fun addApiKey(username: String, apiKey: ApiKey) = localStorageManager.addApiKey(username, apiKey)
+    fun toggleApiKeyStatus(username: String, keyId: String) = localStorageManager.toggleApiKeyStatus(username, keyId)
+    fun deleteApiKey(username: String, keyId: String) = localStorageManager.deleteApiKey(username, keyId)
+    fun reorderApiKeys(username: String, fromIndex: Int, toIndex: Int) = localStorageManager.reorderApiKeys(username, fromIndex, toIndex)
+    fun loadAppSettings(): AppSettings = localStorageManager.loadAppSettings()
+    fun saveAppSettings(settings: AppSettings) = localStorageManager.saveAppSettings(settings)
+    /** Change the on-disk settings with [transform] under the file lock (never save a stale in-memory copy). */
+    fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings = localStorageManager.updateAppSettings(transform)
+    fun saveFileLocally(fileName: String, data: ByteArray): String? = localStorageManager.saveFileLocally(fileName, data)
+    fun deleteFile(filePath: String): Boolean = localStorageManager.deleteFile(filePath)
+
+    // ==================== Custom Providers ====================
+    fun loadCustomProviders(username: String): List<CustomProviderConfig> = localStorageManager.loadCustomProviders(username)
+    fun saveCustomProviders(username: String, providers: List<CustomProviderConfig>) {
+        localStorageManager.saveCustomProviders(username, providers)
+        apiService.reloadCustomProviders(providers.filter { it.isEnabled })
+    }
+    fun addCustomProvider(username: String, provider: CustomProviderConfig) {
+        localStorageManager.addCustomProvider(username, provider)
+        if (provider.isEnabled) apiService.registerCustomProvider(provider)
+    }
+    fun updateCustomProvider(username: String, providerId: String, updated: CustomProviderConfig) {
+        localStorageManager.updateCustomProvider(username, providerId, updated)
+        apiService.reloadCustomProviders(loadCustomProviders(username).filter { it.isEnabled })
+    }
+    fun deleteCustomProvider(username: String, providerId: String) {
+        val toDelete = localStorageManager.loadCustomProviders(username).find { it.id == providerId }
+        localStorageManager.deleteCustomProvider(username, providerId)
+        toDelete?.let { apiService.unregisterCustomProvider(it.providerKey) }
+    }
+    fun initializeCustomProviders(username: String) {
+        apiService.reloadCustomProviders(localStorageManager.loadCustomProviders(username).filter { it.isEnabled })
+    }
+
+    fun loadFullCustomProviders(username: String): List<FullCustomProviderConfig> = localStorageManager.loadFullCustomProviders(username)
+    fun saveFullCustomProviders(username: String, providers: List<FullCustomProviderConfig>) {
+        localStorageManager.saveFullCustomProviders(username, providers)
+        apiService.reloadFullCustomProviders(providers.filter { it.isEnabled })
+    }
+    fun addFullCustomProvider(username: String, provider: FullCustomProviderConfig) {
+        localStorageManager.addFullCustomProvider(username, provider)
+        if (provider.isEnabled) apiService.registerFullCustomProvider(provider)
+    }
+    fun updateFullCustomProvider(username: String, providerId: String, updated: FullCustomProviderConfig) {
+        localStorageManager.updateFullCustomProvider(username, providerId, updated)
+        apiService.reloadFullCustomProviders(loadFullCustomProviders(username).filter { it.isEnabled })
+    }
+    fun deleteFullCustomProvider(username: String, providerId: String) {
+        val toDelete = localStorageManager.loadFullCustomProviders(username).find { it.id == providerId }
+        localStorageManager.deleteFullCustomProvider(username, providerId)
+        toDelete?.let { apiService.unregisterFullCustomProvider(it.providerKey) }
+    }
+    fun initializeFullCustomProviders(username: String) {
+        apiService.reloadFullCustomProviders(localStorageManager.loadFullCustomProviders(username).filter { it.isEnabled })
+    }
+
+    // ==================== Message Branching ====================
+    fun migrateChatToBranchingStructure(chat: Chat): Chat = messageBranchingManager.migrateChatToBranchingStructure(chat)
+    fun ensureBranchingStructure(username: String, chatId: String): Chat? = messageBranchingManager.ensureBranchingStructure(username, chatId)
+    fun createBranch(username: String, chatId: String, nodeId: String, newUserMessage: Message): Pair<Chat, String>? = messageBranchingManager.createBranch(username, chatId, nodeId, newUserMessage)
+    fun addResponseToCurrentVariant(username: String, chatId: String, response: Message, targetVariantId: String? = null, expectedTailId: String? = null): Chat? =
+        messageBranchingManager.addResponseToCurrentVariant(username, chatId, response, targetVariantId, expectedTailId)
+    fun addAnchoredResponse(username: String, chatId: String, response: Message, anchor: ReplyAnchor): Chat? =
+        messageBranchingManager.addAnchoredResponse(username, chatId, response, anchor)
+    /** Delete a chat on the user's request (a reply still streaming into it is then dropped, not restored). */
+    fun deleteChat(username: String, chatId: String): UserChatHistory = chatHistoryManager.deleteChat(username, chatId)
+    fun switchVariant(username: String, chatId: String, nodeId: String, variantIndex: Int): Chat? = messageBranchingManager.switchVariant(username, chatId, nodeId, variantIndex)
+    fun getBranchInfo(chat: Chat, nodeId: String): BranchInfo? = messageBranchingManager.getBranchInfo(chat, nodeId)
+    fun getBranchInfoForMessage(chat: Chat, messageId: String): BranchInfo? = messageBranchingManager.getBranchInfoForMessage(chat, messageId)
+    fun addUserMessageAsNewNode(username: String, chatId: String, userMessage: Message): Chat? = messageBranchingManager.addUserMessageAsNewNode(username, chatId, userMessage)
+    fun findNodeForMessage(chat: Chat, message: Message): String? = messageBranchingManager.findNodeForMessage(chat, message)
+    fun deleteMessageFromBranch(username: String, chatId: String, messageId: String): DeleteMessageResult = messageBranchingManager.deleteMessageFromBranch(username, chatId, messageId)
+
+    // ==================== Search ====================
+    fun searchChats(username: String, query: String): List<SearchResult> = chatSearchService.searchChats(username, query)
+
+    // ==================== File Upload ====================
+    suspend fun uploadFile(provider: Provider, filePath: String, fileName: String, mimeType: String, username: String): Attachment? {
+        return fileUploadManager.uploadFile(provider, filePath, fileName, mimeType, username)
+    }
+
+    // ==================== Send Message ====================
+    suspend fun sendMessage(
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        username: String,
+        chatId: String? = null,
+        projectAttachments: List<Attachment> = emptyList(),
+        webSearchEnabled: Boolean = false,
+        enabledTools: List<ToolSpecification> = emptyList(),
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null,
+        callback: StreamingCallback
+    ) {
+        val storedApiKeys = loadApiKeys(username)
+        val apiKeys = storedApiKeys.filter { it.isActive }.associate { it.provider to it.key }
+        val (updatedMessages, hasUpdates) = fileUploadManager.ensureFilesUploadedForProvider(provider, messages, username)
+        if (hasUpdates && chatId != null) updateChatWithNewAttachments(username, chatId, updatedMessages)
+        val updatedProjectAttachments = fileUploadManager.ensureProjectFilesUploadedForProvider(provider, projectAttachments, username)
+        val finalMessages = if (updatedProjectAttachments.isNotEmpty()) {
+            listOf(Message(role = "user", text = "General files belonging to the project of which this conversation is a part are attached:", attachments = updatedProjectAttachments)) + updatedMessages
+        } else updatedMessages
+        apiService.sendMessage(provider.withProjectIdFrom(storedApiKeys), modelName, finalMessages, systemPrompt, apiKeys, webSearchEnabled, enabledTools, thinkingBudget, temperature, callback)
+    }
+
+    // ==================== Title Generation ====================
+    suspend fun generateConversationTitle(username: String, conversationId: String, provider: String? = null): String =
+        titleGenerationService.generateConversationTitle(username, conversationId, provider)
+
+    // ==================== GitHub ====================
+    fun loadGitHubConnection(username: String): GitHubConnection? = externalConnectionsManager.loadGitHubConnection(username)
+    fun saveGitHubConnection(username: String, connection: GitHubConnection) = externalConnectionsManager.saveGitHubConnection(username, connection)
+    fun removeGitHubConnection(username: String) = externalConnectionsManager.removeGitHubConnection(username)
+    fun isGitHubConnected(username: String): Boolean = externalConnectionsManager.isGitHubConnected(username)
+    fun getGitHubApiService(username: String): Pair<GitHubApiService, String>? = externalConnectionsManager.getGitHubApiService(username)
+    fun updateGitHubLastUsed(username: String) = externalConnectionsManager.updateGitHubLastUsed(username)
+
+    // ==================== Google Workspace ====================
+    fun loadGoogleWorkspaceConnection(username: String): GoogleWorkspaceConnection? = externalConnectionsManager.loadGoogleWorkspaceConnection(username)
+    fun saveGoogleWorkspaceConnection(username: String, connection: GoogleWorkspaceConnection) = externalConnectionsManager.saveGoogleWorkspaceConnection(username, connection)
+    fun removeGoogleWorkspaceConnection(username: String) = externalConnectionsManager.removeGoogleWorkspaceConnection(username)
+    fun isGoogleWorkspaceConnected(username: String): Boolean = externalConnectionsManager.isGoogleWorkspaceConnected(username)
+    fun updateGoogleWorkspaceEnabledServices(username: String, services: EnabledGoogleServices) = externalConnectionsManager.updateGoogleWorkspaceEnabledServices(username, services)
+    fun getGoogleWorkspaceApiServices(username: String): Triple<GmailApiService?, GoogleCalendarApiService?, GoogleDriveApiService?>? = externalConnectionsManager.getGoogleWorkspaceApiServices(username)
+    fun updateGoogleWorkspaceLastUsed(username: String) = externalConnectionsManager.updateGoogleWorkspaceLastUsed(username)
+
+    // ==================== Skills ====================
+    fun getInstalledSkills() = skillsStorageManager.getInstalledSkills()
+    fun getEnabledSkillsMetadata() = skillsStorageManager.getEnabledSkillsMetadata()
+    fun createSkill(name: String, description: String, body: String = "") = skillsStorageManager.createSkill(name, description, body)
+    fun deleteSkill(skillName: String) = skillsStorageManager.deleteSkill(skillName)
+    fun setSkillEnabled(skillName: String, enabled: Boolean) = skillsStorageManager.setSkillEnabled(skillName, enabled)
+    fun getSkillMdContent(skillName: String) = skillsStorageManager.getSkillMdContent(skillName)
+    fun importSkillFromText(content: String) = skillsStorageManager.importFromText(content)
+}

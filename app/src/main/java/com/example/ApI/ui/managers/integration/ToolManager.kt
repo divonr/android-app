@@ -1,5 +1,6 @@
 package com.example.ApI.ui.managers.integration
 
+import com.example.ApI.data.AndroidPlatformStorage
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
@@ -40,7 +41,7 @@ class ToolManager(
         val enabledToolIds = baseEnabledTools.filter { it !in excludedTools }
 
         val toolRegistry = ToolRegistry.getInstance()
-        val currentProvider = deps.uiState.value.currentProvider?.provider ?: "openai"
+        val currentProvider = ToolRegistry.specProviderFor(deps.uiState.value.currentProvider?.provider ?: "openai")
 
         val specifications = mutableListOf<ToolSpecification>()
 
@@ -62,7 +63,7 @@ class ToolManager(
             currentChat?.group?.let { groupId ->
                 groups.find { it.group_id == groupId }?.let { group ->
                     val groupConversationsTool = GroupConversationsTool(
-                        repository = deps.repository,
+                        loadChatHistory = { username -> deps.repository.loadChatHistory(username) },
                         username = currentUser,
                         currentChatId = currentChat.chat_id,
                         groupId = groupId,
@@ -81,14 +82,26 @@ class ToolManager(
             }
 
             val pythonTool = PythonInterpreterTool(
-                context = deps.context,
+                platformStorage = AndroidPlatformStorage(deps.context),
                 currentChat = currentChat,
-                currentGroup = currentGroup
+                currentGroup = currentGroup,
+                files = pythonToolFiles()
             )
             specifications.add(pythonTool.getSpecification(currentProvider))
         }
 
         return specifications
+    }
+
+    /**
+     * With sync on, the Python tool also reads attachments of other devices (from the account's
+     * store) and its generated files get a hash and are uploaded for the other devices. With
+     * sync off (null) the tool works with the device's files exactly as before.
+     */
+    private fun pythonToolFiles(): com.example.ApI.tools.PythonToolFiles? {
+        val attachments = com.example.ApI.data.DeviceAttachmentsProvider.get(deps.context)
+        if (!attachments.enabled) return null
+        return attachments.pythonFiles(java.io.File(deps.context.filesDir, "attachments"))
     }
 
     /**
@@ -104,7 +117,7 @@ class ToolManager(
             return currentChat?.group?.let { groupId ->
                 groups.find { it.group_id == groupId }?.let { group ->
                     val groupConversationsTool = GroupConversationsTool(
-                        repository = deps.repository,
+                        loadChatHistory = { username -> deps.repository.loadChatHistory(username) },
                         username = currentUser,
                         currentChatId = currentChat.chat_id,
                         groupId = groupId,
@@ -130,9 +143,10 @@ class ToolManager(
             }
 
             val pythonTool = PythonInterpreterTool(
-                context = deps.context,
+                platformStorage = AndroidPlatformStorage(deps.context),
                 currentChat = currentChat,
-                currentGroup = currentGroup
+                currentGroup = currentGroup,
+                files = pythonToolFiles()
             )
             return pythonTool.execute(toolCall.parameters)
         }
@@ -145,12 +159,11 @@ class ToolManager(
      * Enable a tool by its ID.
      */
     fun enableTool(toolId: String) {
-        val currentSettings = deps.appSettings.value
+        val currentSettings = deps.repository.loadAppSettings()
         if (!currentSettings.enabledTools.contains(toolId)) {
-            val updatedSettings = currentSettings.copy(
-                enabledTools = currentSettings.enabledTools + toolId
-            )
-            deps.repository.saveAppSettings(updatedSettings)
+            val updatedSettings = deps.repository.updateAppSettings { fresh ->
+                if (toolId in fresh.enabledTools) fresh else fresh.copy(enabledTools = fresh.enabledTools + toolId)
+            }
             updateAppSettings(updatedSettings)
         }
     }
@@ -159,11 +172,9 @@ class ToolManager(
      * Disable a tool by its ID.
      */
     fun disableTool(toolId: String) {
-        val currentSettings = deps.appSettings.value
-        val updatedSettings = currentSettings.copy(
-            enabledTools = currentSettings.enabledTools - toolId
-        )
-        deps.repository.saveAppSettings(updatedSettings)
+        val updatedSettings = deps.repository.updateAppSettings { fresh ->
+            fresh.copy(enabledTools = fresh.enabledTools - toolId)
+        }
         updateAppSettings(updatedSettings)
     }
 }

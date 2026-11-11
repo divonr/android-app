@@ -1,0 +1,66 @@
+/* =========================================================
+   Design tokens — mirrors app/src/main/java/.../ui/theme/Color.kt + Type.kt
+   Source of truth for ALL visual decisions in the refactored web UI.
+   ========================================================= */
+
+:root {
+  /* ── Backgrounds & surfaces (Color.kt) ── */
+  --bg:               #0D0E14;   /* Background */
+  --surface:          #1A1B26;   /* Surface */
+  --surface-variant:  #20212C;   /* SurfaceVariant */
+
+  /* ── Primary palette (Color.kt) ── */
+  --primary:    #6C7CE7;   /* Primary */
+  --secondary:  #5B6EF7;   /* Secondary */
+  --tertiary:   #9C88FF;   /* Tertiary */
+
+  /* ── On-color text (Color.kt) ── */
+  --on-surface:          #E8E8F2;   /* OnSurface */
+  --on-surface-variant:  #BDBDBD;   /* OnSurfaceVariant */
+  --on-primary:          #FFFFFF;   /* OnPrimary */
+
+  /* ── Chat bubbles (Color.kt) ── */
+  --assistant-bubble: #2A2B3A;
+  --user-bubble:      #6C7CE7;
+  --system-bubble:    #3A3B4A;
+  --message-border:   #34354A;
+
+  /* ── Accent colors (Color.kt) ── */
+  --accent-blue:   #5DADE2;   /* AccentBlue */
+  --accent-green:  #58D68D;   /* AccentGreen */
+  --accent-red:    #EC7063;   /* AccentRed */
+  --accent-yellow: #F7DC6F;   /* AccentYellow */
+
+  /* ── Typography scale (Type.kt font sizes / weights) ── */
+  --fs-title-small:   16px;  --fw-title-small:   600;   /* titleSmall  16/SemiBold */
+  --fs-title-medium:  18px;  --fw-title-medium:  500;   /* titleMedium 18/Medium   */
+  --fs-label-medium:  12px;  --fw-label-medium:  500;   /* labelMedium 12/Medium   */
+  --fs-body-large:    16px;  --fw-body-large:    400;   /* bodyLarge   16/Normal   */
+  --fs-body-medium:   14px;  --fw-body-medium:   400;   /* bodyMedium  14/Normal   */
+  --fs-body-small:    12px;  --fw-body-small:    400;   /* bodySmall   12/Normal   */
+  --fs-label-small:   11px;  --fw-label-small:   500;   /* labelSmall  11/Medium   */
+
+  /* ── Border radius tokens ── */
+  --radius-icon-btn: 11px;   /* 36px icon button rounded square */
+  --radius-pill:     24px;   /* input pill (ChatInputArea RoundedCornerShape(24dp)) */
+  --radius-bubble:   18px;   /* message bubbles */
+  --radius-card:     12px;   /* cards / dialogs */
+
+  /* ── Spacing anchors (ChatTopBar / ChatInputArea dp values) ── */
+  --spacing-topbar-h: 20px;
+  --spacing-topbar-v: 16px;
+  --spacing-input-h:  20px;
+  --spacing-input-v:  16px;
+
+  /* ── Alpha overlay helpers ── */
+  --primary-15: rgba(108, 124, 231, 0.15);  /* active icon button bg */
+  --primary-30: rgba(108, 124, 231, 0.30);  /* disabled round button */
+  --primary-08: rgba(108, 124, 231, 0.08);  /* thought bubble bg */
+  --primary-20: rgba(108, 124, 231, 0.20);  /* thought bubble border */
+
+  /* ── Icon button fixed dimensions ── */
+  --icon-btn-size:    36px;
+  --icon-btn-icon:    18px;
+  --round-btn-size:   40px;
+  --round-btn-icon:   18px;
+}

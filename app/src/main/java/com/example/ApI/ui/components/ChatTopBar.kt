@@ -267,6 +267,7 @@ fun NormalModeTopBar(
                             "openai" -> R.string.provider_openai
                             "anthropic" -> R.string.provider_anthropic
                             "google" -> R.string.provider_google
+                            "vertex" -> R.string.provider_vertex
                             "poe" -> R.string.provider_poe
                             "cohere" -> R.string.provider_cohere
                             "openrouter" -> R.string.provider_openrouter

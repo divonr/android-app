@@ -1,0 +1,38 @@
+/* =========================================================
+   AppLayout — centered phone-width column shell
+   R0: sidebar removed; pure full-screen column model.
+   ========================================================= */
+
+.shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  /* Slightly darker than --bg so the column reads as a phone bezel on wide screens */
+  background: #08090f;
+}
+
+.frame {
+  width: 100%;
+  max-width: 520px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  position: relative;
+  /* Subtle border to separate column from outer bg on very wide screens */
+  box-shadow: 0 0 0 1px rgba(52, 53, 74, 0.5);
+}
+
+/* On phone widths the column IS the viewport — outer bg matches */
+@media (max-width: 520px) {
+  .shell {
+    background: var(--bg);
+  }
+
+  .frame {
+    box-shadow: none;
+  }
+}

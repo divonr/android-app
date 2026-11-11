@@ -24,6 +24,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import com.example.ApI.R
+import com.example.ApI.data.attachments.AttachmentTransferState
 import com.example.ApI.data.model.SelectedFile
 import com.example.ApI.data.model.WebSearchSupport
 import com.example.ApI.ui.theme.*
@@ -35,7 +36,10 @@ import com.example.ApI.ui.theme.*
 fun SelectedFilesPreview(
     selectedFiles: List<SelectedFile>,
     onRemoveFile: (SelectedFile) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** By local path: files uploading to the account's store, or whose upload failed. */
+    transfers: Map<String, AttachmentTransferState> = emptyMap(),
+    onRetryUpload: (SelectedFile) -> Unit = {}
 ) {
     if (selectedFiles.isEmpty()) return
 
@@ -50,7 +54,9 @@ fun SelectedFilesPreview(
             items(selectedFiles) { file ->
                 FilePreview(
                     file = file,
-                    onRemove = { onRemoveFile(file) }
+                    onRemove = { onRemoveFile(file) },
+                    transfer = file.localPath?.let { transfers[it] },
+                    onRetryUpload = { onRetryUpload(file) }
                 )
             }
         }
@@ -69,7 +75,9 @@ fun SelectedFilesPreview(
             items(selectedFiles) { file ->
                 FilePreviewThumbnail(
                     file = file,
-                    onRemove = { onRemoveFile(file) }
+                    onRemove = { onRemoveFile(file) },
+                    transfer = file.localPath?.let { transfers[it] },
+                    onRetryUpload = { onRetryUpload(file) }
                 )
             }
         }

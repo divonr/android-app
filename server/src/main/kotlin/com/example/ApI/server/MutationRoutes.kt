@@ -1,0 +1,1129 @@
+package com.example.ApI.server
+
+import com.example.ApI.data.model.*
+import com.example.ApI.data.repository.DeleteMessageResult
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.request.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
+import io.ktor.http.content.*
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.*
+import java.io.ByteArrayInputStream
+import java.util.UUID
+
+private val lenientJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+/** A project ID as Android's key form produces it: no whitespace, null when empty. */
+private fun String?.normalizedProjectId(): String? = this?.filterNot { it.isWhitespace() }?.takeIf { it.isNotEmpty() }
+
+private const val MAX_ZIP_UPLOAD_BYTES = 50L * 1024 * 1024  // 50 MB
+
+// ── P4 Request DTOs ──────────────────────────────────────────────────────────
+
+@Serializable
+data class CreateChatRequest(
+    val previewName: String,
+    val systemPrompt: String = "",
+    val groupId: String? = null
+)
+
+@Serializable
+data class PatchChatRequest(
+    val previewName: String? = null,
+    val systemPrompt: String? = null,
+    // Share-link fields are patched together (empty strings clear the link)
+    val shareLink: String? = null,
+    val shareId: String? = null
+)
+
+@Serializable
+data class ImportChatRequest(
+    val content: String
+)
+
+@Serializable
+data class CreateGroupRequest(
+    val groupName: String
+)
+
+@Serializable
+data class PatchGroupRequest(
+    val groupName: String? = null,
+    val systemPrompt: String? = null,
+    val isProject: Boolean? = null
+)
+
+@Serializable
+data class AddApiKeyRequest(
+    val id: String? = null,
+    val provider: String,
+    val key: String,
+    val isActive: Boolean = true,
+    val customName: String? = null,
+    /** Google Cloud project; required for the `vertex` provider, ignored for the others. */
+    val projectId: String? = null
+)
+
+@Serializable
+data class PatchApiKeyRequest(
+    val key: String? = null,
+    val isActive: Boolean? = null,
+    val customName: String? = null,
+    /** New Google Cloud project of a `vertex` key. Absent or blank keeps the current one. */
+    val projectId: String? = null
+)
+
+@Serializable
+data class ReorderKeysRequest(
+    val fromIndex: Int,
+    val toIndex: Int
+)
+
+@Serializable
+data class CreateBranchRequest(
+    val nodeId: String,
+    val newUserMessage: Message
+)
+
+@Serializable
+data class SwitchVariantRequest(
+    val variantIndex: Int
+)
+
+@Serializable
+data class BranchInfoDto(
+    val nodeId: String,
+    val currentVariantIndex: Int,
+    val totalVariants: Int,
+    val currentVariantId: String
+)
+
+@Serializable
+data class CreateBranchResponse(
+    val chat: Chat,
+    val newVariantId: String
+)
+
+@Serializable
+data class CreateSkillRequest(
+    val name: String? = null,
+    val description: String? = null,
+    val body: String? = null,
+    val importText: String? = null
+)
+
+@Serializable
+data class PatchSkillRequest(
+    val enabled: Boolean
+)
+
+@Serializable
+data class AddMessageRequest(
+    val role: String,
+    val text: String,
+    val attachments: List<Attachment> = emptyList()
+)
+
+@Serializable
+data class GenerateTitleRequest(
+    val provider: String = "auto"
+)
+
+@Serializable
+data class TitleResponse(
+    val title: String
+)
+
+// ── P4 Mutation Routes ───────────────────────────────────────────────────────
+
+fun Route.mutationRoutes() {
+
+    // ========== Providers ==========
+
+    // POST /api/providers/refresh — force refresh cached models
+    post("/providers/refresh") {
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val (changed, _) = repo.forceRefreshModels()
+        call.respond(HttpStatusCode.OK, mapOf("ok" to true, "changed" to changed))
+    }
+
+    // ========== Chats CRUD ==========
+
+    // POST /api/chats — create a new chat (optionally in a group)
+    post("/chats") {
+        val body = call.receive<CreateChatRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val chat = if (body.groupId != null) {
+            repo.createNewChatInGroup(username, body.previewName, body.groupId, body.systemPrompt)
+        } else {
+            repo.createNewChat(username, body.previewName, body.systemPrompt)
+        }
+        call.respond(HttpStatusCode.Created, chat)
+    }
+
+    // PATCH /api/chats/{chatId} — rename or update system prompt
+    patch("/chats/{chatId}") {
+        val chatId = call.parameters["chatId"] ?: return@patch call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val body = call.receive<PatchChatRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+
+        // Load current chat
+        var chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
+        if (chat == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+            return@patch
+        }
+
+        // Apply patches
+        if (body.systemPrompt != null) {
+            chat = repo.updateChatSystemPrompt(username, chatId, body.systemPrompt) ?: chat
+        }
+        if (body.previewName != null) {
+            // Rename: one locked load-modify-save (nothing written meanwhile is lost)
+            val updatedHistory = repo.updateChatHistory(username) { history ->
+                history.copy(
+                    chat_history = history.chat_history.map {
+                        if (it.chat_id == chatId) it.copy(preview_name = body.previewName) else it
+                    }
+                )
+            }
+            chat = updatedHistory.chat_history.find { it.chat_id == chatId } ?: chat
+        }
+        if (body.shareLink != null && body.shareId != null) {
+            chat = repo.updateChatShareLink(username, chatId, body.shareLink, body.shareId) ?: chat
+        }
+        call.respond(HttpStatusCode.OK, chat!!)
+    }
+
+    // DELETE /api/chats/{chatId} — delete a chat
+    delete("/chats/{chatId}") {
+        val chatId = call.parameters["chatId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val exists = repo.loadChatHistory(username).chat_history.any { it.chat_id == chatId }
+        if (!exists) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+            return@delete
+        }
+        // Locked delete, recorded as a deletion made on this device (a reply still streaming
+        // into the chat is dropped instead of restoring it)
+        repo.deleteChat(username, chatId)
+        call.respond(HttpStatusCode.NoContent)
+    }
+
+    // GET /api/chats/{chatId}/export — export chat as JSON
+    get("/chats/{chatId}/export") {
+        val chatId = call.parameters["chatId"] ?: return@get call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val json = repo.getChatJson(username, chatId)
+        if (json == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+        } else {
+            call.respondText(json, ContentType.Application.Json)
+        }
+    }
+
+    // POST /api/chats/import — import a chat from JSON
+    post("/chats/import") {
+        val body = call.receive<ImportChatRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        if (!repo.validateChatJson(body.content)) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid chat JSON"))
+            return@post
+        }
+        val newChatId = repo.importSingleChat(body.content, username)
+        if (newChatId == null) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Failed to import chat"))
+        } else {
+            call.respond(HttpStatusCode.Created, mapOf("chatId" to newChatId))
+        }
+    }
+
+    // ========== Messages ==========
+
+    // POST /api/chats/{chatId}/messages — add a message to a chat (multi-message mode).
+    // The tree is authoritative (sync merges rebuild `messages` from it): a user message
+    // becomes a new node after the current path, like Android's multi-message send; any
+    // other role is appended to the current path's last variant.
+    post("/chats/{chatId}/messages") {
+        val chatId = call.parameters["chatId"] ?: return@post call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val body = call.receive<AddMessageRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val message = Message(
+            id = UUID.randomUUID().toString(),
+            role = body.role,
+            text = body.text,
+            attachments = body.attachments,
+            datetime = java.time.Instant.now().toString()
+        )
+        // Whoever saves a message commits its files — before the save, and holding them against
+        // a delete of the same bytes meanwhile (UserAttachments.beginSave)
+        val fileSave = ctx.attachments.beginSave(message.attachments)
+        val updatedChat = try {
+            // A file that is gone (deleted before this save): the message is not saved without it
+            if (call.refuseMissingFiles(fileSave)) return@post
+            if (message.role == "user") {
+                repo.addUserMessageAsNewNode(username, chatId, message)
+            } else {
+                repo.addResponseToCurrentVariant(username, chatId, message)
+            }
+        } finally {
+            fileSave.end()
+        }
+        if (updatedChat == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+        } else {
+            val saved = updatedChat.messageNodes.asSequence()
+                .flatMap { node -> node.variants.asSequence() }
+                .flatMap { v -> sequenceOf(v.userMessage) + v.responses.asSequence() }
+                .firstOrNull { it.id == message.id }
+            call.respond(HttpStatusCode.Created, saved ?: message)
+        }
+    }
+
+    // DELETE /api/chats/{chatId}/messages/{messageId} — branch-aware delete (same as
+    // DELETE /api/chats/{chatId}/branch/messages/{messageId}, Android's delete): removes the
+    // message from the tree; a message followed by other messages can't be deleted (400).
+    // Editing only the flat `messages` list would be reverted by the next sync merge.
+    delete("/chats/{chatId}/messages/{messageId}") {
+        val chatId = call.parameters["chatId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val messageId = call.parameters["messageId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing messageId")
+        )
+        val ctx = call.userContext()
+        call.respondBranchDelete(ctx, chatId, messageId)
+    }
+
+    // POST /api/chats/{chatId}/generate-title — regenerate title regardless of message count
+    post("/chats/{chatId}/generate-title") {
+        val chatId = call.parameters["chatId"] ?: return@post call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val body = try {
+            call.receive<GenerateTitleRequest>()
+        } catch (e: Exception) {
+            GenerateTitleRequest()
+        }
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+
+        // Verify chat exists
+        val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
+        if (chat == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+            return@post
+        }
+
+        val providerArg = body.provider.takeIf { it.isNotBlank() && it != "auto" }
+        val titleGenerator = ctx.titleGenerator
+
+        try {
+            val title = titleGenerator.generate(username, chatId, providerArg)
+
+            // Persist the generated title
+            if (title.isNotBlank()) {
+                repo.updateChatHistory(username) { history ->
+                    history.copy(
+                        chat_history = history.chat_history.map { c ->
+                            if (c.chat_id == chatId) c.copy(preview_name = title) else c
+                        }
+                    )
+                }
+            }
+
+            call.respond(HttpStatusCode.OK, TitleResponse(title = title))
+        } catch (e: Exception) {
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                mapOf("error" to "Title generation failed: ${e.message}")
+            )
+        }
+    }
+
+    // ========== Branching ==========
+
+    // POST /api/chats/{chatId}/branch — create a new branch at a node
+    post("/chats/{chatId}/branch") {
+        val chatId = call.parameters["chatId"] ?: return@post call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val body = call.receive<CreateBranchRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+
+        // Ensure branching structure exists (a legacy chat is migrated deterministically)
+        val migrated = repo.ensureBranchingStructure(username, chatId)
+
+        // The web sends `message.nodeId ?: message.id`: a legacy message carries no node id,
+        // so a non-node id is looked up as the id of a message in the tree
+        val nodeId = migrated?.let { chat ->
+            if (chat.messageNodes.any { it.nodeId == body.nodeId }) body.nodeId
+            else findNodeOfMessage(chat, body.nodeId)
+        } ?: body.nodeId
+
+        // The files of the branch's message are held and committed like any saved message's. An
+        // edit keeps the attachments of a message that is already saved (possibly another
+        // device's, whose upload has not reached the store): never refused for a missing file
+        val fileSave = ctx.attachments.beginSave(body.newUserMessage.attachments)
+        val result = try {
+            repo.createBranch(username, chatId, nodeId, body.newUserMessage)
+        } finally {
+            fileSave.end()
+        }
+        if (result == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat or node not found"))
+        } else {
+            val (updatedChat, newVariantId) = result
+            call.respond(HttpStatusCode.Created, CreateBranchResponse(updatedChat, newVariantId))
+        }
+    }
+
+    // POST /api/chats/{chatId}/nodes/{nodeId}/switch — switch variant at a node
+    post("/chats/{chatId}/nodes/{nodeId}/switch") {
+        val chatId = call.parameters["chatId"] ?: return@post call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val nodeId = call.parameters["nodeId"] ?: return@post call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing nodeId")
+        )
+        val body = call.receive<SwitchVariantRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+
+        val updatedChat = repo.switchVariant(username, chatId, nodeId, body.variantIndex)
+        if (updatedChat == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat or node not found"))
+        } else {
+            call.respond(HttpStatusCode.OK, updatedChat)
+        }
+    }
+
+    // GET /api/chats/{chatId}/nodes/{nodeId}/branch-info — get branch info for a node
+    get("/chats/{chatId}/nodes/{nodeId}/branch-info") {
+        val chatId = call.parameters["chatId"] ?: return@get call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val nodeId = call.parameters["nodeId"] ?: return@get call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing nodeId")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val chat = repo.loadChatHistory(username).chat_history.find { it.chat_id == chatId }
+            ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+
+        val branchInfo = repo.getBranchInfo(chat, nodeId)
+        if (branchInfo == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Node not found"))
+        } else {
+            call.respond(HttpStatusCode.OK, BranchInfoDto(
+                nodeId = branchInfo.nodeId,
+                currentVariantIndex = branchInfo.currentVariantIndex,
+                totalVariants = branchInfo.totalVariants,
+                currentVariantId = branchInfo.currentVariantId
+            ))
+        }
+    }
+
+    // DELETE /api/chats/{chatId}/branch/messages/{messageId} — branch-aware delete (what the
+    // web uses; DELETE /api/chats/{chatId}/messages/{messageId} above is the same)
+    delete("/chats/{chatId}/branch/messages/{messageId}") {
+        val chatId = call.parameters["chatId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val messageId = call.parameters["messageId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing messageId")
+        )
+        val ctx = call.userContext()
+        call.respondBranchDelete(ctx, chatId, messageId)
+    }
+
+    // ========== Groups CRUD ==========
+
+    // POST /api/groups — create a new group
+    post("/groups") {
+        val body = call.receive<CreateGroupRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val group = repo.createNewGroup(username, body.groupName)
+        call.respond(HttpStatusCode.Created, group)
+    }
+
+    // PATCH /api/groups/{groupId} — rename group, update system prompt, toggle project
+    patch("/groups/{groupId}") {
+        val groupId = call.parameters["groupId"] ?: return@patch call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing groupId")
+        )
+        val body = call.receive<PatchGroupRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+
+        // Verify group exists
+        val history = repo.loadChatHistory(username)
+        val group = history.groups.find { it.group_id == groupId }
+        if (group == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found"))
+            return@patch
+        }
+
+        var success = true
+        if (body.groupName != null) {
+            success = success && repo.renameGroup(username, groupId, body.groupName)
+        }
+        if (body.isProject != null) {
+            success = success && repo.updateGroupProjectStatus(username, groupId, body.isProject)
+        }
+        if (body.systemPrompt != null) {
+            // system_prompt is part of ChatGroup — one locked load-modify-save
+            repo.updateChatHistory(username) { history ->
+                history.copy(
+                    groups = history.groups.map {
+                        if (it.group_id == groupId) it.copy(system_prompt = body.systemPrompt) else it
+                    }
+                )
+            }
+        }
+
+        val updatedGroup = repo.loadChatHistory(username).groups.find { it.group_id == groupId }
+        if (updatedGroup == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found after update"))
+        } else {
+            call.respond(HttpStatusCode.OK, updatedGroup)
+        }
+    }
+
+    // DELETE /api/groups/{groupId} — delete a group
+    delete("/groups/{groupId}") {
+        val groupId = call.parameters["groupId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing groupId")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val history = repo.loadChatHistory(username)
+        if (history.groups.none { it.group_id == groupId }) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found"))
+            return@delete
+        }
+        repo.deleteGroup(username, groupId)
+        call.respond(HttpStatusCode.NoContent)
+    }
+
+    // POST /api/groups/{groupId}/chats/{chatId} — add chat to group
+    post("/groups/{groupId}/chats/{chatId}") {
+        val groupId = call.parameters["groupId"] ?: return@post call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing groupId")
+        )
+        val chatId = call.parameters["chatId"] ?: return@post call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val ok = repo.addChatToGroup(username, chatId, groupId)
+        if (!ok) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat or group not found"))
+        } else {
+            call.respond(HttpStatusCode.OK, mapOf("ok" to true))
+        }
+    }
+
+    // DELETE /api/groups/{groupId}/chats/{chatId} — remove chat from group
+    delete("/groups/{groupId}/chats/{chatId}") {
+        val groupId = call.parameters["groupId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing groupId")
+        )
+        val chatId = call.parameters["chatId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing chatId")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        // removeChatFromGroup removes from any group, groupId is validated for correctness
+        val history = repo.loadChatHistory(username)
+        val chat = history.chat_history.find { it.chat_id == chatId }
+        if (chat == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+            return@delete
+        }
+        if (chat.group != groupId) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Chat is not in this group"))
+            return@delete
+        }
+        repo.removeChatFromGroup(username, chatId)
+        call.respond(HttpStatusCode.OK, mapOf("ok" to true))
+    }
+
+    // POST /api/groups/{groupId}/attachments — add attachment to group
+    post("/groups/{groupId}/attachments") {
+        val groupId = call.parameters["groupId"] ?: return@post call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing groupId")
+        )
+        val attachment = call.receive<Attachment>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        // Whoever saves a project attachment commits its file — before the save, and holding it
+        // against a delete of the same bytes meanwhile (UserAttachments.beginSave)
+        val fileSave = ctx.attachments.beginSave(listOf(attachment))
+        val ok = try {
+            if (call.refuseMissingFiles(fileSave)) return@post
+            repo.addAttachmentToGroup(username, groupId, attachment)
+        } finally {
+            fileSave.end()
+        }
+        if (!ok) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found"))
+        } else {
+            val updatedGroup = repo.loadChatHistory(username).groups.find { it.group_id == groupId }
+            call.respond(HttpStatusCode.Created, updatedGroup!!)
+        }
+    }
+
+    // DELETE /api/groups/{groupId}/attachments/{attachmentIndex} — remove attachment from group
+    delete("/groups/{groupId}/attachments/{attachmentIndex}") {
+        val groupId = call.parameters["groupId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing groupId")
+        )
+        val indexStr = call.parameters["attachmentIndex"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing attachmentIndex")
+        )
+        val index = indexStr.toIntOrNull() ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Invalid attachmentIndex")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val ok = repo.removeAttachmentFromGroup(username, groupId, index)
+        if (!ok) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group or attachment not found"))
+        } else {
+            val updatedGroup = repo.loadChatHistory(username).groups.find { it.group_id == groupId }
+            if (updatedGroup == null) {
+                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found"))
+            } else {
+                call.respond(HttpStatusCode.OK, updatedGroup)
+            }
+        }
+    }
+
+    // ========== API Keys CRUD ==========
+
+    // POST /api/keys — add a new API key (full key value accepted)
+    post("/keys") {
+        val body = call.receive<AddApiKeyRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val projectId = body.projectId.normalizedProjectId()
+        if (body.provider == VERTEX_PROVIDER && projectId == null) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "projectId is required for this provider"))
+            return@post
+        }
+        val key = ApiKey(
+            id = body.id ?: UUID.randomUUID().toString(),
+            provider = body.provider,
+            key = body.key,
+            isActive = body.isActive,
+            customName = body.customName,
+            projectId = projectId.takeIf { body.provider == VERTEX_PROVIDER }
+        )
+        repo.addApiKey(username, key)
+        call.respond(HttpStatusCode.Created, key.masked())
+    }
+
+    // PATCH /api/keys/{keyId} — update key value, active flag, or custom name
+    patch("/keys/{keyId}") {
+        val keyId = call.parameters["keyId"] ?: return@patch call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing keyId")
+        )
+        val body = call.receive<PatchApiKeyRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val projectId = body.projectId.normalizedProjectId()
+        // One locked load-modify-save (a sync merge or another tab's write in between is kept)
+        val updated = repo.updateApiKey(username, keyId) { existing ->
+            existing.copy(
+                key = body.key ?: existing.key,
+                isActive = body.isActive ?: existing.isActive,
+                customName = if (body.customName != null) body.customName else existing.customName,
+                projectId = projectId.takeIf { existing.provider == VERTEX_PROVIDER } ?: existing.projectId
+            )
+        }
+        if (updated == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Key not found"))
+            return@patch
+        }
+        call.respond(HttpStatusCode.OK, updated.masked())
+    }
+
+    // DELETE /api/keys/{keyId} — delete an API key
+    delete("/keys/{keyId}") {
+        val keyId = call.parameters["keyId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing keyId")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val keys = repo.loadApiKeys(username)
+        if (keys.none { it.id == keyId }) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Key not found"))
+            return@delete
+        }
+        repo.deleteApiKey(username, keyId)
+        call.respond(HttpStatusCode.NoContent)
+    }
+
+    // POST /api/keys/{keyId}/toggle — toggle isActive
+    post("/keys/{keyId}/toggle") {
+        val keyId = call.parameters["keyId"] ?: return@post call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing keyId")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val keys = repo.loadApiKeys(username)
+        if (keys.none { it.id == keyId }) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Key not found"))
+            return@post
+        }
+        repo.toggleApiKeyStatus(username, keyId)
+        val updated = repo.loadApiKeys(username).find { it.id == keyId }!!
+        call.respond(HttpStatusCode.OK, updated.masked())
+    }
+
+    // POST /api/keys/reorder — reorder keys by fromIndex/toIndex
+    post("/keys/reorder") {
+        val body = call.receive<ReorderKeysRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val keys = repo.loadApiKeys(username)
+        if (body.fromIndex < 0 || body.fromIndex >= keys.size ||
+            body.toIndex < 0 || body.toIndex >= keys.size) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Index out of bounds"))
+            return@post
+        }
+        repo.reorderApiKeys(username, body.fromIndex, body.toIndex)
+        val updated = repo.loadApiKeys(username).map { it.masked() }
+        call.respond(HttpStatusCode.OK, updated)
+    }
+
+    // ========== Settings ==========
+
+    // PATCH /api/settings — partial settings update (GET-then-PATCH semantics).
+    // Applied as a transform of the on-disk settings under their file lock (a sync merge
+    // written meanwhile is kept). `remoteSync` belongs to the server (login seeds it): only
+    // the per-device `syncApiKeys` opt-in can be changed; enabled/URL/token/email are ignored.
+    patch("/settings") {
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        // Receive as raw JSON so we can merge only supplied fields
+        val bodyJson = call.receiveText()
+        val patch = lenientJson.parseToJsonElement(bodyJson).jsonObject
+        val before = repo.loadAppSettings().remoteSync.syncApiKeys
+
+        val merged = repo.updateAppSettings { current -> applySettingsPatch(current, patch) }
+        if (merged.remoteSync.syncApiKeys && !before) {
+            // api_keys_* just became a synced file: fetch the account's keys now
+            repo.pullNow()
+        }
+        call.respond(HttpStatusCode.OK, merged.forClient())
+    }
+
+    // ========== Custom Providers (OpenAI-compatible) ==========
+
+    // GET /api/custom-providers
+    get("/custom-providers") {
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        call.respond(HttpStatusCode.OK, repo.loadCustomProviders(username))
+    }
+
+    // POST /api/custom-providers
+    post("/custom-providers") {
+        val body = call.receive<CustomProviderConfig>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        repo.addCustomProvider(username, body)
+        call.respond(HttpStatusCode.Created, body)
+    }
+
+    // PUT /api/custom-providers/{providerId}
+    put("/custom-providers/{providerId}") {
+        val providerId = call.parameters["providerId"] ?: return@put call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing providerId")
+        )
+        val body = call.receive<CustomProviderConfig>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val existing = repo.loadCustomProviders(username).find { it.id == providerId }
+        if (existing == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Provider not found"))
+            return@put
+        }
+        repo.updateCustomProvider(username, providerId, body)
+        val updated = repo.loadCustomProviders(username).find { it.id == providerId } ?: body
+        call.respond(HttpStatusCode.OK, updated)
+    }
+
+    // DELETE /api/custom-providers/{providerId}
+    delete("/custom-providers/{providerId}") {
+        val providerId = call.parameters["providerId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing providerId")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val existing = repo.loadCustomProviders(username).find { it.id == providerId }
+        if (existing == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Provider not found"))
+            return@delete
+        }
+        repo.deleteCustomProvider(username, providerId)
+        call.respond(HttpStatusCode.NoContent)
+    }
+
+    // ========== Full Custom Providers ==========
+
+    // GET /api/full-custom-providers
+    get("/full-custom-providers") {
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        call.respond(HttpStatusCode.OK, repo.loadFullCustomProviders(username))
+    }
+
+    // POST /api/full-custom-providers
+    post("/full-custom-providers") {
+        val body = call.receive<FullCustomProviderConfig>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        repo.addFullCustomProvider(username, body)
+        call.respond(HttpStatusCode.Created, body)
+    }
+
+    // PUT /api/full-custom-providers/{providerId}
+    put("/full-custom-providers/{providerId}") {
+        val providerId = call.parameters["providerId"] ?: return@put call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing providerId")
+        )
+        val body = call.receive<FullCustomProviderConfig>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val existing = repo.loadFullCustomProviders(username).find { it.id == providerId }
+        if (existing == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Provider not found"))
+            return@put
+        }
+        repo.updateFullCustomProvider(username, providerId, body)
+        val updated = repo.loadFullCustomProviders(username).find { it.id == providerId } ?: body
+        call.respond(HttpStatusCode.OK, updated)
+    }
+
+    // DELETE /api/full-custom-providers/{providerId}
+    delete("/full-custom-providers/{providerId}") {
+        val providerId = call.parameters["providerId"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing providerId")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val username = ctx.username
+        val existing = repo.loadFullCustomProviders(username).find { it.id == providerId }
+        if (existing == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Provider not found"))
+            return@delete
+        }
+        repo.deleteFullCustomProvider(username, providerId)
+        call.respond(HttpStatusCode.NoContent)
+    }
+
+    // ========== Skills ==========
+
+    // GET /api/skills
+    get("/skills") {
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val skills = repo.getInstalledSkills()
+        call.respond(HttpStatusCode.OK, skills)
+    }
+
+    // GET /api/skills/{skillName} — raw SKILL.md content
+    get("/skills/{skillName}") {
+        val skillName = call.parameters["skillName"] ?: return@get call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing skillName")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val content = repo.getSkillMdContent(skillName)
+        if (content == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Skill not found"))
+        } else {
+            call.respondText(content, ContentType.Text.Plain)
+        }
+    }
+
+    // POST /api/skills — create or import a skill
+    post("/skills") {
+        val body = call.receive<CreateSkillRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val skill = if (body.importText != null) {
+            // Import from full markdown text
+            repo.importSkillFromText(body.importText)
+        } else if (body.name != null && body.description != null) {
+            repo.createSkill(body.name, body.description, body.body ?: "")
+        } else {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Provide either 'importText' or 'name'+'description'"))
+            return@post
+        }
+        if (skill == null) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Failed to create/import skill"))
+        } else {
+            call.respond(HttpStatusCode.Created, skill)
+        }
+    }
+
+    // PATCH /api/skills/{skillName} — toggle enabled state
+    patch("/skills/{skillName}") {
+        val skillName = call.parameters["skillName"] ?: return@patch call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing skillName")
+        )
+        val body = call.receive<PatchSkillRequest>()
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val skills = repo.getInstalledSkills()
+        if (skills.none { it.directoryName == skillName }) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Skill not found"))
+            return@patch
+        }
+        repo.setSkillEnabled(skillName, body.enabled)
+        val updated = repo.getInstalledSkills().find { it.directoryName == skillName }
+        if (updated == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Skill not found after update"))
+        } else {
+            call.respond(HttpStatusCode.OK, updated)
+        }
+    }
+
+    // DELETE /api/skills/{skillName}
+    delete("/skills/{skillName}") {
+        val skillName = call.parameters["skillName"] ?: return@delete call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing skillName")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val skills = repo.getInstalledSkills()
+        if (skills.none { it.directoryName == skillName }) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Skill not found"))
+            return@delete
+        }
+        repo.deleteSkill(skillName)
+        call.respond(HttpStatusCode.NoContent)
+    }
+
+    // GET /api/skills/{skillName}/export — download skill as application/zip
+    get("/skills/{skillName}/export") {
+        val skillName = call.parameters["skillName"] ?: return@get call.respond(
+            HttpStatusCode.BadRequest, mapOf("error" to "Missing skillName")
+        )
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val skills = repo.getInstalledSkills()
+        if (skills.none { it.directoryName == skillName }) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Skill not found"))
+            return@get
+        }
+        val zipBytes = java.io.ByteArrayOutputStream().use { baos ->
+            java.util.zip.ZipOutputStream(baos).use { zos ->
+                val ok = repo.exportSkillToZip(skillName, zos)
+                if (!ok) return@get call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Export failed"))
+            }
+            baos.toByteArray()
+        }
+        call.response.header(
+            io.ktor.http.HttpHeaders.ContentDisposition,
+            "attachment; filename=\"${skillName}.zip\""
+        )
+        call.respondBytes(zipBytes, ContentType.parse("application/zip"), HttpStatusCode.OK)
+    }
+
+    // POST /api/skills/import-zip — multipart ZIP upload; validates SKILL.md presence
+    post("/skills/import-zip") {
+        val multipart = call.receiveMultipart()
+        var zipBytes: ByteArray? = null
+        var tooLarge = false
+
+        multipart.forEachPart { part ->
+            when (part) {
+                is PartData.FileItem -> {
+                    if (!tooLarge) {
+                        val bytes = part.streamProvider().use { it.readBytes() }
+                        if (bytes.size.toLong() > MAX_ZIP_UPLOAD_BYTES) {
+                            tooLarge = true
+                        } else {
+                            zipBytes = bytes
+                        }
+                    }
+                }
+                else -> {}
+            }
+            part.dispose()
+        }
+
+        if (tooLarge) {
+            call.respond(HttpStatusCode.PayloadTooLarge, mapOf("error" to "File exceeds maximum allowed size (50 MB)"))
+            return@post
+        }
+
+        val bytes = zipBytes
+        if (bytes == null || bytes.isEmpty()) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "No ZIP file received"))
+            return@post
+        }
+
+        val ctx = call.userContext()
+        val repo = ctx.repository
+        val skill = try {
+            val zipStream = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes))
+            val result = repo.importSkillFromZip(zipStream)
+            zipStream.close()
+            result
+        } catch (e: Exception) {
+            null
+        }
+
+        if (skill == null) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid skill ZIP: SKILL.md not found or ZIP is malformed"))
+            return@post
+        }
+
+        call.respond(HttpStatusCode.Created, skill)
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** The node holding a message with [messageId] (a user message or a response), or null. */
+internal fun findNodeOfMessage(chat: Chat, messageId: String): String? =
+    chat.messageNodes.firstOrNull { node ->
+        node.variants.any { v -> v.userMessage.id == messageId || v.responses.any { it.id == messageId } }
+    }?.nodeId
+
+/** Branch-aware message delete (Android's delete) answered as the updated chat / 400 / 404. */
+private suspend fun ApplicationCall.respondBranchDelete(ctx: UserContext, chatId: String, messageId: String) {
+    val repo = ctx.repository
+    if (repo.loadChatHistory(ctx.username).chat_history.none { it.chat_id == chatId }) {
+        respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
+        return
+    }
+    when (val result = repo.deleteMessageFromBranch(ctx.username, chatId, messageId)) {
+        is DeleteMessageResult.Success -> respond(HttpStatusCode.OK, result.updatedChat)
+        is DeleteMessageResult.CannotDeleteBranchPoint ->
+            respond(HttpStatusCode.BadRequest, mapOf("error" to result.message))
+        is DeleteMessageResult.Error ->
+            respond(HttpStatusCode.NotFound, mapOf("error" to result.message))
+    }
+}
+
+/**
+ * [current] with the fields of a PATCH /api/settings body applied.  `remoteSync` is
+ * server-owned: only `remoteSync.syncApiKeys` is taken from the body.
+ *
+ * The synced lists also take deltas, applied to the list as it is now (under the settings
+ * lock): `starredModelsAdd`/`starredModelsRemove`, `enabledToolsAdd`/`enabledToolsRemove`,
+ * `excludedToolIdsAdd`/`excludedToolIdsRemove`.  The web sends these instead of a whole list
+ * built from the copy it loaded earlier, which would drop entries another device added since
+ * (the sync merge would then delete them everywhere).
+ */
+internal fun applySettingsPatch(current: AppSettings, patch: JsonObject): AppSettings {
+    val replaced = replaceSettingsFields(current, patch)
+    return replaced.copy(
+        starredModels = applyListDelta(replaced.starredModels, patch, "starredModels"),
+        enabledTools = applyListDelta(replaced.enabledTools, patch, "enabledTools"),
+        excludedToolIds = applyListDelta(replaced.excludedToolIds, patch, "excludedToolIds")
+    )
+}
+
+/** [list] with `<name>Remove` entries removed and missing `<name>Add` entries appended. */
+private inline fun <reified T> applyListDelta(list: List<T>, patch: JsonObject, name: String): List<T> {
+    val remove = patch["${name}Remove"]?.let { lenientJson.decodeFromJsonElement<List<T>>(it) }.orEmpty().toSet()
+    val add = patch["${name}Add"]?.let { lenientJson.decodeFromJsonElement<List<T>>(it) }.orEmpty()
+    if (remove.isEmpty() && add.isEmpty()) return list
+    val kept = list.filter { it !in remove }
+    return kept + add.filter { it !in kept }.distinct()
+}
+
+private fun replaceSettingsFields(current: AppSettings, patch: JsonObject): AppSettings = current.copy(
+    selected_provider = patch["selected_provider"]?.jsonPrimitive?.contentOrNull ?: current.selected_provider,
+    selected_model = patch["selected_model"]?.jsonPrimitive?.contentOrNull ?: current.selected_model,
+    temperature = patch["temperature"]?.jsonPrimitive?.doubleOrNull ?: current.temperature,
+    multiMessageMode = patch["multiMessageMode"]?.jsonPrimitive?.booleanOrNull ?: current.multiMessageMode,
+    starredModels = patch["starredModels"]?.let {
+        lenientJson.decodeFromJsonElement<List<StarredModel>>(it)
+    } ?: current.starredModels,
+    skipWelcomeScreen = patch["skipWelcomeScreen"]?.jsonPrimitive?.booleanOrNull ?: current.skipWelcomeScreen,
+    enabledTools = patch["enabledTools"]?.let {
+        lenientJson.decodeFromJsonElement<List<String>>(it)
+    } ?: current.enabledTools,
+    excludedToolIds = patch["excludedToolIds"]?.let {
+        lenientJson.decodeFromJsonElement<List<String>>(it)
+    } ?: current.excludedToolIds,
+    titleGenerationSettings = if (patch.containsKey("titleGenerationSettings")) {
+        val tgsJson = patch["titleGenerationSettings"]!!.jsonObject
+        current.titleGenerationSettings.copy(
+            enabled = tgsJson["enabled"]?.jsonPrimitive?.booleanOrNull ?: current.titleGenerationSettings.enabled,
+            provider = tgsJson["provider"]?.jsonPrimitive?.contentOrNull ?: current.titleGenerationSettings.provider,
+            updateOnExtension = tgsJson["updateOnExtension"]?.jsonPrimitive?.booleanOrNull ?: current.titleGenerationSettings.updateOnExtension
+        )
+    } else current.titleGenerationSettings,
+    // Only the per-device "sync API keys" opt-in; the rest of remoteSync (enabled, server
+    // URL, token, account) is seeded by login and must not be changed from the browser
+    remoteSync = (patch["remoteSync"] as? JsonObject)?.get("syncApiKeys")?.jsonPrimitive?.booleanOrNull
+        ?.let { current.remoteSync.copy(syncApiKeys = it) }
+        ?: current.remoteSync,
+    childLockSettings = if (patch.containsKey("childLockSettings")) {
+        val clJson = patch["childLockSettings"]!!.jsonObject
+        current.childLockSettings.copy(
+            enabled = clJson["enabled"]?.jsonPrimitive?.booleanOrNull ?: current.childLockSettings.enabled,
+            encryptedPassword = clJson["encryptedPassword"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.encryptedPassword,
+            startTime = clJson["startTime"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.startTime,
+            endTime = clJson["endTime"]?.jsonPrimitive?.contentOrNull ?: current.childLockSettings.endTime
+        )
+    } else current.childLockSettings
+)

@@ -13,9 +13,11 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.ApI.MainActivity
+import com.example.ApI.data.AndroidPlatformStorage
 import com.example.ApI.data.model.*
 import com.example.ApI.data.network.LLMApiService
 import com.example.ApI.data.repository.DataRepository
+import com.example.ApI.data.repository.ReplyAnchor
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolSpecification
@@ -59,16 +61,14 @@ class StreamingService : Service() {
         const val EXTRA_REQUEST_ID = "request_id"
         const val EXTRA_CHAT_ID = "chat_id"
         const val EXTRA_USERNAME = "username"
-        const val EXTRA_PROVIDER_JSON = "provider_json"
         const val EXTRA_MODEL_NAME = "model_name"
-        const val EXTRA_SYSTEM_PROMPT = "system_prompt"
         const val EXTRA_WEB_SEARCH_ENABLED = "web_search_enabled"
-        const val EXTRA_MESSAGES_JSON = "messages_json"
-        const val EXTRA_PROJECT_ATTACHMENTS_JSON = "project_attachments_json"
-        const val EXTRA_ENABLED_TOOLS_JSON = "enabled_tools_json"
         const val EXTRA_TOOL_RESULT_JSON = "tool_result_json"
-        const val EXTRA_THINKING_BUDGET_JSON = "thinking_budget_json"
         const val EXTRA_TEMPERATURE = "temperature"
+        /** The variant the reply belongs to (the variant of the last message sent). */
+        const val EXTRA_TARGET_VARIANT_ID = "target_variant_id"
+        /** The id of the message the reply follows (the last message sent). */
+        const val EXTRA_EXPECTED_TAIL_ID = "expected_tail_id"
     }
 
     // Binder for local binding
@@ -91,6 +91,9 @@ class StreamingService : Service() {
     // Active jobs mapped by requestId (for cancellation)
     private val activeJobs = ConcurrentHashMap<String, Job>()
 
+    // Where each request's responses are saved (pinned variant + the message they follow)
+    private val replyAnchors = ConcurrentHashMap<String, ReplyAnchor>()
+
     // Pending tool results (for tool execution flow)
     private val pendingToolResults = ConcurrentHashMap<String, CompletableDeferred<ToolExecutionResult>>()
 
@@ -108,8 +111,10 @@ class StreamingService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "StreamingService created")
-        repository = DataRepository(applicationContext)
-        apiService = LLMApiService(applicationContext)
+        // Same data dir as the UI's repository, hence the same process-wide SyncEngine
+        // (SyncEngine.forDir): one lock and one sync state for both
+        repository = DataRepository(AndroidPlatformStorage(applicationContext))
+        apiService = LLMApiService()
         createNotificationChannel()
     }
 
@@ -130,49 +135,49 @@ class StreamingService : Service() {
     }
 
     private fun handleStartRequest(intent: Intent) {
+        // Started via startForegroundService: go foreground on every path (also the ones
+        // that fail below), otherwise the system reports the app as not responding
+        startForeground(NOTIFICATION_ID, buildNotification())
+
         val requestId = intent.getStringExtra(EXTRA_REQUEST_ID) ?: UUID.randomUUID().toString()
-        val chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return
-        val username = intent.getStringExtra(EXTRA_USERNAME) ?: return
-        val providerJson = intent.getStringExtra(EXTRA_PROVIDER_JSON) ?: return
-        val modelName = intent.getStringExtra(EXTRA_MODEL_NAME) ?: return
-        val systemPrompt = intent.getStringExtra(EXTRA_SYSTEM_PROMPT) ?: ""
+        val chatId = intent.getStringExtra(EXTRA_CHAT_ID)
+        val username = intent.getStringExtra(EXTRA_USERNAME)
+        val modelName = intent.getStringExtra(EXTRA_MODEL_NAME)
         val webSearchEnabled = intent.getBooleanExtra(EXTRA_WEB_SEARCH_ENABLED, false)
-        val messagesJson = intent.getStringExtra(EXTRA_MESSAGES_JSON) ?: return
-        val projectAttachmentsJson = intent.getStringExtra(EXTRA_PROJECT_ATTACHMENTS_JSON) ?: "[]"
-        val enabledToolsJson = intent.getStringExtra(EXTRA_ENABLED_TOOLS_JSON) ?: "[]"
-        val thinkingBudgetJson = intent.getStringExtra(EXTRA_THINKING_BUDGET_JSON)
         val temperature = if (intent.hasExtra(EXTRA_TEMPERATURE)) {
             intent.getFloatExtra(EXTRA_TEMPERATURE, 1.0f)
         } else {
             null
         }
+        // The conversation is handed over in-process (too large for Intent extras)
+        val payload = StreamingRequestPayloads.take(requestId)
 
-        Log.d(TAG, "Starting request: requestId=$requestId, chatId=$chatId, temperature=$temperature")
-
-        // Parse data from JSON
-        val provider: Provider
-        val messages: List<Message>
-        val projectAttachments: List<Attachment>
-        val enabledTools: List<ToolSpecification>
-        val thinkingBudget: ThinkingBudgetValue
-
-        try {
-            provider = JsonConfig.standard.decodeFromString<Provider>(providerJson)
-            messages = JsonConfig.standard.decodeFromString<List<Message>>(messagesJson)
-            projectAttachments = JsonConfig.standard.decodeFromString<List<Attachment>>(projectAttachmentsJson)
-            enabledTools = JsonConfig.standard.decodeFromString<List<ToolSpecification>>(enabledToolsJson)
-            thinkingBudget = if (thinkingBudgetJson != null) {
-                JsonConfig.standard.decodeFromString<ThinkingBudgetValue>(thinkingBudgetJson)
-            } else {
-                ThinkingBudgetValue.None
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse request data", e)
+        if (chatId == null || username == null || modelName == null || payload == null) {
+            val reason = if (payload == null) "request data is no longer available" else "missing request parameters"
+            Log.e(TAG, "Cannot start request $requestId: $reason")
+            AppLogger.w("Streaming request $requestId not started by service: $reason.")
             serviceScope.launch {
-                _streamingEvents.emit(StreamingEvent.Error(requestId, chatId, "Failed to parse request: ${e.message}"))
+                if (chatId != null) {
+                    _streamingEvents.emit(StreamingEvent.Error(requestId, chatId, "Failed to start request: $reason"))
+                    _streamingEvents.emit(StreamingEvent.StatusChange(requestId, chatId, RequestStatus.FAILED))
+                }
+                checkAndStopSelf()
             }
             return
         }
+
+        val provider = payload.provider
+        val messages = payload.messages
+        val systemPrompt = payload.systemPrompt
+        val projectAttachments = payload.projectAttachments
+        val enabledTools = payload.enabledTools
+        val thinkingBudget = payload.thinkingBudget
+
+        Log.d(TAG, "Starting request: requestId=$requestId, chatId=$chatId, temperature=$temperature")
+        AppLogger.d(
+            "Streaming request $requestId picked up by service: ${messages.size} messages, " +
+                "~${payload.approxTextChars()} chars of text."
+        )
 
         // Create request tracking object
         val request = StreamingRequest(
@@ -187,9 +192,16 @@ class StreamingService : Service() {
             createdAt = Instant.now().toString()
         )
         activeRequests[requestId] = request
+        // Pin the replies: explicit extras from the ViewModel, else the last message sent
+        val fallbackAnchor = ReplyAnchor.forRequest(messages)
+        val (fallbackVariant, fallbackTail) = fallbackAnchor.current()
+        replyAnchors[requestId] = ReplyAnchor(
+            intent.getStringExtra(EXTRA_TARGET_VARIANT_ID) ?: fallbackVariant,
+            intent.getStringExtra(EXTRA_EXPECTED_TAIL_ID) ?: fallbackTail,
+            messages
+        )
 
-        // Start foreground with notification
-        startForeground(NOTIFICATION_ID, buildNotification())
+        // Already in the foreground; show the updated request count
         updateNotification()
 
         // Emit status change
@@ -226,6 +238,8 @@ class StreamingService : Service() {
         activeJobs.remove(requestId)
 
         val request = activeRequests.remove(requestId)
+
+        replyAnchors.remove(requestId)
         if (request != null) {
             serviceScope.launch {
                 _streamingEvents.emit(StreamingEvent.StatusChange(requestId, request.chatId, RequestStatus.CANCELLED))
@@ -267,6 +281,8 @@ class StreamingService : Service() {
         activeJobs.remove(requestId)
 
         val request = activeRequests.remove(requestId)
+
+        replyAnchors.remove(requestId)
         if (request != null) {
             serviceScope.launch {
                 _streamingEvents.emit(StreamingEvent.StatusChange(requestId, request.chatId, RequestStatus.CANCELLED))
@@ -293,6 +309,7 @@ class StreamingService : Service() {
         // Remove from active requests without emitting events
         // (ViewModel handles the UI state change)
         activeRequests.remove(requestId)
+        replyAnchors.remove(requestId)
 
         // Update notification and possibly stop service
         serviceScope.launch {
@@ -306,6 +323,19 @@ class StreamingService : Service() {
      * Get all active requests (for UI display)
      */
     fun getActiveRequests(): Map<String, StreamingRequest> = activeRequests.toMap()
+
+    /** Where [requestId]'s next response belongs (for the ViewModel's partial save on stop). */
+    fun replyAnchor(requestId: String): ReplyAnchor? = replyAnchors[requestId]
+
+    /** Save a response of [requestId] at its pinned place (falls back to the current path). */
+    private fun saveResponse(requestId: String, username: String, chatId: String, message: Message) {
+        val anchor = replyAnchors[requestId]
+        if (anchor != null) {
+            repository.addAnchoredResponse(username, chatId, message, anchor)
+        } else {
+            repository.addResponseToCurrentVariant(username, chatId, message)
+        }
+    }
 
     private suspend fun executeStreamingRequest(
         requestId: String,
@@ -375,7 +405,7 @@ class StreamingService : Service() {
                             thinkingDurationSeconds = thoughtsData?.second,
                             thoughtsStatus = thoughtsData?.third ?: ThoughtsStatus.NONE
                         )
-                        repository.addResponseToCurrentVariant(username, chatId, assistantMessage)
+                        saveResponse(requestId, username, chatId, assistantMessage)
                         if (pendingToolOutputAttachments.isNotEmpty()) {
                             pendingToolOutputAttachments.clear()
                         }
@@ -389,6 +419,7 @@ class StreamingService : Service() {
                     } finally {
                         // Cleanup
                         activeRequests.remove(requestId)
+                        replyAnchors.remove(requestId)
                         activeJobs.remove(requestId)
                         _activeRequestCount.emit(activeRequests.size)
                         updateNotification()
@@ -406,6 +437,7 @@ class StreamingService : Service() {
 
                     // Cleanup
                     activeRequests.remove(requestId)
+                    replyAnchors.remove(requestId)
                     activeJobs.remove(requestId)
                     _activeRequestCount.emit(activeRequests.size)
                     updateNotification()
@@ -450,43 +482,22 @@ class StreamingService : Service() {
                             thinkingDurationSeconds = thoughtsData?.second,
                             thoughtsStatus = thoughtsData?.third ?: ThoughtsStatus.NONE
                         )
-                        repository.addResponseToCurrentVariant(username, chatId, precedingMessage)
+                        saveResponse(requestId, username, chatId, precedingMessage)
                         // Clear thoughts after using - they belong to this message, not the final response
                         thoughtsData = null
                         if (pendingToolOutputAttachments.isNotEmpty()) {
                             pendingToolOutputAttachments.clear()
                         }
                     }
-                    repository.addResponseToCurrentVariant(username, chatId, toolCallMessage)
-                    repository.addResponseToCurrentVariant(username, chatId, toolResponseMessage)
+                    saveResponse(requestId, username, chatId, toolCallMessage)
+                    saveResponse(requestId, username, chatId, toolResponseMessage)
 
                     // Extract output files from tool result and queue them for the NEXT text message
-                    val toolResult = toolCallMessage.toolCall?.result
-                    if (toolResult is ToolExecutionResult.Success || toolResult is ToolExecutionResult.Error) {
-                        val details = when (toolResult) {
-                            is ToolExecutionResult.Success -> toolResult.details
-                            is ToolExecutionResult.Error -> toolResult.details
-                            else -> null
-                        }
-                        val outputFiles = details?.get("output_files")?.jsonArray
-                        if (!outputFiles.isNullOrEmpty()) {
-                            val attachments = outputFiles.mapNotNull { fileJson ->
-                                try {
-                                    val fileObj = fileJson.jsonObject
-                                    val fileName = fileObj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                                    val mimeType = fileObj["mime_type"]?.jsonPrimitive?.contentOrNull ?: "application/octet-stream"
-                                    val localPath = fileObj["local_file_path"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                                    Attachment(local_file_path = localPath, file_name = fileName, mime_type = mimeType)
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to parse output file: ${e.message}")
-                                    null
-                                }
-                            }
-                            if (attachments.isNotEmpty()) {
-                                pendingToolOutputAttachments.addAll(attachments)
-                                Log.d(TAG, "Queued ${attachments.size} output files for the next assistant message")
-                            }
-                        }
+                    // (with the hash + size when the tool stored them; see PythonInterpreterTool.outputAttachments)
+                    val attachments = com.example.ApI.tools.PythonInterpreterTool.outputAttachments(toolCallMessage.toolCall?.result)
+                    if (attachments.isNotEmpty()) {
+                        pendingToolOutputAttachments.addAll(attachments)
+                        Log.d(TAG, "Queued ${attachments.size} output files for the next assistant message")
                     }
 
                     // Notify ViewModel to reload chat history and clear streaming text
@@ -521,15 +532,28 @@ class StreamingService : Service() {
         }
 
         try {
+            // Attachments this device does not have (attached on the web / another device, or
+            // generated by the cloud's Python tool) are fetched from the account's store into the
+            // cache, and the request reads them there. Requests without such files are untouched.
+            // The copy is for the request only: sendMessage writes back provider ids, never paths.
+            val (localMessages, localProjectAttachments) = try {
+                com.example.ApI.data.DeviceAttachmentsProvider.get(applicationContext).localize(messages, projectAttachments)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppLogger.w("Could not fetch attachments from the store: ${e.message}")
+                messages to projectAttachments
+            }
+
             // Execute via Repository (which handles file uploads and delegates to ApiService)
             repository.sendMessage(
                 provider = provider,
                 modelName = modelName,
-                messages = messages,
+                messages = localMessages,
                 systemPrompt = systemPrompt,
                 username = username,
                 chatId = chatId,
-                projectAttachments = projectAttachments,
+                projectAttachments = localProjectAttachments,
                 webSearchEnabled = webSearchEnabled,
                 enabledTools = enabledTools,
                 thinkingBudget = thinkingBudget,
@@ -541,6 +565,7 @@ class StreamingService : Service() {
             Log.d(TAG, "Request was cancelled: requestId=$requestId")
             // Just clean up without emitting error
             activeRequests.remove(requestId)
+            replyAnchors.remove(requestId)
             activeJobs.remove(requestId)
             serviceScope.launch {
                 _activeRequestCount.emit(activeRequests.size)

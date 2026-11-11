@@ -1,0 +1,238 @@
+# Web UI — Implementation Progress
+
+Persistent checkpoint file. Survives across sessions so work can resume cleanly
+if interrupted. **Every subagent reads this FIRST, marks its step `[~]` on start
+and `[x]` on finish with a one-line note + commit hash. Never redo an `[x]` step.**
+
+Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
+
+Plan file: `/home/divonr/.claude/plans/cosmic-coalescing-cray.md`
+Branch: `web-ui`
+
+---
+
+## R9 — User-reported web/Android parity bugs (2026-06-10)
+
+All five reported bugs fixed (Android = source of truth):
+
+- [x] **Back arrows mirrored** — web used `MdArrowBack` (always points left); Android uses `Icons.AutoMirrored.Filled.ArrowBack` which flips in RTL. `ui/icons.tsx` now exports an auto-mirrored `MdArrowBack` (scaleX(-1)), fixing every screen at once. commit 1a21049
+- [x] **Model logos in avatar circles** — copied the 8 PNGs from `app/src/main/assets/models_logos/` to `web/public/models_logos/`; added `getModelLogoPath()` to `utils/chatUtils.ts` mirroring `ModelLogoUtils.kt`; rendered in ChatHistoryPage chat cards + search results and MessageBubble assistant avatar (GroupPage intentionally left initial-only, like Android GroupScreen). Also fixed `getChatModel` fallback to `gpt-4o` (Chat.model computed property). commit 8c04fcb
+- [x] **Quick-settings popups** — PopupPortal now measures itself and clamps within the viewport (flips above the anchor when no room below), mirroring Compose DropdownMenu auto-positioning; fixed `closeAll(); setShow(v => !v)` ordering bug so a second click on the thinking/temperature/tools/direction buttons closes the popup. commit 46b4435
+- [x] **Integrations built-in tools** — root cause: server `PATCH /api/settings` silently dropped `enabledTools`/`excludedToolIds`, so the Integrations toggles never persisted. Added both to the merge + test. ChatPage tools dropdown was also wrongly built from skills; now mirrors Android: items = `AppSettings.enabledTools` (+ group-conversations tool when chat is in a group), checkbox state = not-excluded, toggles persist `excludedToolIds` via settings PATCH, stream requests send available−excluded. New `utils/toolCatalog.ts` mirrors ToolRegistry names + ToolToggleDropdown grouping. commit caf02ab
+- [x] **Share button** — top-bar share was a no-op (called export and discarded it) and the context-menu share auto-downloaded. Both now open a new `ChatExportDialog` mirroring `ChatImportExportDialogs.kt`: header "ייצוא שיחה", LTR monospace JSON editor with edit toggle, Share (Web Share API file → download fallback), Link button (AES-CBC WebCrypto encryption, POST/PUT/DELETE to https://api-divonr.xyz/share, viewer link copied to clipboard, copy/update/delete floating menu), "להורדות" download. Share-link persisted via `PATCH /api/chats/{id}` which gained `shareLink`/`shareId` fields (+ test). commit 06707ea
+
+Verified: `:server:test` green, web vitest 114/114, e2e 12/12, `npm run build` + `:server:installDist` clean.
+
+## R8 — Parity audit + sync fixes (Android = source of truth)
+
+Full two-agent audit (UI parity + capability/REST parity) found and fixed:
+
+- [x] **Sync: newly-tracked files never uploaded** — `SyncEngine.pull()` now marks tracked-but-missing-on-server local files dirty so "Sync Now" uploads them (e.g. api_keys after enabling syncApiKeys). commit 72a201d
+- [x] **Sync: web server hardcoded syncApiKeys=false** — new `SYNC_API_KEYS` env var wired through SyncConfig; docs updated. commit bb528e1. Deployed with `SYNC_API_KEYS=true`; verified all 15 api keys pulled to `~/.llm-api-web`.
+- [x] **POST /api/chats/{id}/generate-title** — was 404; web "AI Rename" now works. TitleGenerator seam in AppModule. commit c99ee3f
+- [x] **POST /api/chats/{id}/messages/{id}/resend (SSE)** — was 404; web edit-resend/regenerate now work. Shared `streamSseResponse` helper extracted from send route. commit 3bbd932
+- [x] **GET /oauth/{github,google}/start** — web OAuth connect was 404; now 302-redirect routes (session-validated, CSRF state in session); redundant POST /api/integrations/*/start removed. commit fad38f2
+- [x] **messages_added SSE event** — emitted after mid-stream tool message persistence; web parser + ChatPage reload wired. commit 930a6a2
+- [x] **SettingsPage nav links** to Integrations/Skills/Logs (labels verbatim from Android). commit ecebbcc
+- [x] **Skill ZIP export/import** — GET /api/skills/{name}/export + POST /api/skills/import-zip + SkillsPage UI. commit dfe17dd
+- [x] **Test Connection wired** — /api/sync/status gained live `reachable` probe via SyncEngine.testConnection(). commit 4bb73e8
+
+Remaining known (intentional/low): drag-reorder of API keys (web uses up/down buttons), full-custom-provider editor uses JSON blobs, skip-welcome toggle not surfaced on web.
+
+Verified: :server:test green, web vitest 114/114, deployed (installDist + web build + llm-web restart), new endpoints live (401/302 not 404), fresh APK built for apk-server.
+
+## UI Refactor — R7 (Polish + visual verification + deploy build)
+
+- [x] **R7 — Fidelity fixes, visual verification, E2E update, deploy build**
+  - **A1 — Message context menu**: Replaced hover-triggered opacity mechanism with long-press (500ms `onPointerDown` timer) + right-click (`onContextMenu`), portaled and fixed-positioned at cursor coordinates. Matches ChatHistoryPage (R1) pattern and Android long-press behaviour. Menu is no longer invisible on mobile/phone-primary target.
+  - **A2 — KeysPage ScreenTopBar migration**: Replaced inline `topBar` div + `IconButton+h1` in both the loading and main render paths with the shared `ScreenTopBar` component. `headingAriaLabel="API Keys"` preserved for smoke tests.
+  - **A3 — De-dup sha256/isInLockRange**: Extracted to `web/src/utils/crypto.ts` and `web/src/utils/childLock.ts`. Both `SettingsPage` and `ChildLockPage` now import from there; local duplicates removed.
+  - **A4 — Drag reorder**: Skipped (low priority; existing up/down buttons are functional).
+  - **Visual verification** (B): Built fresh `web/dist`, started server on port 8097, took mobile (390×844) + desktop (1280×800) screenshots of Login, ChatHistory, Chat (with Markdown+table+code+Hebrew), Settings, Keys, Skills. Compared against Android reference screenshots. Fidelity is high on all core screens. Remaining drift fixed:
+    - **Code block BIDI**: Added `dir="ltr"` DOM attribute to `<div className={styles.codeWrapper}>` in `Markdown.tsx` so the Unicode bidirectional algorithm does not reorder punctuation (e.g. semicolons) at line ends when an RTL ancestor is present.
+    - All other elements (colors, phone-width column on desktop, RTL-mirrored rows, bottom input bar RTL order, bubble alignment/colors, top bar provider+model centering, scroll buttons) match the Android design.
+  - **E2E update** (C): Rewrote `web/e2e/app.spec.ts` for Hebrew UI — uses `[aria-label="password"]` (not `#password`), checks `[role=alert]` for Hebrew error message, tests chat textarea, adds SPA routing `/keys` test, removes obsolete "save button" assertion (auto-save). 12/12 E2E tests pass.
+  - **Deploy artifact**: `web/dist` is freshly built and ready to serve.
+  - `npm run build` ✓ (tsc + vite) | `npx vitest run` 107/107 ✓ | `npm run test:e2e` 12/12 ✓
+  - commits: 919dfc8 (A1–A3), 71af42a (B visual fix + C E2E)
+
+## Deploy note
+
+To redeploy after pulling:
+```
+# 1. Rebuild server
+./gradlew :server:installDist
+
+# 2. Rebuild web frontend
+npm --prefix web run build
+
+# 3. Restart the service (leaves web/dist as the static artifact)
+sudo systemctl restart llm-web
+```
+The `llm-web` systemd unit must have `WEB_STATIC_DIR` pointing at `web/dist` (absolute path). See `server/deploy/DEPLOY.md` for full env-var reference.
+
+---
+
+## P0 — Scaffold + API contract
+- [x] `:server` Gradle module (Ktor 2.3.12 + Netty, depends `:shared`), `ServerPlatformStorage`, `ServerMain`, `AppModule`, `configureRouting` with `/health`; `server/API_CONTRACT.md` (full REST+SSE spec for all phases); Ktor testApplication health test + DataRepository smoke tests — all passing. Note: `ktor-server-sse` requires Ktor 3.x; SSE for P3 will use `respondTextWriter` on Ktor 2.x.
+- commit: 4fe993c
+
+## P1 — Auth + session
+- [x] `POST /login` (password from env `WEB_UI_PASSWORD`), Ktor Sessions signed-cookie (`llm_web_session`), `authenticate("session")` guard on all `/api/**` routes via `Route.apiRoutes()` extension, `POST /logout`. `AuthConfig` data class lets tests inject password + secret without env vars. Tests: 401 without session, login round-trip (200 + Set-Cookie), logout invalidates, /health still public, 401 JSON body — all 10 tests pass.
+- commit: a8abeaf
+
+## P2 — Read APIs
+- [x] GET /api/providers, /api/providers/models, /api/settings, /api/chats, /api/chats/{chatId}, /api/groups, /api/keys (masked), /api/search. `currentUsername()` helper reads `AppSettings.current_user`. API keys masked (last 4 chars). `SearchResultDto` server DTO because `:shared` `SearchResult` is not @Serializable. 27 tests total (17 new), all passing.
+- commit: 171ecdd
+
+## P3 — Streaming send (core)
+- [x] POST /api/chat/send SSE endpoint using `respondTextWriter` + `Channel<String>` bridge. `ChatEngine` interface seam (real: `RepositoryChatEngine` delegates to `DataRepository.sendMessage`; test: `FakeChatEngine` scripts callback directly). Tool execution via `ToolRegistry.executeTool`, tool messages persisted via `addResponseToCurrentVariant`. Title generation mirrors `TitleGenerationManager` (1st or 3rd assistant message). User message persisted before streaming via `addUserMessageAsNewNode`. 8 new tests (35 total), all passing.
+- commit: b06f4a9
+
+## P4 — Mutation APIs
+- [x] Chat CRUD (create/rename/system-prompt/delete/export/import), messages (add/delete-from-point), branching (createBranch/switchVariant/branch-info/deleteMessageFromBranch), groups full CRUD + project-status + chat membership + attachments, API keys (add/patch/delete/toggle/reorder), settings PATCH (merge semantics), custom providers CRUD, full custom providers CRUD, skills (list/get-content/create/import/enable-disable/delete), POST /api/providers/refresh. Settings PUT semantics: merge (GET-then-PATCH pattern, only supplied fields overwritten). 46 new tests (81 total), all passing.
+- commit: 2a05c8b
+
+## P5 — Files + integrations OAuth
+- [x] POST /api/files/upload (multipart, 50 MB limit) → Attachment; DELETE /api/files. GET/DELETE /api/integrations/github|google; POST /api/integrations/github|google/start (CSRF state in session); GET /oauth/github|google/callback (public); PATCH /api/integrations/google/services. OAuthTokenExchanger seam (RealOAuthTokenExchanger / FakeOAuthTokenExchanger in tests). UserSession extended with githubOAuthState/googleOAuthState fields. GitHub credentials from env (GITHUB_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_SECRET) with desktop app fallback. Google credentials from env only (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET). PUBLIC_BASE_URL env for redirect URIs. 17 new P5 tests (98 total), all passing. commit: 2fd3040
+
+## P6 — Frontend scaffold
+- [x] Vite 5 + React 18 + TS 5 in `web/`. Typed API client (`client.ts`) covering all endpoints, SSE stream client (`stream.ts`) with fetch-based frame parser handling chunk boundaries, typed models (`types.ts`) mirroring all shared Kotlin DTOs. App shell: BrowserRouter v6, AuthGuard checking `/api/session`, AppLayout (sidebar + responsive mobile hamburger), Login page. Stores: Zustand `authStore` + `chatStore`. CSS Modules dark theme (palette from Color.kt). `<Markdown>` with remark-gfm/math + rehype-katex + rehype-highlight + copy button. PWA manifest. 28 Vitest tests (stream parser, request helper, login flow, Markdown smoke) all green. `tsc --noEmit` + `vite build` → `web/dist` produced clean. Node 18 forced Vite 5 (not 6/7). Styling: CSS Modules (no Tailwind — avoids Node-18 JIT compat issues).
+
+## P7 — Frontend screens (parity)
+- [x] All screens implemented with desktop parity: ChatPage (streaming SSE, live partial text, collapsible thinking, tool_call/tool_result inline, model/provider picker, web-search toggle, thinking-budget + temperature, stop/abort, message edit→branch, delete-from-point, copy, regenerate, branch navigator ‹ n/m ›), ChatHistoryPage (list/groups/search/create/rename/delete), KeysPage (API keys + custom providers + full custom providers CRUD with toggle/reorder), SettingsPage (all AppSettings fields incl. child-lock + title-generation + starred-models), GroupPage (project mode + shared system prompt + attachments), SkillsPage (skill editor + enable/disable + create/delete), IntegrationsPage (GitHub/Google connect/disconnect + google services toggle). CSS Modules dark theme. AuthGuard on all routes. RTL/LTR dir="auto" on message bubbles. 74/74 Vitest tests green. build clean. Root cause of 6 test failures: (1-3) vi.restoreAllMocks() in SmokeTests beforeEach stripped mock implementations — fixed by switching to vi.clearAllMocks(); (4-6) getByText(/api keys|child lock|title generation/i) matched multiple DOM nodes — fixed by switching to getByRole('heading', ...) queries. commit: e5867a7
+
+## P8 — E2E + deploy
+- [x] Static SPA serving from Ktor (WEB_STATIC_DIR env, tailcard GET fallback for SPA routes, /api paths never swallowed). KTOR_PORT + LLM_WEB_DATA_DIR env overrides added. 4 new server tests (102 total, all green). Playwright @1.48.2 + Chromium installed; 9 E2E tests authored and passing (auth, chat CRUD, settings persistence, API keys UI, seeded chat navigation, SPA fallback routing). `npm run test:e2e` wired; Vitest `test` script unchanged (e2e/ excluded). `./gradlew :server:installDist` produces runnable artifact at `server/build/install/server/bin/server`. Smoke test: `curl localhost:8091/health` → `{"status":"ok"}`, `curl localhost:8091/` → SPA index.html. Deployment artifacts: `server/deploy/llm-web.service`, `llm-web.env.example`, `build-and-run.sh`, `DEPLOY.md`. Root .gitignore updated for secrets + Playwright output. commit: 38e5e34
+
+## P9 — Remote sync bootstrap
+
+- [x] Added `SyncConfig` data class + `resolveSyncConfig()` (reads `SYNC_ENABLED`, `SYNC_SERVER_URL`, `SYNC_TOKEN`, `SYNC_USER`, `SYNC_PULL_INTERVAL_SECONDS` env vars). `SyncConfig.startEngine=false` gate lets tests assert config seeding without opening sockets. On startup (when enabled + token set): seeds `RemoteSyncSettings` + optional `current_user` into `AppSettings`, calls `startSync()` + initial `pullNow()`, launches a periodic pull loop (default 20 s) tied to `ApplicationStopping` lifecycle. Added `POST /api/sync/pull` + `GET /api/sync/status` endpoints (auth-gated; token never returned). 8 new tests (110 total, all green). `installDist` still produces a runnable artifact. Docs: `llm-web.env.example` + `DEPLOY.md` updated with sync section.
+- commit: bbe1f13
+
+## UI Refactor — R6 (Groups + Skills + Integrations + Logs/Welcome screens)
+
+- [x] **R6 — Groups, Skills, Integrations, Logs, Welcome — Hebrew/RTL, app-style, full interaction**
+  - **`web/src/pages/GroupPage.tsx`** (rewritten): ScreenTopBar with project-mode toggle (checkbox+slider) in `actions`. `ProjectArea` renders system-prompt textarea + attachment file grid with add/remove. `ChatItem` shows model-initial circle + meta. Handlers: `handleToggleProject` → `groupsApi.update(id, {isProject})`, `handleSavePrompt`, `handleFileUpload` → `filesApi.upload` + `groupsApi.addAttachment`, `handleNewChat` → `chatsApi.create` then navigate.
+  - **`web/src/pages/SkillsPage.tsx`** (rewritten): `SkillCard` with 44dp icon box, enable/disable toggle (stopPropagation). Dialogs: `ImportTextDialog` (SKILL.md textarea), `CreateSkillDialog` (name enforced lowercase/hyphens, description), `DeleteSkillDialog`. ScreenTopBar with import (⬇) + create (+) action buttons.
+  - **`web/src/pages/SkillEditorPage.tsx`** (new): `/skills/:name/edit`. Monospace `dir="ltr"` textarea + description meta field. Save button shown when dirty. Loads via `skillsApi.list()` + `skillsApi.getContent(name)`.
+  - **`web/src/pages/IntegrationsPage.tsx`** (rewritten): Tool section (date/time, group-conversations, Python toggles → `settingsApi.update`). `GitHubCard`: connect/disconnect via `integrations.github.startOAuth()/disconnect()`. `GoogleCard`: connect/disconnect + service sub-toggles (Gmail, Calendar, Drive) → `integrations.google.updateServices`. Returns from OAuth with `?github=connected`/`?google=connected` show success banner.
+  - **`web/src/pages/LogsPage.tsx`** (new): `/logs`. Client-side log capture via `appLogger.subscribe`. Black terminal theme. Auto-scroll to bottom. Clear button → `clearLogs()`.
+  - **`web/src/utils/appLogger.ts`** (new): Ring buffer (max 500 entries), subscriber pattern, `_timestamp()`. Intercepts console.log/warn/error + `window.error` only when `import.meta.env?.MODE !== 'test'`.
+  - **`web/src/pages/WelcomePage.tsx`** (new): `/welcome`. FREE_PROVIDERS (Google, Poe, Cohere, LLM Stats) + PAID_PROVIDERS (OpenAI, Anthropic, OpenRouter) as styled cards linking to API key pages. Skip-welcome checkbox → `settingsApi.update`. "יש לי מפתח API >" → navigate('/keys').
+  - **`web/src/components/ScreenTopBar.tsx`** (updated): Added optional `actions?: React.ReactNode` prop for trailing elements (e.g. project toggle, save button, import/create buttons).
+  - **`web/src/i18n/he.ts`**: +50 R6 Hebrew keys (group_*, skills_*, skill_editor_*, integrations_*, logs_*, welcome_*).
+  - **`web/src/App.tsx`**: Added routes for `skills/:name/edit`, `logs`, `welcome`.
+  - **`web/tsconfig.json`**: Added `"vite/client"` to `types` array to fix `import.meta.env` TS error.
+  - **`web/src/__tests__/SmokeTests.test.tsx`**: Updated with `vi.hoisted()` for `cssProxy`, `mockGroup`, `mockSkill` (fixes TDZ hoisting errors). Added 12 new R6 interaction tests (GroupPage, SkillsPage, SkillEditorPage, IntegrationsPage, LogsPage, WelcomePage).
+  - `npm run build` ✓ | `npx vitest run` 107/107 ✓
+  - commit: 13a2176
+
+## UI Refactor — R5 (User Settings + Child Lock screens)
+
+- [x] **R5 — User settings + child lock — Hebrew/RTL, app-style cards, auto-save, dialogs, time picker**
+  - **`web/src/components/ScreenTopBar.tsx`** (new): Shared top-bar used by SettingsPage + ChildLockPage. Back-arrow IconButton (40px, surface-variant bg) + bold Hebrew title. `headingAriaLabel` prop exposes English aria-label for test selectors while showing Hebrew visually. R6/R7 can migrate KeysPage + other screens.
+  - **`web/src/pages/SettingsPage.tsx`** (rewritten): Matches Android UsernameScreen.kt structure. User info card (read-only username + MdPerson avatar). TitleGenerationSection: enable toggle → provider selector (expandable radio list, all 6 providers from TitleGenerationSection.kt) → update-on-extension checkbox. Multi-message mode card with Hebrew explainer. Child lock section: toggle → ChildLockSetupDialog (password + show/hide eye + start/end time pickers) → ChildLockDisableDialog (password verify). Remote sync section: enabled toggle + server URL + auth token (show/hide) + sync-api-keys toggle with warning + Sync-Now (→ POST /api/sync/pull) + Test-Connection (→ GET /api/sync/status, display-only stub noted below).
+  - **`web/src/pages/ChildLockPage.tsx`** (new): Black full-screen lock screen matching ChildLockScreen.kt. MdLock 80px icon, Hebrew headlines, end-time display, password entry to unlock early (SHA-256 verify against stored hash). On load: if lock not currently active (time range check), redirects to /. Route: /child-lock.
+  - **`web/src/pages/SettingsPage.module.css`** (rewritten): card/cardSmall (RoundedCornerShape 20dp/16dp SurfaceVariant/Surface), toggle switch (CSS-only pill matching Android Switch), providerBtn+providerList (expandable), checkboxRow, textField+fieldInputWrap+trailingBtn (password eye), actionRow+outlineBtn (Sync-Now/Test-Connection), timeRow+timeChip (lock time display), TimePicker: timeDisplay (digital, primary color), numberPicker (up/down arrows + adjacent ghost values), quickHoursSection+chipsRow+chip.
+  - **Auto-save**: Toggle switches call `settings.update({ field })` immediately. Text inputs (server URL, auth token) debounced 800ms then auto-save. Child lock dialogs save on confirm.
+  - **TimePicker**: Two modes — wheel picker (up/down arrows, 3-visible wrap, matches NumberPicker from TimePickerComponents.kt) + quick-select chips (common hours + :00/:15/:30/:45 minutes). Mode toggle button. Wrapped in R0 `Dialog` (open=true, actions). Note: no drag support; that's R7.
+  - **Password hashing**: Web uses SHA-256 (SubtleCrypto) for child lock password storage. Not interoperable with Android's AES/CBC/PBKDF2+EncryptedSharedPreferences — noted. Password is web-only when set via web.
+  - **Remote sync — what's wired vs display-only**: Enabled toggle + server URL + auth token + sync-api-keys → persisted via `settings.update`. "Sync Now" → `POST /api/sync/pull` (wired). "Test Connection" → `GET /api/sync/status` (partial: verifies server is reachable, not an end-to-end remote-server check; no `/api/sync/test-connection` endpoint exists — noted for R6/R7).
+  - **`web/src/api/types.ts`**: Added `RemoteSyncSettings` interface (`enabled`, `serverBaseUrl`, `authToken`, `syncApiKeys`) + `remoteSync: RemoteSyncSettings` to `AppSettings`.
+  - **`web/src/api/client.ts`**: Added `sync.pull()` + `sync.status()` endpoints.
+  - **`web/src/ui/icons.ts`**: Added MdLock, MdAccessTime, MdVisibility, MdVisibilityOff, MdSync, MdCloudSync, MdPerson, MdLink.
+  - **`web/src/i18n/he.ts`**: +28 R5 Hebrew keys: advanced_settings, current_user_label, child_lock_mode/hours_hint/setup_title/setup_warning/disable_title/disable_body/password_label/password_placeholder/from/until/locked_title/until_time_prefix/available_msg/wrong_password/enter_password_to_unlock/unlock, time_picker_title/quick_mode/precise_mode/hours/minutes/common_hours/minutes_label.
+  - **`web/src/__tests__/SettingsPage.test.tsx`** (rewritten): 10 tests — section heading renders (Advanced Settings/Title Generation/Multi-Message Mode/Child Lock/Remote Sync using aria-label queries), username display, auto-save on toggle (multi-message, title gen, remote sync enabled), child lock enable→setup dialog, dialog cancel, Sync-Now→sync.pull called, Test-Connection→sync.status called. All 94 tests green.
+  - **`web/src/__tests__/SmokeTests.test.tsx`**: Updated SettingsPage smoke assertion to `/advanced settings/i`; added `remoteSync` to mock settings; added `sync` mock.
+  - **ScreenTopBar migration**: Used in SettingsPage + ChildLockPage. KeysPage (R4) not migrated — lower risk to leave unchanged; noted for R7.
+  - **LabeledField extraction**: Not extracted — the field pattern across pages is varied enough that a generic wrapper wouldn't simplify. Noted for R7.
+  - `npm run build` ✓ | `npx vitest run` 94/94 ✓
+  - commit: 5ad2725
+
+## UI Refactor — R4 (API Keys + Custom Providers screens)
+
+- [x] **R4 — API Keys screen + custom provider dialogs — Hebrew/RTL, app-style cards, dialogs**
+  - **`web/src/pages/KeysPage.tsx`** (rewritten): Top bar (back arrow IconButton + Hebrew title "מפתחות API", `aria-label="API Keys"` for smoke-test compat). Action buttons row: "הוסף מפתח API" (primary, `--primary` bg) + "קבל מפתח API" (green #4A7C59). API keys list: provider-gradient cards (openai=white, anthropic=orange, google=rainbow, poe=purple, cohere=green, openrouter=white, llmstats=blue) with 48px provider-initial icon, masked key in monospace, Hebrew status pills (פעיל/לא פעיל), up/down reorder buttons calling `apiKeys.reorder`, delete button (title="Delete") → confirm Dialog → `apiKeys.delete`. Toggle → `apiKeys.toggle`. Add-key dialog: custom portal dropdown showing built-in providers + custom/full-custom providers (each with edit/delete icon buttons) + "הגדר ספק חדש..." create option → `apiKeys.create`. Custom providers section: list + edit (IconButton) + delete (confirm dialog) + add (→ SimpleCustomProviderDialog) → `customProviders.create/replace/delete`. Full custom providers section: same → `fullCustomProviders.create/replace/delete`. SimpleCustomProviderDialog: name, baseUrl, apiKey, modelNames, OpenAI-compatible checkbox (unchecking → switches to FullCustomProviderDialog). FullCustomProviderDialog: 3 tabs (Request/תגובה/מודל), requestTemplate + responseMapping JSON blobs, streaming-confirmed checkbox. DeleteKeyDialog + DeleteProviderDialog using R0 Dialog component.
+  - **Reorder approach**: Up/Down arrow buttons (simpler than long-press drag; app uses drag-after-long-press, web uses up/down). R7 can add DnD.
+  - **FullCustomProviderDialog simplification (R7 note)**: Uses web-API fields (requestTemplate+responseMapping JSON blobs) instead of Android's bodyTemplate/messageFields/parserType/eventMappings streaming-config sub-editors — those require the richer server-side schema first.
+  - **`web/src/pages/KeysPage.module.css`** (rewritten): topBar, keyCard (rounded-20, gradient), providerIcon (48px, primary-10 bg), statusPill (active=green/inactive=red), reorderBtns, deleteBtn, providerDropdown (portal menu), tabBar/tabBtn (3-tab dialog), section/providerRow (custom providers list), dialogField/dialogInput/dialogTextarea, all theme.css variables.
+  - **`web/src/i18n/he.ts`**: +26 R4 Hebrew keys: `delete_api_key_title/body`, `key_status_active/inactive`, `get_api_key`, `reorder_up/down`, `full_custom_providers`, `define_full_provider/edit_full_provider`, `openai_compatible_label`, `streaming_confirmed_label`, `body_template_section`, `request_tab/response_tab/model_tab`, `provider_api_key`, `model_names_label`, `request_template_label/response_mapping_label`, `select_provider`, `custom_name_optional/placeholder`, `delete_provider_title/body`, `invalid_json`.
+  - **`web/src/__tests__/KeysPage.test.tsx`** (rewritten): 13 tests — Hebrew UI assertions, provider dropdown interaction (portal findable in JSDOM), masked key display, toggle/delete/reorder calls, custom provider add flow. `aria-label="API Keys"` on heading keeps SmokeTests `/api keys/i` regex passing without touching SmokeTests.test.tsx.
+  - Reusable for R5/R6: `Dialog`+`DialogButton` (already R0), `IconButton` (R0). Shared `ScreenShell` pattern (back-arrow + title row) could be extracted into a `ScreenTopBar` component for R5/R6 to import.
+  - `npm run build` ✓ | `npx vitest run` 88/88 ✓
+  - commit: efc8116
+
+## UI Refactor — R3 (Chat screen body + input)
+
+- [x] **R3 — Message bubbles, ThoughtsBubble, ToolCallBlock, BranchNavigator, streaming render, ChatInputArea, scroll buttons, Markdown restyle, i18n, tests**
+  - **`web/src/components/chat/MessageBubble.tsx`** (new): User=#6C7CE7 (topLeftRadius 6, align flex-start=RIGHT in RTL), assistant=#2A2B3A (topRightRadius 6, align flex-end=LEFT in RTL), system=#3A3B4A. Inline ThoughtsBubble + ToolCallBlock for assistant. Model avatar 32px. ContextMenu (portaled, hover-on ⋯). BranchNavigator below user messages.
+  - **`web/src/components/chat/ThoughtsBubble.tsx`** (new): Live elapsed timer (setInterval 100ms) while streaming. primary-08 bg, primary-20 border. Hebrew "מחשבות... (x.x שניות)". Expand/collapse when done.
+  - **`web/src/components/chat/ToolCallBlock.tsx`** (new): MdExtension icon in 40px circle. Tool name, parameters JSON, result with green/red bg per success/failure. Status: מבצע.../הושלם/נכשל.
+  - **`web/src/components/chat/BranchNavigator.tsx`** (new): `‹ n/m ›` with prev/next chevrons; hidden when totalVariants ≤ 1.
+  - **`web/src/components/chat/ChatInputArea.tsx`** (new): Pill layout (MdAdd attach | textarea | action buttons). Edit banner with cancel X. File previews (single=list, multiple=4-col grid). isExpanded ≥3 estimated lines → vertical stack. WebSearchToggleBtn (primary-15 when on). RoundBtn 40px: send/stop/confirm/resend.
+  - **`web/src/pages/ChatPage.tsx`** (rewritten): makeStreamCallbacks() helper; thinkingStartTime/durationSeconds in StreamState; streaming bubble with ThoughtsBubble + ToolCallBlock + partial text; floating scroll buttons (MdArrowUpward/Downward); ChatInputArea integration.
+  - **`web/src/pages/ChatPage.module.css`** (simplified): page-shell only; .streamingBubble, .streamingDots (streamPulse animation), .scrollBtn (absolute, 42px circle, primary bg, RTL-safe centering).
+  - **`web/src/components/Markdown.tsx`** + **`Markdown.module.css`**: Code blocks: .codeHeader bar with language chip (.codeLang) + copy button (.copyBtn), uses t('copy_code')/t('copied'). RTL-safe: padding-inline-start on lists, border-inline-start on blockquotes, text-align:start on tables.
+  - **`web/src/i18n/he.ts`**: +20 R3 Hebrew keys (thoughts_seconds, editing_message, tool_executing/completed/failed, confirm_edit_and_resend, copy_code, copied, scroll_to_top/bottom, etc.).
+  - **`web/src/__tests__/ChatPage.test.tsx`**: +3 R3 tests (full streaming sequence thoughts→tool→text→complete, send/stop toggle, edit mode architecture). Hebrew placeholder + מחשבות assertions.
+  - `npm run build` ✓ | `npx vitest run` 83/83 ✓
+  - commit: 5e6b8c7
+
+## UI Refactor — R2 (Chat screen chrome)
+
+- [x] **R2 — Chat screen chrome — top bar, quick settings, model selector, system-prompt dialog**
+  - **`web/src/utils/chatUtils.ts`** (new): hoisted `getModelInitial` + `formatTimestamp` from `ChatHistoryPage`; re-imported there.
+  - **`web/src/components/chat/ChatTopBar.tsx`** (new): `NormalModeTopBar` (back+search / provider+model center / share+delete), `SearchModeTopBar` (back + full-width input + close/search icon), floating 28px chevron toggle at `bottom:-14px; inset-inline-end:20px`. All inline styles, CSS logical props for RTL.
+  - **`web/src/components/chat/QuickSettingsBar.tsx`** (new): animated expand/collapse row of 36px icon-buttons (thinking-budget, temperature, tools, text-direction, system-prompt). Active states: thinking≠none, temp≠null, some tools excluded, prompt≠''. `PopupPortal` via `getBoundingClientRect+createPortal` avoids overflow clipping. Four popups: `ThinkingBudgetPopup` (none/low/medium/high/max), `TemperaturePopup` (slider 0–2 + reset), `ToolToggleDropdown` (master toggle + per-tool checkboxes), `TextDirectionMenu` (RTL/A/LTR buttons). Exports `TextDirectionMode` type.
+  - **`web/src/components/chat/ModelSelectorDialog.tsx`** (new): provider tab bar (star + one per provider), `StarredPage` (starred models or empty hint), `ProviderModelList` (filtered rows + star toggle), custom model name entry, filter search input.
+  - **`web/src/components/chat/SystemPromptDialog.tsx`** (new): multiline textarea (`direction:auto`), cancel/אישור buttons via R0 `Dialog`/`DialogButton`, saves via `chats.update(chatId, {systemPrompt})`.
+  - **`web/src/pages/ChatPage.tsx`**: integrated all four components; added state for searchMode, quickSettingsExpanded, textDirectionMode, providersList, starredModels, showModelSelector, showSystemPromptDialog, showDeleteConfirm. All new hooks hoisted before early return (Rules of Hooks). `handleDeleteChat` → confirm dialog → `chats.delete`; `handleSaveSystemPrompt` → `chats.update`; `handleModelSelect` / `handleToggleStar` → settings update.
+  - **`web/src/i18n/he.ts`**: added 30+ R2 Hebrew keys (thinking labels, temperature, tools, text-direction, model-selector, starred, quick-settings).
+  - **`web/src/__tests__/ChatPage.test.tsx`**: added 4 new R2 chrome tests; updated topbar test to use `getAllByText` for model name (appears in both topbar + message bubble).
+  - **`web/src/__tests__/SmokeTests.test.tsx`**: added `providers.list` mock.
+  - `npm run build` ✓ | `npx vitest run` 80/80 ✓
+
+## UI Refactor — R1 (ChatHistory screen)
+
+- [x] **R1 — ChatHistory screen — Hebrew/RTL, groups, search, context menus, dialogs**
+  - Rewrote `web/src/pages/ChatHistoryPage.tsx` to match Android `ChatHistoryScreen.kt` pixel-for-pixel.
+  - Top bar: forced-LTR "**A**p**I**" logo, search icon (enters search mode), API-keys icon, settings icon.
+  - Search mode: full-width search field with Hebrew placeholder "חיפוש בשיחות...", live debounced results via `search.query`, close/clear button.
+  - List: `organizeAndSortAllItems` ported from `ChatListOrganizer.kt` — groups + ungrouped chats sorted by last-message timestamp.
+  - Chat item (`ChatItemCard`): 48px model-initial avatar (color-coded circle), title, last-message preview, timestamp (`formatTimestamp` from `ChatUtils.kt`), message count with MdForum icon.
+  - Group item (`GroupItemCard`): folder icon in secondary color, name, chat count, expand-in-place arrow — click navigates to group screen.
+  - Grouped chats: indented 48px `margin-inline-start` (RTL-aware, mirrors Android's `padding(start=32dp)`).
+  - FAB: fixed `inset-inline-end: 24px; bottom: 24px` (RTL → bottom-left, matching Android Scaffold FAB bottomEnd placement), single tap creates "שיחה חדשה" and navigates.
+  - Context menus: right-click + 500 ms long-press (pointer-down timer), portaled to `document.body`, chat menu and group menu with full menu item sets from `ChatHistoryContextMenus.kt`.
+  - Dialogs: rename-chat, delete-chat-confirm, create-group, rename-group, delete-group-confirm — all using R0 `Dialog`/`DialogButton`.
+  - Added 22 new Hebrew i18n keys to `web/src/i18n/he.ts` (search_, close_search, share_chat, add_to_group, remove_from_group, create_new_group, rename_group, make_project, delete_group_scatter, group_name_label, etc.).
+  - Added `MdFolder`, `MdStar`, `MdForum`, `MdRemove`, `MdStar` to `web/src/ui/icons.ts`.
+  - Tests: rewrote `ChatHistoryPage.test.tsx` for Hebrew UI (12 tests, up from 10): top-bar icon buttons, FAB direct-create, Hebrew search placeholder, search mode toggle, context-menu-rename→dialog→API-call. All 76 vitest tests green.
+  - `npm run build` ✓ | `npx vitest run` 76/76 ✓
+  - commit: aa540d6
+
+## UI Refactor — R0 (Foundation)
+
+- [x] **R0 — Design tokens + RTL shell + UI kit + i18n + nav scaffold**
+  - `web/src/styles/theme.css` — all Color.kt + Type.kt tokens as CSS variables (`--bg`, `--surface`, `--primary`, typography scale, radius, spacing, alpha overlays).
+  - `web/index.html` — `<html lang="he" dir="rtl">` (RTL shell).
+  - `web/src/index.css` — imports `theme.css` globally.
+  - `web/src/i18n/he.ts` — 99 Hebrew strings from `strings.xml` (verbatim), `t()` helper + `useT()` hook.
+  - `web/src/ui/icons.ts` — named re-exports from `react-icons/md` (single import point for screens).
+  - `web/src/ui/IconButton.tsx` — 36px rounded-square icon button, `active` prop → `--primary-15` bg.
+  - `web/src/ui/Surface.tsx` — bg + border-radius + elevation helper.
+  - `web/src/ui/Card.tsx` — convenience wrapper over Surface.
+  - `web/src/ui/RoundButton.tsx` — 40px circular primary action button (send/confirm/web-search).
+  - `web/src/ui/Popup.tsx` + `PopupItem` — anchored dropdown menu (portaled, dismissible).
+  - `web/src/ui/Dialog.tsx` + `DialogButton` — modal dialog (Material3 dark look).
+  - `web/src/components/AppLayout.tsx` — sidebar REMOVED; replaced with centered 520px `.shell`/`.frame` column.
+  - `web/src/pages/LoginPage.tsx` — restyled dark/Hebrew (labels from `i18n/he.ts`).
+  - `web/src/__tests__/LoginPage.test.tsx` — updated for Hebrew button text.
+  - `react-icons@^4.12.0` added to dependencies.
+  - `npm run build` ✓ | `npx vitest run` 74/74 ✓
+  - commit: 575edb9
+
+## How to run (production)
+See `server/deploy/DEPLOY.md` for the full deployment guide.
+Short version: set secrets in `server/deploy/llm-web.env`, run `./gradlew :server:installDist && npm --prefix web run build`, then `sudo systemctl enable --now llm-web` (after copying the unit file).
