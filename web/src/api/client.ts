@@ -496,22 +496,31 @@ export const skills = {
 // Files
 // ---------------------------------------------------------------------------
 
+/** Answer of the delete routes: a committed (used) file is never deleted. */
+export interface DeleteFileResponse {
+  deleted: boolean
+  state?: string | null
+}
+
 export const files = {
   /**
-   * POST /api/files/upload — multipart upload.
-   * Returns an Attachment with server paths and provider file IDs.
+   * POST /api/files/upload — multipart upload (part `file`) into the user's attachment store,
+   * as a pending file. Returns the Attachment to put into a message / group as is:
+   * `file_name`, `mime_type`, `sha256`, `size` (no `local_file_path`).
+   * Errors are ApiErrors whose body is `{ error, code }` (`file_too_large`, `store_unavailable`,
+   * `no_file`); an aborted request rejects with the fetch's AbortError.
    */
-  upload: (file: File, provider = '', chatId = '') => {
+  upload: (file: File, options: { signal?: AbortSignal } = {}) => {
     const form = new FormData()
     form.append('file', file)
-    form.append('provider', provider)
-    form.append('chatId', chatId)
     return fetch(`${BASE_URL}/api/files/upload`, {
       method: 'POST',
       credentials: 'include',
       body: form,
+      signal: options.signal,
       // No Content-Type header — browser sets multipart boundary automatically
     }).then(async (res) => {
+      if (res.status === 401) emitUnauthenticated()
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         throw new ApiError(res.status, body)
@@ -520,11 +529,20 @@ export const files = {
     })
   },
 
-  /** DELETE /api/files */
-  delete: (filePath: string) =>
-    request<void>('/api/files', {
+  /**
+   * DELETE /api/files/:sha256 — remove an upload that was never used (attached, then removed
+   * before sending). `keepalive` lets the request outlive the page (tab closed / reloaded).
+   */
+  delete: (sha256: string, options: { keepalive?: boolean } = {}) =>
+    request<DeleteFileResponse>(`/api/files/${sha256}`, {
       method: 'DELETE',
-      body: JSON.stringify({ filePath }),
+      keepalive: options.keepalive,
+    }),
+
+  /** POST /api/files/:sha256/commit — only needed when no saving route references the file */
+  commit: (sha256: string) =>
+    request<{ sha256: string; size: number; state: string }>(`/api/files/${sha256}/commit`, {
+      method: 'POST',
     }),
 }
 

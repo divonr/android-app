@@ -6,9 +6,18 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { groups as groupsApi, chats as chatsApi, files as filesApi } from '../api/client'
-import type { ChatGroup, Chat } from '../api/types'
+import type { Attachment, ChatGroup, Chat } from '../api/types'
+import { StoreImage } from '../components/chat/AttachmentView'
+import { markAttachmentsUsed } from '../hooks/useDraftAttachments'
+import {
+  attachmentKind,
+  attachmentUrl,
+  describeUploadError,
+  fileRejection,
+} from '../utils/attachments'
 import ScreenTopBar from '../components/ScreenTopBar'
 import { t } from '../i18n/he'
+import { apiErrorMessage } from '../utils/apiErrors'
 import styles from './GroupPage.module.css'
 import { SYNC_CHANGED_EVENT } from '../hooks/useSyncRefresh'
 
@@ -62,9 +71,83 @@ interface ProjectAreaProps {
   onPromptSave: (prompt: string) => Promise<void>
   onAddFile: () => void
   onRemoveFile: (idx: number) => void
+  /** Names of the files that are being uploaded right now */
+  uploadingNames: string[]
 }
 
-const ProjectArea: React.FC<ProjectAreaProps> = ({ group, onPromptSave, onAddFile, onRemoveFile }) => {
+/**
+ * One project file. With a store hash it is usable here whichever device added it: an image is
+ * shown (loaded when it scrolls into view) and opens on click, any other file downloads. Without
+ * a hash the file exists only on the device that added it.
+ */
+const ProjectFileTile: React.FC<{ att: Attachment; onRemove: () => void }> = ({ att, onRemove }) => {
+  const [broken, setBroken] = useState(false)
+  const kind = attachmentKind(att)
+  const removeBtn = (
+    <button
+      className={styles.fileRemoveBtn}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove() }}
+      aria-label={`${t('remove_file')} ${att.file_name}`}
+    >
+      ✕
+    </button>
+  )
+  const name = <span className={styles.fileThumbName}>{att.file_name}</span>
+
+  if (kind === 'legacy' || broken) {
+    const reason = kind === 'legacy' ? t('attachment_device_only') : t('attachment_unavailable')
+    return (
+      <div
+        className={`${styles.fileThumb} ${styles.fileThumbUnavailable}`}
+        data-testid="project-file"
+        data-attachment-state={kind === 'legacy' ? 'legacy' : 'unavailable'}
+        title={reason}
+      >
+        <span className={styles.fileThumbIcon}>{getMimeIcon(att.mime_type)}</span>
+        {name}
+        <span className={styles.fileThumbHint}>{reason}</span>
+        {removeBtn}
+      </div>
+    )
+  }
+
+  if (kind === 'image') {
+    return (
+      <div className={styles.fileThumb} data-testid="project-file" data-attachment-state="image">
+        <a
+          className={styles.fileThumbLink}
+          href={attachmentUrl(att)!}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={att.file_name}
+          aria-label={`${t('attachment_open_image')}: ${att.file_name}`}
+        >
+          <StoreImage att={att} width={100} height={100} onError={() => setBroken(true)} />
+        </a>
+        {removeBtn}
+      </div>
+    )
+  }
+
+  return (
+    <div className={styles.fileThumb} data-testid="project-file" data-attachment-state="file">
+      <a
+        className={styles.fileThumbLink}
+        href={attachmentUrl(att, true)!}
+        download={att.file_name}
+        title={`${t('attachment_download')}: ${att.file_name}`}
+        aria-label={`${t('attachment_download')}: ${att.file_name}`}
+      >
+        <span className={styles.fileThumbIcon}>{getMimeIcon(att.mime_type)}</span>
+        {name}
+        <span className={styles.fileThumbHint}>⬇ {t('attachment_download')}</span>
+      </a>
+      {removeBtn}
+    </div>
+  )
+}
+
+const ProjectArea: React.FC<ProjectAreaProps> = ({ group, onPromptSave, onAddFile, onRemoveFile, uploadingNames }) => {
   const [editing, setEditing] = useState(false)
   const [editPrompt, setEditPrompt] = useState(group.system_prompt ?? '')
   const [saving, setSaving] = useState(false)
@@ -127,7 +210,7 @@ const ProjectArea: React.FC<ProjectAreaProps> = ({ group, onPromptSave, onAddFil
       {/* Files */}
       <div>
         <p className={styles.filesHeader}>{t('group_files')}</p>
-        {group.group_attachments.length === 0 ? (
+        {group.group_attachments.length === 0 && uploadingNames.length === 0 ? (
           <div
             className={styles.filesEmpty}
             onClick={onAddFile}
@@ -147,16 +230,24 @@ const ProjectArea: React.FC<ProjectAreaProps> = ({ group, onPromptSave, onAddFil
               <span className={styles.fileThumbIcon}>+</span>
             </div>
             {group.group_attachments.map((att, i) => (
-              <div key={i} className={styles.fileThumb}>
-                <span className={styles.fileThumbIcon}>{getMimeIcon(att.mime_type)}</span>
-                <span className={styles.fileThumbName}>{att.file_name}</span>
-                <button
-                  className={styles.fileRemoveBtn}
-                  onClick={(e) => { e.stopPropagation(); onRemoveFile(i) }}
-                  aria-label={`${t('remove_file')} ${att.file_name}`}
-                >
-                  ✕
-                </button>
+              <ProjectFileTile
+                key={`${i}-${att.sha256 ?? att.file_name}`}
+                att={att}
+                onRemove={() => onRemoveFile(i)}
+              />
+            ))}
+            {/* Being uploaded: greyed, with a spinner, until the project has it */}
+            {uploadingNames.map((fileName, i) => (
+              <div
+                key={`uploading-${i}`}
+                className={`${styles.fileThumb} ${styles.fileThumbUploading}`}
+                data-testid="project-file"
+                data-attachment-state="uploading"
+                aria-busy="true"
+                title={t('attachment_uploading')}
+              >
+                <span className={styles.fileSpinner} role="progressbar" aria-label={t('attachment_uploading')} />
+                <span className={styles.fileThumbName}>{fileName}</span>
               </div>
             ))}
           </div>
@@ -213,8 +304,10 @@ const GroupPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creatingChat, setCreatingChat] = useState(false)
-  const [uploadingFile, setUploadingFile] = useState(false)
+  const [uploadingNames, setUploadingNames] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const groupRef = useRef<ChatGroup | null>(null)
+  groupRef.current = group
 
   // silent: a background refresh (sync) — no loading state, the page stays as is meanwhile
   const loadGroup = useCallback(async (silent = false) => {
@@ -277,20 +370,46 @@ const GroupPage: React.FC = () => {
 
   // ── File attachment ────────────────────────────────────────────────────────
 
+  // A project file is used the moment it is added: upload → add to the group (the server
+  // commits it). If the group cannot take it, the upload is deleted again.
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !groupId) return
-    setUploadingFile(true)
-    try {
-      const att = await filesApi.upload(file)
-      const updated = await groupsApi.addAttachment(groupId, att)
-      setGroup(updated)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed')
-    } finally {
-      setUploadingFile(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
+    const picked = Array.from(e.target.files ?? [])
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (picked.length === 0 || !groupId) return
+
+    const problems: string[] = []
+    for (const file of picked) {
+      const reason = fileRejection(file)
+      if (reason) {
+        problems.push(`${file.name}: ${reason}`)
+        continue
+      }
+      setUploadingNames((prev) => [...prev, file.name])
+      try {
+        const att = await filesApi.upload(file)
+        try {
+          const updated = await groupsApi.addAttachment(groupId, att)
+          markAttachmentsUsed([att])
+          setGroup(updated)
+        } catch (err) {
+          // The server refused it (a definite answer — after a lost connection it may have been
+          // saved): nothing references the upload, unless the project already holds the same file
+          const status = (err as { status?: unknown } | null)?.status
+          const refused = typeof status === 'number' && status >= 400 && status < 500
+          const held = groupRef.current?.group_attachments.some((a) => a.sha256 && a.sha256 === att.sha256)
+          if (refused && att.sha256 && !held) filesApi.delete(att.sha256).catch(() => {})
+          problems.push(`${file.name}: ${apiErrorMessage(err, t('attachment_upload_failed'))}`)
+        }
+      } catch (err) {
+        problems.push(`${file.name}: ${describeUploadError(err).message}`)
+      } finally {
+        setUploadingNames((prev) => {
+          const at = prev.indexOf(file.name)
+          return at < 0 ? prev : [...prev.slice(0, at), ...prev.slice(at + 1)]
+        })
+      }
     }
+    if (problems.length > 0) setError(problems.join(' · '))
   }
 
   const handleRemoveAttachment = async (idx: number) => {
@@ -373,6 +492,7 @@ const GroupPage: React.FC = () => {
             onPromptSave={handleSavePrompt}
             onAddFile={() => fileInputRef.current?.click()}
             onRemoveFile={handleRemoveAttachment}
+            uploadingNames={uploadingNames}
           />
         )}
 
@@ -401,8 +521,9 @@ const GroupPage: React.FC = () => {
         ref={fileInputRef}
         type="file"
         className={styles.fileInput}
+        multiple
         onChange={handleFileUpload}
-        disabled={uploadingFile}
+        aria-label={t('group_add_file')}
       />
 
       {/* FAB: new chat */}

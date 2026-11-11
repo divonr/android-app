@@ -10,7 +10,12 @@
 export interface Attachment {
   file_name: string
   mime_type: string
+  /** Device-specific hint only; null for files uploaded through the web */
   local_file_path?: string | null
+  /** The file's identity across devices (64 lowercase hex); absent on attachments that predate the store */
+  sha256?: string | null
+  /** Size in bytes (set together with sha256) */
+  size?: number | null
   file_OPENAI_id?: string | null
   file_POE_url?: string | null
   file_GOOGLE_uri?: string | null

@@ -21,8 +21,10 @@ import {
   MdLanguage,
   MdClose,
   MdAttachFile,
+  MdRefresh,
+  MdErrorOutline,
 } from '../../ui/icons'
-import type { Attachment } from '../../api/types'
+import type { DraftAttachment } from '../../hooks/useDraftAttachments'
 import { t } from '../../i18n/he'
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -88,57 +90,134 @@ const RoundBtn: React.FC<RoundBtnProps> = ({
 // ─── SelectedFilesPreview ────────────────────────────────────────────────────
 
 interface FilesPreviewProps {
-  attachments: Attachment[]
-  uploading: boolean
-  onRemove: (idx: number) => void
+  attachments: DraftAttachment[]
+  onRemove: (id: string) => void
+  onRetry: (id: string) => void
 }
 
-const SelectedFilesPreview: React.FC<FilesPreviewProps> = ({ attachments, uploading, onRemove }) => {
-  if (attachments.length === 0 && !uploading) return null
+/** The spinner laid over an attachment while it uploads. */
+const UploadSpinner: React.FC<{ size: number }> = ({ size }) => (
+  <span
+    role="progressbar"
+    aria-label={t('attachment_uploading')}
+    style={{
+      display: 'block',
+      width: size,
+      height: size,
+      borderRadius: '50%',
+      border: '2px solid var(--primary)',
+      borderTopColor: 'transparent',
+      animation: 'r3spin 0.75s linear infinite',
+      flexShrink: 0,
+    }}
+  />
+)
+
+/** The file's picture: its image when it is one, else the paperclip. Greyed while uploading. */
+const DraftGlyph: React.FC<{ att: DraftAttachment; size: number }> = ({ att, size }) => {
+  const dim = att.status === 'uploading' ? 0.4 : 1
+  if (att.previewUrl) {
+    return (
+      <img
+        src={att.previewUrl}
+        alt=""
+        draggable={false}
+        style={{
+          width: size, height: size, borderRadius: 6, objectFit: 'cover', flexShrink: 0,
+          opacity: dim, filter: att.status === 'uploading' ? 'grayscale(1)' : undefined,
+          transition: 'opacity 0.2s, filter 0.2s',
+        }}
+      />
+    )
+  }
+  if (att.status === 'failed') {
+    return <MdErrorOutline size={Math.min(size, 24)} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
+  }
+  return (
+    <MdAttachFile
+      size={Math.min(size, 24)}
+      style={{ color: 'var(--primary)', flexShrink: 0, opacity: dim, transition: 'opacity 0.2s' }}
+    />
+  )
+}
+
+const SelectedFilesPreview: React.FC<FilesPreviewProps> = ({ attachments, onRemove, onRetry }) => {
+  if (attachments.length === 0) return null
+
+  const border = (att: DraftAttachment) =>
+    `1px solid ${att.status === 'failed' ? 'var(--color-error)' : 'var(--color-border)'}`
+  const stateTitle = (att: DraftAttachment) =>
+    att.status === 'uploading' ? t('attachment_uploading') : att.status === 'failed' ? att.error : undefined
 
   if (attachments.length === 1) {
     // Single file: list row
+    const att = attachments[0]
     return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 20px',
-        }}
-      >
-        {attachments.map((att, i) => (
-          <div
-            key={i}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              background: 'var(--surface)',
-              borderRadius: 8,
-              padding: '6px 10px',
-              border: '1px solid var(--color-border)',
-              maxWidth: '100%',
-              overflow: 'hidden',
-            }}
-          >
-            <MdAttachFile size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-            <span style={{ fontSize: 13, color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 20px' }}>
+        <div
+          data-testid="draft-attachment"
+          data-upload-status={att.status}
+          aria-busy={att.status === 'uploading'}
+          title={stateTitle(att)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'var(--surface)',
+            borderRadius: 8,
+            padding: '6px 10px',
+            border: border(att),
+            maxWidth: '100%',
+            overflow: 'hidden',
+          }}
+        >
+          <span style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <DraftGlyph att={att} size={att.previewUrl ? 28 : 16} />
+            {att.status === 'uploading' && (
+              <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <UploadSpinner size={14} />
+              </span>
+            )}
+          </span>
+          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+            <span
+              style={{
+                fontSize: 13,
+                color: 'var(--color-text)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                opacity: att.status === 'uploading' ? 0.5 : 1,
+                transition: 'opacity 0.2s',
+              }}
+            >
               {att.file_name}
             </span>
+            {att.status === 'failed' && (
+              <span role="alert" style={{ fontSize: 11, color: 'var(--color-error)' }}>{att.error}</span>
+            )}
+          </span>
+          {att.status === 'failed' && att.retryable && (
             <button
               type="button"
-              onClick={() => onRemove(i)}
-              style={{ background: 'none', border: 'none', color: 'var(--on-surface-variant)', cursor: 'pointer', padding: 0, display: 'flex' }}
-              aria-label="Remove attachment"
+              onClick={() => onRetry(att.id)}
+              style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0, display: 'flex' }}
+              aria-label={t('attachment_retry')}
+              title={t('attachment_retry')}
             >
-              <MdClose size={14} />
+              <MdRefresh size={16} />
             </button>
-          </div>
-        ))}
-        {uploading && (
-          <span style={{ fontSize: 12, color: 'var(--on-surface-variant)' }}>מעלה...</span>
-        )}
+          )}
+          <button
+            type="button"
+            onClick={() => onRemove(att.id)}
+            style={{ background: 'none', border: 'none', color: 'var(--on-surface-variant)', cursor: 'pointer', padding: 0, display: 'flex' }}
+            aria-label="Remove attachment"
+            title={t('attachment_remove')}
+          >
+            <MdClose size={14} />
+          </button>
+        </div>
       </div>
     )
   }
@@ -149,20 +228,24 @@ const SelectedFilesPreview: React.FC<FilesPreviewProps> = ({ attachments, upload
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))',
-        gap: 4,
-        padding: '6px 20px',
+        gap: 8,
+        padding: '10px 20px 6px',
         maxHeight: 160,
         overflowY: 'auto',
       }}
     >
-      {attachments.map((att, i) => (
+      {attachments.map((att) => (
         <div
-          key={i}
+          key={att.id}
+          data-testid="draft-attachment"
+          data-upload-status={att.status}
+          aria-busy={att.status === 'uploading'}
+          title={stateTitle(att)}
           style={{
             position: 'relative',
             background: 'var(--surface)',
             borderRadius: 8,
-            border: '1px solid var(--color-border)',
+            border: border(att),
             padding: 6,
             display: 'flex',
             flexDirection: 'column',
@@ -171,13 +254,45 @@ const SelectedFilesPreview: React.FC<FilesPreviewProps> = ({ attachments, upload
             minHeight: 64,
           }}
         >
-          <MdAttachFile size={24} style={{ color: 'var(--primary)' }} />
-          <span style={{ fontSize: 10, color: 'var(--on-surface-variant)', textAlign: 'center', wordBreak: 'break-all', lineHeight: 1.2 }}>
-            {att.file_name.length > 12 ? att.file_name.slice(0, 10) + '…' : att.file_name}
+          <span style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 32 }}>
+            <DraftGlyph att={att} size={att.previewUrl ? 40 : 24} />
+            {att.status === 'uploading' && (
+              <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <UploadSpinner size={20} />
+              </span>
+            )}
           </span>
+          <span
+            style={{
+              fontSize: 10,
+              color: att.status === 'failed' ? 'var(--color-error)' : 'var(--on-surface-variant)',
+              textAlign: 'center',
+              wordBreak: 'break-all',
+              lineHeight: 1.2,
+              opacity: att.status === 'uploading' ? 0.5 : 1,
+            }}
+          >
+            {att.status === 'failed'
+              ? <span role="alert">{att.error}</span>
+              : att.file_name.length > 12 ? att.file_name.slice(0, 10) + '…' : att.file_name}
+          </span>
+          {att.status === 'failed' && att.retryable && (
+            <button
+              type="button"
+              onClick={() => onRetry(att.id)}
+              style={{
+                background: 'var(--primary-15)', border: 'none', borderRadius: 10, color: 'var(--primary)',
+                cursor: 'pointer', padding: '2px 8px', fontSize: 10, display: 'flex', alignItems: 'center', gap: 2,
+              }}
+              aria-label={t('attachment_retry')}
+            >
+              <MdRefresh size={11} />
+              {t('attachment_retry')}
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => onRemove(i)}
+            onClick={() => onRemove(att.id)}
             style={{
               position: 'absolute',
               top: -4, insetInlineEnd: -4,
@@ -193,14 +308,12 @@ const SelectedFilesPreview: React.FC<FilesPreviewProps> = ({ attachments, upload
               padding: 0,
             }}
             aria-label="Remove attachment"
+            title={t('attachment_remove')}
           >
             <MdClose size={11} />
           </button>
         </div>
       ))}
-      {uploading && (
-        <div style={{ fontSize: 11, color: 'var(--on-surface-variant)', alignSelf: 'center' }}>מעלה...</div>
-      )}
     </div>
   )
 }
@@ -210,9 +323,10 @@ const SelectedFilesPreview: React.FC<FilesPreviewProps> = ({ attachments, upload
 interface ChatInputAreaProps {
   inputText: string
   onInputChange: (v: string) => void
-  attachments: Attachment[]
-  uploading: boolean
-  onRemoveAttachment: (idx: number) => void
+  /** The un-sent attachments, each with its upload state */
+  attachments: DraftAttachment[]
+  onRemoveAttachment: (id: string) => void
+  onRetryAttachment: (id: string) => void
   onAttachFile: () => void
   streaming: boolean
   editingMsg: boolean
@@ -232,8 +346,8 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
   inputText,
   onInputChange,
   attachments,
-  uploading,
   onRemoveAttachment,
+  onRetryAttachment,
   onAttachFile,
   streaming,
   editingMsg,
@@ -255,7 +369,15 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
   const estimatedLines = newlineCount + 1 + wrappedLines
   const isExpanded = estimatedLines >= 3
 
-  const canSend = inputText.trim().length > 0 || attachments.length > 0
+  // A message cannot go out before its files are in the store: sending waits for the uploads,
+  // and a failed upload has to be retried or removed first
+  const uploading = attachments.some((a) => a.status === 'uploading')
+  const uploadFailed = attachments.some((a) => a.status === 'failed')
+  const uploadsBlock = uploading || uploadFailed
+  const blockedReason = uploading
+    ? t('attachment_wait_for_uploads')
+    : uploadFailed ? t('attachment_fix_failed_uploads') : undefined
+  const canSend = (inputText.trim().length > 0 || attachments.length > 0) && !uploadsBlock
 
   // Action buttons (right side of pill)
   const actionButtons = () => {
@@ -363,9 +485,17 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
       {/* Files preview (above pill) */}
       <SelectedFilesPreview
         attachments={attachments}
-        uploading={uploading}
         onRemove={onRemoveAttachment}
+        onRetry={onRetryAttachment}
       />
+      {blockedReason && (
+        <div
+          role="status"
+          style={{ padding: '0 20px', fontSize: 11, color: uploadFailed && !uploading ? 'var(--color-error)' : 'var(--on-surface-variant)' }}
+        >
+          {blockedReason}
+        </div>
+      )}
 
       {/* Outer padding */}
       <div style={{ padding: '16px 20px' }}>
@@ -384,7 +514,6 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
           <button
             type="button"
             onClick={onAttachFile}
-            disabled={uploading}
             aria-label={t('attach_file')}
             title={t('attach_file')}
             style={{
@@ -394,7 +523,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
               borderRadius: 12,
               background: attachments.length > 0 ? 'var(--primary-15)' : 'transparent',
               border: 'none',
-              cursor: uploading ? 'not-allowed' : 'pointer',
+              cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

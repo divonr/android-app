@@ -22,7 +22,8 @@ import Markdown from '../Markdown'
 import ThoughtsBubble from './ThoughtsBubble'
 import ToolCallBlock from './ToolCallBlock'
 import BranchNavigator from './BranchNavigator'
-import { MdAttachFile, MdContentCopy, MdEdit, MdRefresh, MdDelete } from '../../ui/icons'
+import AttachmentView from './AttachmentView'
+import { MdContentCopy, MdEdit, MdRefresh, MdDelete } from '../../ui/icons'
 import { getModelInitial, getModelLogoPath } from '../../utils/chatUtils'
 import { t } from '../../i18n/he'
 import type { Chat, Message, BranchInfo } from '../../api/types'
@@ -435,25 +436,11 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 display: 'flex',
                 flexWrap: 'wrap',
                 gap: 6,
+                minWidth: 0,
               }}
             >
               {msg.attachments.map((att, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    background: isUser ? 'rgba(255,255,255,0.15)' : 'var(--surface-variant)',
-                    borderRadius: 6,
-                    padding: '4px 8px',
-                    fontSize: 12,
-                    color: isUser ? 'rgba(255,255,255,0.9)' : 'var(--on-surface-variant)',
-                  }}
-                >
-                  <MdAttachFile size={13} />
-                  <span>{att.file_name}</span>
-                </div>
+                <AttachmentView key={i} att={att} onPrimary={isUser} />
               ))}
             </div>
           )}

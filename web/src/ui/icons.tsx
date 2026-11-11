@@ -66,6 +66,7 @@ export {
   MdMoreVert,
   MdAttachFile,
   MdPhoto,
+  MdErrorOutline,
   // Arrows
   MdArrowDropDown,
   MdArrowDropUp,

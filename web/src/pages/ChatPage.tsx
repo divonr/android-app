@@ -19,7 +19,6 @@ import { apiErrorMessage } from '../utils/apiErrors'
 import {
   providers as providersApi,
   branching,
-  files as filesApi,
   settings as settingsApi,
   chats as chatsApi,
   apiKeys as apiKeysApi,
@@ -34,6 +33,7 @@ import { sendStream, resendStream } from '../api/stream'
 import type { StreamCallbacks } from '../api/stream'
 import { cancelRun } from '../api/runs'
 import { useRunsStore, selectForeignRun } from '../stores/runsStore'
+import { useDraftAttachments } from '../hooks/useDraftAttachments'
 import {
   EMPTY_STREAM,
   dropSettled,
@@ -122,8 +122,10 @@ const ChatPage: React.FC = () => {
 
   // ── Input state ──────────────────────────────────────────────────────────
   const [inputText, setInputText] = useState('')
-  const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [uploading, setUploading] = useState(false)
+  // Un-sent attachments: uploaded as soon as they are attached, deleted from the store again
+  // when removed — or when the chat is left with them un-sent
+  const draft = useDraftAttachments(chatId)
+  const draftBlocked = draft.uploading || draft.hasFailed
   const [editingMsg, setEditingMsg] = useState<Message | null>(null)
 
   // ── Streaming state ──────────────────────────────────────────────────────
@@ -451,29 +453,34 @@ const ChatPage: React.FC = () => {
   }, [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, busy, beginStream])
 
   const handleSubmit = useCallback(() => {
-    if (!inputText.trim() || busy) return
+    // Files still uploading (or failed): the message waits — it must not go out without them
+    if (!inputText.trim() || busy || draftBlocked) return
 
     if (editingMsg) {
-      handleEditSubmit(editingMsg, inputText, attachments)
+      handleEditSubmit(editingMsg, inputText)
       return
     }
 
+    // From here the files belong to the message: the server commits them when it saves it
+    const atts = draft.takeForSend()
     if (multiMessageMode) {
-      bufferMessage(inputText, attachments)
+      bufferMessage(inputText, atts)
     } else {
-      doSend(inputText, attachments)
+      doSend(inputText, atts)
     }
     setInputText('')
-    setAttachments([])
-  }, [inputText, attachments, busy, editingMsg, multiMessageMode, bufferMessage, doSend]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [inputText, draft, draftBlocked, busy, editingMsg, multiMessageMode, bufferMessage, doSend]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Edit / resend ─────────────────────────────────────────────────────────
 
   const handleEditSubmit = useCallback(
-    async (originalMsg: Message, newText: string, atts: Attachment[]) => {
+    async (originalMsg: Message, newText: string) => {
       if (!chatId || !newText.trim()) return
       setEditingMsg(null)
       setError(null)
+      // An edit keeps the message's own attachments; files attached to the composer meanwhile
+      // are not part of it, so they are dropped (and deleted from the store)
+      draft.discardAll()
 
       try {
         // Like Android's edit: a new variant (branch) in the message's node holding a copy of
@@ -490,7 +497,6 @@ const ChatPage: React.FC = () => {
         })
         updateChat(result.chat)
         setInputText('')
-        setAttachments([])
 
         // The resend route accepts the new variant's id: it replies into that variant
         const newMsgId = result.newVariantId
@@ -510,7 +516,7 @@ const ChatPage: React.FC = () => {
         setError(err instanceof Error ? err.message : 'Edit failed')
       }
     },
-    [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, updateChat, beginStream],
+    [chatId, provider, model, currentChat, webSearch, enabledToolIds, thinkingBudget, temperature, updateChat, beginStream, draft.discardAll],
   )
 
   // ── Regenerate ────────────────────────────────────────────────────────────
@@ -557,19 +563,14 @@ const ChatPage: React.FC = () => {
 
   // ── File upload ───────────────────────────────────────────────────────────
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !chatId) return
-    setUploading(true)
-    try {
-      const att = await filesApi.upload(file, provider, chatId)
-      setAttachments((prev) => [...prev, att])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed')
-    } finally {
-      setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
+  // Each picked file starts uploading at once (see useDraftAttachments); a file over the size
+  // limit — or an empty one — is refused here, before any request
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files ?? [])
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (picked.length === 0 || !chatId) return
+    const rejected = draft.add(picked)
+    if (rejected.length > 0) setError(rejected.join(' · '))
   }
 
   // ── Copy ──────────────────────────────────────────────────────────────────
@@ -914,6 +915,7 @@ const ChatPage: React.FC = () => {
       <input
         ref={fileInputRef}
         type="file"
+        multiple
         style={{ display: 'none' }}
         onChange={handleFileSelect}
         aria-label="Attach file"
@@ -922,9 +924,9 @@ const ChatPage: React.FC = () => {
       <ChatInputArea
         inputText={inputText}
         onInputChange={setInputText}
-        attachments={attachments}
-        uploading={uploading}
-        onRemoveAttachment={(idx) => setAttachments((prev) => prev.filter((_, j) => j !== idx))}
+        attachments={draft.items}
+        onRemoveAttachment={draft.remove}
+        onRetryAttachment={draft.retry}
         onAttachFile={() => fileInputRef.current?.click()}
         streaming={busy}
         editingMsg={!!editingMsg}
@@ -934,10 +936,10 @@ const ChatPage: React.FC = () => {
         onSend={handleSubmit}
         onStop={handleStop}
         onConfirmEdit={() => {
-          if (editingMsg) handleEditSubmit(editingMsg, inputText, attachments)
+          if (editingMsg && !draftBlocked) handleEditSubmit(editingMsg, inputText)
         }}
         onConfirmEditAndResend={() => {
-          if (editingMsg) handleEditSubmit(editingMsg, inputText, attachments)
+          if (editingMsg && !draftBlocked) handleEditSubmit(editingMsg, inputText)
         }}
         onCancelEdit={cancelEdit}
         onKeyDown={handleKeyDown}
