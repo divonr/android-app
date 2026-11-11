@@ -36,6 +36,7 @@
     <string name="provider_openai">OpenAI</string>
     <string name="provider_poe">Poe</string>
     <string name="provider_google">Google</string>
+    <string name="provider_vertex">Google Agent Platform (Vertex)</string>
     <string name="provider_anthropic">Anthropic</string>
     <string name="provider_cohere">Cohere</string>
     <string name="provider_openrouter">OpenRouter</string>
@@ -75,6 +76,7 @@
     <string name="openai_gpt5_nano">gpt-5-nano via OpenAI</string>
     <string name="poe_gpt5_nano">gpt-5-nano via POE</string>
     <string name="google_gemini_flash_lite">gemini-2.5-flash-lite via Google</string>
+    <string name="vertex_gemini_flash_lite">gemini-3.1-flash-lite via Google Agent Platform</string>
     <string name="anthropic_claude_haiku">claude-3-haiku via Anthropic</string>
     <string name="cohere_command_r7b">command-r7b via Cohere</string>
     <string name="openrouter_llama">llama-3.1-8b via OpenRouter</string>
@@ -104,6 +106,43 @@
     <string name="rename">שנה שם</string>
     <string name="chat_title">כותרת השיחה</string>
     <string name="save">שמור</string>
+
+    <!-- Remote Sync Settings -->
+    <string name="remote_sync_title">סנכרון מרחוק (Remote Sync)</string>
+    <string name="remote_sync_status_enabled">סנכרון פעיל</string>
+    <string name="remote_sync_status_off">כבוי</string>
+    <string name="remote_sync_server_url">כתובת שרת</string>
+    <string name="remote_sync_auth_token">טוקן אימות</string>
+    <string name="remote_sync_api_keys">סנכרן גם מפתחות API</string>
+    <string name="remote_sync_api_keys_warning">מפתחות ה-API שלך יועלו לשרת שלך (מוצפנים במנוחה).</string>
+    <string name="remote_sync_now">סנכרן עכשיו</string>
+    <string name="remote_sync_now_done">נשלח!</string>
+    <string name="remote_sync_test">בדוק חיבור</string>
+    <string name="remote_sync_test_ok">תקין ✓</string>
+    <string name="remote_sync_test_fail">נכשל ✗</string>
+    <string name="remote_sync_sign_in">התחבר עם Google</string>
+    <string name="remote_sync_sign_out">התנתק</string>
+    <string name="remote_sync_signed_in_as">מחובר כ:</string>
+    <string name="remote_sync_session_expired">פג תוקף החיבור — התחבר שוב</string>
+    <string name="remote_sync_signing_in">מתחבר…</string>
+    <string name="remote_sync_status_signed_in">סנכרון פעיל</string>
+    <string name="remote_sync_status_needs_reauth">נדרשת התחברות מחדש</string>
+    <string name="remote_sync_server_url_advanced">כתובת שרת (מתקדם)</string>
+    <string name="remote_sync_sign_in_success">נרשמת בהצלחה כ: %1$s</string>
+    <string name="remote_sync_sign_in_error">שגיאת התחברות לסנכרון</string>
+    <string name="remote_sync_status_server_outdated">שרת הסנכרון צריך עדכון</string>
+    <string name="remote_sync_server_outdated_detail">שרת הסנכרון ישן מדי למיזוג בטוח בין מכשירים. הסנכרון מושהה עד שהשרת יעודכן; הנתונים המקומיים נשמרים.</string>
+    <string name="cloud_execution_title">נהל ביצוע בקשות API בענן</string>
+    <string name="cloud_execution_description">אם אפשרות זו מופעלת, שליחת הפרומפטים וקבלת התשובות תבוצע בענן, תסונכרן בין מכשירים ולא תהיה תלויה בחיבור פעיל של האפליקציה בזמן הזרמת התשובות.</string>
+    <string name="cloud_execution_requires_api_keys">אפשרות זו דורשת סנכרון של מפתחות ה-API לענן</string>
+    <string name="cloud_execution_requires_sync">אפשרות זו דורשת סנכרון פעיל עם חשבון מחובר</string>
+    <string name="cloud_execution_fallback_notice">הבקשה נשלחת מהמכשיר</string>
+    <string name="cloud_execution_stop_failed">לא ניתן היה לעצור את הבקשה בענן</string>
+    <string name="attachment_uploading">מעלה לענן…</string>
+    <string name="attachment_upload_failed_retry">ההעלאה לענן נכשלה · הקישו לניסיון חוזר</string>
+    <string name="attachment_unavailable">הקובץ אינו זמין כרגע</string>
+    <string name="attachment_downloading">מוריד את הקובץ…</string>
+    <string name="attachment_download_failed_retry">טעינת הקובץ נכשלה · הקישו לניסיון חוזר</string>
 
     <!-- Full Custom Provider Feature -->
     <!-- Note: The following UI components use hardcoded Hebrew strings and do not reference string resources:

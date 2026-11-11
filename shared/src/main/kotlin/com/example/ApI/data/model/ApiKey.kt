@@ -1,0 +1,140 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
+package com.example.ApI.data.model
+
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.Serializable
+
+/**
+ * Remote-sync configuration stored inside [AppSettings].
+ *
+ * The entire object is STRIPPED before uploading `app_settings.json` to the server so that
+ * the user's sync credentials never leave the device.  When pulling, we MERGE the local copy
+ * back in so the remote blob can never clobber sync settings.
+ *
+ * ### v2 semantics (Google Sign-In)
+ * - [authToken] is now the **server-minted opaque token** returned by `POST /auth/google`,
+ *   NOT a user-entered bearer token.  It is obtained via [DataRepository.signInToSync] and
+ *   is never displayed or manually edited.
+ * - [accountEmail] holds the Google account email for display purposes only (not used in
+ *   any API call).
+ * - [enabled] is set to `true` by [DataRepository.signInToSync] and `false` by
+ *   [DataRepository.signOutOfSync].
+ *
+ * Default values make a fresh install or a pre-v2 JSON file behave identically to the
+ * pre-sync codebase (`coerceInputValues = true` handles missing fields on deserialization).
+ */
+@Serializable
+data class RemoteSyncSettings(
+    val enabled: Boolean = false,
+    val serverBaseUrl: String = "https://sync.api-divonr.xyz",
+    /** Server-minted opaque token (NOT user-entered). Cleared on sign-out. */
+    val authToken: String = "",
+    /** Google account email — display only. Cleared on sign-out. */
+    val accountEmail: String = "",
+    val syncApiKeys: Boolean = false,
+    /**
+     * "Manage API requests in the cloud" (CLOUD_RUNS_PLAN.md): LLM requests are executed by the
+     * web backend at [cloudBaseUrl] instead of by this device. Per device, like the rest of this
+     * object. Only meaningful together with [syncApiKeys] — see [cloudExecutionEffective].
+     */
+    val cloudExecution: Boolean = false,
+    /** Base URL of the web backend (llm-web) that executes cloud runs. */
+    val cloudBaseUrl: String = DEFAULT_CLOUD_BASE_URL
+) {
+    /**
+     * Whether requests are sent to the cloud right now: the option is on, sync is on and signed
+     * in, and the API keys are synced (the cloud has no keys otherwise).
+     */
+    val cloudExecutionEffective: Boolean
+        get() = cloudExecution && enabled && syncApiKeys && authToken.isNotBlank() && cloudBaseUrl.isNotBlank()
+
+    companion object {
+        const val DEFAULT_CLOUD_BASE_URL = "https://app.api-divonr.xyz"
+    }
+}
+
+@Serializable
+data class ApiKey(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val provider: String,
+    val key: String,
+    val isActive: Boolean = true,
+    val customName: String? = null,
+    /** Google Cloud project for an Agent Platform key; unset for every other provider. */
+    val projectId: String? = null
+)
+
+/** Provider key of Google Gemini Enterprise Agent Platform (formerly Vertex AI). */
+const val VERTEX_PROVIDER = "vertex"
+
+/** Placeholder in the Agent Platform request URL, filled from the key's [ApiKey.projectId]. */
+const val PROJECT_ID_PLACEHOLDER = "{project_id}"
+
+/**
+ * Fills the project ID into an Agent Platform provider's URL, from the same key that is used for
+ * the request (the last active one, as `associate` picks). Other providers pass through.
+ */
+fun Provider.withProjectIdFrom(apiKeys: List<ApiKey>): Provider {
+    if (provider != VERTEX_PROVIDER) return this
+    val projectId = apiKeys.lastOrNull { it.isActive && it.provider == VERTEX_PROVIDER }
+        ?.projectId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return this
+    return copy(request = request.copy(base_url = request.base_url.replace(PROJECT_ID_PLACEHOLDER, projectId)))
+}
+
+@Serializable
+data class AppSettings(
+    val current_user: String,
+    val selected_provider: String,
+    val selected_model: String,
+    val temperature: Double = 1.0,
+    val titleGenerationSettings: TitleGenerationSettings = TitleGenerationSettings(),
+    val multiMessageMode: Boolean = false,
+    val childLockSettings: ChildLockSettings = ChildLockSettings(),
+    val enabledTools: List<String> = emptyList(), // List of enabled tool IDs from integrations
+    val excludedToolIds: List<String> = emptyList(), // Tools excluded via chat screen shortcut (overrides enabledTools)
+    val githubConnections: Map<String, GitHubConnectionInfo> = emptyMap(), // GitHub connections per user (username -> connection info)
+    val googleWorkspaceConnections: Map<String, GoogleWorkspaceConnectionInfo> = emptyMap(), // Google Workspace connections per user
+    val skipWelcomeScreen: Boolean = false, // Whether to skip the welcome/onboarding screen
+    val starredModels: List<StarredModel> = emptyList(), // User's favorite models for quick access
+    val remoteSync: RemoteSyncSettings = RemoteSyncSettings() // Remote sync configuration (stripped before upload)
+)
+
+/**
+ * GitHub connection information stored in app settings
+ */
+@Serializable
+data class GitHubConnectionInfo(
+    val username: String, // App username (not GitHub username)
+    val githubUsername: String, // GitHub username
+    val connectedAt: Long,
+    // Always written: a default evaluated at decode time would differ on every read (and per device)
+    @EncodeDefault val lastUsed: Long = System.currentTimeMillis()
+)
+
+@Serializable
+data class TitleGenerationSettings(
+    val enabled: Boolean = true,
+    val provider: String = "auto", // "auto", "openai", "poe", "google"
+    val updateOnExtension: Boolean = true // Update title after 3rd model response
+)
+
+@Serializable
+data class ChildLockSettings(
+    val enabled: Boolean = false,
+    val encryptedPassword: String = "",
+    val startTime: String = "23:00", // Default start time
+    val endTime: String = "07:00" // Default end time
+)
+
+/**
+ * Represents a starred/favorite model for quick access.
+ * Stores both provider and model name since the same model name
+ * can exist across multiple providers.
+ */
+@Serializable
+data class StarredModel(
+    val provider: String,
+    val modelName: String
+)

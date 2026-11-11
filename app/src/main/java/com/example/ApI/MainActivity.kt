@@ -14,7 +14,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ApI.data.AndroidPlatformStorage
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.ui.ChatViewModel
@@ -31,6 +35,8 @@ import com.example.ApI.ui.screen.SkillsScreen
 import com.example.ApI.ui.screen.SkillEditorScreen
 import com.example.ApI.ui.theme.ApITheme
 import com.example.ApI.ui.theme.Background
+import com.example.ApI.util.AppLogger
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     // State to trigger recomposition when a new intent arrives
@@ -38,6 +44,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Enable crash-persistent logging as early as possible (no Application class exists)
+        AppLogger.initPersistentLog(File(filesDir, "logs"))
+        installUncaughtExceptionHandler()
+
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(
                 android.graphics.Color.parseColor("#0D0E14")
@@ -69,17 +80,48 @@ class MainActivity : ComponentActivity() {
         // Increment the state to trigger recomposition and LaunchedEffect
         intentState.value++
     }
+
+    /**
+     * Persist full stack traces of uncaught exceptions to the log file,
+     * synchronously on the crashing thread, then delegate to the previous handler
+     * to preserve normal crash behavior.
+     */
+    private fun installUncaughtExceptionHandler() {
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                AppLogger.logFatal(thread, throwable)
+            } catch (_: Throwable) {
+                // Never block crash handling
+            }
+            previousHandler?.uncaughtException(thread, throwable)
+        }
+    }
 }
 
 @Composable
 fun LLMChatApp(sharedIntent: Intent? = null, activity: ComponentActivity? = null, intentTrigger: Int = 0) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val repository = remember { DataRepository(context) }
+    val repository = remember { DataRepository(AndroidPlatformStorage(context)) }
     val viewModel: ChatViewModel = viewModel { ChatViewModel(repository, context, sharedIntent) }
 
     val currentScreen by viewModel.currentScreen.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
     val appSettings by viewModel.appSettings.collectAsState()
+
+    // Observe lifecycle to call pullNow() on every resume (remote sync)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.onAppResume()
+            } else if (event == Lifecycle.Event.ON_PAUSE) {
+                viewModel.onAppPause()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Initialize GitHub tools if already connected on app start
     LaunchedEffect(Unit) {

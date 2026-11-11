@@ -31,16 +31,17 @@ class ChildLockManager(
                 parentalControlManager.setParentalPassword(password, deviceId)
 
                 // Update settings with child lock enabled
-                val updatedSettings = deps.appSettings.value.copy(
-                    childLockSettings = ChildLockSettings(
-                        enabled = true,
-                        encryptedPassword = parentalControlManager.getEncryptedPassword(),
-                        startTime = startTime,
-                        endTime = endTime
+                val encryptedPassword = parentalControlManager.getEncryptedPassword()
+                val updatedSettings = deps.repository.updateAppSettings {
+                    it.copy(
+                        childLockSettings = ChildLockSettings(
+                            enabled = true,
+                            encryptedPassword = encryptedPassword,
+                            startTime = startTime,
+                            endTime = endTime
+                        )
                     )
-                )
-
-                deps.repository.saveAppSettings(updatedSettings)
+                }
                 updateAppSettings(updatedSettings)
             } catch (e: Exception) {
                 deps.updateUiState(
@@ -65,16 +66,16 @@ class ChildLockManager(
 
             if (isValidPassword) {
                 // Disable child lock
-                val updatedSettings = deps.appSettings.value.copy(
-                    childLockSettings = ChildLockSettings(
-                        enabled = false,
-                        encryptedPassword = "",
-                        startTime = "23:00",
-                        endTime = "07:00"
+                val updatedSettings = deps.repository.updateAppSettings {
+                    it.copy(
+                        childLockSettings = ChildLockSettings(
+                            enabled = false,
+                            encryptedPassword = "",
+                            startTime = "23:00",
+                            endTime = "07:00"
+                        )
                     )
-                )
-
-                deps.repository.saveAppSettings(updatedSettings)
+                }
                 updateAppSettings(updatedSettings)
                 true
             } else {
@@ -104,16 +105,16 @@ class ChildLockManager(
      * @param endTime Lock end time
      */
     fun updateChildLockSettings(enabled: Boolean, password: String, startTime: String, endTime: String) {
-        val updatedSettings = deps.appSettings.value.copy(
-            childLockSettings = ChildLockSettings(
-                enabled = enabled,
-                encryptedPassword = password,
-                startTime = startTime,
-                endTime = endTime
+        val updatedSettings = deps.repository.updateAppSettings {
+            it.copy(
+                childLockSettings = ChildLockSettings(
+                    enabled = enabled,
+                    encryptedPassword = password,
+                    startTime = startTime,
+                    endTime = endTime
+                )
             )
-        )
-
-        deps.repository.saveAppSettings(updatedSettings)
+        }
         updateAppSettings(updatedSettings)
     }
 

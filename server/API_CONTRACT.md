@@ -1,0 +1,841 @@
+# Web UI REST + SSE API Contract
+
+This document is the authoritative specification for the `:server` Ktor module.
+Later phases implement endpoints defined here.
+Data model class names reference the `:shared` module (`com.example.ApI.data.model.*`).
+
+---
+
+## Base URL
+
+All API endpoints are prefixed with `/api`.
+Auth endpoints (`/auth/google/*`, `/logout`, `/oauth/*`) live at the root.
+`/health` lives at the root (unauthenticated).
+
+```
+GET  /health                        → 200 {"status":"ok"}
+GET  /auth/google/start             → redirect to Google sign-in
+GET  /auth/google/callback          → Google sign-in callback (sets session cookie)
+POST /logout                        → clear session cookie
+GET  /oauth/github/callback         → GitHub Workspace OAuth callback
+GET  /oauth/google/callback         → Google Workspace OAuth callback
+GET  /api/me                        → current user identity (authenticated)
+GET  /api/**                        → all require valid session
+```
+
+**Password login (`POST /login`) has been removed.** The only login path is Google Sign-In.
+
+---
+
+## Authentication (Step 5b — Google-only login)
+
+### Session mechanism
+
+- Login is via Google Sign-In only; no password.
+- Ktor `Sessions` plugin with a signed HTTP-only cookie (`llm_web_session`).
+- Cookie signing secret from `WEB_UI_SESSION_SECRET` environment variable.
+- All `/api/**` routes protected by `authenticate("session") { }`.
+- Each session is scoped to the authenticated user (`username`, `email`); all
+  data reads and writes go to that user's per-user directory
+  (`{LLM_WEB_DATA_DIR}/users/{username}/`).
+
+### GET /auth/google/start
+
+Generates a CSRF state token, stores it in a pre-auth session cookie, and
+redirects the browser to Google's OAuth 2.0 authorization page.
+
+**Response 302** → `https://accounts.google.com/o/oauth2/v2/auth?...`
+
+**Response 503** — when `GOOGLE_OAUTH_CLIENT_ID` is not configured:
+```json
+{ "error": "Google login not configured — set GOOGLE_OAUTH_CLIENT_ID" }
+```
+
+### GET /auth/google/callback?code={code}&state={state}
+
+Completes the Google Sign-In flow: validates CSRF state, exchanges the
+authorization code for an ID token, verifies the token, checks the optional
+email allowlist, then exchanges with the sync server to obtain a canonical
+username and per-user sync token.  On success, sets the authenticated session
+cookie and redirects to `/`.
+
+**Response 302** → `/` (success, session cookie set)
+
+**Error redirects** (302):
+
+| Location | Cause |
+|---|---|
+| `/login?error=invalid_state` | CSRF state missing or mismatch |
+| `/login?error=token_exchange_failed` | Google code→token exchange failed |
+| `/login?error=token_invalid` | ID token failed verification |
+| `/login?error=not_allowed` | Email not in `ALLOWED_GOOGLE_EMAILS` allowlist |
+| `/login?error=sync_unavailable` | Sync server did not return a username/token |
+
+**Response 400** — missing `code` or `state` query parameters.
+
+### POST /logout
+
+Clears the session cookie.
+
+**Response 200**:
+```json
+{ "ok": true }
+```
+
+### GET /api/me
+
+Returns the identity of the currently authenticated user.
+
+**Response 200**:
+```json
+{ "username": "alice_example_com", "email": "alice@example.com" }
+```
+
+**Response 401** — no valid session.
+
+---
+
+## Health
+
+### GET /health
+
+No auth required.
+
+**Response 200**:
+```json
+{ "status": "ok" }
+```
+
+---
+
+## Providers & Models (P2)
+
+### GET /api/providers
+
+Returns the full list of providers as built by `DataRepository.loadProviders()`.
+
+**Response 200** — array of `Provider`:
+```json
+[
+  {
+    "provider": "openai",
+    "models": [ { "name": "gpt-4o", ... }, ... ],
+    "request": { "request_type": "openai", "base_url": "...", "headers": {}, ... },
+    "response_important_fields": { ... }
+  }
+]
+```
+
+### GET /api/providers/models
+
+Returns a flat list of all available model names grouped by provider (convenience endpoint for the UI model picker).
+
+**Response 200**:
+```json
+[
+  { "provider": "openai", "modelName": "gpt-4o" },
+  { "provider": "anthropic", "modelName": "claude-opus-4-5" }
+]
+```
+
+### POST /api/providers/refresh
+
+Triggers `DataRepository.forceRefreshModels()`.
+
+**Response 200**:
+```json
+{ "ok": true, "changed": true }
+```
+
+---
+
+## Chat History (P2)
+
+Username is always the `current_user` from `AppSettings` (single-user server — the web server does not support multi-user).
+The server resolves the username internally from `loadAppSettings().current_user`.
+
+### GET /api/chats
+
+Returns `UserChatHistory` for the current user.
+
+**Response 200** — `UserChatHistory`:
+```json
+{
+  "user_name": "alice",
+  "chat_history": [ { "chat_id": "...", "preview_name": "...", "messages": [...], ... } ],
+  "groups": [ { "group_id": "...", "group_name": "...", ... } ]
+}
+```
+
+### GET /api/chats/{chatId}
+
+Returns a single `Chat` by ID.
+
+**Response 200** — `Chat`
+
+**Response 404**:
+```json
+{ "error": "Chat not found" }
+```
+
+### POST /api/chats
+
+Creates a new chat.
+
+**Request**:
+```json
+{ "previewName": "string", "systemPrompt": "string", "groupId": "string|null" }
+```
+
+**Response 201** — `Chat`
+
+### PATCH /api/chats/{chatId}
+
+Updates chat metadata (rename, system prompt).
+
+**Request** (all fields optional):
+```json
+{ "previewName": "string", "systemPrompt": "string" }
+```
+
+**Response 200** — updated `Chat`
+
+### DELETE /api/chats/{chatId}
+
+Deletes the chat from history.
+
+**Response 204** — no content
+
+### GET /api/chats/{chatId}/export
+
+Returns the chat as exported JSON (calls `DataRepository.getChatJson`).
+
+**Response 200** — raw JSON string (Content-Type: application/json)
+
+### POST /api/chats/import
+
+Imports a single chat from JSON.
+
+**Request** (JSON body):
+```json
+{ "content": "<chat json string>" }
+```
+
+**Response 201**:
+```json
+{ "chatId": "new-chat-id" }
+```
+
+---
+
+## Messages (P4)
+
+### POST /api/chats/{chatId}/messages
+
+Adds a message directly to chat history (used for user messages before streaming begins).
+
+**Request** — `Message`:
+```json
+{
+  "role": "user",
+  "text": "Hello",
+  "attachments": []
+}
+```
+
+**Response 201** — `Message` with generated `id` and `datetime`
+
+### DELETE /api/chats/{chatId}/messages/{messageId}
+
+Deletes a message and all subsequent messages (calls `deleteMessagesFromPoint`).
+
+**Response 200** — updated `Chat`
+
+### POST /api/chats/{chatId}/messages/{messageId}/resend
+
+Re-sends from a given message (deletes from that point, then triggers streaming send).
+
+**Request**:
+```json
+{
+  "provider": "openai",
+  "modelName": "gpt-4o",
+  "systemPrompt": "string",
+  "webSearchEnabled": false,
+  "enabledToolIds": [],
+  "thinkingBudget": "none",
+  "temperature": null
+}
+```
+
+**Response** — SSE stream (same as `POST /api/chat/send`)
+
+---
+
+## Streaming Send (P3)
+
+### POST /api/chat/send
+
+Sends a user message and streams the response via Server-Sent Events.
+The client should use `EventSource` or a fetch-based SSE reader.
+
+**Request** (JSON body):
+```json
+{
+  "chatId": "string",
+  "provider": "openai",
+  "modelName": "gpt-4o",
+  "messages": [ { "role": "user", "text": "Hello" } ],
+  "systemPrompt": "",
+  "webSearchEnabled": false,
+  "enabledToolIds": [],
+  "thinkingBudget": "none",
+  "temperature": null,
+  "projectAttachments": []
+}
+```
+
+**`thinkingBudget`** values: `"none"` | `"low"` | `"medium"` | `"high"` | `"max"` (maps to `ThinkingBudgetValue`).
+
+**Response** — `Content-Type: text/event-stream`
+
+Each SSE event has the form:
+```
+event: <event_type>
+data: <JSON payload>
+```
+
+#### SSE event types (mapped from `StreamingCallback`):
+
+| SSE `event` field    | `StreamingCallback` method     | `data` JSON shape                                                                 |
+|----------------------|-------------------------------|-----------------------------------------------------------------------------------|
+| `partial`            | `onPartialResponse(text)`     | `{ "text": "string" }`                                                            |
+| `thinking_started`   | `onThinkingStarted()`         | `{}`                                                                              |
+| `thinking_partial`   | `onThinkingPartial(text)`     | `{ "text": "string" }`                                                            |
+| `thinking_complete`  | `onThinkingComplete(...)`     | `{ "thoughts": "string|null", "durationSeconds": 1.5, "status": "PRESENT" }`     |
+| `tool_call`          | `onToolCall(toolCall, ...)`   | `{ "toolId": "string", "toolName": "string", "parameters": {} }`                 |
+| `tool_result`        | after `ToolRegistry.execute`  | `{ "toolId": "string", "success": true, "output": "string" }`                    |
+| `complete`           | `onComplete(fullText)`        | `{ "text": "string", "messageId": "string" }`                                    |
+| `error`              | `onError(error)`              | `{ "error": "string" }`                                                           |
+
+After the `complete` or `error` event, the server closes the SSE stream.
+
+Tool execution sequence: on `onToolCall`, the server calls `ToolRegistry.getInstance().executeTool(...)`,
+saves the tool messages via `onSaveToolMessages`, then emits `tool_result` and continues streaming.
+This mirrors `desktop/ui/managers/streaming/` + `integration/ToolManager`.
+
+---
+
+## Groups (P2 + P4)
+
+### GET /api/groups
+
+Returns the groups array from `UserChatHistory`.
+
+**Response 200** — array of `ChatGroup`
+
+### POST /api/groups
+
+Creates a new group.
+
+**Request**:
+```json
+{ "groupName": "string" }
+```
+
+**Response 201** — `ChatGroup`
+
+### PATCH /api/groups/{groupId}
+
+Updates group properties.
+
+**Request** (all optional):
+```json
+{
+  "groupName": "string",
+  "systemPrompt": "string",
+  "isProject": true
+}
+```
+
+**Response 200** — updated `ChatGroup`
+
+### DELETE /api/groups/{groupId}
+
+Deletes the group (calls `DataRepository.deleteGroup`). Chats in the group are NOT deleted — they become ungrouped.
+
+**Response 204**
+
+### POST /api/groups/{groupId}/chats/{chatId}
+
+Adds a chat to a group.
+
+**Response 200** — `{ "ok": true }`
+
+### DELETE /api/groups/{groupId}/chats/{chatId}
+
+Removes a chat from a group.
+
+**Response 200** — `{ "ok": true }`
+
+### POST /api/groups/{groupId}/attachments
+
+Adds an attachment to a group (project context).
+
+**Request** — `Attachment`:
+```json
+{
+  "file_name": "doc.pdf",
+  "mime_type": "application/pdf",
+  "local_file_path": "/path/on/server"
+}
+```
+
+**Response 201** — updated `ChatGroup`
+
+### DELETE /api/groups/{groupId}/attachments/{attachmentIndex}
+
+Removes an attachment from a group.
+
+**Response 200** — updated `ChatGroup`
+
+---
+
+## API Keys (P2 + P4)
+
+### GET /api/keys
+
+Returns all API keys for the current user (keys are stored server-side only).
+
+**Response 200** — array of `ApiKey`:
+```json
+[
+  { "id": "uuid", "provider": "openai", "key": "sk-...", "isActive": true, "customName": null }
+]
+```
+
+### POST /api/keys
+
+Adds an API key.
+
+**Request** — `ApiKey` body (id may be omitted; server generates UUID):
+```json
+{ "provider": "openai", "key": "sk-...", "isActive": true, "customName": null, "projectId": null }
+```
+
+**Response 201** — `ApiKey`
+
+### PATCH /api/keys/{keyId}
+
+Updates a key (typically toggles `isActive` or updates the key value).
+
+**Request** (all optional):
+```json
+{ "key": "sk-new", "isActive": false, "customName": "My key", "projectId": "my-project" }
+```
+
+**Response 200** — updated `ApiKey`
+
+### DELETE /api/keys/{keyId}
+
+Deletes an API key.
+
+**Response 204**
+
+### POST /api/keys/{keyId}/toggle
+
+Toggles the `isActive` flag.
+
+**Response 200** — updated `ApiKey`
+
+### POST /api/keys/reorder
+
+Reorders keys (drag-and-drop in UI).
+
+**Request**:
+```json
+{ "fromIndex": 0, "toIndex": 2 }
+```
+
+**Response 200** — updated array of `ApiKey`
+
+---
+
+## Settings (P2 + P4)
+
+### GET /api/settings
+
+Returns `AppSettings` for the current user.
+
+**Response 200** — `AppSettings`
+
+### PATCH /api/settings
+
+Updates settings fields (partial update).
+
+**Request** (all fields optional, same shape as `AppSettings`):
+```json
+{
+  "selected_provider": "openai",
+  "selected_model": "gpt-4o",
+  "temperature": 0.8,
+  "multiMessageMode": false,
+  "titleGenerationSettings": { "enabled": true, "provider": "auto", "updateOnExtension": true },
+  "skipWelcomeScreen": true,
+  "remoteSync": { "syncApiKeys": true },
+  "childLockSettings": { "enabled": true, "encryptedPassword": "<sha256>", "startTime": "22:00", "endTime": "06:30" }
+}
+```
+
+`remoteSync` is merged field-by-field (`enabled`, `serverBaseUrl`, `authToken`, `accountEmail`, `syncApiKeys`) — omitted fields keep their current values, so toggling `syncApiKeys` never clobbers the login-seeded credentials. `childLockSettings` is merged the same way (`enabled`, `encryptedPassword`, `startTime`, `endTime`).
+
+**Response 200** — updated `AppSettings`
+
+---
+
+## Custom Providers — OpenAI-compatible (P4)
+
+### GET /api/custom-providers
+
+Returns all `CustomProviderConfig` entries for the current user.
+
+**Response 200** — array of `CustomProviderConfig`
+
+### POST /api/custom-providers
+
+Creates a new custom provider.
+
+**Request** — `CustomProviderConfig` (id may be omitted)
+
+**Response 201** — `CustomProviderConfig`
+
+### PUT /api/custom-providers/{providerId}
+
+Replaces a custom provider.
+
+**Request** — full `CustomProviderConfig`
+
+**Response 200** — updated `CustomProviderConfig`
+
+### DELETE /api/custom-providers/{providerId}
+
+Deletes a custom provider.
+
+**Response 204**
+
+---
+
+## Full Custom Providers (P4)
+
+Same shape as above, replacing `CustomProviderConfig` with `FullCustomProviderConfig`.
+
+- `GET    /api/full-custom-providers`
+- `POST   /api/full-custom-providers`
+- `PUT    /api/full-custom-providers/{providerId}`
+- `DELETE /api/full-custom-providers/{providerId}`
+
+---
+
+## Skills (P4)
+
+### GET /api/skills
+
+Returns all installed skills.
+
+**Response 200** — array of `InstalledSkill`
+
+### GET /api/skills/{skillName}
+
+Returns the raw markdown content of the skill's SKILL.md file.
+
+**Response 200** — plain text (Content-Type: text/plain)
+
+### POST /api/skills
+
+Creates or imports a skill.
+
+**Request**:
+```json
+{ "name": "string", "description": "string", "body": "optional markdown body" }
+```
+
+or for import-from-text:
+```json
+{ "importText": "full skill markdown with frontmatter" }
+```
+
+**Response 201** — `InstalledSkill`
+
+### PATCH /api/skills/{skillName}
+
+Updates the skill's enabled state.
+
+**Request**:
+```json
+{ "enabled": true }
+```
+
+**Response 200** — updated `InstalledSkill`
+
+### DELETE /api/skills/{skillName}
+
+Deletes the skill.
+
+**Response 204**
+
+### GET /api/skills/{skillName}/export
+
+Downloads the skill directory as a ZIP archive (mirrors Android `SkillsStorageManager.exportToZip`).
+
+**Response 200** — `application/zip` body; `Content-Disposition: attachment; filename="<skillName>.zip"`
+
+The ZIP entries follow the pattern `<directoryName>/<relativeFilePath>` (e.g. `my-skill/SKILL.md`).
+
+**Response 404** — skill not found.
+
+### POST /api/skills/import-zip
+
+Imports a skill from a multipart ZIP upload (mirrors Android ZIP import path). The ZIP must contain a SKILL.md file (at the root or inside one subdirectory); otherwise 400 is returned.
+
+**Request** — `multipart/form-data` with a single `file` part containing the ZIP bytes. Max size: 50 MB.
+
+**Response 201** — `InstalledSkill` JSON of the newly installed skill.
+
+**Response 400** — `{ "error": "Invalid skill ZIP: SKILL.md not found or ZIP is malformed" }` when the ZIP contains no SKILL.md.
+
+**Response 413** — when the upload exceeds 50 MB.
+
+---
+
+## Branching (P4)
+
+### POST /api/chats/{chatId}/branch
+
+Creates a new branch at a node.
+
+**Request**:
+```json
+{ "nodeId": "string", "newUserMessage": { "role": "user", "text": "Alternative message" } }
+```
+
+**Response 201**:
+```json
+{ "chat": { ...Chat... }, "newVariantId": "string" }
+```
+
+### POST /api/chats/{chatId}/nodes/{nodeId}/switch
+
+Switches to a different variant at a node.
+
+**Request**:
+```json
+{ "variantIndex": 1 }
+```
+
+**Response 200** — updated `Chat`
+
+### GET /api/chats/{chatId}/nodes/{nodeId}/branch-info
+
+Returns `BranchInfo` for a node.
+
+**Response 200**:
+```json
+{
+  "nodeId": "string",
+  "currentVariantIndex": 0,
+  "totalVariants": 2,
+  "currentVariantId": "string"
+}
+```
+
+---
+
+## Files (P5)
+
+### POST /api/files/upload
+
+Uploads a file as an attachment. Saves locally via `DataRepository.saveFileLocally`.
+
+**Request** — multipart/form-data:
+- `file`: binary file content
+- `provider`: provider key (e.g. "openai") — if non-empty, also uploads to provider's file API
+- `chatId`: optional, links the attachment to a chat
+
+**Response 201** — `Attachment`:
+```json
+{
+  "file_name": "document.pdf",
+  "mime_type": "application/pdf",
+  "local_file_path": "/home/user/.llm-api-web/files/llm_data/...",
+  "file_OPENAI_id": "file-abc123",
+  "file_GOOGLE_uri": null,
+  "file_POE_url": null
+}
+```
+
+### DELETE /api/files
+
+Deletes a locally saved file.
+
+**Request**:
+```json
+{ "filePath": "/absolute/path/on/server" }
+```
+
+**Response 204**
+
+---
+
+## Search (P2)
+
+### GET /api/search?q={query}
+
+Searches chats and messages via `DataRepository.searchChats`.
+
+**Response 200** — array of search results:
+```json
+[
+  {
+    "chatId": "string",
+    "chatTitle": "string",
+    "matchType": "TITLE|CONTENT|FILE_NAME",
+    "messageIndex": 3,
+    "snippet": "...matching text excerpt..."
+  }
+]
+```
+
+---
+
+## Title Generation (P3)
+
+### POST /api/chats/{chatId}/generate-title
+
+Triggers `DataRepository.generateConversationTitle`. Used after streaming completes.
+
+**Request** (optional):
+```json
+{ "provider": "auto" }
+```
+
+**Response 200**:
+```json
+{ "title": "Generated title string" }
+```
+
+---
+
+## Integrations — GitHub (P5)
+
+### GET /api/integrations/github
+
+Returns the current user's GitHub connection status.
+
+**Response 200** — `GitHubConnection` or `null`:
+```json
+{
+  "auth": { "accessToken": "gho_...", "scope": "repo,read:user", ... },
+  "user": { "login": "alice", "id": 12345, ... },
+  "connectedAt": 1700000000000
+}
+```
+
+### GET /oauth/github/start
+
+Redirects the browser to GitHub's OAuth authorization page.
+Server validates the session cookie (no valid session → redirect to `/login`),
+generates a random `state` token, stores it in the session, then issues a 302.
+
+**Response 302** → `https://github.com/login/oauth/authorize?...`
+**Response 302** → `/login` (if not authenticated)
+
+### GET /oauth/github/callback?code={code}&state={state}
+
+Exchanges the code for an access token, fetches the user profile,
+stores via `DataRepository.saveGitHubConnection`.
+
+**Response 302** → `/` (app root, on success)
+**Response 400** on state mismatch or token exchange failure.
+
+### DELETE /api/integrations/github
+
+Disconnects GitHub (calls `DataRepository.removeGitHubConnection`).
+
+**Response 204**
+
+---
+
+## Integrations — Google Workspace (P5)
+
+Same pattern as GitHub, using `GoogleWorkspaceConnection`.
+
+- `GET    /api/integrations/google`         — returns connection or null
+- `GET    /oauth/google/start`              — 302 redirect to Google OAuth (session required; 302 to /login if not authenticated; 503 if GOOGLE_OAUTH_CLIENT_ID unset)
+- `GET    /oauth/google/callback`           — exchange code, store connection
+- `DELETE /api/integrations/google`         — disconnect
+- `PATCH  /api/integrations/google/services` — update `EnabledGoogleServices`
+
+Note: `POST /api/integrations/{provider}/start` (which returned the authorize URL as JSON)
+has been removed. The web client uses browser navigation to `GET /oauth/{provider}/start`.
+
+---
+
+## Remote Sync
+
+### GET /api/sync/status
+
+Returns the current remote-sync configuration and performs a live connectivity probe when sync is enabled.
+
+**Response 200**:
+```json
+{
+  "enabled": true,
+  "serverBaseUrl": "https://sync.example.com",
+  "lastChangeTick": 12345,
+  "reachable": true
+}
+```
+
+- `reachable` is `null` when sync is disabled (no network probe attempted).
+- `reachable` is `true` or `false` when sync is enabled (result of `SyncEngine.testConnection()`).
+- The `authToken` field is **never** included in the response.
+
+### POST /api/sync/pull
+
+Triggers an immediate pull from the remote sync server.
+Safe no-op when sync is disabled.
+
+**Response 200**: `{ "ok": true }`
+
+---
+
+## Error Responses
+
+All error responses use a consistent shape:
+
+```json
+{ "error": "Human-readable message" }
+```
+
+Standard HTTP status codes:
+
+| Code | Meaning                  |
+|------|--------------------------|
+| 200  | OK                       |
+| 201  | Created                  |
+| 204  | No Content               |
+| 400  | Bad Request              |
+| 401  | Unauthorized (no session)|
+| 403  | Forbidden                |
+| 404  | Not Found                |
+| 409  | Conflict                 |
+| 500  | Internal Server Error    |
+
+---
+
+## Notes for implementers
+
+- The server is **multi-user**: each authenticated session carries a `username`; all repository calls resolve the per-user `DataRepository` via `UserRegistry.context(username)`. Data is stored under `{LLM_WEB_DATA_DIR}/users/{username}/`.
+- `UserRegistry` lazily creates a `DataRepository` (and optionally a `SyncEngine`) per user on first login. Engines are stopped on application shutdown.
+- SSE streaming (`POST /api/chat/send`) uses Ktor's `respondTextWriter` (Ktor 2.x) or `sse { }` (Ktor 3.x). P3 will confirm the approach after evaluating library availability. The event format above is the contract regardless of Ktor version.
+- The `ktor-server-sse` artifact is only available in Ktor 3.x. If staying on 2.3.x for P3, implement SSE manually via `respondTextWriter` with appropriate `Content-Type: text/event-stream` header and chunked encoding.

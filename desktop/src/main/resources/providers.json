@@ -1,0 +1,687 @@
+[
+    {
+        "provider": "openai",
+        "models": ["gpt-5", "gpt-4.1", "gpt-4o", "o1", "o1-pro","o3", "o4-mini", "o4-mini-deep-research"],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://api.openai.com/v1/responses",
+            "headers": {
+                "Authorization": "Bearer {OPENAI_API_KEY_HERE}",
+                "Content-Type": "application/json"
+            },
+            "body": {
+                "model": "{model_name}",
+                "input": [
+                    {
+                        "role": "system",
+                        "content": "{system_prompt}"
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "{user_first_prompt}"
+                            },
+                            {
+                                "type": "input_image",
+                                "file_id": "{file_ID}"
+                            }
+                        ]
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "{model_first_response}"
+                    },
+                    {
+                        "role": "user",
+                        "content": "{user_second_prompt}"
+                    }
+                ]
+            }
+        },
+        "response_important_fields": {
+            "id": "{response_id}",
+            "model": "{model_name}",
+            "output": [
+                {
+                    "id": "{reasoning_id}",
+                    "type": "reasoning",
+                    "summary": []
+                },
+                {
+                    "id": "{message_id}",
+                    "type": "message",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "annotations": [],
+                            "text": "{model_response}"
+                        }
+                    ],
+                    "role": "assistant"
+                }
+            ],
+            "usage": {
+                "input_tokens": "{input_tokens_count}",
+                "output_tokens": "{output_tokens_count}",
+                "output_tokens_details": {
+                    "reasoning_tokens": "{reasoning_tokens_count}"
+                },
+                "total_tokens": "{total_tokens_count}"
+            }
+        },
+        "upload_files_request": {
+            "request_type": "POST",
+            "base_url": "https://api.openai.com/v1/files",
+            "headers": {
+                "Authorization": "Bearer {OPENAI_API_KEY_HERE}",
+                "Content-Type": "multipart/form-data"
+            },
+            "data": {
+                "purpose": "{`assistants` for general use/`vision` for images}"
+            },
+            "files": {
+                "file": "{open(file_path, \"rb\")}"
+            }
+        },
+        "upload_files_response_important_fields": {
+            "id": "{file_ID}"
+        }
+    },
+    {
+        "provider": "poe",
+        "models": [
+            {
+                "name": "GPT-5",
+                "min_points": 250
+            },
+            {
+                "name": "GPT-4.1",
+                "min_points": 206
+            },
+            {
+                "name": "o3",
+                "min_points": 401
+            },
+            {
+                "name": "o4-mini",
+                "min_points": 243
+            },
+            {
+                "name": "Claude-Sonnet-4-Search",
+                "min_points": 870
+            },
+            {
+                "name": "Claude-Sonnet-4-Reasoning",
+                "min_points": 1628
+            },
+            {
+                "name": "Claude-Sonnet-3.5",
+                "min_points": 270
+            },
+            {
+                "name": "GLM-4.5",
+                "min_points": 180
+            },
+            {
+                "name": "Gemini-2.5-Pro",
+                "min_points": 335
+            },
+            {
+                "name": "Grok-3",
+                "min_points": 856
+            },
+            {
+                "name": "Grok-4",
+                "min_points": 773
+            },
+            {
+                "name": "GPT-OSS-120B-T",
+                "min_points": 50
+            },
+            {
+                "name": "DeepSeek-V3-FW",
+                "min_points": 300
+            },
+            {
+                "name": "DeepSeek-R1",
+                "min_points": 600
+            },
+            {
+                "name": "Kimi-K2",
+                "min_points": 200
+            }
+        ],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://api.poe.com/bot/{model_name}",
+            "headers": {
+                "Authorization": "Bearer {POE_API_KEY_HERE}",
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            "body": {
+                "version": "1.2",
+                "type": "query",
+                "query": [
+                    {
+                        "role": "system",
+                        "content": "{system_prompt}",
+                        "content_type": "text/markdown"
+                    },
+                    {
+                        "role": "user",
+                        "content": "{user_first_prompt}",
+                        "content_type": "text/markdown",
+                        "attachments": [
+                            {
+                                "url": "{file_URL}",
+                                "content_type": "{mime_type, e.g. image/png}",
+                                "name": "{file_name}",
+                                "inline_ref": "(None)",
+                                "parsed_content": "(None)"
+                            }
+                        ]
+                    },
+                    {
+                        "role": "bot",
+                        "content": "{model_first_response}",
+                        "content_type": "text/markdown"
+                    },
+                    {
+                        "role": "user",
+                        "content": "{user_second_prompt}",
+                        "content_type": "text/markdown"
+                    }
+                ],
+                "user_id": "",
+                "conversation_id": "",
+                "message_id": ""
+            }
+        },
+        "response_important_fields": {
+            "response_format": "server_sent_events",
+            "events": [
+                {
+                    "event": "text",
+                    "data": {
+                        "text": "{model_response_partial_chunk}"
+                    }
+                },
+                {
+                    "event": "replace_response", 
+                    "data": {
+                        "text": "{replacement_text}"
+                    },
+                    "description": "Replaces all previous text content"
+                },
+                {
+                    "event": "error",
+                    "data": {
+                        "text": "{error_message}",
+                        "error_type": "{error_category}"
+                    }
+                },
+                {
+                    "event": "done",
+                    "data": {},
+                    "description": "Indicates end of response stream"
+                }
+            ]
+        },
+        "upload_files_request": {
+            "request_type": "POST",
+            "base_url": "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST",
+            "headers": {
+                "Authorization": "{POE_API_KEY_HERE}"
+            },
+            "files": {
+                "file": "({file_name}, {open(file_path, \"rb\")}, {mime_type, e.g. image/png})"
+            }
+        },
+        "upload_files_response_important_fields": {
+            "file_id": "{file_ID}",
+            "attachment_url": "{file_URL}",
+            "mime_type": "{mime_type, e.g. image/png}"
+        }
+    },
+    {
+        "provider": "google",
+        "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+            "params": {
+                "key": "{GOOGLE_API_KEY_HERE}"
+            },
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": {
+                "systemInstruction": {
+                    "parts": [
+                        {"text": "{system_prompt}"}
+                    ]
+                },
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": "{user_first_prompt}"},
+                            {
+                                "file_data": {
+                                    "mime_type": "{mime_type, e.g. image/png}",
+                                    "file_uri": "{file_URI}"
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "role": "model",
+                        "parts": [
+                            {"text": "{model_first_response}"}
+                        ]
+                    },
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": "{user_second_prompt}"}
+                        ]
+                    }
+                ]
+            }
+        },
+        "response_important_fields": {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "text": "{model_response}"
+                            }
+                        ],
+                        "role": "model"
+                    },
+                    "finishReason": "STOP"
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": "{input_tokens_count}",
+                "candidatesTokenCount": "{output_tokens_count}",
+                "totalTokenCount": "{total_tokens_count}",
+                "thoughtsTokenCount": "{reasoning_tokens_count}"
+            },
+            "modelVersion": "{model_name}",
+            "responseId": "{response_id}"
+        },
+        "upload_files_request": {
+            "request_type": "POST",
+            "base_url": "https://generativelanguage.googleapis.com/upload/v1beta/files",
+            "params": {
+                "key": "{GOOGLE_API_KEY_HERE}"
+            },
+            "headers": {
+                "Content-Type": "{mime_type, e.g. image/png}"
+            },
+            "data": {
+                "{open(file_path, \"rb\").read()}"
+            }
+        },
+        "upload_files_response_important_fields": {
+            "file": {
+                "expirationTime": "{expiration_time}",
+                "uri": "{file_URI}"
+            }
+        }
+    },
+    {
+        "provider": "anthropic",
+        "models": ["claude-sonnet-4-5-20250929", "claude-sonnet-4-20250514", "claude-haiku-4-5-20251001", "claude-opus-4-5-20251101", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://api.anthropic.com/v1/messages",
+            "headers": {
+                "x-api-key": "{ANTHROPIC_API_KEY_HERE}",
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json"
+            },
+            "body": {
+                "model": "{model_name}",
+                "max_tokens": 8192,
+                "system": "{system_prompt}",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{user_first_prompt}"
+                            },
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "{mime_type}",
+                                    "data": "{base64_encoded_image}"
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{model_first_response}"
+                            }
+                        ]
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{user_second_prompt}"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "response_important_fields": {
+            "response_format": "server_sent_events",
+            "events": [
+                {
+                    "event": "message_start",
+                    "data": {
+                        "type": "message_start",
+                        "message": {
+                            "id": "{message_id}",
+                            "model": "{model_name}",
+                            "role": "assistant",
+                            "usage": {
+                                "input_tokens": "{input_tokens}",
+                                "output_tokens": "{output_tokens}"
+                            }
+                        }
+                    }
+                },
+                {
+                    "event": "content_block_start",
+                    "data": {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {
+                            "type": "text",
+                            "text": ""
+                        }
+                    }
+                },
+                {
+                    "event": "content_block_delta",
+                    "data": {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {
+                            "type": "text_delta",
+                            "text": "{partial_text_chunk}"
+                        }
+                    }
+                },
+                {
+                    "event": "content_block_stop",
+                    "data": {
+                        "type": "content_block_stop",
+                        "index": 0
+                    }
+                },
+                {
+                    "event": "content_block_start",
+                    "data": {
+                        "type": "content_block_start",
+                        "index": 1,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": "{tool_use_id}",
+                            "name": "{tool_name}",
+                            "input": {}
+                        }
+                    },
+                    "description": "Indicates model wants to use a tool"
+                },
+                {
+                    "event": "content_block_delta",
+                    "data": {
+                        "type": "content_block_delta",
+                        "index": 1,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": "{partial_json_input}"
+                        }
+                    },
+                    "description": "Streams tool input JSON"
+                },
+                {
+                    "event": "message_delta",
+                    "data": {
+                        "type": "message_delta",
+                        "delta": {
+                            "stop_reason": "tool_use",
+                            "stop_sequence": null
+                        },
+                        "usage": {
+                            "output_tokens": "{total_output_tokens}"
+                        }
+                    }
+                },
+                {
+                    "event": "message_stop",
+                    "data": {
+                        "type": "message_stop"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "provider": "cohere",
+        "models": ["command-a-03-2025", "command-r-plus-08-2024", "command-r-08-2024", "command-r7b-12-2024"],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://api.cohere.ai/v2/chat",
+            "headers": {
+                "Authorization": "Bearer {COHERE_API_KEY_HERE}",
+                "Content-Type": "application/json"
+            },
+            "body": {
+                "model": "{model_name}",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "{system_prompt}"
+                    },
+                    {
+                        "role": "user",
+                        "content": "{user_first_prompt}"
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "{model_first_response}"
+                    }
+                ],
+                "stream": true
+            }
+        },
+        "response_important_fields": {
+            "response_format": "server_sent_events",
+            "events": [
+                {
+                    "event": "message-start",
+                    "data": {
+                        "type": "message-start",
+                        "id": "{message_id}",
+                        "delta": {
+                            "message": {
+                                "role": "assistant"
+                            }
+                        }
+                    }
+                },
+                {
+                    "event": "content-delta",
+                    "data": {
+                        "type": "content-delta",
+                        "index": 0,
+                        "delta": {
+                            "message": {
+                                "content": {
+                                    "text": "{partial_text_chunk}"
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "event": "tool-call-start",
+                    "data": {
+                        "type": "tool-call-start",
+                        "index": 0,
+                        "delta": {
+                            "message": {
+                                "tool_calls": {
+                                    "id": "{tool_call_id}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "{tool_name}",
+                                        "arguments": ""
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "event": "message-end",
+                    "data": {
+                        "type": "message-end",
+                        "delta": {
+                            "finish_reason": "COMPLETE"
+                        }
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "provider": "openrouter",
+        "models": [
+            "openai/o1",
+            "openai/o1-mini",
+            "openai/o3",
+            "openai/o3-mini",
+            "openai/o4-mini",
+            "openai/gpt-5",
+            "openai/gpt-4.1",
+            "openai/gpt-4o",
+            "openai/gpt-4o-mini",
+            "anthropic/claude-sonnet-4",
+            "anthropic/claude-3.5-sonnet",
+            "anthropic/claude-3-opus",
+            "google/gemini-2.5-pro",
+            "google/gemini-2.5-flash",
+            "google/gemini-pro-1.5",
+            "x-ai/grok-3",
+            "x-ai/grok-2",
+            "deepseek/deepseek-r1",
+            "deepseek/deepseek-chat",
+            "qwen/qwq-32b",
+            "meta-llama/llama-3.1-405b-instruct",
+            "mistralai/mistral-large"
+        ],
+        "request": {
+            "request_type": "POST",
+            "base_url": "https://openrouter.ai/api/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {OPENROUTER_API_KEY_HERE}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/your-app",
+                "X-Title": "LLM Chat App"
+            },
+            "body": {
+                "model": "{model_name}",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "{system_prompt}"
+                    },
+                    {
+                        "role": "user",
+                        "content": "{user_first_prompt}"
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "{model_first_response}"
+                    }
+                ],
+                "stream": true
+            }
+        },
+        "response_important_fields": {
+            "response_format": "server_sent_events",
+            "events": [
+                {
+                    "data": {
+                        "id": "{chunk_id}",
+                        "object": "chat.completion.chunk",
+                        "model": "{model_name}",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "content": "{partial_text_chunk}",
+                                    "reasoning_details": [
+                                        {"reasoning": "{reasoning_text_chunk}"}
+                                    ],
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "{tool_call_id}",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "{function_name}",
+                                                "arguments": "{partial_json_arguments}"
+                                            }
+                                        }
+                                    ]
+                                },
+                                "finish_reason": "null | stop | tool_calls | length"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "data": "[DONE]",
+                    "description": "End of stream marker"
+                }
+            ],
+            "supported_parameters": {
+                "reasoning": {
+                    "effort": "xhigh | high | medium | low | minimal"
+                },
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "{function_name}",
+                            "description": "{function_description}",
+                            "parameters": "{json_schema}"
+                        }
+                    }
+                ],
+                "tool_choice": "none | auto | required | {type: function, function: {name: ...}}"
+            }
+        }
+    }
+]

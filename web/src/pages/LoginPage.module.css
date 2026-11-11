@@ -1,0 +1,105 @@
+/* =========================================================
+   LoginPage — dark minimal, matches the app's auth aesthetic.
+   R0 restyle: centered vertically in the phone column, no card border.
+   ========================================================= */
+
+.container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 2rem var(--spacing-input-h);
+}
+
+.inner {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+}
+
+/* App name — large primary-colored heading */
+.appName {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--primary);
+  margin: 0;
+  text-align: center;
+  letter-spacing: -0.5px;
+}
+
+/* Form */
+.form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.label {
+  font-size: var(--fs-label-medium);
+  font-weight: var(--fw-label-medium);
+  color: var(--on-surface-variant);
+}
+
+.input {
+  background: var(--surface-variant);
+  border: 1px solid var(--message-border);
+  border-radius: var(--radius-card);
+  color: var(--on-surface);
+  font-size: var(--fs-body-large);
+  font-family: inherit;
+  padding: 0.7rem 1rem;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.input:focus {
+  border-color: var(--primary);
+}
+
+.input:disabled {
+  opacity: 0.6;
+}
+
+/* Error */
+.error {
+  color: var(--accent-red);
+  font-size: var(--fs-body-small);
+  margin: 0;
+}
+
+/* Primary action button */
+.button {
+  background: var(--primary);
+  color: var(--on-primary);
+  border: none;
+  border-radius: var(--radius-card);
+  font-size: var(--fs-body-large);
+  font-weight: var(--fw-title-small);
+  font-family: inherit;
+  padding: 0.8rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  margin-top: 0.25rem;
+}
+
+.button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

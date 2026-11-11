@@ -140,12 +140,12 @@ private fun injectExampleMessages(
         val messagesByPath = mutableMapOf<String, MutableList<JsonElement>>()
 
         // Add system message
-        if (messageFields.systemField != null) {
-            val systemJson = messageFields.systemField.template.replace(
+        messageFields.systemField?.let { systemField ->
+            val systemJson = systemField.template.replace(
                 BodyTemplatePlaceholders.SYSTEM,
                 escapeJsonString("Answer in the most concise and shortest way imaginable")
             )
-            val path = messageFields.systemField.path
+            val path = systemField.path
             try {
                 messagesByPath.getOrPut(path) { mutableListOf() }
                     .add(json.parseToJsonElement(systemJson))
@@ -153,12 +153,12 @@ private fun injectExampleMessages(
         }
 
         // Add first user message
-        if (messageFields.userField != null) {
-            val userJson = messageFields.userField.template.replace(
+        messageFields.userField?.let { userField ->
+            val userJson = userField.template.replace(
                 BodyTemplatePlaceholders.PROMPT,
                 escapeJsonString("Hi, how are you?")
             )
-            val path = messageFields.userField.path
+            val path = userField.path
             try {
                 messagesByPath.getOrPut(path) { mutableListOf() }
                     .add(json.parseToJsonElement(userJson))
@@ -166,12 +166,12 @@ private fun injectExampleMessages(
         }
 
         // Add first assistant message
-        if (messageFields.assistantField != null) {
-            val assistantJson = messageFields.assistantField.template.replace(
+        messageFields.assistantField?.let { assistantField ->
+            val assistantJson = assistantField.template.replace(
                 BodyTemplatePlaceholders.ASSISTANT,
                 escapeJsonString("Good")
             )
-            val path = messageFields.assistantField.path
+            val path = assistantField.path
             try {
                 messagesByPath.getOrPut(path) { mutableListOf() }
                     .add(json.parseToJsonElement(assistantJson))
@@ -181,12 +181,12 @@ private fun injectExampleMessages(
         // If tool fields are defined, add tool example
         if (messageFields.hasToolFields()) {
             // Add second user message asking to test tool
-            if (messageFields.userField != null) {
-                val userJson = messageFields.userField.template.replace(
+            messageFields.userField?.let { userField ->
+                val userJson = userField.template.replace(
                     BodyTemplatePlaceholders.PROMPT,
                     escapeJsonString("Test the tool")
                 )
-                val path = messageFields.userField.path
+                val path = userField.path
                 try {
                     messagesByPath.getOrPut(path) { mutableListOf() }
                         .add(json.parseToJsonElement(userJson))
@@ -194,12 +194,12 @@ private fun injectExampleMessages(
             }
 
             // Add tool definition
-            if (messageFields.toolDefinitionField != null) {
-                val toolDefJson = messageFields.toolDefinitionField.template
+            messageFields.toolDefinitionField?.let { toolDefinitionField ->
+                val toolDefJson = toolDefinitionField.template
                     .replace(BodyTemplatePlaceholders.TOOL_NAME, "test_tool")
                     .replace(BodyTemplatePlaceholders.TOOL_DESCRIPTION, escapeJsonString("This tool is intended to test tool functionality. Use it when the user asks for"))
                     .replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, """{"type":"object","properties":{"test_parameter":{"type":"string"}},"required":["test_parameter"]}""")
-                val path = messageFields.toolDefinitionField.path
+                val path = toolDefinitionField.path
                 try {
                     messagesByPath.getOrPut(path) { mutableListOf() }
                         .add(json.parseToJsonElement(toolDefJson))
@@ -207,12 +207,12 @@ private fun injectExampleMessages(
             }
 
             // Add tool call
-            if (messageFields.toolCallField != null) {
-                val toolCallJson = messageFields.toolCallField.template
+            messageFields.toolCallField?.let { toolCallField ->
+                val toolCallJson = toolCallField.template
                     .replace(BodyTemplatePlaceholders.TOOL_NAME, "test_tool")
                     .replace(BodyTemplatePlaceholders.TOOL_ID, "call_example_123")
                     .replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, """{"test_parameter":"example_value"}""")
-                val path = messageFields.toolCallField.path
+                val path = toolCallField.path
                 try {
                     messagesByPath.getOrPut(path) { mutableListOf() }
                         .add(json.parseToJsonElement(toolCallJson))
@@ -220,11 +220,11 @@ private fun injectExampleMessages(
             }
 
             // Add tool response
-            if (messageFields.toolResponseField != null) {
-                val toolResponseJson = messageFields.toolResponseField.template
+            messageFields.toolResponseField?.let { toolResponseField ->
+                val toolResponseJson = toolResponseField.template
                     .replace(BodyTemplatePlaceholders.TOOL_RESPONSE, escapeJsonString("Tool executed successfully"))
                     .replace(BodyTemplatePlaceholders.TOOL_ID, "call_example_123")
-                val path = messageFields.toolResponseField.path
+                val path = toolResponseField.path
                 try {
                     messagesByPath.getOrPut(path) { mutableListOf() }
                         .add(json.parseToJsonElement(toolResponseJson))

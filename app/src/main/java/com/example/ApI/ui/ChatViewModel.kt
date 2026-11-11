@@ -24,8 +24,13 @@ import com.example.ApI.R
 import com.example.ApI.data.model.*
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.DeleteMessageResult
+import com.example.ApI.data.repository.ReplyAnchor
+import com.example.ApI.data.sync.ForegroundSyncTicker
+import com.example.ApI.data.sync.SyncReload
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.ParentalControlManager
+import com.example.ApI.service.StreamingRequestPayload
+import com.example.ApI.service.StreamingRequestPayloads
 import com.example.ApI.service.StreamingService
 import com.example.ApI.tools.ToolRegistry
 import com.example.ApI.tools.ToolSpecification
@@ -40,14 +45,18 @@ import com.example.ApI.ui.managers.organization.GroupManager
 import com.example.ApI.ui.managers.organization.SearchManager
 import com.example.ApI.ui.managers.provider.ModelSelectionManager
 import com.example.ApI.ui.managers.provider.TopBarManager
+import com.example.ApI.ui.managers.streaming.CloudRunManager
 import com.example.ApI.ui.managers.streaming.StreamingEventManager
 import com.example.ApI.ui.managers.streaming.TitleGenerationManager
+import com.example.ApI.data.DeviceAttachmentsProvider
+import com.example.ApI.data.attachments.AttachmentTransferState
 import com.example.ApI.ui.managers.io.AttachmentManager
 import com.example.ApI.ui.managers.io.ExportImportManager
 import com.example.ApI.ui.managers.io.SharedIntentManager
 import com.example.ApI.ui.managers.integration.AuthManager
 import com.example.ApI.ui.managers.integration.ToolManager
 import com.example.ApI.ui.managers.settings.ChildLockManager
+import com.example.ApI.data.network.SyncGoogleSignInProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,8 +67,7 @@ import androidx.core.content.FileProvider
 import androidx.core.app.PendingIntentCompat
 import android.app.PendingIntent
 import android.os.Environment
-import com.example.ApI.util.JsonConfig
-import kotlinx.serialization.encodeToString
+import com.example.ApI.util.AppLogger
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.InputStream
@@ -86,6 +94,20 @@ class ChatViewModel(
     private val _appSettings = MutableStateFlow(AppSettings("default", "openai", "gpt-4o"))
     val appSettings: StateFlow<AppSettings> = _appSettings.asStateFlow()
 
+    // Remote sync sign-in provider and in-progress indicator
+    private val syncSignInProvider: SyncGoogleSignInProvider by lazy { SyncGoogleSignInProvider(context) }
+    private val _syncSignInInProgress = MutableStateFlow(false)
+    val syncSignInInProgress: StateFlow<Boolean> = _syncSignInInProgress.asStateFlow()
+
+    /** True when the sync token has expired and the user must re-authenticate. */
+    val syncNeedsReauth: StateFlow<Boolean> get() = repository.needsReauth
+
+    /** True when the sync server is too old (no compare-and-swap uploads): nothing syncs until it is updated. */
+    val syncServerLacksCas: StateFlow<Boolean> get() = repository.syncServerLacksCas
+
+    /** Periodic pull while the app is resumed (started/stopped by [onAppResume] / [onAppPause]). */
+    private val foregroundSyncTicker = ForegroundSyncTicker(viewModelScope) { repository.pullNow() }
+
     // Shared dependencies for managers
     private val managerDeps by lazy {
         ManagerDependencies(
@@ -97,6 +119,15 @@ class ChatViewModel(
             updateUiState = { newState -> _uiState.value = newState }
         )
     }
+
+    /** The account's attachment store on this device (process-wide; does nothing while sync is off). */
+    private val deviceAttachments by lazy { DeviceAttachmentsProvider.get(context) }
+
+    /** By local file path: attached files that are uploading to the store, or whose upload failed. */
+    val attachmentTransfers: StateFlow<Map<String, AttachmentTransferState>> get() = deviceAttachments.transfers
+
+    /** Start a failed upload again (tap on the failed file). */
+    fun retryAttachmentUpload(localPath: String) = deviceAttachments.retry(localPath)
 
     // Service binding for streaming requests
     private var streamingService: StreamingService? = null
@@ -186,7 +217,8 @@ class ChatViewModel(
             startStreamingRequest = { requestId, chatId, username, provider, modelName, messages, systemPrompt, webSearchEnabled, projectAttachments, enabledTools, thinkingBudget, temperature ->
                 startStreamingRequest(requestId, chatId, username, provider, modelName, messages, systemPrompt, webSearchEnabled, projectAttachments, enabledTools, thinkingBudget, temperature)
             },
-            createNewChat = { previewName -> createNewChat(previewName) }
+            createNewChat = { previewName -> createNewChat(previewName) },
+            isCloudExecutionEffective = { cloudRunManager.isEffective }
         )
     }
 
@@ -252,6 +284,18 @@ class ChatViewModel(
         )
     }
 
+    // Cloud runs: requests executed by the web backend, followed through the account's event stream
+    private val cloudRunManager: CloudRunManager by lazy {
+        CloudRunManager(
+            deps = managerDeps,
+            getCurrentDateTimeISO = { getCurrentDateTimeISO() },
+            handleStreamingEvent = { event -> streamingEventManager.handleStreamingEvent(event) },
+            isServiceBusyWith = { chatId ->
+                streamingService?.getActiveRequests()?.values?.any { it.chatId == chatId } == true
+            }
+        )
+    }
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val localBinder = binder as StreamingService.LocalBinder
@@ -290,6 +334,8 @@ class ChatViewModel(
         loadInitialData()
         sharedIntentManager.handleSharedFiles()
         bindToStreamingService()
+        observeSyncChangeTick()
+        cloudRunManager  // follows the cloud-execution setting from now on
     }
 
     private fun getCurrentDateTimeISO(): String {
@@ -318,9 +364,13 @@ class ChatViewModel(
     }
 
     /**
-     * Start a streaming request via the foreground service
+     * The single place a request is handed over for execution.  With "manage API requests in the
+     * cloud" effective the cloud is asked first; when it takes the request no service is started
+     * (the account's event stream drives the UI).  In every other case — the option is off, or
+     * the cloud did not take the request — the request goes to the foreground service exactly
+     * as it always did.
      */
-    private fun startStreamingRequest(
+    private suspend fun startStreamingRequest(
         requestId: String,
         chatId: String,
         username: String,
@@ -334,21 +384,65 @@ class ChatViewModel(
         thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
         temperature: Float? = null
     ) {
+        if (cloudRunManager.isEffective) {
+            val outcome = cloudRunManager.tryStart(
+                requestId, chatId, provider, modelName, messages, systemPrompt, webSearchEnabled,
+                projectAttachments, enabledTools, thinkingBudget, temperature
+            )
+            when (outcome) {
+                CloudRunManager.StartOutcome.CLOUD, CloudRunManager.StartOutcome.STOPPED -> return
+                CloudRunManager.StartOutcome.DEVICE ->
+                    Toast.makeText(context, R.string.cloud_execution_fallback_notice, Toast.LENGTH_SHORT).show()
+            }
+        }
+        // The device runs it. With sync on, its files still go to the account's store (in the
+        // background: hash + upload + commit, the hash recorded on the stored attachment), so
+        // the other devices can show them and the chat can run in the cloud next time.
+        deviceAttachments.backfill(username, chatId, groupIdOf(chatId), messages, projectAttachments)
+        startServiceStreamingRequest(
+            requestId, chatId, username, provider, modelName, messages, systemPrompt, webSearchEnabled,
+            projectAttachments, enabledTools, thinkingBudget, temperature
+        )
+    }
+
+    private fun groupIdOf(chatId: String): String? {
+        val state = _uiState.value
+        val chat = state.currentChat?.takeIf { it.chat_id == chatId } ?: state.chatHistory.find { it.chat_id == chatId }
+        return chat?.group
+    }
+
+    /**
+     * Start a streaming request via the foreground service
+     */
+    private fun startServiceStreamingRequest(
+        requestId: String,
+        chatId: String,
+        username: String,
+        provider: Provider,
+        modelName: String,
+        messages: List<Message>,
+        systemPrompt: String,
+        webSearchEnabled: Boolean,
+        projectAttachments: List<Attachment>,
+        enabledTools: List<ToolSpecification>,
+        thinkingBudget: ThinkingBudgetValue = ThinkingBudgetValue.None,
+        temperature: Float? = null
+    ) {
+        // The Intent carries only small scalars. The conversation itself is handed over
+        // in-process: as Intent extras a long chat exceeds the binder transaction limit,
+        // the start command is never delivered and the app stops responding.
         val intent = Intent(context, StreamingService::class.java).apply {
             action = StreamingService.ACTION_START_REQUEST
             putExtra(StreamingService.EXTRA_REQUEST_ID, requestId)
             putExtra(StreamingService.EXTRA_CHAT_ID, chatId)
             putExtra(StreamingService.EXTRA_USERNAME, username)
-            putExtra(StreamingService.EXTRA_PROVIDER_JSON, JsonConfig.standard.encodeToString(provider))
             putExtra(StreamingService.EXTRA_MODEL_NAME, modelName)
-            putExtra(StreamingService.EXTRA_SYSTEM_PROMPT, systemPrompt)
             putExtra(StreamingService.EXTRA_WEB_SEARCH_ENABLED, webSearchEnabled)
-            putExtra(StreamingService.EXTRA_MESSAGES_JSON, JsonConfig.standard.encodeToString(messages))
-            putExtra(StreamingService.EXTRA_PROJECT_ATTACHMENTS_JSON, JsonConfig.standard.encodeToString(projectAttachments))
-            putExtra(StreamingService.EXTRA_ENABLED_TOOLS_JSON, JsonConfig.standard.encodeToString(enabledTools))
-            // Add thinking budget if not None
-            if (thinkingBudget != ThinkingBudgetValue.None) {
-                putExtra(StreamingService.EXTRA_THINKING_BUDGET_JSON, JsonConfig.standard.encodeToString(thinkingBudget))
+            // Pin the reply to the variant of the message it answers, after that message
+            // (survives a variant switch or a sync merge while streaming)
+            messages.lastOrNull()?.let { last ->
+                last.variantId?.let { putExtra(StreamingService.EXTRA_TARGET_VARIANT_ID, it) }
+                putExtra(StreamingService.EXTRA_EXPECTED_TAIL_ID, last.id)
             }
             // Add temperature if set
             if (temperature != null) {
@@ -356,10 +450,30 @@ class ChatViewModel(
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+        val payload = StreamingRequestPayload(
+            provider = provider,
+            messages = messages.toList(),
+            systemPrompt = systemPrompt,
+            projectAttachments = projectAttachments.toList(),
+            enabledTools = enabledTools.toList(),
+            thinkingBudget = thinkingBudget
+        )
+        StreamingRequestPayloads.put(requestId, payload)
+        AppLogger.d(
+            "Streaming request $requestId handed to service: ${payload.messages.size} messages, " +
+                "~${payload.approxTextChars()} chars of text."
+        )
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            StreamingRequestPayloads.take(requestId)
+            AppLogger.w("Streaming request $requestId: failed to start service: ${e.message}")
+            throw e
         }
     }
 
@@ -367,6 +481,9 @@ class ChatViewModel(
      * Cancel a streaming request
      */
     fun cancelStreamingRequest(chatId: String) {
+        // A cloud run is stopped in the cloud (nothing of the partial reply is kept)
+        if (cloudRunManager.stop(chatId, keepPartial = false)) return
+
         // Find the request ID for this chat
         val activeRequests = streamingService?.getActiveRequests() ?: return
         val request = activeRequests.values.find { it.chatId == chatId } ?: return
@@ -391,12 +508,19 @@ class ChatViewModel(
         val currentUser = _appSettings.value.current_user
         val currentModel = _uiState.value.currentModel
 
+        // A cloud run is stopped in the cloud, which saves the partial reply itself (nothing is
+        // saved and no title is generated here)
+        if (cloudRunManager.stop(chatId, keepPartial = true)) return
+
         // Get the accumulated streaming text for this chat
         val accumulatedText = _uiState.value.streamingTextByChat[chatId] ?: ""
 
-        // Find and stop the active request in the service
+        // Find and stop the active request in the service; its reply anchor says where the
+        // partial reply belongs (the pinned variant, after what the request already saved)
         val activeRequests = streamingService?.getActiveRequests()
         val request = activeRequests?.values?.find { it.chatId == chatId }
+        val anchor = request?.let { streamingService?.replyAnchor(it.requestId) }
+            ?: ReplyAnchor.forRequest(currentChat.messages)
         if (request != null) {
             streamingService?.stopAndComplete(request.requestId)
         }
@@ -413,8 +537,8 @@ class ChatViewModel(
                     datetime = getCurrentDateTimeISO()
                 )
 
-                // Save the message to chat history
-                repository.addResponseToCurrentVariant(currentUser, chatId, assistantMessage)
+                // Save the message to chat history, pinned to the request's variant
+                repository.addAnchoredResponse(currentUser, chatId, assistantMessage, anchor)
             }
 
             // Clean up empty chats
@@ -445,6 +569,7 @@ class ChatViewModel(
      */
     override fun onCleared() {
         super.onCleared()
+        foregroundSyncTicker.stop()
         unbindFromStreamingService()
     }
 
@@ -517,11 +642,12 @@ class ChatViewModel(
             // Update settings if we changed anything
             if (currentModel != settings.selected_model ||
                 (currentProvider?.provider != settings.selected_provider)) {
-                val updatedSettings = settings.copy(
-                    selected_provider = currentProvider?.provider ?: "openai",
-                    selected_model = currentModel
-                )
-                repository.saveAppSettings(updatedSettings)
+                val updatedSettings = repository.updateAppSettings {
+                    it.copy(
+                        selected_provider = currentProvider?.provider ?: "openai",
+                        selected_model = currentModel
+                    )
+                }
                 _appSettings.value = updatedSettings
             }
 
@@ -536,6 +662,9 @@ class ChatViewModel(
 
             // Initialize Skills tools
             initializeSkillTools()
+
+            // Start remote sync (no-op if disabled)
+            repository.startSync()
         }
     }
 
@@ -560,8 +689,9 @@ class ChatViewModel(
                 }
             }
             if (changed) {
-                val updatedSettings = settings.copy(enabledTools = currentEnabled)
-                repository.saveAppSettings(updatedSettings)
+                val updatedSettings = repository.updateAppSettings { fresh ->
+                    fresh.copy(enabledTools = (fresh.enabledTools + skillToolIds).distinct())
+                }
                 _appSettings.value = updatedSettings
             }
         }
@@ -723,8 +853,7 @@ class ChatViewModel(
 
     // ==================== Settings Management ====================
     fun updateMultiMessageMode(enabled: Boolean) {
-        val updatedSettings = _appSettings.value.copy(multiMessageMode = enabled)
-        repository.saveAppSettings(updatedSettings)
+        val updatedSettings = repository.updateAppSettings { it.copy(multiMessageMode = enabled) }
         _appSettings.value = updatedSettings
     }
 
@@ -746,8 +875,7 @@ class ChatViewModel(
      * Update the skip welcome screen setting.
      */
     fun updateSkipWelcomeScreen(skip: Boolean) {
-        val updatedSettings = _appSettings.value.copy(skipWelcomeScreen = skip)
-        repository.saveAppSettings(updatedSettings)
+        val updatedSettings = repository.updateAppSettings { it.copy(skipWelcomeScreen = skip) }
         _appSettings.value = updatedSettings
     }
 
@@ -880,20 +1008,20 @@ class ChatViewModel(
      * If exclude is false, removes it from excluded list.
      */
     fun toggleToolExclusion(toolId: String, exclude: Boolean) {
-        val currentExcluded = _appSettings.value.excludedToolIds
-
-        val updatedExcluded = if (exclude) {
-            if (toolId !in currentExcluded) currentExcluded + toolId else currentExcluded
-        } else {
-            currentExcluded - toolId
+        // Applied to the stored settings (the in-memory copy may predate a sync)
+        val updatedSettings = repository.updateAppSettings { settings ->
+            val currentExcluded = settings.excludedToolIds
+            val updatedExcluded = if (exclude) {
+                if (toolId !in currentExcluded) currentExcluded + toolId else currentExcluded
+            } else {
+                currentExcluded - toolId
+            }
+            settings.copy(excludedToolIds = updatedExcluded)
         }
-
-        val updatedSettings = _appSettings.value.copy(excludedToolIds = updatedExcluded)
-        repository.saveAppSettings(updatedSettings)
         _appSettings.value = updatedSettings
 
         // Also update UI state
-        _uiState.value = _uiState.value.copy(excludedToolIds = updatedExcluded)
+        _uiState.value = _uiState.value.copy(excludedToolIds = updatedSettings.excludedToolIds)
     }
 
     /**
@@ -1047,6 +1175,304 @@ class ChatViewModel(
     fun navigateToVariant(nodeId: String, variantIndex: Int) = branchingManager.navigateToVariant(nodeId, variantIndex)
     fun ensureBranchingStructure() = branchingManager.ensureBranchingStructure()
 
+    // ==================== Remote Sync ====================
+
+    /**
+     * Observe syncChangeTick from the repository. When it increments, reload what a sync may
+     * have changed so pulled-in changes appear without a manual refresh.
+     */
+    private fun observeSyncChangeTick() {
+        viewModelScope.launch {
+            repository.syncChangeTick.collect { tick ->
+                if (tick > 0L) {
+                    try {
+                        reloadAfterSync()
+                    } catch (e: Exception) {
+                        Log.e("ChatViewModel", "Reload after sync failed", e)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Refresh settings, the chat list, groups, the current chat and the current group (and the
+     * system prompt shown for them) from disk. A current chat deleted elsewhere falls back
+     * gracefully ([SyncReload]); an active stream's state (loading/streaming ids, streamed text)
+     * and the unsent draft are left alone.
+     */
+    private suspend fun reloadAfterSync() {
+        repeat(RELOAD_ATTEMPTS) {
+            val before = _uiState.value
+            val settingsBefore = _appSettings.value
+            val (settings, history) = withContext(Dispatchers.IO) {
+                val settings = repository.loadAppSettings()
+                settings to repository.loadChatHistory(settings.current_user)
+            }
+            while (true) {
+                when (applyReload(before, settingsBefore, settings, history)) {
+                    true -> {
+                        authManager.refreshIntegrationToolsAfterSync()
+                        return
+                    }
+                    false -> break  // re-read
+                    null -> continue  // another state update raced the apply: recompute
+                }
+            }
+        }
+        Log.w("ChatViewModel", "Reload after sync skipped: local changes kept racing it")
+    }
+
+    /**
+     * Apply a reload read from disk while the UI state was [before] and the settings
+     * [settingsBefore]. False: the chat state or settings changed meanwhile (a local write the
+     * read may predate — e.g. a new chat, a buffered message — must not be overlaid with an
+     * older disk copy; re-read). Null: another state update raced this one (recompute).
+     */
+    private fun applyReload(before: ChatUiState, settingsBefore: AppSettings, settings: AppSettings, history: UserChatHistory): Boolean? {
+        val state = _uiState.value
+        if (_appSettings.value !== settingsBefore || state.chatHistory !== before.chatHistory ||
+            state.currentChat !== before.currentChat || state.groups !== before.groups ||
+            state.currentGroup !== before.currentGroup
+        ) {
+            return false  // written meanwhile: the disk copy read may predate it
+        }
+        val busyChatIds = state.loadingChatIds + state.streamingChatIds
+        val hasDraft = state.currentMessage.isNotBlank() || state.selectedFiles.isNotEmpty()
+        val currentChat = SyncReload.currentChatAfterReload(history.chat_history, state.currentChat, busyChatIds, hasDraft)
+        val currentGroup = SyncReload.currentGroupAfterReload(history.groups, state.currentGroup)
+        val chatSwitched = currentChat?.chat_id != state.currentChat?.chat_id
+        val onGroupScreen = _currentScreen.value is Screen.Group
+
+        val systemPrompt = when {
+            state.showSystemPromptDialog -> state.systemPrompt  // being edited: leave it
+            onGroupScreen -> currentGroup?.system_prompt ?: state.systemPrompt
+            currentChat != null -> currentChat.systemPrompt
+            chatSwitched -> ""
+            else -> state.systemPrompt
+        }
+
+        // The selected model is an account setting another device may have changed
+        val settingsProvider = state.availableProviders.find { it.provider == settings.selected_provider }
+            ?.takeIf { p -> p.models.any { it.name == settings.selected_model } }
+        val modelChanged = settingsProvider != null &&
+            (settingsProvider.provider != state.currentProvider?.provider || settings.selected_model != state.currentModel)
+
+        var updated = state.copy(
+            chatHistory = history.chat_history,
+            groups = history.groups,
+            currentChat = currentChat,
+            currentGroup = currentGroup,
+            systemPrompt = systemPrompt,
+            excludedToolIds = settings.excludedToolIds
+        )
+        if (chatSwitched && state.isEditMode) {
+            updated = updated.copy(editingMessage = null, isEditMode = false)
+        }
+        if (modelChanged) {
+            val webSearchSupport = modelSelectionManager.getWebSearchSupport(settingsProvider!!.provider, settings.selected_model)
+            updated = updated.copy(
+                currentProvider = settingsProvider,
+                currentModel = settings.selected_model,
+                webSearchSupport = webSearchSupport,
+                webSearchEnabled = when (webSearchSupport) {
+                    WebSearchSupport.REQUIRED -> true
+                    WebSearchSupport.OPTIONAL -> state.webSearchEnabled
+                    WebSearchSupport.UNSUPPORTED -> false
+                }
+            )
+        }
+        if (!_uiState.compareAndSet(state, updated)) return null
+        _appSettings.value = settings
+
+        if (onGroupScreen && currentGroup == null) {
+            navigateToScreen(Screen.ChatHistory)
+        }
+        return true
+    }
+
+    /** Called on Activity onResume: pull latest changes now and periodically while resumed. */
+    fun onAppResume() {
+        repository.pullNow()
+        foregroundSyncTicker.start()
+        cloudRunManager.onForeground()
+    }
+
+    /** Called on Activity onPause: stop the periodic foreground pull. */
+    fun onAppPause() {
+        foregroundSyncTicker.stop()
+        cloudRunManager.onBackground()
+    }
+
+    /** Update the "Enable remote sync" toggle. Persists the change and starts sync if turned on. */
+    fun updateRemoteSyncEnabled(enabled: Boolean) {
+        val updatedSettings = repository.updateAppSettings {
+            it.copy(
+                // Cloud execution needs sync: off with it
+                remoteSync = it.remoteSync.copy(
+                    enabled = enabled,
+                    cloudExecution = it.remoteSync.cloudExecution && enabled
+                )
+            )
+        }
+        _appSettings.value = updatedSettings
+        if (enabled) repository.startSync()
+    }
+
+    /** Update the remote sync server URL. */
+    fun updateRemoteSyncServerUrl(url: String) {
+        val updatedSettings = repository.updateAppSettings {
+            it.copy(
+                remoteSync = it.remoteSync.copy(serverBaseUrl = url)
+            )
+        }
+        _appSettings.value = updatedSettings
+    }
+
+    /** Update the "Also sync API keys" toggle. */
+    fun updateRemoteSyncApiKeys(syncApiKeys: Boolean) {
+        val updatedSettings = repository.updateAppSettings {
+            it.copy(
+                // Cloud execution needs the keys in the cloud: off with their sync
+                remoteSync = it.remoteSync.copy(
+                    syncApiKeys = syncApiKeys,
+                    cloudExecution = it.remoteSync.cloudExecution && syncApiKeys
+                )
+            )
+        }
+        _appSettings.value = updatedSettings
+    }
+
+    /**
+     * Update the "manage API requests in the cloud" checkbox. It can only be turned on while
+     * sync is on, signed in, and syncing the API keys (the cloud runs the requests with them).
+     */
+    fun updateCloudExecution(enabled: Boolean) {
+        if (enabled) {
+            val sync = repository.loadAppSettings().remoteSync
+            val missing = when {
+                !sync.enabled || sync.authToken.isBlank() -> R.string.cloud_execution_requires_sync
+                !sync.syncApiKeys -> R.string.cloud_execution_requires_api_keys
+                else -> null
+            }
+            if (missing != null) {
+                Toast.makeText(context, missing, Toast.LENGTH_LONG).show()
+                return
+            }
+        }
+        val updatedSettings = repository.updateAppSettings {
+            val sync = it.remoteSync
+            it.copy(
+                remoteSync = sync.copy(
+                    cloudExecution = enabled && sync.enabled && sync.authToken.isNotBlank() && sync.syncApiKeys
+                )
+            )
+        }
+        _appSettings.value = updatedSettings
+    }
+
+    /** Trigger an immediate pull from the server. */
+    fun triggerSyncNow() {
+        repository.pullNow()
+    }
+
+    /** Test the sync connection. Returns true on success, false on failure. */
+    suspend fun testSyncConnection(): Boolean = repository.testSyncConnection()
+
+    // ── Google Sign-In for sync ───────────────────────────────────────────────
+
+    /**
+     * Returns the Google Sign-In intent to launch via an ActivityResultLauncher.
+     * Signs out any existing cached session first so the account chooser always
+     * appears (allowing account switching).
+     */
+    fun getSyncSignInIntent(): android.content.Intent = syncSignInProvider.getSignInIntent()
+
+    /**
+     * Processes the ActivityResult returned after the user completes (or cancels)
+     * the Google sign-in flow.  On success, exchanges the ID token for a
+     * server-minted sync token, runs the one-time local user migration, and
+     * reloads all user data so the UI reflects the (potentially new) username.
+     */
+    fun handleSyncSignInResult(data: android.content.Intent) {
+        viewModelScope.launch {
+            _syncSignInInProgress.value = true
+            try {
+                val identityResult = syncSignInProvider.handleSignInResult(data)
+                identityResult.fold(
+                    onSuccess = { identity ->
+                        val signInResult = repository.signInToSync(identity)
+                        signInResult.fold(
+                            onSuccess = { username ->
+                                reloadUserDataAfterSignIn()
+                                showSnackbar(
+                                    context.getString(R.string.remote_sync_sign_in_success, username)
+                                )
+                            },
+                            onFailure = { error ->
+                                showSnackbar(
+                                    error.message
+                                        ?: context.getString(R.string.remote_sync_sign_in_error)
+                                )
+                            }
+                        )
+                    },
+                    onFailure = { error ->
+                        showSnackbar(
+                            error.message
+                                ?: context.getString(R.string.remote_sync_sign_in_error)
+                        )
+                    }
+                )
+            } finally {
+                _syncSignInInProgress.value = false
+            }
+        }
+    }
+
+    /**
+     * Signs out of remote sync: disables sync, clears the server-minted token
+     * and account email.  Local data and the current username are preserved.
+     */
+    fun signOutOfSync() {
+        repository.signOutOfSync()
+        val updatedSettings = repository.loadAppSettings()
+        _appSettings.value = updatedSettings
+    }
+
+    /**
+     * Reloads all user-scoped data after a successful sign-in (current_user may
+     * have changed due to the one-time default→username migration).
+     */
+    private fun reloadUserDataAfterSignIn() {
+        viewModelScope.launch {
+            val settings = repository.loadAppSettings()
+            _appSettings.value = settings
+
+            repository.initializeCustomProviders(settings.current_user)
+            repository.initializeFullCustomProviders(settings.current_user)
+
+            val allProviders = repository.loadProviders()
+            val activeProviders = repository.loadApiKeys(settings.current_user)
+                .filter { it.isActive }.map { it.provider }
+            val providers = allProviders.filter { it.provider in activeProviders }
+            val currentProvider = providers.find { it.provider == settings.selected_provider }
+                ?: providers.firstOrNull()
+
+            val chatHistory = repository.loadChatHistory(settings.current_user)
+            repository.cleanupEmptyChats(settings.current_user)
+            val refreshedHistory = repository.loadChatHistory(settings.current_user)
+
+            _uiState.value = _uiState.value.copy(
+                availableProviders = providers,
+                currentProvider = currentProvider,
+                chatHistory = refreshedHistory.chat_history,
+                groups = refreshedHistory.groups,
+                currentChat = refreshedHistory.chat_history.lastOrNull()
+            )
+        }
+    }
+
 }
 
 
@@ -1054,3 +1480,6 @@ class ChatViewModel(
 
 
 
+
+/** Disk reads a sync reload makes before giving up on local writes racing it (the next tick retries). */
+private const val RELOAD_ATTEMPTS = 5

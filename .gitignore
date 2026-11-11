@@ -14,3 +14,22 @@
 .cxx
 local.properties
 .claude/settings.local.json
+
+# Local, environment-specific — not shared
+CLAUDE.md
+
+# Web frontend build artifacts
+web/node_modules
+web/dist
+web/.vite
+
+# Playwright E2E test output
+web/test-results
+web/playwright-report
+web/.playwright
+
+# R7 visual verification screenshots (local only)
+web/r7-screenshots/
+
+# Deployment secrets — never commit real env file
+server/deploy/llm-web.env

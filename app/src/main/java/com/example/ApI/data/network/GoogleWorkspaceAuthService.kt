@@ -28,7 +28,8 @@ class GoogleWorkspaceAuthService(private val context: Context) {
 
         // OAuth 2.0 Client ID from Google Cloud Console
         // OAuth 2.0 Web Client ID (Required for requestIdToken/requestServerAuthCode)
-        private const val CLIENT_ID = "926212364522-f5ppm0o9cj95te2rerborkdg62e8qlc4.apps.googleusercontent.com"
+        // Accessible to SyncGoogleSignInProvider (same web client id, different scopes)
+        const val CLIENT_ID = "926212364522-f5ppm0o9cj95te2rerborkdg62e8qlc4.apps.googleusercontent.com"
 
         // OAuth Scopes for Google Workspace APIs
         const val SCOPE_GMAIL_MODIFY = "https://www.googleapis.com/auth/gmail.modify"

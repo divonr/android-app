@@ -179,13 +179,14 @@ fun WelcomeScreen(
     if (showAddApiKeyDialog) {
         AddApiKeyDialog(
             providers = providers,
-            onConfirm = { provider, key, customName ->
+            onConfirm = { provider, key, customName, projectId ->
                 repository.addApiKey(
                     currentUser,
                     ApiKey(
                         provider = provider,
                         key = key,
-                        customName = customName
+                        customName = customName,
+                        projectId = projectId
                     )
                 )
                 showAddApiKeyDialog = false

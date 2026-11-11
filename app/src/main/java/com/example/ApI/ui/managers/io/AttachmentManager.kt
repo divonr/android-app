@@ -1,9 +1,11 @@
 package com.example.ApI.ui.managers.io
 
 import android.net.Uri
+import com.example.ApI.data.DeviceAttachmentsProvider
 import com.example.ApI.data.model.SelectedFile
 import com.example.ApI.ui.managers.ManagerDependencies
 import kotlinx.coroutines.launch
+import java.io.File
 import java.io.InputStream
 
 /**
@@ -14,6 +16,15 @@ import java.io.InputStream
 class AttachmentManager(
     private val deps: ManagerDependencies
 ) {
+    /** The account's attachment store (does nothing while sync is off). */
+    private val attachments by lazy { DeviceAttachmentsProvider.get(deps.context) }
+
+    /**
+     * Start a failed upload of an attached file again.
+     */
+    fun retryUpload(file: SelectedFile) {
+        file.localPath?.let { attachments.retry(it) }
+    }
 
     /**
      * Add a file from URI to the selected files list.
@@ -35,6 +46,8 @@ class AttachmentManager(
                             mimeType = mimeType,
                             localPath = localPath
                         )
+                        // With sync on: upload to the account's store right away, in the background
+                        attachments.attach(File(localPath))
 
                         deps.updateUiState(
                             deps.uiState.value.copy(
@@ -72,6 +85,7 @@ class AttachmentManager(
                                 mimeType = mimeType,
                                 localPath = localPath
                             )
+                            attachments.attach(File(localPath))
                             newSelectedFiles.add(selectedFile)
                         }
                     }
@@ -100,6 +114,9 @@ class AttachmentManager(
                 selectedFiles = deps.uiState.value.selectedFiles.filter { it != file }
             )
         )
+
+        // Stop its upload and delete it from the account's store (it was never used)
+        file.localPath?.let { attachments.remove(it) }
 
         // Delete the local file if it exists
         file.localPath?.let { path ->
