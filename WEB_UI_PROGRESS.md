@@ -11,6 +11,10 @@ Branch: `web-ui`
 
 ---
 
+## R13 — Composer height fix (2026-11-11)
+
+- [x] **Empty composer is one line again** — the textarea's inline height was set only in its `onChange`, so a text cleared without an input event (a send, a finished or cancelled edit) left the empty box as tall as the text had been (up to 150px). `ChatInputArea.tsx` now fits the height in a layout effect on every text change and on a width change (`ResizeObserver`), through `components/chat/textareaAutosize.ts`: no inline height while empty (rows = 1 / min-height give the one line), else `scrollHeight` capped at 150px. Tests: `__tests__/ComposerAutosize.test.tsx`.
+
 ## R12 — Composer emoji keyboard (2026-11-11)
 
 - [x] **Emoji keyboard in the composer** — mirrors Android's `ui/components/emoji/`. In `ChatInputArea.tsx` the attach (+) button moved to the other side of the text field, next to the web-search toggle, and its old place holds an emoji toggle (smiley; a keyboard icon while the panel is open). The toggle opens `components/chat/EmojiPanel.tsx` under the pill: `emoji-picker-react` (new dependency) with native glyphs and its bundled data — nothing is fetched at run time — themed with the app's colours through `--epr-*` variables, Hebrew category names and labels, Android's tab order, recents first, search (English), the skin-tone picker by the search field and long press for an emoji's own tones (recents and tone kept by the picker in localStorage). The panel is `React.lazy`, a chunk of its own (about 335 kB, 90 kB gzipped; the main bundle grew by about 4 kB) loaded on first opening. A picked emoji goes in at the textarea's caret (in place of the selection) and the panel stays open; Escape and a click outside the composer close it (the picker takes an Escape first when it has a query or a tone popup to dismiss). Unlike Android there is no system keyboard to swap with and no backspace key in the panel. Strings `emoji_*` in `he.ts`. Tests: `ChatEmoji.test.tsx`, `EmojiPanel.test.tsx`.
