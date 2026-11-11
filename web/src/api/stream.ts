@@ -14,7 +14,8 @@
  *
  * The request is executed by a server-owned "run": the stream starts with a `run` event
  * carrying its id, relays the run's events and ends after its terminal event (`complete`,
- * `error` or `cancelled`).  `: ping` comment frames keep an idle stream alive.  Closing the
+ * `error` or `cancelled`).  `: ping` comment frames keep an idle stream alive.  A `usage` event
+ * (the token counts of one provider request) only writes a log line.  Closing the
  * response does NOT stop the run (that is POST /api/runs/{runId}/cancel, see ./runs); a stream
  * that breaks before the terminal event is reported through `onStreamLost`, and the run can
  * still be followed on the account-level stream.
@@ -32,6 +33,7 @@ import type {
   SseThinkingStartedEvent,
   SseToolCallEvent,
   SseToolResultEvent,
+  SseUsageEvent,
   SendMessageRequest,
   ResendMessageRequest,
 } from './types'
@@ -122,6 +124,28 @@ export function parseSseChunk(
 }
 
 // ---------------------------------------------------------------------------
+// Token usage (for checking the provider's prompt cache)
+// ---------------------------------------------------------------------------
+
+/**
+ * The log line of a `usage` event, in the wording of the server's and Android's logs. A count
+ * that is missing or not a number reads as 0; the cached share of the prompt is rounded down.
+ *
+ * Exported for unit testing.
+ */
+export function usageLogLine(event: Partial<SseUsageEvent> | null | undefined): string {
+  const count = (value: unknown) =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : 0
+  const prompt = count(event?.promptTokens)
+  const cached = count(event?.cachedTokens)
+  const percent = prompt > 0 ? Math.floor((cached * 100) / prompt) : 0
+  return (
+    `Token usage: prompt=${prompt}, cached=${cached} (${percent}%), ` +
+    `output=${count(event?.outputTokens)}, thoughts=${count(event?.thoughtsTokens)}`
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Internal: dispatch a parsed frame to callbacks
 // ---------------------------------------------------------------------------
 
@@ -183,6 +207,10 @@ function dispatchFrame(
       break
     case 'messages_added':
       callbacks.onMessagesAdded?.(json as SseMessagesAddedEvent)
+      break
+    case 'usage':
+      // No UI: console.log is what the Logs page shows (utils/appLogger)
+      console.log(usageLogLine(json as SseUsageEvent))
       break
     case 'error':
       progress.ended = true

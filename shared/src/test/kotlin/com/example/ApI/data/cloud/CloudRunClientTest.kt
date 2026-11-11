@@ -4,6 +4,7 @@ import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.Message
 import com.example.ApI.data.model.ThinkingBudgetValue
 import com.example.ApI.data.model.ThoughtsStatus
+import com.example.ApI.data.model.TokenUsage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -245,6 +246,9 @@ class CloudRunClientTest {
         stream.event("tool_call", """{"toolId":"get_date_time","toolName":"Date","parameters":{},"runId":"r1","chatId":"c1"}""")
         stream.event("tool_result", """{"toolId":"get_date_time","success":true,"output":"now","runId":"r1","chatId":"c1"}""")
         stream.event("messages_added", """{"runId":"r1","chatId":"c1"}""")
+        // The token counts of a provider request; a count the server left out is 0
+        stream.event("usage", """{"promptTokens":4436,"cachedTokens":4043,"outputTokens":372,"thoughtsTokens":12,"runId":"r1","chatId":"c1"}""")
+        stream.event("usage", """{"promptTokens":100,"runId":"r1","chatId":"c1"}""")
         stream.event("partial", """{"text":"lo\nשלום","runId":"r1","chatId":"c1"}""")
         stream.event("complete", """{"text":"Hello","messageId":"msg-9","runId":"r1","chatId":"c1"}""")
         stream.event("error", """{"error":"boom","runId":"r2","chatId":"c2"}""")
@@ -260,6 +264,10 @@ class CloudRunClientTest {
         assertEquals(CloudRunEvent.ToolCall("r1", "c1", "get_date_time", "Date"), collected.next())
         assertEquals(CloudRunEvent.ToolResult("r1", "c1", "get_date_time", true), collected.next())
         assertEquals(CloudRunEvent.MessagesAdded("r1", "c1"), collected.next())
+        val usage = assertIs<CloudRunEvent.Usage>(collected.next())
+        assertEquals(CloudRunEvent.Usage("r1", "c1", TokenUsage(4436, 4043, 372, 12)), usage)
+        assertEquals("prompt=4436, cached=4043 (91%), output=372, thoughts=12", usage.usage.describe())
+        assertEquals(CloudRunEvent.Usage("r1", "c1", TokenUsage(100, 0, 0, 0)), collected.next())
         assertEquals(CloudRunEvent.Partial("r1", "c1", "lo\nשלום"), collected.next())
         assertEquals(CloudRunEvent.Complete("r1", "c1", "Hello", "msg-9"), collected.next())
         assertEquals(CloudRunEvent.Error("r2", "c2", "boom"), collected.next())

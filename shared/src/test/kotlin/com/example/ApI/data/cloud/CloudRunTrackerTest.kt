@@ -2,6 +2,7 @@ package com.example.ApI.data.cloud
 
 import com.example.ApI.data.model.StreamingEvent
 import com.example.ApI.data.model.ThoughtsStatus
+import com.example.ApI.data.model.TokenUsage
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -181,6 +182,25 @@ class CloudRunTrackerTest {
         assertEquals(listOf(CloudRunAction.ChatUpdated("c1")), tracker.onEvent(CloudRunEvent.ChatUpdated("r1", "c1")))
         assertEquals("r2", tracker.displayedRun("c1"))
         assertEquals(listOf(partial("r2", "c1", "llo")), tracker.onEvent(CloudRunEvent.Partial("r2", "c1", "llo")))
+    }
+
+    @Test
+    fun `usage changes nothing - no action, no adopted run, a followed run goes on`() {
+        val tracker = CloudRunTracker()
+        val usage = TokenUsage(promptTokens = 4436, cachedTokens = 4043, outputTokens = 372, thoughtsTokens = 12)
+
+        // Of a run nobody announced here: not adopted
+        assertEquals(emptyList(), tracker.onEvent(CloudRunEvent.Usage("r-unknown", "c9", usage)))
+        assertFalse(tracker.isTracked("r-unknown"))
+        assertNull(tracker.displayedRun("c9"))
+
+        // Of the run a chat displays (one per provider request, so also between its tool steps)
+        tracker.registerLocal("r1", "c1")
+        tracker.confirmLocal("r1")
+        tracker.onEvent(CloudRunEvent.Partial("r1", "c1", "He"))
+        assertEquals(emptyList(), tracker.onEvent(CloudRunEvent.Usage("r1", "c1", usage)))
+        assertEquals("r1", tracker.displayedRun("c1"))
+        assertEquals(listOf(partial("r1", "c1", "llo")), tracker.onEvent(CloudRunEvent.Partial("r1", "c1", "llo")))
     }
 
     // ── Snapshots ─────────────────────────────────────────────────────────────

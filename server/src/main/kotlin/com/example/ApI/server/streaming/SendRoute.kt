@@ -5,6 +5,7 @@ import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.Message
 import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.ThinkingBudgetValue
+import com.example.ApI.data.model.VERTEX_PROVIDER
 import com.example.ApI.data.model.TitleGenerationSettings
 import com.example.ApI.data.model.Chat
 import com.example.ApI.data.model.ChatGroup
@@ -36,7 +37,9 @@ import java.util.UUID
  * server doesn't need a separate "add message" round-trip before streaming.  The
  * server persists the new user message and streams the assistant response.
  *
- * [messages] — full conversation history INCLUDING the new user message at the end.
+ * [messages] — full conversation history INCLUDING the new user message at the end.  For vertex,
+ *              when it is the chat's stored path message for message, the stored messages are
+ *              what the provider gets (see [storedRequestMessages]).
  * [projectAttachments] — group/project context attachments; only used when the chat is not in a
  *                        project of the server's copy (a project chat gets the project's own files).
  * [thinkingBudget] — "none" | "low" | "medium" | "high" | "max" | integer string
@@ -205,17 +208,24 @@ fun Route.sendRoute() {
         // Pin the replies to the saved user message (multi-message mode: the chat's last message)
         val anchor = anchorAfter(savedChat, userMessage?.takeIf { body.persistUserMessage }?.id)
 
+        // The web posts every message as role, text and attachments only. Vertex gets the stored
+        // messages of the same path instead (a tool call with its arguments, ids, output and
+        // signature), like the turn's follow-up requests and a resend: its prompt cache is a
+        // prefix match on what those sent. Every other provider keeps the web's own list
+        val requestMessages =
+            if (body.provider == VERTEX_PROVIDER) storedRequestMessages(body.messages, anchor.path()) else body.messages
+
         // The user's own tools for this chat. As before, an enabled tool the server has no tool
         // for is simply not offered to the model (no 409 on this route)
         val tools = ctx.tools.forRun(
-            body.chatId, body.enabledToolIds, messages = body.messages, projectAttachments = projectAttachments
+            body.chatId, body.enabledToolIds, messages = requestMessages, projectAttachments = projectAttachments
         )
 
         // This server's files of the request's attachments (the user's own files, the cache, the
         // store). Unlike POST /api/runs there is no device to fall back to: a file that cannot
         // be had is — as before — not sent
         val files = ctx.attachmentsForRun(
-            body.provider, body.chatId, savedChat.group, body.messages, projectAttachments, WEB_ATTACHMENTS_TIMEOUT_MS
+            body.provider, body.chatId, savedChat.group, requestMessages, projectAttachments, WEB_ATTACHMENTS_TIMEOUT_MS
         )?.files ?: AttachmentFiles.NONE
 
         call.startAndStreamRun(
@@ -225,7 +235,7 @@ fun Route.sendRoute() {
                 chatId = body.chatId,
                 provider = provider,
                 modelName = body.modelName,
-                messages = body.messages,
+                messages = requestMessages,
                 systemPrompt = systemPrompt,
                 webSearchEnabled = body.webSearchEnabled,
                 enabledToolIds = body.enabledToolIds,
@@ -265,6 +275,29 @@ internal fun effectiveSystemPrompt(project: ChatGroup?, chatPrompt: String): Str
         projectPrompt.isEmpty() -> chatPrompt
         else -> "$projectPrompt\n\n$chatPrompt"
     }
+}
+
+/**
+ * The messages a web send to vertex hands to the provider: [stored] (the chat's stored path up to the
+ * message to answer) when [client] is that path message for message — same roles, texts and
+ * attached file names — else [client] as it was sent.
+ *
+ * The stored messages are what every other request of the conversation sent (the follow-up
+ * requests of a tool turn, a resend, a device), so the request starts with the same prefix and
+ * the provider's prompt cache is hit; the web's copy has no tool arguments, call ids, outputs or
+ * thought signatures.  A list that is not the stored path (the client shows another branch or an
+ * older state of the chat, or sent a list of its own) is never replaced: the model must answer
+ * the conversation the user sees.
+ */
+internal fun storedRequestMessages(client: List<Message>, stored: List<Message>): List<Message> {
+    if (client.size != stored.size) return client
+    val samePath = client.indices.all { i ->
+        val sent = client[i]
+        val saved = stored[i]
+        sent.role == saved.role && sent.text == saved.text &&
+            sent.attachments.map { it.file_name } == saved.attachments.map { it.file_name }
+    }
+    return if (samePath) stored else client
 }
 
 /**

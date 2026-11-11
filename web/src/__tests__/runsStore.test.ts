@@ -219,6 +219,31 @@ describe('runsStore', () => {
     expect(list).not.toHaveBeenCalled()
   })
 
+  it('usage (and any event the store does not know) leaves a followed run as it is', async () => {
+    runs().applyEvent(ev('run_started', { run: run() }))
+    runs().applyEvent(ev('partial', { text: 'Hel' }))
+    await flush()
+    vi.clearAllMocks()
+    const before = runs().runs.r1
+    const usage = { promptTokens: 4436, cachedTokens: 4043, outputTokens: 372, thoughtsTokens: 12 }
+
+    runs().applyEvent(ev('usage', usage))
+    runs().applyEvent(ev('from_the_future', { x: 1 }))
+    // Of a run the store does not follow: nothing appears
+    runs().applyEvent(ev('usage', usage, 'r-other', 'c2'))
+    await flush()
+
+    expect(runs().runs).toEqual({ r1: before })
+    expect(runs().runs.r1).toBe(before)
+    expect(runs().errors).toEqual({})
+    expect(get).not.toHaveBeenCalled()
+    expect(list).not.toHaveBeenCalled()
+
+    // …and the run streams on
+    runs().applyEvent(ev('partial', { text: 'lo' }))
+    expect(shown()?.partialText).toBe('Hello')
+  })
+
   describe('own runs (the tab reads their per-request stream)', () => {
     it('are followed silently: not shown as foreign, no reloads', async () => {
       runs().claim('r1')

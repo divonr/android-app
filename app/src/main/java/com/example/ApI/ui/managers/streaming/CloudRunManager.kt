@@ -8,6 +8,7 @@ import com.example.ApI.data.cloud.CloudCancelResult
 import com.example.ApI.data.cloud.CloudRunAction
 import com.example.ApI.data.cloud.CloudRunClient
 import com.example.ApI.data.cloud.CloudRunConfig
+import com.example.ApI.data.cloud.CloudRunEvent
 import com.example.ApI.data.cloud.CloudRunRequest
 import com.example.ApI.data.cloud.CloudRunTracker
 import com.example.ApI.data.cloud.CloudStartResult
@@ -121,7 +122,12 @@ class CloudRunManager(
         val wanted = foreground && isEffective
         if (wanted && streamJob == null) {
             streamJob = deps.scope.launch {
-                client.events().collect { event -> apply(tracker.onEvent(event)) }
+                client.events().collect { event ->
+                    // The provider answered from the server: its token counts (the sign of a
+                    // prompt-cache hit) would otherwise only be in the server's log
+                    if (event is CloudRunEvent.Usage) AppLogger.i("Cloud run ${event.runId} token usage: ${event.usage.describe()}")
+                    apply(tracker.onEvent(event))
+                }
             }
         } else if (!wanted) {
             streamJob?.cancel()

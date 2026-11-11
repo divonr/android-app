@@ -203,6 +203,8 @@ class CloudRunTracker(private val isChatBusyLocally: (chatId: String) -> Boolean
             // About the chat, not the run (which is over): never adopts or changes a run. Also
             // reported for a run given up for an on-device fallback: the title is news all the same
             is CloudRunEvent.ChatUpdated -> out += CloudRunAction.ChatUpdated(event.chatId)
+            // Numbers for the log, not the run's state: nothing to show, never adopts a run
+            is CloudRunEvent.Usage -> {}
         }
         return out
     }

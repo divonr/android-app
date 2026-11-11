@@ -125,6 +125,16 @@ whenever nothing was sent for 15 s. The stream never ends by itself (only on ser
     the generation failed, or it gave the same name). A client refreshes its chat list and the
     chat's title; it must not treat the run as running again. Clients that do not know the event
     ignore it (unknown event types are ignored by both clients).
+  - `usage` → `{"promptTokens","cachedTokens","outputTokens","thoughtsTokens"}` (integers;
+    2026-11-11): not about the run's state — the token counts of ONE provider request of the run
+    (each tool follow-up is a request, so a run can send several), from providers that report them
+    (today only `vertex`). `cachedTokens` is the part of `promptTokens` the provider served from
+    its prompt cache (0 on a miss); it is the only sign that the provider's implicit caching was
+    used. Sent while the run is running (the last one right before the terminal event, also
+    before an `error` of a request whose counts arrived); never after the terminal event. It
+    changes nothing of `RunState` or a snapshot and is not replayed to a client that connects
+    later. Clients only log it (the server too: `Run <runId> <provider>/<model> token usage:
+    prompt=…, cached=… (…%), output=…, thoughts=…`); clients that do not know the event ignore it.
 - Snapshot + subscription are atomic (no event lost or duplicated between them).
 - `messages_added`, `complete` and `cancelled` are emitted only after the save (if any) AND a bounded
   (≈3 s) flush of the sync upload, so a client can pull immediately.
@@ -168,8 +178,8 @@ the route prepares the chat as today (persist user message / create branch), sta
 generated `runId`), sends a first `run` event `{"runId"}`, then relays that run's events — same
 event names and data as before, WITHOUT `runId`/`chatId` in the data and without `run_started` —
 and ends the response after the run's terminal event. New on this stream: the `run` event, a
-`cancelled` → `{}` terminal event (when the run was cancelled through the cancel endpoint), and
-`: ping` comment frames. Closing this response does NOT cancel the run (until S3 the web's stop
+`cancelled` → `{}` terminal event (when the run was cancelled through the cancel endpoint),
+`usage` (2026-11-11, as on the user-level stream) and `: ping` comment frames. Closing this response does NOT cancel the run (until S3 the web's stop
 button therefore no longer stops anything: the reply is still saved). Title generation after
 completion stays (server side) for every run; since S5 it runs after the terminal event, so this
 response has ended by then and the title is announced only on the user-level stream
@@ -177,6 +187,17 @@ response has ended by then and the title is announced only on the user-level str
 unchanged (400 unknown provider, 404 chat not found…): the 409 codes belong to `POST /api/runs` only.
 Attachments are resolved as for `POST /api/runs` (round 2, Server), but there is no device to fall
 back to: a file the server cannot get is — as before — not sent to the provider.
+**Stored history (2026-11-11).** The web posts every message of `messages` as role, text and
+attachments only. For provider `vertex`, `POST /api/chat/send` therefore hands the run the server's STORED messages of the
+chat's path (up to the saved user message; in multi-message mode the whole path) whenever the
+client's list is that path message for message — same roles, texts and attached file names
+(`storedRequestMessages`). The provider then gets tool calls with their arguments, call ids,
+outputs and thought signatures, and the request starts with exactly what the turn's follow-up
+requests, a resend and a device send (provider prompt caches are prefix matches). A list that is not
+the stored path (another branch, an older state of the chat, a list of the client's own) is sent
+as the client gave it, as before, and so is every list for another provider (a stored reply's
+thoughts carry no signature, which Anthropic refuses). The resend route always built its request
+from the stored chat.
 (A6) **Project chats.** The web does not build the project context; these two routes take it from
 the server's own copy: when the chat's group is a project (`is_project` — Android's
 `getCurrentChatProjectGroup`; a plain group adds nothing) the request gets the group's
@@ -314,6 +335,9 @@ event stream with reconnect), `CloudRunTracker` (the runs' client-side state →
   shows its error. `error` is shown like an on-device error (snackbar) + a pull.
   `chat_updated` → a pull; the ordinary reload after a sync refreshes the chat list and the open
   chat's title. It never adopts, shows or ends a run (also handled for a run the device gave up).
+  `usage` → one line in the in-app log (`Cloud run <runId> token usage: prompt=…, cached=… (…%),
+  output=…, thoughts=…`), for every run of the account the stream reports; nothing else (the
+  tracker ignores it: no action, no adopted run).
 - Stop button on a cloud run → cancel endpoint with `keepPartial=true` (the device's stop button is
   `stopStreamingAndSave`); the text stops growing at once and the overlay goes with the `cancelled`
   event (which no longer waits for the title generation). Stop while the start request is still in flight is applied when it returns. If the cancel
@@ -338,6 +362,9 @@ event stream with reconnect), `CloudRunTracker` (the runs' client-side state →
   chat list and take the new name into the open chat (`chatStore.refreshTitle`) — only the name, so
   a reply that is streaming into the chat is not disturbed. The per-request stream of an own send
   ends at the terminal event, before the title exists; the title always arrives this way.
+- `usage`: the per-request stream of an own send writes one `console.log` line (`Token usage:
+  prompt=…, cached=… (…%), output=…, thoughts=…`), which the Logs page shows; no UI. On the
+  account-level stream it is ignored (an own run would be logged twice).
 - Own sends keep using the per-request SSE. A per-request stream that breaks before the terminal
   event (after the `run` event), and leaving the chat while it streams, hand the run over to the
   account-level stream (no error; the fetch is closed, the run goes on).

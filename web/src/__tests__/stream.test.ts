@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { parseSseChunk, sendStream, resendStream } from '../api/stream'
+import { parseSseChunk, sendStream, resendStream, usageLogLine } from '../api/stream'
 import type { StreamCallbacks } from '../api/stream'
 import type { ResendMessageRequest } from '../api/types'
 
@@ -120,6 +120,30 @@ describe('parseSseChunk', () => {
 // ---------------------------------------------------------------------------
 // sendStream — fetch mock tests
 // ---------------------------------------------------------------------------
+
+describe('usageLogLine', () => {
+  it('shows the counts and the cached share of the prompt, rounded down', () => {
+    expect(
+      usageLogLine({ promptTokens: 4436, cachedTokens: 4043, outputTokens: 372, thoughtsTokens: 12 }),
+    ).toBe('Token usage: prompt=4436, cached=4043 (91%), output=372, thoughts=12')
+    expect(
+      usageLogLine({ promptTokens: 3, cachedTokens: 2, outputTokens: 1, thoughtsTokens: 0 }),
+    ).toBe('Token usage: prompt=3, cached=2 (66%), output=1, thoughts=0')
+  })
+
+  it('reads a missing or unusable count as 0 and never divides by an empty prompt', () => {
+    expect(usageLogLine({ promptTokens: 100, outputTokens: 5 })).toBe(
+      'Token usage: prompt=100, cached=0 (0%), output=5, thoughts=0',
+    )
+    expect(usageLogLine({ cachedTokens: 7 })).toBe(
+      'Token usage: prompt=0, cached=7 (0%), output=0, thoughts=0',
+    )
+    expect(usageLogLine({ promptTokens: 'many' } as never)).toBe(
+      'Token usage: prompt=0, cached=0 (0%), output=0, thoughts=0',
+    )
+    expect(usageLogLine(null)).toBe('Token usage: prompt=0, cached=0 (0%), output=0, thoughts=0')
+  })
+})
 
 describe('sendStream callbacks', () => {
   beforeEach(() => {
@@ -365,6 +389,28 @@ describe('per-request stream of a run', () => {
     const b = recorder()
     await resendStream('c1', 'm0', RESEND, b.cbs).done
     expect(b.log).toEqual(['error:network down'])
+  })
+
+  it('usage writes one log line per event and reaches no callback', async () => {
+    const logged = vi.spyOn(console, 'log').mockImplementation(() => {})
+    stubFetch(body([
+      'event: run\ndata: {"runId":"r1"}\n\n',
+      'event: partial\ndata: {"text":"hi"}\n\n',
+      'event: usage\ndata: {"promptTokens":4436,"cachedTokens":4043,"outputTokens":372,"thoughtsTokens":12}\n\n',
+      'event: messages_added\ndata: {}\n\n',
+      // The follow-up request of the tool step; an event this client does not know is skipped
+      'event: usage\ndata: {"promptTokens":100,"cachedTokens":0,"outputTokens":5,"thoughtsTokens":0}\n\n',
+      'event: from_the_future\ndata: {"x":1}\n\n',
+      'event: complete\ndata: {"text":"hi","messageId":"m1"}\n\n',
+    ]))
+    const { log, cbs } = recorder()
+    await resendStream('c1', 'm0', RESEND, cbs).done
+    // Not a terminal event: the stream goes on to the run's end
+    expect(log).toEqual(['run:r1', 'partial:hi', 'messages_added', 'complete:m1'])
+    expect(logged.mock.calls).toEqual([
+      ['Token usage: prompt=4436, cached=4043 (91%), output=372, thoughts=12'],
+      ['Token usage: prompt=100, cached=0 (0%), output=5, thoughts=0'],
+    ])
   })
 
   it('nothing follows the terminal event: no stream-lost after complete / error', async () => {

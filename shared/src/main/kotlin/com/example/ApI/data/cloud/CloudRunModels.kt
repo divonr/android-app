@@ -3,6 +3,7 @@ package com.example.ApI.data.cloud
 import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.Message
 import com.example.ApI.data.model.ThoughtsStatus
+import com.example.ApI.data.model.TokenUsage
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -10,6 +11,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 
 /** JSON of the cloud-run wire protocol (CLOUD_RUNS_PLAN.md). */
@@ -123,6 +125,13 @@ sealed class CloudRunEvent {
      */
     data class ChatUpdated(val runId: String, val chatId: String) : CloudRunEvent()
 
+    /**
+     * Not an event of the run's state: the token counts of one provider request of the run
+     * (each tool follow-up is a request), from providers that report them — what tells whether
+     * the provider's prompt cache was used.
+     */
+    data class Usage(val runId: String, val chatId: String, val usage: TokenUsage) : CloudRunEvent()
+
     companion object {
         /**
          * The event of an SSE frame, or null for an unknown event type or unusable data (ignored:
@@ -142,6 +151,8 @@ sealed class CloudRunEvent {
         }
 
         private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+
+        private fun JsonObject.int(key: String): Int = (this[key] as? JsonPrimitive)?.intOrNull ?: 0
 
         private fun parse(type: String, obj: JsonObject): CloudRunEvent? {
             if (type == "snapshot") {
@@ -178,6 +189,10 @@ sealed class CloudRunEvent {
                 "error" -> Error(runId, chatId, obj.string("error") ?: "Unknown error")
                 "cancelled" -> Cancelled(runId, chatId)
                 "chat_updated" -> ChatUpdated(runId, chatId)
+                "usage" -> Usage(
+                    runId, chatId,
+                    TokenUsage(obj.int("promptTokens"), obj.int("cachedTokens"), obj.int("outputTokens"), obj.int("thoughtsTokens"))
+                )
                 else -> null
             }
         }

@@ -6,6 +6,7 @@ import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.model.ThinkingBudgetValue
 import com.example.ApI.data.model.ThoughtsStatus
+import com.example.ApI.data.model.TokenUsage
 import com.example.ApI.data.repository.AttachmentOwner
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.ReplyAnchor
@@ -75,7 +76,8 @@ data class RunState(
  * One event of a run: [payload] is the event's own data (without `runId` / `chatId`).
  *
  * `chat_updated` is the one event that can follow a run's terminal event: it is about the run's
- * chat (its automatic title was generated and uploaded), not about the run's state.
+ * chat (its automatic title was generated and uploaded), not about the run's state.  `usage`
+ * (the token counts of one provider request) is not about the run's state either.
  */
 class RunEvent(val type: String, val runId: String, val chatId: String, val payload: JsonObject) {
     val isTerminal: Boolean get() = type == "complete" || type == "error" || type == "cancelled"
@@ -108,7 +110,7 @@ class RunSpec(
     val anchor: ReplyAnchor,
     /**
      * This server's files of the request's attachments (see [AttachmentFiles]); [messages] and
-     * [projectAttachments] stay as the client sent them (their paths are the device's).
+     * [projectAttachments] stay as they were sent or stored (their paths are the device's).
      */
     val attachmentFiles: AttachmentFiles = AttachmentFiles.NONE,
     /** The group whose project attachments [projectAttachments] are (for the provider ids), if known. */
@@ -440,6 +442,18 @@ class RunRegistry(
                     }
                 }
                 stopIfCancelled()
+            }
+
+            override fun onUsage(usage: TokenUsage) {
+                // For checking the provider's prompt cache only (one per provider request): the
+                // run's state does not change, and a client that does not know the event skips it
+                log.info("Run ${spec.runId} ${spec.provider.provider}/${spec.modelName} token usage: ${usage.describe()}")
+                emit(run, "usage", buildJsonObject {
+                    put("promptTokens", usage.promptTokens)
+                    put("cachedTokens", usage.cachedTokens)
+                    put("outputTokens", usage.outputTokens)
+                    put("thoughtsTokens", usage.thoughtsTokens)
+                })
             }
 
             override fun onComplete(fullText: String) {
