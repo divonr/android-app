@@ -1,10 +1,11 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act, cleanup } from '@testing-library/react'
+import { MdKeyboardArrowLeft as MdKeyboardArrowLeftLtr, MdKeyboardArrowRight as MdKeyboardArrowRightLtr } from 'react-icons/md'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ChatPage from '../pages/ChatPage'
 import * as chatStoreModule from '../stores/chatStore'
-import type { Chat } from '../api/types'
+import type { Chat, Message } from '../api/types'
 import type { StreamCallbacks } from '../api/stream'
 
 // ─── CSS modules mock ─────────────────────────────────────────────────────────
@@ -565,37 +566,59 @@ describe('ChatPage — tool calls', () => {
 })
 
 describe('ChatPage — branch navigation', () => {
-  const BRANCHED_CHAT: Chat = {
+  // As the server builds it: an edit / resend / regenerate keeps the user message's id, so the
+  // variants of a node share it and only currentVariantPath tells which one is shown.
+  const user = (text: string, nodeId: string, variantId: string, id = 'm1'): Message => ({
+    id, role: 'user', text, attachments: [], thoughtsStatus: 'NONE', nodeId, variantId,
+  })
+  const reply = (id: string, text: string, nodeId: string, variantId: string): Message => ({
+    id, role: 'assistant', text, attachments: [], thoughtsStatus: 'NONE', nodeId, variantId,
+  })
+  const NODES: Chat['messageNodes'] = [
+    {
+      nodeId: 'node-1',
+      parentNodeId: null,
+      variants: [
+        { variantId: 'v1', userMessage: user('Hello', 'node-1', 'v1'), responses: [reply('a1', 'Answer one', 'node-1', 'v1')], childNodeId: 'node-2' },
+        { variantId: 'v2', userMessage: user('Hello', 'node-1', 'v2'), responses: [reply('a2', 'Answer two', 'node-1', 'v2')] },
+        { variantId: 'v3', userMessage: user('Hello edited', 'node-1', 'v3'), responses: [reply('a3', 'Answer three', 'node-1', 'v3')] },
+      ],
+    },
+    {
+      nodeId: 'node-2',
+      parentNodeId: 'node-1',
+      variants: [
+        { variantId: 'w1', userMessage: user('Follow up', 'node-2', 'w1', 'm2'), responses: [reply('b1', 'Deep one', 'node-2', 'w1')] },
+        { variantId: 'w2', userMessage: user('Follow up', 'node-2', 'w2', 'm2'), responses: [reply('b2', 'Deep two', 'node-2', 'w2')] },
+      ],
+    },
+  ]
+  /** The chat with [path] as its current path (what the server's switch answers). */
+  const chatOn = (path: string[]): Chat => ({
     ...SAMPLE_CHAT,
-    messageNodes: [
-      {
-        nodeId: 'node-1',
-        parentNodeId: null,
-        variants: [
-          {
-            variantId: 'v1',
-            userMessage: { id: 'm1', role: 'user', text: 'Hello', attachments: [], thoughtsStatus: 'NONE' },
-            responses: [],
-          },
-          {
-            variantId: 'v2',
-            userMessage: { id: 'm3', role: 'user', text: 'Hello v2', attachments: [], thoughtsStatus: 'NONE' },
-            responses: [],
-          },
-        ],
-      },
-    ],
-    messages: [
-      {
-        id: 'm1',
-        role: 'user',
-        text: 'Hello',
-        attachments: [],
-        thoughtsStatus: 'NONE',
-        nodeId: 'node-1',
-        variantId: 'v1',
-      },
-    ],
+    messageNodes: NODES,
+    currentVariantPath: path,
+    messages: path.flatMap((id) => {
+      const v = NODES.flatMap((n) => n.variants).find((x) => x.variantId === id)!
+      return [v.userMessage, ...v.responses]
+    }),
+  })
+
+  // The real updateChat (other tests replace it with a mock): a switch must reach the store
+  // and re-render
+  const realUpdateChat = chatStoreModule.useChatStore.getState().updateChat
+  const open = (chat: Chat) => {
+    chatStoreModule.useChatStore.setState({
+      history: null,
+      currentChat: chat,
+      loading: false,
+      error: null,
+      loadHistory: vi.fn(),
+      loadChat: vi.fn(),
+      updateChat: realUpdateChat,
+      clearCurrentChat: vi.fn(),
+    })
+    renderChatPage()
   }
 
   beforeEach(() => {
@@ -603,49 +626,95 @@ describe('ChatPage — branch navigation', () => {
     vi.mocked(streamModule.sendStream).mockReturnValue({ abort: vi.fn(), done: Promise.resolve() })
   })
 
-  it('renders branch navigator when node has multiple variants', async () => {
-    chatStoreModule.useChatStore.setState({
-      history: null,
-      currentChat: BRANCHED_CHAT,
-      loading: false,
-      error: null,
-      loadHistory: vi.fn(),
-      loadChat: vi.fn(),
-      updateChat: vi.fn(),
-      clearCurrentChat: vi.fn(),
-    })
-
-    renderChatPage()
-    await waitFor(() => {
-      expect(screen.getByText('1/2')).toBeInTheDocument()
-    })
+  it('shows the position of the variant on the current path, not of the first with the same message id', async () => {
+    open(chatOn(['v2']))
+    await waitFor(() => expect(screen.getByText('2/3')).toBeInTheDocument())
+    expect(screen.getByLabelText(/previous variant/i)).not.toBeDisabled()
+    expect(screen.getByLabelText(/next variant/i)).not.toBeDisabled()
   })
 
-  it('calls switchVariant when navigation arrow is clicked', async () => {
-    vi.mocked(clientModule.branching.switchVariant).mockResolvedValue(SAMPLE_CHAT)
+  it('disables previous on the first variant and next on the last', async () => {
+    open(chatOn(['v3']))
+    await waitFor(() => expect(screen.getByText('3/3')).toBeInTheDocument())
+    expect(screen.getByLabelText(/previous variant/i)).not.toBeDisabled()
+    expect(screen.getByLabelText(/next variant/i)).toBeDisabled()
+    cleanup()
 
-    chatStoreModule.useChatStore.setState({
-      history: null,
-      currentChat: BRANCHED_CHAT,
-      loading: false,
-      error: null,
-      loadHistory: vi.fn(),
-      loadChat: vi.fn(),
-      updateChat: vi.fn(),
-      clearCurrentChat: vi.fn(),
-    })
+    open(chatOn(['v1', 'w1']))
+    await waitFor(() => expect(screen.getByText('1/3')).toBeInTheDocument())
+    const [prevOuter, prevNested] = screen.getAllByLabelText(/previous variant/i)
+    expect(prevOuter).toBeDisabled()
+    expect(prevNested).toBeDisabled()
+    for (const next of screen.getAllByLabelText(/next variant/i)) expect(next).not.toBeDisabled()
+  })
 
-    renderChatPage()
-    await waitFor(() => {
-      screen.getByText('1/2')
-    })
+  it('switches to the previous branch on click and shows it', async () => {
+    vi.mocked(clientModule.branching.switchVariant).mockResolvedValue(chatOn(['v1', 'w1']))
+    open(chatOn(['v2']))
+    await waitFor(() => expect(screen.getByText('Answer two')).toBeInTheDocument())
 
-    const nextBtn = screen.getByLabelText(/next variant/i)
-    fireEvent.click(nextBtn)
+    fireEvent.click(screen.getByLabelText(/previous variant/i))
 
-    await waitFor(() => {
-      expect(clientModule.branching.switchVariant).toHaveBeenCalledWith('c1', 'node-1', 1)
-    })
+    await waitFor(() => expect(screen.getByText('Answer one')).toBeInTheDocument())
+    expect(clientModule.branching.switchVariant).toHaveBeenCalledWith('c1', 'node-1', 0)
+    expect(screen.queryByText('Answer two')).not.toBeInTheDocument()
+    expect(screen.getByText('1/3')).toBeInTheDocument()
+  })
+
+  it('switches to the next branch on click and shows it', async () => {
+    vi.mocked(clientModule.branching.switchVariant).mockResolvedValue(chatOn(['v3']))
+    open(chatOn(['v2']))
+    await waitFor(() => expect(screen.getByText('2/3')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByLabelText(/next variant/i))
+
+    await waitFor(() => expect(screen.getByText('Answer three')).toBeInTheDocument())
+    expect(clientModule.branching.switchVariant).toHaveBeenCalledWith('c1', 'node-1', 2)
+    expect(screen.getByText('3/3')).toBeInTheDocument()
+  })
+
+  it('switches a nested branch by its own node and index', async () => {
+    vi.mocked(clientModule.branching.switchVariant).mockResolvedValue(chatOn(['v1', 'w1']))
+    open(chatOn(['v1', 'w2']))
+    await waitFor(() => expect(screen.getByText('Deep two')).toBeInTheDocument())
+    expect(screen.getByText('2/2')).toBeInTheDocument()
+
+    fireEvent.click(screen.getAllByLabelText(/previous variant/i)[1])
+
+    await waitFor(() => expect(screen.getByText('Deep one')).toBeInTheDocument())
+    expect(clientModule.branching.switchVariant).toHaveBeenCalledWith('c1', 'node-2', 0)
+    expect(screen.getByText('1/2')).toBeInTheDocument()
+  })
+
+  it('finds the node of a message without a nodeId by its id', async () => {
+    const chat = chatOn(['v2'])
+    open({ ...chat, messages: chat.messages.map((m) => ({ ...m, nodeId: null, variantId: null })) })
+    await waitFor(() => expect(screen.getByText('2/3')).toBeInTheDocument())
+  })
+
+  it('lays the arrows out like Android in RTL: previous first pointing right, next last pointing left', async () => {
+    open(chatOn(['v2']))
+    await waitFor(() => expect(screen.getByText('2/3')).toBeInTheDocument())
+
+    const prev = screen.getByLabelText(/previous variant/i)
+    const next = screen.getByLabelText(/next variant/i)
+    // DOM order previous → counter → next: in the RTL document previous is on the right
+    expect(prev.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(prev.parentElement!.textContent).toBe('2/3')
+    expect(prev).toHaveAttribute('title', 'ענף קודם')
+    expect(next).toHaveAttribute('title', 'ענף הבא')
+
+    // Auto-mirrored KeyboardArrowLeft / KeyboardArrowRight: the left arrow's path flipped
+    // points right (previous), the right arrow's flipped points left (next)
+    const { container: ltr } = render(<><MdKeyboardArrowLeftLtr /><MdKeyboardArrowRightLtr /></>)
+    const [leftPath, rightPath] = Array.from(ltr.querySelectorAll('svg')).map((svg) => svg.innerHTML)
+    const prevIcon = screen.getByTestId('branch-prev-icon')
+    const nextIcon = screen.getByTestId('branch-next-icon')
+    expect(prevIcon.innerHTML).toBe(leftPath)
+    expect(nextIcon.innerHTML).toBe(rightPath)
+    expect(leftPath).not.toBe(rightPath)
+    expect(prevIcon.style.transform).toBe('scaleX(-1)')
+    expect(nextIcon.style.transform).toBe('scaleX(-1)')
   })
 })
 
