@@ -2,6 +2,7 @@ package com.example.ApI.server.runs
 
 import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.Message
+import com.example.ApI.data.repository.AttachmentOwner
 import com.example.ApI.data.repository.ReplyAnchor
 import com.example.ApI.server.UserContext
 import com.example.ApI.server.appModule
@@ -17,11 +18,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import java.io.File
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
 
@@ -71,70 +72,41 @@ object RunRejectionCode {
     const val ATTACHMENTS_UNSUPPORTED = "attachments_unsupported"
 }
 
-// ── Attachments rule ──────────────────────────────────────────────────────────
+// ── Attachments ───────────────────────────────────────────────────────────────
+
+/** How long POST /api/runs waits for the request's files (the device gives the whole call 15 s). */
+internal const val RUN_ATTACHMENTS_TIMEOUT_MS = 10_000L
+
+/** How long the web's own send / resend wait for the request's files. */
+internal const val WEB_ATTACHMENTS_TIMEOUT_MS = 60_000L
 
 /**
- * Whether sending [attachment] to [provider] reads the attachment's file.  Mirrors what
- * `FileUploadManager.ensureFilesUploadedForProvider` and the provider classes do:
- *  - openai: images and PDFs are sent by `file_OPENAI_id` (uploaded first when missing); every
- *    other type is read and inlined as text;
- *  - poe: sent by `file_POE_url` (uploaded first when missing);
- *  - google (AI Studio): sent by `file_GOOGLE_uri` (uploaded first when missing);
- *  - every other provider (anthropic, vertex, cohere, openrouter, custom…) inlines the bytes.
+ * The files of a request's attachments for a run of this user (see [resolveRequestAttachments]),
+ * or null when they could not all be fetched within [timeoutMs].  Attachments found in the
+ * user's own files without a hash (saved by the web before the store existed) are hashed,
+ * stored and given their identity in the background.
  */
-internal fun attachmentNeedsFile(provider: String, attachment: Attachment): Boolean = when (provider) {
-    "openai" -> {
-        val sentById = attachment.mime_type.startsWith("image/") || attachment.mime_type == "application/pdf"
-        !(sentById && !attachment.file_OPENAI_id.isNullOrBlank())
-    }
-    "poe" -> attachment.file_POE_url.isNullOrBlank()
-    "google" -> attachment.file_GOOGLE_uri.isNullOrBlank() || attachment.file_GOOGLE_uri == "{file_URI}"
-    else -> true
-}
-
-/** Whether [attachment]'s file is one of this server's files of the user (under [userDir]). */
-internal fun isServerFile(attachment: Attachment, userDir: File): Boolean {
-    val path = attachment.local_file_path?.takeIf { it.isNotBlank() } ?: return false
-    return try {
-        val file = File(path).canonicalFile
-        file.isFile && file.toPath().startsWith(userDir.canonicalFile.toPath())
-    } catch (_: Exception) {
-        false
-    }
-}
-
-/**
- * The attachments rule of a cloud run (CLOUD_RUNS_PLAN.md, "Attachments"): the name of an
- * attachment the server cannot serve, or null when the request can run here.
- *
- * Only user messages and the project attachments are sent to a provider.  Each of their
- * attachments must either need no file ([attachmentNeedsFile]) or be a file of this user on this
- * server (uploaded through the web).  Besides, no attachment anywhere in the request may make
- * the server upload a file that is not the user's own server file (a device path that happens
- * to exist here): its uploaded id would be written into the synced history.
- */
-internal fun unservableAttachment(
+internal suspend fun UserContext.attachmentsForRun(
     provider: String,
+    chatId: String,
+    groupId: String?,
     messages: List<Message>,
     projectAttachments: List<Attachment>,
-    userDir: File
-): String? {
-    val sent = messages.filter { it.role == "user" }.flatMap { it.attachments } + projectAttachments
-    sent.firstOrNull { attachmentNeedsFile(provider, it) && !isServerFile(it, userDir) }?.let { return it.file_name }
-
-    val uploads = provider == "openai" || provider == "poe" || provider == "google"
-    if (uploads) {
-        val missingId: (Attachment) -> Boolean = when (provider) {
-            "openai" -> { a -> a.file_OPENAI_id == null }
-            "poe" -> { a -> a.file_POE_url == null }
-            else -> { a -> a.file_GOOGLE_uri == null }
-        }
-        messages.flatMap { it.attachments }.firstOrNull { a ->
-            val path = a.local_file_path
-            missingId(a) && path != null && !isServerFile(a, userDir) && runCatching { File(path).exists() }.getOrDefault(true)
-        }?.let { return it.file_name }
+    timeoutMs: Long
+): ResolvedRequestAttachments? {
+    if (messages.all { it.attachments.isEmpty() } && projectAttachments.isEmpty()) {
+        return ResolvedRequestAttachments(AttachmentFiles.NONE, emptyList(), emptyList())
     }
-    return null
+    val resolved = withTimeoutOrNull(timeoutMs) {
+        attachments.resolveRequestAttachments(provider, messages, projectAttachments)
+    } ?: return null
+    for (unhashed in resolved.unhashed) {
+        val owner = unhashed.messageId?.let { AttachmentOwner.ChatMessage(chatId, it) }
+            ?: groupId?.takeIf { it.isNotBlank() }?.let { AttachmentOwner.Group(it) }
+            ?: continue
+        attachments.backfillInBackground(owner, unhashed.attachment, unhashed.file)
+    }
+    return resolved
 }
 
 // ── SSE plumbing ──────────────────────────────────────────────────────────────
@@ -256,14 +228,27 @@ fun Route.runRoutes() {
         }
 
         // The user's own tools for this run, from the user's connections as they are right now
-        val tools = ctx.tools.forRun(body.chatId, body.enabledToolIds, body.groupId)
+        val tools = ctx.tools.forRun(body.chatId, body.enabledToolIds, body.groupId, body.messages, body.projectAttachments)
         val unknownTools = tools.missing(body.enabledToolIds)
         if (unknownTools.isNotEmpty()) {
             return@post reject(RunRejectionCode.UNSUPPORTED_TOOLS, "Tools not available on the server: ${unknownTools.joinToString()}")
         }
 
-        unservableAttachment(body.provider, body.messages, body.projectAttachments, ctx.storage.baseDir)?.let { name ->
-            return@post reject(RunRejectionCode.ATTACHMENTS_UNSUPPORTED, "Attachment \"$name\" is not available on the server")
+        // The files the provider will read: the user's own files here, the cache, the store.
+        // Only a file the server cannot have at all sends the request back to the device
+        val groupId = body.groupId?.takeIf { it.isNotBlank() }
+            ?: body.projectAttachments.takeIf { it.isNotEmpty() }
+                ?.let { repo.loadChatHistory(ctx.username).chat_history.find { c -> c.chat_id == body.chatId }?.group }
+        val resolved = ctx.attachmentsForRun(
+            body.provider, body.chatId, groupId, body.messages, body.projectAttachments, RUN_ATTACHMENTS_TIMEOUT_MS
+        ) ?: return@post reject(
+            RunRejectionCode.ATTACHMENTS_UNSUPPORTED, "The attachments could not be fetched from the attachment store in time"
+        )
+        resolved.unavailable.firstOrNull()?.let { missing ->
+            return@post reject(
+                RunRejectionCode.ATTACHMENTS_UNSUPPORTED,
+                "Attachment \"${missing.attachment.file_name}\" is not available on the server: ${missing.reason}"
+            )
         }
 
         // The client saved its message on its side: bring the server copy up to date meanwhile
@@ -284,7 +269,9 @@ fun Route.runRoutes() {
                 thinkingBudget = parseBudget(body.thinkingBudget),
                 temperature = body.temperature,
                 projectAttachments = body.projectAttachments,
-                anchor = ReplyAnchor.forRequest(body.messages)
+                anchor = ReplyAnchor.forRequest(body.messages),
+                attachmentFiles = resolved.files,
+                groupId = groupId
             )
         )
         call.respond(

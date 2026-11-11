@@ -115,7 +115,8 @@ fun ApplicationTestBuilder.startWithFakeGoogleAuth(
     pullIntervalSeconds: Long = 20L,
     loginPullTimeoutMs: Long = UserRegistry.LOGIN_PULL_TIMEOUT_MS,
     syncWhoamiClient: com.example.ApI.server.auth.SyncWhoamiClient = com.example.ApI.server.auth.FakeSyncWhoamiClient(),
-    runPingIntervalMs: Long = 15_000L
+    runPingIntervalMs: Long = 15_000L,
+    maxFileBytes: Long = com.example.ApI.data.attachments.AttachmentStoreClient.DEFAULT_MAX_FILE_BYTES
 ) {
     application {
         module(
@@ -133,6 +134,10 @@ fun ApplicationTestBuilder.startWithFakeGoogleAuth(
             // Never the real GitHub / Google APIs from a test
             integrationTools = FakeIntegrationTools(),
             googleTokenRefresher = FakeGoogleTokenRefresher(),
+            // …nor a real provider's file upload or the real Python executor
+            providerFileUploader = NO_PROVIDER_UPLOADS,
+            pythonExecutorUrl = UNREACHABLE_PYTHON_EXECUTOR,
+            maxFileBytes = maxFileBytes,
             chatEngineFactory = chatEngineFactory,
             titleGeneratorFactory = titleGeneratorFactory
         )

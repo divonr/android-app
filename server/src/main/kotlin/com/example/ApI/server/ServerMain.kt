@@ -125,6 +125,9 @@ fun main() {
  * @param integrationTools      Creates the GitHub / Google Workspace tools of a run.  Tests pass a fake.
  * @param googleTokenRefresher  Refreshes a Google Workspace access token.  Tests pass a fake.
  * @param runRegistry           Owns the runs.  Tests may pass one with short timeouts.
+ * @param providerFileUploader  Uploads a run's attachment files to a provider.  Tests pass a fake.
+ * @param pythonExecutorUrl     The remote executor of the Python tool.  Tests pass a fake's URL.
+ * @param maxFileBytes          The largest attachment file accepted (default: the store's 95 MB).
  */
 fun Application.module(
     storage: ServerPlatformStorage = ServerPlatformStorage(),
@@ -143,6 +146,9 @@ fun Application.module(
     integrationTools: com.example.ApI.server.runs.IntegrationTools? = null,
     googleTokenRefresher: com.example.ApI.server.oauth.GoogleTokenRefresher? = null,
     runRegistry: RunRegistry = RunRegistry(),
+    providerFileUploader: com.example.ApI.server.runs.ProviderFileUploader? = null,
+    pythonExecutorUrl: String = com.example.ApI.tools.PythonInterpreterTool.SERVER_URL,
+    maxFileBytes: Long = com.example.ApI.data.attachments.AttachmentStoreClient.DEFAULT_MAX_FILE_BYTES,
     // Keep last so that `module(storage, authConfig) { repo -> engine }` trailing-lambda syntax works.
     chatEngineFactory: ((DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null
 ) {
@@ -162,7 +168,11 @@ fun Application.module(
             }
         },
         integrationTools = integrationTools ?: com.example.ApI.server.runs.RealIntegrationTools,
-        googleTokenRefresher = googleTokenRefresher ?: com.example.ApI.server.oauth.RealGoogleTokenRefresher()
+        googleTokenRefresher = googleTokenRefresher ?: com.example.ApI.server.oauth.RealGoogleTokenRefresher(),
+        providerFileUploaderFactory = providerFileUploader?.let { uploader -> { _ -> uploader } }
+            ?: { repo -> com.example.ApI.server.runs.RepositoryProviderFileUploader(repo) },
+        pythonExecutorUrl = pythonExecutorUrl,
+        maxFileBytes = maxFileBytes
     )
 
     // Keep syncing every signed-in user from startup, before their first request

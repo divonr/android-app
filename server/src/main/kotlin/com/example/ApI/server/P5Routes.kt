@@ -1,23 +1,17 @@
 package com.example.ApI.server
 
-import com.example.ApI.data.model.Attachment
 import com.example.ApI.data.model.EnabledGoogleServices
 import com.example.ApI.data.model.GitHubConnection
 import com.example.ApI.data.model.GoogleWorkspaceConnection
 import io.ktor.http.*
-import io.ktor.http.content.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.sessions.*
 import kotlinx.serialization.Serializable
-import java.io.File
 import java.net.URLEncoder
 import java.security.SecureRandom
-
-// ── Max upload size ───────────────────────────────────────────────────────────
-private const val MAX_UPLOAD_BYTES = 50L * 1024 * 1024  // 50 MB
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -33,103 +27,6 @@ data class IntegrationsStatusResponse(
 data class OAuthStartResponse(
     val authorizeUrl: String
 )
-
-@Serializable
-data class DeleteFileRequest(
-    val filePath: String
-)
-
-// ── File routes (inside authenticated /api block) ─────────────────────────────
-
-fun Route.fileRoutes() {
-
-    // POST /api/files/upload — multipart/form-data, returns Attachment
-    post("/files/upload") {
-        val ctx = call.userContext()
-        val repo = ctx.repository
-
-        val multipart = call.receiveMultipart()
-        var fileName: String? = null
-        var mimeType: String? = null
-        var fileBytes: ByteArray? = null
-        var tooLarge = false
-
-        multipart.forEachPart { part ->
-            when (part) {
-                is PartData.FileItem -> {
-                    if (!tooLarge) {
-                        fileName = part.originalFileName?.ifBlank { null }
-                            ?: part.name?.ifBlank { null }
-                            ?: "upload"
-                        mimeType = part.contentType?.toString() ?: "application/octet-stream"
-                        val bytes = part.streamProvider().use { it.readBytes() }
-                        if (bytes.size.toLong() > MAX_UPLOAD_BYTES) {
-                            tooLarge = true
-                        } else {
-                            fileBytes = bytes
-                        }
-                    }
-                }
-                is PartData.FormItem -> {
-                    // Optional form fields (provider, chatId) — accepted but not used here;
-                    // provider upload happens at send time inside sendMessage.
-                }
-                else -> {}
-            }
-            part.dispose()
-        }
-
-        if (tooLarge) {
-            call.respond(
-                HttpStatusCode.PayloadTooLarge,
-                mapOf("error" to "File exceeds maximum allowed size (50 MB)")
-            )
-            return@post
-        }
-
-        val bytes = fileBytes
-        if (bytes == null || bytes.isEmpty()) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "No file content received"))
-            return@post
-        }
-
-        val name = fileName ?: "upload"
-        val mime = mimeType ?: "application/octet-stream"
-
-        val localPath = repo.saveFileLocally(name, bytes)
-        if (localPath == null) {
-            call.respond(
-                HttpStatusCode.InternalServerError,
-                mapOf("error" to "Failed to save file locally")
-            )
-            return@post
-        }
-
-        val attachment = Attachment(
-            local_file_path = localPath,
-            file_name = name,
-            mime_type = mime
-        )
-        call.respond(HttpStatusCode.Created, attachment)
-    }
-
-    // DELETE /api/files — delete a locally saved file
-    delete("/files") {
-        val body = call.receive<DeleteFileRequest>()
-        val filePath = body.filePath
-        if (filePath.isBlank()) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "filePath is required"))
-            return@delete
-        }
-        val file = File(filePath)
-        if (!file.exists()) {
-            call.respond(HttpStatusCode.NotFound, mapOf("error" to "File not found"))
-            return@delete
-        }
-        file.delete()
-        call.respond(HttpStatusCode.NoContent)
-    }
-}
 
 // ── Integration routes (inside authenticated /api block) ──────────────────────
 

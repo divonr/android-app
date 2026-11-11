@@ -493,32 +493,11 @@ class StreamingService : Service() {
                     saveResponse(requestId, username, chatId, toolResponseMessage)
 
                     // Extract output files from tool result and queue them for the NEXT text message
-                    val toolResult = toolCallMessage.toolCall?.result
-                    if (toolResult is ToolExecutionResult.Success || toolResult is ToolExecutionResult.Error) {
-                        val details = when (toolResult) {
-                            is ToolExecutionResult.Success -> toolResult.details
-                            is ToolExecutionResult.Error -> toolResult.details
-                            else -> null
-                        }
-                        val outputFiles = details?.get("output_files")?.jsonArray
-                        if (!outputFiles.isNullOrEmpty()) {
-                            val attachments = outputFiles.mapNotNull { fileJson ->
-                                try {
-                                    val fileObj = fileJson.jsonObject
-                                    val fileName = fileObj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                                    val mimeType = fileObj["mime_type"]?.jsonPrimitive?.contentOrNull ?: "application/octet-stream"
-                                    val localPath = fileObj["local_file_path"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                                    Attachment(local_file_path = localPath, file_name = fileName, mime_type = mimeType)
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to parse output file: ${e.message}")
-                                    null
-                                }
-                            }
-                            if (attachments.isNotEmpty()) {
-                                pendingToolOutputAttachments.addAll(attachments)
-                                Log.d(TAG, "Queued ${attachments.size} output files for the next assistant message")
-                            }
-                        }
+                    // (with the hash + size when the tool stored them; see PythonInterpreterTool.outputAttachments)
+                    val attachments = com.example.ApI.tools.PythonInterpreterTool.outputAttachments(toolCallMessage.toolCall?.result)
+                    if (attachments.isNotEmpty()) {
+                        pendingToolOutputAttachments.addAll(attachments)
+                        Log.d(TAG, "Queued ${attachments.size} output files for the next assistant message")
                     }
 
                     // Notify ViewModel to reload chat history and clear streaming text

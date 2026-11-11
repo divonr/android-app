@@ -36,7 +36,10 @@ class RepositoryChatEngine(private val repository: DataRepository) : ChatEngine 
             messages = messages,
             systemPrompt = systemPrompt,
             username = username,
-            chatId = chatId,
+            // No chat id: the repository would otherwise save the request's attachments back
+            // into the chat, and on this server their paths are in-flight server paths. The run
+            // writes the provider ids it obtained itself, by hash (RunRegistry.writeProviderIds)
+            chatId = null,
             projectAttachments = projectAttachments,
             webSearchEnabled = webSearchEnabled,
             enabledTools = enabledTools,

@@ -5,7 +5,10 @@ import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.MigrationResult
 import com.example.ApI.server.oauth.GoogleTokenRefresher
 import com.example.ApI.server.oauth.RealGoogleTokenRefresher
+import com.example.ApI.server.attachments.UserAttachments
 import com.example.ApI.server.runs.IntegrationTools
+import com.example.ApI.server.runs.ProviderFileUploader
+import com.example.ApI.server.runs.RepositoryProviderFileUploader
 import com.example.ApI.server.runs.RealIntegrationTools
 import com.example.ApI.server.runs.UserTools
 import com.example.ApI.server.streaming.ChatEngine
@@ -25,8 +28,9 @@ import java.io.File
  * Each [UserContext] owns an isolated [ServerPlatformStorage] and [DataRepository]
  * rooted at `{dataRoot}/users/{username}/`.  The [chatEngine] and [titleGenerator]
  * are created from the same factory lambdas used at application startup so tests
- * can inject fakes uniformly.  [tools] resolves, per run, the tools this user's runs may use
- * (never a process-wide registry: see [UserTools]).
+ * can inject fakes uniformly.  [attachments] is the user's attachment store client, cache and
+ * resolver; [providerFiles] uploads a run's files to a provider.  [tools] resolves, per run, the
+ * tools this user's runs may use (never a process-wide registry: see [UserTools]).
  */
 data class UserContext(
     val username: String,
@@ -34,7 +38,9 @@ data class UserContext(
     val repository: DataRepository,
     val chatEngine: ChatEngine,
     val titleGenerator: TitleGenerator,
-    val tools: UserTools = UserTools(username, repository)
+    val attachments: UserAttachments = UserAttachments(username, storage, repository),
+    val providerFiles: ProviderFileUploader = RepositoryProviderFileUploader(repository),
+    val tools: UserTools = UserTools(username, repository, storage = storage, attachments = attachments)
 )
 
 // ── UserRegistry ──────────────────────────────────────────────────────────────
@@ -70,6 +76,9 @@ data class UserContext(
  * @param titleGeneratorFactory Factory that creates a [TitleGenerator] from a [DataRepository].
  * @param integrationTools     Creates the GitHub / Google Workspace tools of a user's runs.
  * @param googleTokenRefresher Refreshes a user's Google Workspace access token.
+ * @param providerFileUploaderFactory Creates the uploader of a user's files to a provider.
+ * @param pythonExecutorUrl    The remote executor of the Python tool.
+ * @param maxFileBytes         The largest attachment file accepted (the store's limit).
  */
 class UserRegistry(
     private val baseDir: File,
@@ -84,7 +93,10 @@ class UserRegistry(
         }
     },
     private val integrationTools: IntegrationTools = RealIntegrationTools,
-    private val googleTokenRefresher: GoogleTokenRefresher = RealGoogleTokenRefresher()
+    private val googleTokenRefresher: GoogleTokenRefresher = RealGoogleTokenRefresher(),
+    private val providerFileUploaderFactory: (DataRepository) -> ProviderFileUploader = { repo -> RepositoryProviderFileUploader(repo) },
+    private val pythonExecutorUrl: String = com.example.ApI.tools.PythonInterpreterTool.SERVER_URL,
+    private val maxFileBytes: Long = com.example.ApI.data.attachments.AttachmentStoreClient.DEFAULT_MAX_FILE_BYTES
 ) {
     companion object {
         /** Bounded wait of a login for the user's first pull (plan §6). */
@@ -137,13 +149,19 @@ class UserRegistry(
             }
         }
 
+        val attachments = UserAttachments(username, storage, repository, maxFileBytes)
         return UserContext(
             username = username,
             storage = storage,
             repository = repository,
             chatEngine = chatEngine,
             titleGenerator = titleGenerator,
-            tools = UserTools(username, repository, integrationTools, googleTokenRefresher)
+            attachments = attachments,
+            providerFiles = providerFileUploaderFactory(repository),
+            tools = UserTools(
+                username, repository, integrationTools, googleTokenRefresher,
+                storage = storage, attachments = attachments, pythonExecutorUrl = pythonExecutorUrl
+            )
         )
     }
 
@@ -337,7 +355,9 @@ class UserRegistry(
             pullScopes.values.forEach { it.cancel() }
             pullScopes.clear()
         }
-        val repos = runBlocking { mutex.withLock { contexts.values.map { it.repository } } }
+        val all = runBlocking { mutex.withLock { contexts.values.toList() } }
+        all.forEach { it.attachments.close() }
+        val repos = all.map { it.repository }
         if (startEngine) {
             runBlocking {
                 withTimeoutOrNull(SHUTDOWN_FLUSH_TIMEOUT_MS) {

@@ -41,7 +41,11 @@ internal class LiveServer(
     googleTokenRefresher: com.example.ApI.server.oauth.GoogleTokenRefresher = FakeGoogleTokenRefresher(),
     // No title by default: the real generator would call a provider
     titleGenerator: TitleGenerator = TitleGenerator { _, _, _ -> "" },
-    runRegistry: com.example.ApI.server.runs.RunRegistry = com.example.ApI.server.runs.RunRegistry()
+    runRegistry: com.example.ApI.server.runs.RunRegistry = com.example.ApI.server.runs.RunRegistry(),
+    // Never a real provider / the real Python executor from a test
+    providerFileUploader: com.example.ApI.server.runs.ProviderFileUploader = NO_PROVIDER_UPLOADS,
+    pythonExecutorUrl: String = UNREACHABLE_PYTHON_EXECUTOR,
+    maxFileBytes: Long = com.example.ApI.data.attachments.AttachmentStoreClient.DEFAULT_MAX_FILE_BYTES
 ) : AutoCloseable {
 
     private val server = embeddedServer(Netty, port = 0, host = "127.0.0.1") {
@@ -60,6 +64,9 @@ internal class LiveServer(
             googleTokenRefresher = googleTokenRefresher,
             titleGeneratorFactory = { _ -> titleGenerator },
             runRegistry = runRegistry,
+            providerFileUploader = providerFileUploader,
+            pythonExecutorUrl = pythonExecutorUrl,
+            maxFileBytes = maxFileBytes,
             chatEngineFactory = { _ -> engine }
         )
     }.start(wait = false)
@@ -118,6 +125,33 @@ internal class LiveClient(private val baseUrl: String, private val token: String
 
     fun raw(method: String, path: String, body: String? = null): HttpResponse<String> =
         http.send(request(method, path, body, token), HttpResponse.BodyHandlers.ofString())
+
+    /** A request with any body and headers, answered with the raw bytes. */
+    fun bytes(
+        method: String,
+        path: String,
+        body: ByteArray? = null,
+        headers: Map<String, String> = emptyMap()
+    ): HttpResponse<ByteArray> {
+        val builder = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        if (token != null) builder.header("Authorization", "Bearer $token")
+        headers.forEach { (k, v) -> builder.header(k, v) }
+        builder.method(method, if (body != null) HttpRequest.BodyPublishers.ofByteArray(body) else HttpRequest.BodyPublishers.noBody())
+        return http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray())
+    }
+
+    /** `POST /api/files/upload` of one file (multipart, field `file`). */
+    fun upload(fileName: String, mimeType: String, content: ByteArray): LiveResponse {
+        val boundary = "----test-boundary-${System.nanoTime()}"
+        val head = "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\n" +
+            "Content-Type: $mimeType\r\n\r\n"
+        val body = head.toByteArray(Charsets.UTF_8) + content + "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
+        val response = bytes("POST", "/api/files/upload", body, mapOf("Content-Type" to "multipart/form-data; boundary=$boundary"))
+        return LiveResponse(response.statusCode(), String(response.body(), Charsets.UTF_8))
+    }
+
+    fun delete(path: String, body: String? = null): LiveResponse =
+        raw("DELETE", path, body).let { LiveResponse(it.statusCode(), it.body()) }
 
     fun get(path: String): LiveResponse = raw("GET", path).let { LiveResponse(it.statusCode(), it.body()) }
 

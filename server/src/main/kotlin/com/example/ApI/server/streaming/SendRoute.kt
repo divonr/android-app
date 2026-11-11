@@ -10,7 +10,10 @@ import com.example.ApI.data.model.Chat
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.ReplyAnchor
 import com.example.ApI.server.TitleGenerator
+import com.example.ApI.server.runs.AttachmentFiles
 import com.example.ApI.server.runs.RunSpec
+import com.example.ApI.server.runs.WEB_ATTACHMENTS_TIMEOUT_MS
+import com.example.ApI.server.runs.attachmentsForRun
 import com.example.ApI.server.runs.startAndStreamRun
 import com.example.ApI.server.userContext
 import io.ktor.http.*
@@ -179,12 +182,24 @@ fun Route.sendRoute() {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
             return@post
         }
+        // Whoever saves a message commits its files (idempotent, in the background)
+        if (userMessage != null && body.persistUserMessage) ctx.attachments.commitInBackground(userMessage.attachments)
+
         // Pin the replies to the saved user message (multi-message mode: the chat's last message)
         val anchor = anchorAfter(savedChat, userMessage?.takeIf { body.persistUserMessage }?.id)
 
         // The user's own tools for this chat. As before, an enabled tool the server has no tool
         // for is simply not offered to the model (no 409 on this route)
-        val tools = ctx.tools.forRun(body.chatId, body.enabledToolIds)
+        val tools = ctx.tools.forRun(
+            body.chatId, body.enabledToolIds, messages = body.messages, projectAttachments = body.projectAttachments
+        )
+
+        // This server's files of the request's attachments (the user's own files, the cache, the
+        // store). Unlike POST /api/runs there is no device to fall back to: a file that cannot
+        // be had is — as before — not sent
+        val files = ctx.attachmentsForRun(
+            body.provider, body.chatId, savedChat.group, body.messages, body.projectAttachments, WEB_ATTACHMENTS_TIMEOUT_MS
+        )?.files ?: AttachmentFiles.NONE
 
         call.startAndStreamRun(
             ctx,
@@ -201,7 +216,9 @@ fun Route.sendRoute() {
                 thinkingBudget = parseBudget(body.thinkingBudget),
                 temperature = body.temperature,
                 projectAttachments = body.projectAttachments,
-                anchor = anchor
+                anchor = anchor,
+                attachmentFiles = files,
+                groupId = savedChat.group
             )
         )
     }
@@ -301,6 +318,11 @@ fun Route.resendRoute() {
             return@post
         }
         val requestMessages = updatedChat.messages.take(end + 1)
+        // The branch's user message is saved (again): its files are in use
+        requestMessages.lastOrNull()?.let { ctx.attachments.commitInBackground(it.attachments) }
+        val files = ctx.attachmentsForRun(
+            body.provider, chatId, updatedChat.group, requestMessages, emptyList(), WEB_ATTACHMENTS_TIMEOUT_MS
+        )?.files ?: AttachmentFiles.NONE
 
         call.startAndStreamRun(
             ctx,
@@ -314,11 +336,13 @@ fun Route.resendRoute() {
                 webSearchEnabled = body.webSearchEnabled,
                 enabledToolIds = body.enabledToolIds,
                 // The user's own tools for this chat (unavailable ones are not offered, as before)
-                tools = ctx.tools.forRun(chatId, body.enabledToolIds),
+                tools = ctx.tools.forRun(chatId, body.enabledToolIds, messages = requestMessages),
                 thinkingBudget = parseBudget(body.thinkingBudget),
                 temperature = body.temperature,
                 projectAttachments = emptyList(),
-                anchor = ReplyAnchor.forRequest(requestMessages)
+                anchor = ReplyAnchor.forRequest(requestMessages),
+                attachmentFiles = files,
+                groupId = updatedChat.group
             )
         )
     }

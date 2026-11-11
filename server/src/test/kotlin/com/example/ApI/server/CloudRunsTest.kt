@@ -17,7 +17,7 @@ import com.example.ApI.server.runs.RunRequest
 import com.example.ApI.server.runs.RunSpec
 import com.example.ApI.server.runs.RunStatus
 import com.example.ApI.server.runs.RunTools
-import com.example.ApI.server.runs.unservableAttachment
+import com.example.ApI.server.runs.attachmentNeedsFile
 import com.example.ApI.server.streaming.ChatEngine
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolCallInfo
@@ -385,43 +385,25 @@ class CloudRunsTest {
     }
 
     @Test
-    fun `the attachments rule follows what each provider reads`() {
-        val userDir = File(System.getProperty("java.io.tmpdir"), "runs-rule-${System.nanoTime()}").apply { mkdirs() }
-        val serverFile = File(userDir, "files/uploads/doc.pdf").apply { parentFile.mkdirs(); writeText("pdf") }
-        val outside = File(System.getProperty("java.io.tmpdir"), "runs-rule-outside-${System.nanoTime()}.txt").apply { writeText("x") }
-        fun att(path: String?, mime: String = "image/png", openai: String? = null, poe: String? = null, google: String? = null) =
-            Attachment(local_file_path = path, file_name = "f", mime_type = mime, file_OPENAI_id = openai, file_POE_url = poe, file_GOOGLE_uri = google)
-        fun check(provider: String, a: Attachment, role: String = "user") =
-            unservableAttachment(provider, listOf(Message(role = role, text = "q", attachments = listOf(a))), emptyList(), userDir)
-        val device = "/data/user/0/app/files/x"
+    fun `which attachments need their file follows what each provider reads`() {
+        fun att(mime: String = "image/png", openai: String? = null, poe: String? = null, google: String? = null) =
+            Attachment(local_file_path = "/data/user/0/app/files/x", file_name = "f", mime_type = mime,
+                file_OPENAI_id = openai, file_POE_url = poe, file_GOOGLE_uri = google)
 
         // openai: images / PDFs go by file id, everything else is read and inlined
-        assertNull(check("openai", att(device, openai = "file-1")))
-        assertNull(check("openai", att(device, mime = "application/pdf", openai = "file-1")))
-        assertNotNull(check("openai", att(device)))
-        assertNotNull(check("openai", att(device, mime = "text/plain", openai = "file-1")))
+        assertFalse(attachmentNeedsFile("openai", att(openai = "file-1")))
+        assertFalse(attachmentNeedsFile("openai", att(mime = "application/pdf", openai = "file-1")))
+        assertTrue(attachmentNeedsFile("openai", att()))
+        assertTrue(attachmentNeedsFile("openai", att(mime = "text/plain", openai = "file-1")))
         // poe / google: by uploaded url / uri
-        assertNull(check("poe", att(device, poe = "https://poe/file")))
-        assertNotNull(check("poe", att(device, openai = "file-1")))
-        assertNull(check("google", att(device, google = "https://files/abc")))
-        assertNotNull(check("google", att(device, google = "{file_URI}")))
+        assertFalse(attachmentNeedsFile("poe", att(poe = "https://poe/file")))
+        assertTrue(attachmentNeedsFile("poe", att(openai = "file-1")))
+        assertFalse(attachmentNeedsFile("google", att(google = "https://files/abc")))
+        assertTrue(attachmentNeedsFile("google", att(google = "{file_URI}")))
         // providers that inline the bytes always need the file
         for (p in listOf("anthropic", "vertex", "cohere", "openrouter", "my_custom")) {
-            assertNotNull(check(p, att(device, openai = "file-1", poe = "u", google = "g")), p)
+            assertTrue(attachmentNeedsFile(p, att(openai = "file-1", poe = "u", google = "g")), p)
         }
-        // a file of this user on this server (a web upload) is served, whatever the provider
-        for (p in listOf("openai", "anthropic", "google")) {
-            assertNull(check(p, att(serverFile.path, mime = "application/pdf")), p)
-        }
-        // an existing file outside the user's dir is not the user's: never read, never uploaded
-        assertNotNull(check("anthropic", att(outside.path)))
-        assertNotNull(check("openai", att(outside.path)))
-        assertNotNull(check("openai", att(outside.path), role = "assistant"), "would be uploaded by the server")
-        // attachments of non-user messages are not sent: a missing device file there is fine
-        assertNull(check("anthropic", att(device), role = "assistant"))
-        assertNull(check("openai", att(device), role = "assistant"))
-        assertNull(check("openai", att(null), role = "assistant"))
-        assertNotNull(check("openai", att(null)))
     }
 
     // ── The run outlives its watchers ────────────────────────────────────────

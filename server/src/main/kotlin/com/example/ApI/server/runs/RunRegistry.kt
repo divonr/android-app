@@ -6,10 +6,12 @@ import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.StreamingCallback
 import com.example.ApI.data.model.ThinkingBudgetValue
 import com.example.ApI.data.model.ThoughtsStatus
+import com.example.ApI.data.repository.AttachmentOwner
 import com.example.ApI.data.repository.DataRepository
 import com.example.ApI.data.repository.ReplyAnchor
 import com.example.ApI.server.UserContext
 import com.example.ApI.server.streaming.maybeGenerateTitle
+import com.example.ApI.tools.PythonInterpreterTool
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolSpecification
@@ -103,7 +105,14 @@ class RunSpec(
     val temperature: Float?,
     val projectAttachments: List<Attachment>,
     /** Where the run's responses are saved (see [ReplyAnchor]). */
-    val anchor: ReplyAnchor
+    val anchor: ReplyAnchor,
+    /**
+     * This server's files of the request's attachments (see [AttachmentFiles]); [messages] and
+     * [projectAttachments] stay as the client sent them (their paths are the device's).
+     */
+    val attachmentFiles: AttachmentFiles = AttachmentFiles.NONE,
+    /** The group whose project attachments [projectAttachments] are (for the provider ids), if known. */
+    val groupId: String? = null
 ) {
     /** The specifications sent to the provider: the enabled tools this run has. */
     val enabledTools: List<ToolSpecification> = tools.specifications(enabledToolIds, provider.provider)
@@ -153,6 +162,9 @@ class RunRegistry(
         const val TITLE_TIMEOUT_MS = 20_000L
         const val SHUTDOWN_TIMEOUT_MS = 5_000L
         private val EMPTY = JsonObject(emptyMap())
+
+        /** The text of an assistant message that only carries files (the same as Android's). */
+        const val ATTACHED_FILE_TEXT = "[קובץ מצורף]"
     }
 
     private class Run(val ctx: UserContext, val spec: RunSpec, var state: RunState) {
@@ -171,7 +183,19 @@ class RunRegistry(
 
         /** Serializes the run's saves (tool messages / partial reply on cancel). */
         val saveMutex = Mutex()
+
+        /**
+         * Files a tool generated (the Python interpreter), waiting to be attached to the next
+         * assistant message the run saves — where Android's service attaches them.  Under [saveMutex].
+         */
+        val pendingOutputFiles = ArrayList<Attachment>()
+
+        /** Provider ids of files this run uploaded that are not on the stored attachment yet. */
+        val idUpdates = java.util.concurrent.ConcurrentLinkedQueue<IdUpdate>()
     }
+
+    /** [uploaded]'s provider ids belong on the stored attachment [attachment] of [owner]. */
+    private class IdUpdate(val owner: AttachmentOwner, val attachment: Attachment, val uploaded: Attachment)
 
     private class UserRuns {
         val runs = LinkedHashMap<String, Run>()
@@ -396,16 +420,20 @@ class RunRegistry(
                     run.saveMutex.withLock {
                         if (run.cancelled) return@withLock
                         val t = pendingThoughts
-                        if (precedingText.isNotBlank() || t != null) {
+                        if (precedingText.isNotBlank() || t != null || run.pendingOutputFiles.isNotEmpty()) {
                             repo.addAnchoredResponse(
                                 username, spec.chatId,
-                                assistantMessage(spec, precedingText, t), spec.anchor
+                                assistantMessage(spec, precedingText, t, takeOutputFiles(run)), spec.anchor
                             )
                             // They belong to that message, not to the final reply
                             pendingThoughts = null
                         }
                         repo.addAnchoredResponse(username, spec.chatId, toolCallMessage, spec.anchor)
                         repo.addAnchoredResponse(username, spec.chatId, toolResponseMessage, spec.anchor)
+                        // The files the tool generated go to the NEXT assistant message (like Android's service)
+                        run.pendingOutputFiles += PythonInterpreterTool.outputAttachments(toolCallMessage.toolCall?.result)
+                        // The chat is in the server copy by now at the latest
+                        writeProviderIds(run)
                         flushUploads(repo)
                         // What streamed so far is in the saved history now
                         emit(run, "messages_added") { it.copy(text = "", thinkingText = "", thinkingActive = false) }
@@ -424,14 +452,16 @@ class RunRegistry(
         }
 
         try {
+            // The provider's copy of the request: this server's file paths, never saved
+            val request = inFlightRequest(run)
             run.ctx.chatEngine.send(
                 provider = spec.provider,
                 modelName = spec.modelName,
-                messages = spec.messages,
+                messages = request.messages,
                 systemPrompt = spec.systemPrompt,
                 username = username,
                 chatId = spec.chatId,
-                projectAttachments = spec.projectAttachments,
+                projectAttachments = request.projectAttachments,
                 webSearchEnabled = spec.webSearchEnabled,
                 enabledTools = spec.enabledTools,
                 thinkingBudget = spec.thinkingBudget,
@@ -459,9 +489,71 @@ class RunRegistry(
         }
     }
 
-    private fun assistantMessage(spec: RunSpec, text: String, thoughts: Thoughts?) = Message(
+    private class InFlightRequest(val messages: List<Message>, val projectAttachments: List<Attachment>)
+
+    /**
+     * The request as the provider gets it: every attachment with this server's path of its file
+     * (or none), and — for the providers that take files by reference — with the id of a file
+     * uploaded now.  Those ids are then written onto the stored attachments ([writeProviderIds]);
+     * the paths never are: this copy is not saved anywhere.
+     */
+    private suspend fun inFlightRequest(run: Run): InFlightRequest {
+        val spec = run.spec
+        val files = spec.attachmentFiles
+        val providerName = spec.provider.provider
+
+        suspend fun prepare(owner: AttachmentOwner?, attachment: Attachment): Attachment {
+            val inFlight = files.inFlight(attachment)
+            val file = files.fileOf(attachment) ?: return inFlight
+            if (!needsProviderUpload(providerName, attachment)) return inFlight
+            val uploaded = run.ctx.providerFiles.upload(
+                spec.provider, file, attachment.file_name, attachment.mime_type, run.ctx.username
+            ) ?: return inFlight
+            if (owner != null) run.idUpdates += IdUpdate(owner, attachment, uploaded)
+            return inFlight.withProviderIdsOf(uploaded)
+        }
+
+        val messages = spec.messages.map { message ->
+            if (message.attachments.isEmpty()) message
+            else message.copy(attachments = message.attachments.map {
+                prepare(AttachmentOwner.ChatMessage(spec.chatId, message.id), it)
+            })
+        }
+        val groupOwner = spec.groupId?.takeIf { it.isNotBlank() }?.let { AttachmentOwner.Group(it) }
+        val projectAttachments = spec.projectAttachments.map { prepare(groupOwner, it) }
+        writeProviderIds(run)
+        return InFlightRequest(messages, projectAttachments)
+    }
+
+    /**
+     * Write the provider ids of the files this run uploaded onto the stored attachments (by
+     * message id + hash, under the repository's file lock; only the ids).  An attachment whose
+     * message is not in the server copy yet is tried again at the run's next save.
+     */
+    private fun writeProviderIds(run: Run) {
+        val repo = run.ctx.repository
+        val iterator = run.idUpdates.iterator()
+        while (iterator.hasNext()) {
+            val update = iterator.next()
+            try {
+                if (repo.recordAttachmentProviderIds(run.ctx.username, update.owner, update.attachment, update.uploaded)) {
+                    iterator.remove()
+                }
+            } catch (e: Exception) {
+                log.warn("Recording provider file ids of run ${run.spec.runId} failed: ${e.message}")
+            }
+        }
+    }
+
+    /** The generated files waiting for an assistant message (emptied).  Under the run's save mutex. */
+    private fun takeOutputFiles(run: Run): List<Attachment> =
+        run.pendingOutputFiles.toList().also { run.pendingOutputFiles.clear() }
+
+    private fun assistantMessage(spec: RunSpec, text: String, thoughts: Thoughts?, files: List<Attachment> = emptyList()) = Message(
         role = "assistant",
-        text = text,
+        // A message that only carries generated files gets Android's placeholder text
+        text = text.ifBlank { if (files.isNotEmpty()) ATTACHED_FILE_TEXT else "" },
+        attachments = files,
         model = spec.modelName,
         datetime = Instant.now().toString(),
         thoughts = thoughts?.text,
@@ -478,15 +570,21 @@ class RunRegistry(
     private suspend fun finishComplete(run: Run, fullText: String, thoughts: Thoughts?) {
         val spec = run.spec
         val repo = run.ctx.repository
-        val message = assistantMessage(spec, fullText, thoughts)
+        var message = assistantMessage(spec, fullText, thoughts)
         val saved = try {
-            run.saveMutex.withLock { repo.addAnchoredResponse(run.ctx.username, spec.chatId, message, spec.anchor) }
+            run.saveMutex.withLock {
+                message = assistantMessage(spec, fullText, thoughts, takeOutputFiles(run))
+                repo.addAnchoredResponse(run.ctx.username, spec.chatId, message, spec.anchor)
+            }
         } catch (e: Exception) {
             log.warn("Saving the reply of run ${spec.runId} failed: ${e.message}")
             return finishFailed(run, "Failed to save response: ${e.message}")
         }
         // null: the chat was deleted on this server meanwhile — the reply is dropped, like on a device
-        if (saved != null) flushUploads(repo)
+        if (saved != null) {
+            writeProviderIds(run)
+            flushUploads(repo)
+        }
         val payload = buildJsonObject {
             put("text", fullText)
             put("messageId", if (saved != null) message.id else "")
@@ -504,12 +602,14 @@ class RunRegistry(
             run.saveMutex.withLock {
                 // Read after any tool-message save in flight: only what is not saved yet
                 val text = synchronized(lock) { run.state.text }
-                if (keepPartial && text.isNotBlank()) {
+                // Files a tool generated are kept with the partial reply (or on their own)
+                if (keepPartial && (text.isNotBlank() || run.pendingOutputFiles.isNotEmpty())) {
                     val saved = repo.addAnchoredResponse(
-                        run.ctx.username, spec.chatId, assistantMessage(spec, text, null), spec.anchor
+                        run.ctx.username, spec.chatId, assistantMessage(spec, text, null, takeOutputFiles(run)), spec.anchor
                     )
                     if (saved != null) {
                         replySaved = true
+                        writeProviderIds(run)
                         flushUploads(repo)
                     }
                 }

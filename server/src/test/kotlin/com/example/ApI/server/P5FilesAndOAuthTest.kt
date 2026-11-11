@@ -18,7 +18,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 
 /**
- * Phase 5 tests: file upload (POST /api/files/upload) and OAuth integrations.
+ * Phase 5 tests: OAuth integrations (the file routes are in [WebFileRoutesTest]).
  *
  * Auth uses [googleLogin] (fake Google login).  Integration OAuth tests inject a
  * [CombinedFakeExchanger] that handles GitHub/Google Workspace exchanges in
@@ -126,100 +126,6 @@ class P5FilesAndOAuthTest {
             clientSecret: String,
             redirectUri: String
         ): Result<String> = Result.success(code)
-    }
-
-    // ── File upload tests ─────────────────────────────────────────────────────
-
-    @Test
-    fun `POST api files upload without session returns 401`() = testApplication {
-        val (storage, _) = seededStorage()
-        startWithFakeGoogleAuth(storage)
-
-        val response = client.post("/api/files/upload") {
-            setBody(
-                MultiPartFormDataContent(
-                    formData {
-                        append("file", "hello world".toByteArray(), Headers.build {
-                            append(HttpHeaders.ContentType, "text/plain")
-                            append(HttpHeaders.ContentDisposition, "filename=\"test.txt\"")
-                        })
-                    }
-                )
-            )
-        }
-        assertEquals(HttpStatusCode.Unauthorized, response.status)
-    }
-
-    @Test
-    fun `POST api files upload with session returns 201 Attachment`() = testApplication {
-        val (storage, _) = seededStorage()
-        startWithFakeGoogleAuth(storage)
-        val c = googleLogin(TEST_USER_EMAIL)
-
-        val fileContent = "Hello, world! This is a test file.".toByteArray()
-        val response = c.post("/api/files/upload") {
-            setBody(
-                MultiPartFormDataContent(
-                    formData {
-                        append("file", fileContent, Headers.build {
-                            append(HttpHeaders.ContentType, "text/plain")
-                            append(HttpHeaders.ContentDisposition, "filename=\"hello.txt\"")
-                        })
-                    }
-                )
-            )
-        }
-        assertEquals(HttpStatusCode.Created, response.status)
-
-        val body = Json.parseToJsonElement(response.bodyAsText()).jsonObject
-        assertEquals("hello.txt", body["file_name"]?.jsonPrimitive?.content)
-        assertEquals("text/plain", body["mime_type"]?.jsonPrimitive?.content)
-        assertNotNull(body["local_file_path"]?.jsonPrimitive?.content)
-
-        // Verify the file was actually written to disk
-        val localPath = body["local_file_path"]!!.jsonPrimitive.content
-        val diskFile = File(localPath)
-        assertTrue(diskFile.exists(), "File should exist on disk at $localPath")
-        assertEquals(String(fileContent), diskFile.readText())
-    }
-
-    @Test
-    fun `POST api files upload with empty body returns 400`() = testApplication {
-        val (storage, _) = seededStorage()
-        startWithFakeGoogleAuth(storage)
-        val c = googleLogin(TEST_USER_EMAIL)
-
-        // Upload multipart with no file parts — just a form field
-        val response = c.post("/api/files/upload") {
-            setBody(
-                MultiPartFormDataContent(
-                    formData {
-                        append("provider", "openai")
-                    }
-                )
-            )
-        }
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        assertTrue(response.bodyAsText().contains("No file content"))
-    }
-
-    @Test
-    fun `DELETE api files deletes an uploaded file`() = testApplication {
-        val (storage, repo) = seededStorage()
-        startWithFakeGoogleAuth(storage)
-        val c = googleLogin(TEST_USER_EMAIL)
-
-        // Save a file via the repository directly
-        val localPath = repo.saveFileLocally("to-delete.txt", "delete me".toByteArray())
-        assertNotNull(localPath, "saveFileLocally should succeed")
-        assertTrue(File(localPath).exists(), "File should exist before delete")
-
-        val response = c.delete("/api/files") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"filePath":"$localPath"}""")
-        }
-        assertEquals(HttpStatusCode.NoContent, response.status)
-        assertFalse(File(localPath).exists(), "File should be gone after delete")
     }
 
     // ── GET /api/integrations — status endpoint ───────────────────────────────

@@ -195,3 +195,66 @@ Not done here (later stages)
   through Cloudflare: a 95 MB upload through the public URL is untested.
 - Deploy: sync-server needs a restart to get the routes (it creates the `files` table and
   `sync_files/` on start). Old clients are unaffected by the new server.
+
+## A2 — attachment store: llm-web (runs with files, Python tool, web file routes) (done, not committed, not deployed)
+
+Contract: the plan's "Server (llm-web) — A2" and "Web file routes" (both written in this stage; the
+web UI stage implements against the latter). "Attachments (v1)" is superseded.
+
+server
+- `attachments/UserAttachments.kt` (new, on `UserContext.attachments`): the user's store client
+  (token of the user's server copy), cache, resolver with the path-trust rule (only the user's
+  `llm_data/attachments` and `attachments_cache`), `receive` (stream → cache by hash, size limit),
+  `commit`, `commitInBackground` (retry), `storeNow`, `backfillInBackground`.
+- `runs/RunAttachments.kt` (new): `attachmentNeedsFile`, `resolveRequestAttachments`,
+  `AttachmentFiles` (the in-flight copy), `ProviderFileUploader` seam. `unservableAttachment` /
+  `isServerFile` are gone.
+- `runs/RunRoutes.kt`: `POST /api/runs` resolves the needed files (≤ 10 s) → `409
+  attachments_unsupported` only when one cannot be had; `RunSpec.attachmentFiles` / `groupId`.
+- `runs/RunRegistry.kt`: the engine gets the in-flight copy; uploads to the provider and writes the
+  ids back by message id + hash (`writeProviderIds`, retried at the next save); generated files
+  wait for the next assistant message.
+- `streaming/RepositoryChatEngine.kt`: `sendMessage` without a chat id (no path write-back).
+- `runs/RunTools.kt`: `UserTools.pythonTool` (per run; inputs from the request + the server copy).
+- `FileRoutes.kt` (new; the two old routes left `P5Routes.kt`): upload, `GET`, commit, delete,
+  legacy delete. `SendRoute.kt` / `MutationRoutes.kt`: commit on save, files for the web's runs.
+- `module(...)` / `UserRegistry`: `providerFileUploader`, `pythonExecutorUrl`, `maxFileBytes`.
+  `build.gradle.kts`: `implementation(libs.okhttp)` (the store client's constructor names it).
+
+shared
+- `data/repository/StoredAttachments.kt` + `DataRepository.recordAttachmentIdentity` /
+  `recordAttachmentProviderIds` / `updateStoredAttachments`, `AttachmentOwner` (chat message / group).
+- `tools/PythonInterpreterTool.kt`: optional `PythonToolFiles` (input lookup, output keeping) and
+  `executorUrl`; `output_files` carries `sha256` / `size`; `outputAttachments(result)`. Without the
+  new arguments it behaves as before (device paths). `DataRepository.sendMessage`,
+  `FileUploadManager` and the providers are untouched.
+
+app
+- `StreamingService`: the `output_files` parsing is `PythonInterpreterTool.outputAttachments` (same
+  result for the device's files; a hash is kept when there is one). Nothing else.
+
+Tests
+- server (241 in all): `AttachmentStoreRunsTest` (7: store-only attachment read by the engine; ids written
+  back by hash for a message and a group, asserted on the stored JSON; a chat that has not synced;
+  path-trust attacks — outside file, other user's file, own data file, symlink, `..` — on
+  `/api/runs` and the web send; the three 409 cases + the legacy web upload and its backfill; the
+  Python tool end to end; generated files without following text), `WebFileRoutesTest` (12: every
+  route, 401s, two users, content type / nosniff / disposition / header injection, Range, commit +
+  re-upload, pending vs committed delete, legacy path delete, size limit, commits by the saving
+  routes, commit retry). Fakes: `FakeFileStore` (port of the shared fake), `FakePythonExecutor`;
+  every server test now runs with no provider upload and an unreachable Python executor.
+  Changed: `CloudRunsTest` (the old rule test → `attachmentNeedsFile`), `CloudRunToolsTest` (Python
+  is offered; needs a store), `P5FilesAndOAuthTest` (its 4 file tests moved / rewritten).
+- shared: `StoredAttachmentsTest` (5).
+
+Notes / open
+- Android still sends no hashes (A3): until then a device request with files answers 409 exactly as
+  before, and the web UI (A4) still expects `local_file_path` from the upload (it now gets `null`)
+  and calls `DELETE /api/files` with a path — deploy A2 together with A4.
+- The server's cache (`attachments_cache`) is never evicted.
+- Web send / resend: a file the server cannot get is silently not sent (no device to fall back to).
+- Project attachment ids are now persisted on the group (a device does not persist them; it
+  re-uploads project files on every request).
+- A provider upload that fails in the run is tried once more by `sendMessage` itself; that second
+  id is used for the request but not saved.
+- Not run against the real store, a real provider upload or the real Python executor (fakes only).

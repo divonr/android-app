@@ -100,7 +100,7 @@ Responses:
   Codes, checked in this order: `unknown_provider`, `no_api_key` (no active key for the provider in
   the server copy), `unsupported_tools` (an enabled tool id the server has no tool for in this
   run — see Tools; the error text names the ids), `attachments_unsupported` (the request needs attachment bytes the
-  server does not have — see Attachments).
+  server cannot get — see "Attachment store (round 2)", Server).
 - `400 {"error"}` — malformed body, or blank `runId` / `chatId`, or empty `messages`.
 - `401` — bad/missing auth.
 
@@ -174,8 +174,9 @@ button therefore no longer stops anything: the reply is still saved). Title gene
 completion stays (server side) for every run; since S5 it runs after the terminal event, so this
 response has ended by then and the title is announced only on the user-level stream
 (`chat_updated`). The pre-validation errors of these routes are
-unchanged (400 unknown provider, 404 chat not found…): the 409 codes belong to `POST /api/runs` only,
-and so does the attachments rule. Tools: these routes use the same per-user tool set as
+unchanged (400 unknown provider, 404 chat not found…): the 409 codes belong to `POST /api/runs` only.
+Attachments are resolved as for `POST /api/runs` (round 2, Server), but there is no device to fall
+back to: a file the server cannot get is — as before — not sent to the provider. Tools: these routes use the same per-user tool set as
 `POST /api/runs` (Tools section), but an enabled tool id the server has no tool for is — as before —
 silently not offered to the model instead of a 409.
 
@@ -197,7 +198,7 @@ enables one of its ids. A run keeps the tools (and tokens) it started with until
 | Google Workspace (`gmail_*`, `calendar_*`, `drive_*`) | the user's synced `google_workspace_auth_<user>.json` holds a connection, the tool's service is enabled in it (`enabledServices`), and its access token is valid (after a refresh, below) | 409 |
 | `get_current_group_conversations` | the run's chat is in a group of the user (below) | 409 |
 | Skills (`read_skill`, `read_skill_file`, `write_skill_file`, `edit_skill_file`) | never | 409 |
-| `python_interpreter` | never | 409 |
+| `python_interpreter` | (A2) the user has an attachment store, i.e. sync is on with a token in the server copy — always the case for an authenticated request (round 2, Server) | 409 |
 
 - **Group tool context.** On Android the tool is built from the open chat and its group. On the
   server it is built for the run: `currentChatId` = the run's `chatId`; the group is the request's
@@ -224,13 +225,10 @@ enables one of its ids. A run keeps the tools (and tokens) it started with until
   the device's skills (it has the ones made on the web), and the skills catalog in the request's
   system prompt is the device's. A device with enabled skills therefore still falls back for every
   request. Needs skill-folder sync first.
-- **Why Python stays on the device:** `PythonInterpreterTool` is never in a registry — Android
-  builds it per request from the open chat. It only calls the remote executor, so a JVM could run
-  it, but its input files are attachment paths on the device and its output files are saved next
-  to the app and attached to the next message by `StreamingService`; attachment files are not
-  synced, so a file generated in the cloud could not be shown on the phone.
+- **Python (A2, was device-only in S5):** `PythonInterpreterTool` is never in a process registry —
+  Android builds it per request from the open chat; the server builds it per run (round 2, Server).
 
-## Attachments (v1)
+## Attachments (v1) — superseded by "Attachment store (round 2)"; `unservableAttachment` is gone
 Device-local attachment files are not on the server. The server answers
 `409 attachments_unsupported` when executing the request would require reading a file that is not
 the user's own file on the server; the client then falls back to local execution. The server never
@@ -419,14 +417,113 @@ above; results, never exceptions), `AttachmentResolver`, `AttachmentUploader` / 
 - Web: uploads go through llm-web (cookie auth) into the store; attachments from any device are
   viewable/downloadable in the web UI.
 
-## Server (llm-web)
-- A run resolves needed attachment files from the store (cache in the user's dir). `409
-  attachments_unsupported` remains only for a file that has no hash and is not on the server.
-- The server may now upload files to the provider and write provider ids (matched by message id + hash)
-  into the synced history; it must still never write its own local paths there.
-- Python tool runs in cloud runs: inputs resolved from the store; generated files are stored, committed
-  and attached (with hash) to the saved tool message, as Android's service does locally.
+## Server (llm-web) — A2
+Per user (`UserContext.attachments`, `server/.../attachments/UserAttachments.kt`): an
+`AttachmentStoreClient` with the sync token of the user's server copy, the user's cache
+(`users/<u>/files/attachments_cache/<sha256>`, never evicted) and an `AttachmentResolver`.
+
+- **Path trust.** A `local_file_path` comes from a client. The server reads it only when it is a
+  file inside the user's own attachment directories — `files/llm_data/attachments` (what the web
+  saved before the store existed) and `files/attachments_cache` — after resolving symlinks and `..`.
+  Every other path (another user's dir, the user's own data files, anything else on the machine) is
+  ignored and the file is taken from the store by hash.
+- **Which files a run needs** (`attachmentNeedsFile`): only attachments of **user** messages and
+  the project attachments, and only when the provider reads the file — `openai`: everything except
+  an image / PDF that has `file_OPENAI_id`; `poe`: no `file_POE_url`; `google`: no `file_GOOGLE_uri`;
+  every other provider: always.
+- **`POST /api/runs`** resolves the needed files before it answers (own file → cache → store
+  download; at most 10 s for all of them): `409 attachments_unsupported` when one cannot be had —
+  it has no hash and is not the user's file here, the store does not have it (the device's upload
+  has not finished), the store cannot be reached, or the 10 s passed. Nothing is changed by a
+  rejected request. The web's send / resend routes resolve the same way (60 s) but send the request
+  without a file they cannot get.
+- **In-flight copy.** The provider code reads `local_file_path`. The run hands the engine a copy of
+  the request in which every attachment has this server's path of its file, or no path at all
+  (`AttachmentFiles.inFlight`; a file that is sent by id gets none). The copy is never saved:
+  `RepositoryChatEngine` calls `DataRepository.sendMessage` without a chat id, which turns off the
+  repository's own write-back of the request's attachments (the one a device uses).
+- **Provider ids.** For `openai` / `poe` / `google` the run uploads a resolved file whose id is
+  missing (`ProviderFileUploader`, the device's upload code) before the request, and writes the id
+  onto the stored attachment with `DataRepository.recordAttachmentProviderIds`: the attachment of
+  that message id (every copy: path and tree) — or of the chat's group for a project attachment —
+  with the same hash (no hash on either side: same path + name + mime type). Only the three id
+  fields are written, in one locked load-modify-save; never a path. When the chat is not in the
+  server copy yet, the write is tried again at the run's next save (the first reply restores the
+  question). Project attachment ids are written to the request's `groupId`, else the group of the
+  server copy's chat.
+- **Lazy backfill on the server.** A needed attachment found in the user's own directory without a
+  hash (a pre-store web upload) is hashed, uploaded and committed in the background and its identity
+  recorded with `DataRepository.recordAttachmentIdentity` (the shared helper A3 uses on the device:
+  the attachment of that chat / group + message id without a hash and with the same path, name and
+  mime type gets `sha256` + `size`; an attachment that has a hash is never changed).
+- **Commit.** Every server path that saves a user message or a project attachment commits the files
+  it references, in the background (`UserAttachments.commitInBackground`: idempotent; a store that
+  cannot be reached is retried after 1 s and 5 s; a `404` → upload again from the server's cache,
+  then commit): `POST /api/chat/send`, `POST /api/chats/{id}/messages`, `POST /api/chats/{id}/branch`,
+  `…/resend`, `POST /api/groups/{id}/attachments`. `POST /api/runs` does not (the device saved the
+  message and commits it).
+- **Python tool** (`UserTools.pythonTool`): built per run when the request enables it and the user
+  has a store. Input files: the attachments of the request and of the server copy's chat and group
+  that have a hash (or are the user's own file here), fetched through the resolver when the code
+  asks for them by name. Generated files: written to the user's cache under their hash, uploaded
+  and committed (`AttachmentUploader.ensureStored`; retried in the background when the store
+  cannot be reached) and described by `file_name`, `mime_type`, `sha256`, `size` — no path. As in
+  Android's `StreamingService`, they are attached to the **next assistant message** the run saves
+  (the text before the next tool call, or the final reply; text `[קובץ מצורף]` when there is none;
+  on a cancel with `keepPartial` they are kept with the partial reply). The tool's result
+  (`toolCall.result.details.output_files`, stored in the tool-call message) now carries `sha256` /
+  `size` and has `local_file_path` only on a device; `PythonInterpreterTool.outputAttachments` is
+  the one parser (used by the service and the server). The server's Python session is its own
+  (`python_sessions.json` in the user's dir), not the device's.
+
+## Web file routes (llm-web, under `/api`, session cookie or sync bearer) — A2
+The browser cannot talk to the sync server; these routes work on the authenticated user's store
+with the user's own sync token. `{sha256}` = 64 lowercase hex digits, else `400 {"error","code":"invalid_hash"}`.
+Errors are `{"error": "<text>", "code": "<code>"}`; every `404` of the server is `{"error":"Not found"}`.
+A hash is not a capability: another user's request for it is a `404`.
+
+- `POST /api/files/upload` — `multipart/form-data`, the file in a part named `file` (other fields are
+  ignored). Streamed to disk while hashed, then uploaded to the store as **pending**.
+  `201` → an `Attachment`: `{"file_name","mime_type","sha256","size"}` and **no `local_file_path`**
+  (`null`; provider ids `null`). The same bytes again → the same answer without a second upload.
+  `400 no_file` (no file part / empty file). `413 file_too_large` + `"maxBytes"` over 95 MB (a
+  request whose `Content-Length` is far over the limit is refused unread). `502 store_unavailable`
+  when the store cannot take it (nothing is kept).
+- `GET /api/files/{sha256}?name=<file name>&mime=<mime_type>[&download=1]` — the bytes, from the
+  user's cache or (downloaded on demand, then cached) the store. `404` when neither has it, `502`
+  when the store cannot be reached. `name` and `mime` are the attachment's own fields; both are
+  optional and neither is trusted:
+  - `mime` in `image/png|jpeg|gif|webp|avif|bmp` → that `Content-Type`, `Content-Disposition: inline`
+    (`attachment` with `download=1`) — usable as `<img src>`;
+  - `application/pdf`, `text/plain`, `audio/mpeg|mp4|wav|x-wav|ogg|webm|aac|flac`,
+    `video/mp4|webm|ogg|quicktime` → that `Content-Type`, but `Content-Disposition: attachment`
+    (usable as `<audio>` / `<video>` source or fetched into a blob; not navigable as a page);
+  - everything else (HTML, SVG, XML, scripts, no `mime`) → `application/octet-stream`, `attachment`.
+  Always `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
+  `Cache-Control: private, max-age=31536000, immutable`, `Accept-Ranges: bytes`. `name` only fills
+  the `filename` of the disposition (sanitized, plus `filename*=UTF-8''…`). Single `Range` requests
+  (`bytes=a-b`, `a-`, `-n`) → `206` + `Content-Range`; unsatisfiable → `416`; multi-range → the whole file.
+  The web UI must not turn fetched bytes of a non-image type into a same-origin document itself
+  (e.g. a blob URL of `text/html` / `image/svg+xml` opened in the app's origin).
+- `POST /api/files/{sha256}/commit` — `200 {"sha256","size","state":"committed"}` (idempotent). When
+  the store lost the file and the server still has it, it is uploaded again first. `404` when
+  neither has it. Not needed after the send / add-message / group-attachment routes (they commit).
+- `DELETE /api/files/{sha256}` — remove an upload that was never used: `200 {"deleted":true}` (gone
+  from the store and from the server's cache) or `{"deleted":false,"state":"committed"|null}` — a
+  committed file is never deleted; `null`: the store does not have it.
+- `DELETE /api/files` (legacy URL) with `{"sha256"}` → the same. With `{"filePath"}` (the old web
+  client): only a file inside the user's own `files/llm_data/attachments` that no saved message /
+  project uses is deleted (`204`); anything else is `404` (`409` when in use) — the old route
+  deleted any path the caller sent.
+- A user whose server copy has no sync credentials (cannot happen after a login / bearer request)
+  gets uploads kept in the server cache only, `commit` → `"state":"local"`.
+
+How the web UI uses them: attach → upload → keep the returned `Attachment` in the draft; remove from
+the draft → `DELETE /api/files/{sha256}`; send → put the `Attachment` (as returned) into the
+message / group — the server commits; show any attachment that has `sha256` (from any device)
+through `GET /api/files/{sha256}?name=&mime=`. An attachment without `sha256` exists only on the
+device that attached it.
 
 ## Stages
 A1 sync-server store + shared model/client/resolver · A2 llm-web (runs, Python tool, web file routes)
-· A3 Android · A4 web UI · A5 deploy + live test.
+· A3 Android · A4 web UI · A5 deploy + live test (llm-web A2 needs the sync-server of A1 running).

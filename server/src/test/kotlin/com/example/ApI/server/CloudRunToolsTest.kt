@@ -534,7 +534,7 @@ class CloudRunToolsTest {
     }
 
     @Test
-    fun `skill tools and the python interpreter stay on the device`() {
+    fun `skill tools stay on the device`() {
         val world = world()
         val alice = world.user(ALICE)
         // Even with a skill on the server: skill folders are not synced, the device's are others
@@ -544,9 +544,27 @@ class CloudRunToolsTest {
             val client = server.client()
             val skills = ToolRegistry().getSkillToolIds()
             client.start(body("r1", alice, skills)).assertUnsupported(*skills.toTypedArray())
-            client.start(body("r2", alice, listOf(ToolRegistry.PYTHON_INTERPRETER))).assertUnsupported(ToolRegistry.PYTHON_INTERPRETER)
         }
         assertTrue(engine.offered.isEmpty(), "nothing ran")
+    }
+
+    @Test
+    fun `the python interpreter needs the user's attachment store`() = runBlocking {
+        val world = world()
+        val alice = world.user(ALICE)
+        val storage = ServerPlatformStorage(File(world.storage.baseDir, "users/$ALICE"))
+        val attachments = com.example.ApI.server.attachments.UserAttachments(ALICE, storage, alice.repo)
+        val tools = com.example.ApI.server.runs.UserTools(ALICE, alice.repo, FakeIntegrationTools(), storage = storage, attachments = attachments)
+        val python = listOf(ToolRegistry.PYTHON_INTERPRETER)
+
+        // Sync is off for this user: a generated file could not reach the user's devices
+        assertEquals(python, tools.forRun(alice.chatId, python).missing(python))
+
+        alice.repo.updateAppSettings {
+            it.copy(remoteSync = it.remoteSync.copy(enabled = true, serverBaseUrl = UNREACHABLE_SYNC_URL, authToken = "token"))
+        }
+        assertEquals(emptyList(), tools.forRun(alice.chatId, python).missing(python))
+        attachments.close()
     }
 
     @Test
@@ -571,7 +589,8 @@ class CloudRunToolsTest {
             stream.nextOf("complete")
             assertNull(stream.nextOrNull(), "the per-request stream ends with the terminal event")
         }
-        assertEquals(listOf("get_date_time", GITHUB_TOOL, GROUP_TOOL), engine.offered[ALICE])
+        // Skills and Gmail (no connection) are dropped; the Python tool runs here now (the user has a store)
+        assertEquals(listOf("get_date_time", GITHUB_TOOL, GROUP_TOOL, "python_interpreter"), engine.offered[ALICE])
         assertEquals(listOf(FakeIntegrationTools.Execution(GITHUB_TOOL, "github:alice-gh:gh-alice")), tools.executions.toList())
     }
 

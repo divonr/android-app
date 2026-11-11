@@ -14,6 +14,8 @@ application {
 
 dependencies {
     implementation(project(":shared"))
+    // AttachmentStoreClient's constructor names OkHttpClient (shared brings it at runtime)
+    implementation(libs.okhttp)
 
     // Ktor server
     implementation(libs.ktor.server.core)

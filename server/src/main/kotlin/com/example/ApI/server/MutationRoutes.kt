@@ -286,6 +286,8 @@ fun Route.mutationRoutes() {
         if (updatedChat == null) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat not found"))
         } else {
+            // Whoever saves a message commits its files (idempotent, in the background)
+            ctx.attachments.commitInBackground(message.attachments)
             val saved = updatedChat.messageNodes.asSequence()
                 .flatMap { node -> node.variants.asSequence() }
                 .flatMap { v -> sequenceOf(v.userMessage) + v.responses.asSequence() }
@@ -383,6 +385,7 @@ fun Route.mutationRoutes() {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Chat or node not found"))
         } else {
             val (updatedChat, newVariantId) = result
+            ctx.attachments.commitInBackground(body.newUserMessage.attachments)
             call.respond(HttpStatusCode.Created, CreateBranchResponse(updatedChat, newVariantId))
         }
     }
@@ -579,6 +582,8 @@ fun Route.mutationRoutes() {
         if (!ok) {
             call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found"))
         } else {
+            // Whoever saves a project attachment commits its file (idempotent, in the background)
+            ctx.attachments.commitInBackground(listOf(attachment))
             val updatedGroup = repo.loadChatHistory(username).groups.find { it.group_id == groupId }
             call.respond(HttpStatusCode.Created, updatedGroup!!)
         }

@@ -33,6 +33,7 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     private val chatHistoryManager = ChatHistoryManager(internalDir, JsonConfig.prettyPrint, platformStorage.downloadsDir, syncHook)
     private val groupProjectManager = GroupProjectManager(chatHistoryManager)
     private val messageBranchingManager = MessageBranchingManager(chatHistoryManager)
+    private val storedAttachments = StoredAttachments(chatHistoryManager)
     private val externalConnectionsManager = ExternalConnectionsManager(internalDir, JsonConfig.prettyPrint, localStorageManager, syncHook)
     private val fileUploadManager = FileUploadManager(JsonConfig.prettyPrint) { username -> localStorageManager.loadApiKeys(username) }
     val skillsStorageManager = SkillsStorageManager(internalDir, JsonConfig.prettyPrint, syncHook)
@@ -412,6 +413,37 @@ class DataRepository(private val platformStorage: PlatformStorage) {
     ): Pair<List<Message>, Boolean> = fileUploadManager.ensureFilesUploadedForProvider(provider, messages, username)
 
     fun updateChatWithNewAttachments(username: String, chatId: String, updatedMessages: List<Message>) = chatHistoryManager.updateChatWithNewAttachments(username, chatId, updatedMessages)
+
+    // ============ Stored attachments (delegated to StoredAttachments) ============
+
+    /**
+     * Record a backfilled identity (hash + size) on a stored attachment of a message / group:
+     * the attachment of [owner] without a hash that has [attachment]'s `local_file_path`, name
+     * and mime type. One locked write; returns whether anything changed.
+     */
+    fun recordAttachmentIdentity(
+        username: String,
+        owner: AttachmentOwner,
+        attachment: Attachment,
+        digest: com.example.ApI.data.attachments.FileDigest
+    ): Boolean = storedAttachments.recordIdentity(username, owner, attachment, digest)
+
+    /**
+     * Record the provider ids of [uploaded] on the stored attachment of [owner] that is the same
+     * file as [attachment] (by hash, else by path + name + mime type). Only the ids are written —
+     * never a `local_file_path`. One locked write; returns whether anything changed.
+     */
+    fun recordAttachmentProviderIds(
+        username: String,
+        owner: AttachmentOwner,
+        attachment: Attachment,
+        uploaded: Attachment
+    ): Boolean = storedAttachments.recordProviderIds(username, owner, attachment, uploaded)
+
+    /** Apply [transform] to the stored attachments of [owner] (locked); returns how many changed. */
+    fun updateStoredAttachments(username: String, owner: AttachmentOwner, transform: (Attachment) -> Attachment): Int =
+        storedAttachments.update(username, owner, transform)
+
     fun exportChatHistory(username: String): String? = chatHistoryManager.exportChatHistory(username)
     fun importChatHistoryJson(raw: ByteArray, targetUsername: String) = chatHistoryManager.importChatHistoryJson(raw, targetUsername)
     fun validateChatJson(jsonContent: String): Boolean = chatHistoryManager.validateChatJson(jsonContent)

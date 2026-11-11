@@ -19,13 +19,38 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
+ * Where the tool's files are on a machine that is not the device that attached them (the web
+ * server; CLOUD_RUNS_PLAN.md, "Attachment store"). Without it the tool works with the
+ * attachments' `local_file_path`, as on the device.
+ */
+interface PythonToolFiles {
+    /** Whether [attachment]'s file can be offered to the model as an input file. */
+    fun isAvailable(attachment: Attachment): Boolean
+
+    /** The file of [attachment] (fetched if needed), or null when it cannot be had. */
+    suspend fun inputFile(attachment: Attachment): File?
+
+    /**
+     * Keep a file the code generated and describe it as an attachment — with its hash and size
+     * and, off the device, without a `local_file_path`. null: it could not be kept.
+     */
+    suspend fun saveOutput(fileName: String, mimeType: String, bytes: ByteArray): Attachment?
+}
+
+/**
  * Python Interpreter tool - shared implementation.
  * Uses file-based session persistence via PlatformStorage.
+ *
+ * @param files       how input files are found and output files kept (null: the device's own
+ *                    files, by `local_file_path`).
+ * @param executorUrl the remote executor (tests point it at a fake).
  */
 class PythonInterpreterTool(
     private val platformStorage: PlatformStorage,
     private val currentChat: Chat?,
-    private val currentGroup: ChatGroup?
+    private val currentGroup: ChatGroup?,
+    private val files: PythonToolFiles? = null,
+    private val executorUrl: String = SERVER_URL
 ) : Tool {
 
     override val id = "python_interpreter"
@@ -54,6 +79,41 @@ Limits: 5 min timeout, 2GB RAM.
         const val SERVER_URL = "https://api-divonr.xyz/execute"
         const val API_KEY = "Ato01g?4:elop-ef,kq32"
         const val MAX_FILE_SIZE = 10 * 1024 * 1024L
+
+        /**
+         * The files a run of the tool generated, as attachments, from the `output_files` of its
+         * result's details: each with its `local_file_path` (a file on this device) and / or its
+         * `sha256` + `size` (a file in the account's attachment store). What saves the tool's
+         * messages attaches them to the next assistant message.
+         */
+        fun outputAttachments(result: ToolExecutionResult?): List<Attachment> {
+            val details = when (result) {
+                is ToolExecutionResult.Success -> result.details
+                is ToolExecutionResult.Error -> result.details
+                null -> null
+            }
+            val outputFiles = (details?.get("output_files") as? JsonArray) ?: return emptyList()
+            return outputFiles.mapNotNull { fileJson ->
+                try {
+                    val obj = fileJson.jsonObject
+                    val fileName = obj["file_name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    val mimeType = obj["mime_type"]?.jsonPrimitive?.contentOrNull ?: "application/octet-stream"
+                    val localPath = obj["local_file_path"]?.jsonPrimitive?.contentOrNull
+                    val sha256 = obj["sha256"]?.jsonPrimitive?.contentOrNull
+                        ?.takeIf { com.example.ApI.data.attachments.AttachmentHash.isValid(it) }
+                    if (localPath == null && sha256 == null) return@mapNotNull null
+                    Attachment(
+                        local_file_path = localPath,
+                        file_name = fileName,
+                        mime_type = mimeType,
+                        sha256 = sha256,
+                        size = if (sha256 != null) obj["size"]?.jsonPrimitive?.longOrNull else null
+                    )
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        }
     }
 
     private val client = OkHttpClient.Builder()
@@ -105,7 +165,7 @@ Limits: 5 min timeout, 2GB RAM.
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
-                    .url(SERVER_URL)
+                    .url(executorUrl)
                     .header("X-Api-Key", API_KEY)
                     .post(multipartBuilder.build())
                     .build()
@@ -123,7 +183,7 @@ Limits: 5 min timeout, 2GB RAM.
         }
     }
 
-    private fun parseResponse(responseBody: String, chatKey: String): ToolExecutionResult {
+    private suspend fun parseResponse(responseBody: String, chatKey: String): ToolExecutionResult {
         val json = Json.parseToJsonElement(responseBody).jsonObject
         json["session_id"]?.jsonPrimitive?.contentOrNull?.let { sessionId ->
             saveSessionId("python_session_$chatKey", sessionId)
@@ -146,7 +206,16 @@ Limits: 5 min timeout, 2GB RAM.
         val details = buildJsonObject {
             put("stdout", logs); put("stderr", ""); put("exit_code", exitCode)
             put("output_files", buildJsonArray {
-                savedAttachments.forEach { att -> add(buildJsonObject { put("file_name", att.file_name); put("mime_type", att.mime_type); put("local_file_path", att.local_file_path) }) }
+                savedAttachments.forEach { att ->
+                    add(buildJsonObject {
+                        put("file_name", att.file_name)
+                        put("mime_type", att.mime_type)
+                        // Stored in the synced tool message: only a path of the device itself
+                        att.local_file_path?.let { put("local_file_path", it) }
+                        att.sha256?.let { put("sha256", it) }
+                        att.size?.let { put("size", it) }
+                    })
+                }
             })
         }
         return if (exitCode != 0 && logs.isNotBlank()) ToolExecutionResult.Error(resultText.ifBlank { "Code execution failed with exit code $exitCode" }, details)
@@ -155,26 +224,31 @@ Limits: 5 min timeout, 2GB RAM.
 
     private fun getAvailableFiles(): List<Attachment> {
         val files = mutableListOf<Attachment>()
-        currentChat?.messages?.forEach { msg -> msg.attachments.filter { it.local_file_path != null }.forEach { files.add(it) } }
-        currentGroup?.group_attachments?.filter { it.local_file_path != null }?.forEach { files.add(it) }
+        val usable: (Attachment) -> Boolean = this.files?.let { hooks -> { a: Attachment -> hooks.isAvailable(a) } }
+            ?: { a: Attachment -> a.local_file_path != null }
+        currentChat?.messages?.forEach { msg -> msg.attachments.filter(usable).forEach { files.add(it) } }
+        currentGroup?.group_attachments?.filter(usable)?.forEach { files.add(it) }
         return files.distinctBy { it.file_name }
     }
 
-    private fun resolveFiles(fileNames: List<String>): List<ResolvedFile> {
+    private suspend fun resolveFiles(fileNames: List<String>): List<ResolvedFile> {
         val available = getAvailableFiles()
         return fileNames.mapNotNull { fileName ->
             val clean = fileName.substringAfterLast("/")
             available.find { it.file_name.equals(clean, ignoreCase = true) }?.let { att ->
                 try {
-                    val file = File(att.local_file_path!!)
+                    val file = (if (files != null) files.inputFile(att) else att.local_file_path?.let { File(it) })
+                        ?: return@let null
                     if (!file.exists() || file.length() > MAX_FILE_SIZE) return@let null
                     ResolvedFile(att.file_name, file.readBytes(), att.mime_type)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) { null }
             }
         }
     }
 
-    private fun saveOutputFiles(artifactsJson: JsonArray): List<Attachment> {
+    private suspend fun saveOutputFiles(artifactsJson: JsonArray): List<Attachment> {
         val attachmentsDir = File(platformStorage.filesDir, "attachments").apply { mkdirs() }
         return artifactsJson.mapNotNull { fileJson ->
             try {
@@ -184,9 +258,12 @@ Limits: 5 min timeout, 2GB RAM.
                 val ext = name.substringAfterLast('.', "").lowercase()
                 val mimeType = getMimeType(ext)
                 val bytes = Base64.getDecoder().decode(contentBase64)
+                if (files != null) return@mapNotNull files.saveOutput(name, mimeType, bytes)
                 val localFile = File(attachmentsDir, "${UUID.randomUUID()}_$name")
                 localFile.writeBytes(bytes)
                 Attachment(local_file_path = localFile.absolutePath, file_name = name, mime_type = mimeType)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) { null }
         }
     }
