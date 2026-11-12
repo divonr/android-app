@@ -516,7 +516,7 @@ class FullDynamicCustomProvider(
 
                 val toolCall = ToolCall(
                     id = detectedCallId ?: java.util.UUID.randomUUID().toString(),  // {tool_id}
-                    toolId = detectedToolName!!,  // {tool_name} - internal tool name
+                    toolId = com.example.ApI.tools.ToolRegistry.toolIdForModelName(detectedToolName!!),  // {tool_name} - internal tool name
                     parameters = paramsJson,
                     provider = config.providerKey
                 )

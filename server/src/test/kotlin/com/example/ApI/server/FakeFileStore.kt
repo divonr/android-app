@@ -11,7 +11,10 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /** Nothing listens there: a Python tool of a test never reaches the real executor. */
-const val UNREACHABLE_PYTHON_EXECUTOR = "http://127.0.0.1:9/execute"
+const val UNREACHABLE_PYTHON_EXECUTOR = "http://127.0.0.1:9/v2/execute"
+
+/** The key the tests' executor expects (nothing real). */
+const val TEST_SANDBOX_KEY = "test-sandbox-key"
 
 /** The default of every server test: no file is ever uploaded to a real provider. */
 val NO_PROVIDER_UPLOADS = ProviderFileUploader { _, _, _, _, _ -> null }
@@ -173,34 +176,46 @@ class FakeFileStore {
 }
 
 /**
- * Fake of the remote Python executor (`POST /execute`, multipart): records the code and the
- * input files of every call and answers with [logs] and [artifacts] (name → bytes).
+ * Fake of the code executor's v2 endpoint (`POST /v2/execute`, multipart): keeps the input files
+ * of every `chat_id`, asks for the ones a manifest names and it does not hold (`missing_files`),
+ * and answers a run with [logs] and [artifacts] (name → bytes).
  */
 class FakePythonExecutor {
-    class Call(val code: String, val files: Map<String, ByteArray>)
+    /**
+     * One run: its code, its session, the files of `/app/input` it ran with ([files]) and the
+     * ones that were uploaded for it ([uploaded]).
+     */
+    class Call(val code: String, val chatId: String, val files: Map<String, ByteArray>, val uploaded: Set<String>)
 
     private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
 
-    val url: String get() = "http://127.0.0.1:${server.address.port}/execute"
+    val url: String get() = "http://127.0.0.1:${server.address.port}/v2/execute"
+
+    /** The runs (a request answered with `missing_files` ran nothing and is not one). */
     val calls = CopyOnWriteArrayList<Call>()
+
+    /** How many requests arrived, handshake rounds included. */
+    val requests = java.util.concurrent.atomic.AtomicInteger()
+
+    private val inputs = java.util.concurrent.ConcurrentHashMap<String, MutableMap<String, ByteArray>>()
 
     @Volatile var logs = "ok"
     @Volatile var artifacts: Map<String, ByteArray> = emptyMap()
 
     fun start(): FakePythonExecutor {
-        server.createContext("/execute") { exchange ->
+        server.createContext("/v2/execute") { exchange ->
             try {
+                requests.incrementAndGet()
                 val boundary = exchange.requestHeaders.getFirst("Content-Type").substringAfter("boundary=").trim('"')
-                val (code, files) = parseMultipart(exchange.requestBody.readBytes(), boundary)
-                calls += Call(code, files)
-                val encoder = java.util.Base64.getEncoder()
-                val artifactsJson = artifacts.entries.joinToString(",") { (name, bytes) ->
-                    """{"name":"$name","content_base64":"${encoder.encodeToString(bytes)}"}"""
+                val (fields, files) = parseMultipart(exchange.requestBody.readBytes(), boundary)
+                val (status, answer) = if (exchange.requestHeaders.getFirst("X-Api-Key") != TEST_SANDBOX_KEY) {
+                    401 to """{"detail":"bad key"}"""
+                } else {
+                    200 to answer(fields, files)
                 }
-                val body = """{"status":"success","session_id":"sess-1","logs":"$logs","exit_code":{"StatusCode":0},"artifacts":[$artifactsJson]}"""
-                    .toByteArray(Charsets.UTF_8)
+                val body = answer.toByteArray(Charsets.UTF_8)
                 exchange.responseHeaders.add("Content-Type", "application/json")
-                exchange.sendResponseHeaders(200, body.size.toLong())
+                exchange.sendResponseHeaders(status, body.size.toLong())
                 exchange.responseBody.use { it.write(body) }
             } catch (_: Throwable) {
                 runCatching { exchange.close() }
@@ -212,11 +227,35 @@ class FakePythonExecutor {
 
     fun stop() = server.stop(0)
 
-    /** The `code` field and the `files` parts (file name → bytes) of a multipart body. */
-    private fun parseMultipart(body: ByteArray, boundary: String): Pair<String, Map<String, ByteArray>> {
+    private fun answer(fields: Map<String, String>, files: Map<String, ByteArray>): String {
+        val chatId = fields.getValue("chat_id")
+        val held = inputs.getOrPut(chatId) { java.util.concurrent.ConcurrentHashMap() }
+        val manifest = kotlinx.serialization.json.Json.parseToJsonElement(fields["input_manifest"] ?: "[]") as kotlinx.serialization.json.JsonArray
+        val wanted = manifest.map {
+            val entry = it as kotlinx.serialization.json.JsonObject
+            (entry.getValue("name") as kotlinx.serialization.json.JsonPrimitive).content to
+                (entry.getValue("sha256") as kotlinx.serialization.json.JsonPrimitive).content
+        }
+        val missing = wanted.filter { (name, sha) -> (files[name] ?: held[name])?.let { FakeFileStore.sha256(it) } != sha }.map { it.first }
+        if (missing.isNotEmpty()) {
+            return """{"status":"missing_files","missing":[${missing.joinToString(",") { "\"$it\"" }}]}"""
+        }
+        val fresh = calls.none { it.chatId == chatId }
+        wanted.forEach { (name, _) -> files[name]?.let { held[name] = it } }
+        calls += Call(fields.getValue("code"), chatId, LinkedHashMap(held.filterKeys { name -> wanted.any { it.first == name } }), files.keys.toSet())
+        val encoder = java.util.Base64.getEncoder()
+        val artifactsJson = artifacts.entries.joinToString(",") { (name, bytes) ->
+            """{"name":"$name","size":${bytes.size},"content_base64":"${encoder.encodeToString(bytes)}"}"""
+        }
+        return """{"status":"success","exit_code":0,"stdout":"$logs","stderr":"","truncated":false,"artifacts":[$artifactsJson],""" +
+            """"fresh_container":$fresh${if (fresh) ""","fresh_reason":"new"""" else ""}}"""
+    }
+
+    /** The text fields and the `files` parts (file name → bytes) of a multipart body. */
+    private fun parseMultipart(body: ByteArray, boundary: String): Pair<Map<String, String>, Map<String, ByteArray>> {
         // ISO-8859-1 maps every byte to one char: positions in the text are positions in the bytes
         val text = String(body, Charsets.ISO_8859_1)
-        var code = ""
+        val fields = LinkedHashMap<String, String>()
         val files = LinkedHashMap<String, ByteArray>()
         for (part in text.split("--$boundary")) {
             val headerEnd = part.indexOf("\r\n\r\n")
@@ -225,11 +264,9 @@ class FakePythonExecutor {
             val content = part.substring(headerEnd + 4).removeSuffix("\r\n").toByteArray(Charsets.ISO_8859_1)
             val name = Regex("name=\"([^\"]*)\"").find(headers)?.groupValues?.get(1) ?: continue
             val fileName = Regex("filename=\"([^\"]*)\"").find(headers)?.groupValues?.get(1)
-            when {
-                name == "code" -> code = String(content, Charsets.UTF_8)
-                name == "files" && fileName != null -> files[fileName] = content
-            }
+                ?.let { String(it.toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8) }
+            if (fileName != null) files[fileName] = content else fields[name] = String(content, Charsets.UTF_8)
         }
-        return code to files
+        return fields to files
     }
 }

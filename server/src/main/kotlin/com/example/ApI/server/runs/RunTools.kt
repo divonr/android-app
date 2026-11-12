@@ -19,6 +19,7 @@ import com.example.ApI.server.oauth.RealGoogleTokenRefresher
 import com.example.ApI.tools.GroupConversationsTool
 import com.example.ApI.tools.PythonInterpreterTool
 import com.example.ApI.tools.PythonToolFiles
+import com.example.ApI.tools.SandboxConfig
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolRegistry
@@ -113,7 +114,8 @@ class UserTools(
     /** The user's storage and attachment files; without them there is no Python tool. */
     private val storage: ServerPlatformStorage? = null,
     private val attachments: UserAttachments? = null,
-    private val pythonExecutorUrl: String = PythonInterpreterTool.SERVER_URL
+    /** The remote executor of the Python tool and its key. */
+    private val sandbox: SandboxConfig = SandboxConfig("", "")
 ) {
     private val log = LoggerFactory.getLogger(UserTools::class.java)
 
@@ -191,12 +193,16 @@ class UserTools(
     /**
      * The Python interpreter for a run in [chatId].  On Android it is built per request from the
      * open chat and its group and works with the attachments' device paths; here it is built for
-     * the run: its input files are the attachments of the request ([messages],
-     * [projectAttachments]) and of this server's copy of the chat / its group, each fetched
-     * through the user's resolver (own files, cache, store); the files the code generates are
-     * kept in the user's cache under their hash, uploaded to the user's store and committed,
-     * and described by hash + size only (no server path) — the run attaches them to the next
-     * assistant message it saves, as Android's service does.
+     * the run.  Its input files are all the attachments of the request ([messages],
+     * [projectAttachments]) and of this server's copy of the chat / its group that have a hash
+     * (or are the user's own file here): the tool names them to the executor with the hash and
+     * size recorded on them, and only a file the executor does not hold yet is fetched through
+     * the user's resolver (own files, cache, store) and uploaded to it over loopback — also a
+     * file that was attached on a device.  A file that has a hash but cannot be fetched fails
+     * the call with its name; one without a hash that is not here is named in the result.
+     * The files the code generates are kept in the user's cache under their hash, uploaded to
+     * the user's store and committed, and described by hash + size only (no server path) — the
+     * run attaches them to the next assistant message it saves, as Android's service does.
      *
      * null (→ the tool id is missing → the device runs the request) when the user has no
      * attachment store: a generated file could not reach the user's devices.
@@ -254,7 +260,7 @@ class UserTools(
                 return Attachment(file_name = fileName, mime_type = mimeType, sha256 = digest.sha256, size = digest.size)
             }
         }
-        return PythonInterpreterTool(storage, chat, group, files, pythonExecutorUrl)
+        return PythonInterpreterTool(storage, chat, group, sandbox, files)
     }
 
     /** The user's Google Workspace connection with a valid access token (refreshed if needed). */

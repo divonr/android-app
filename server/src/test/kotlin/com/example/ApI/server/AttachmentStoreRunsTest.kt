@@ -387,11 +387,9 @@ class AttachmentStoreRunsTest {
                 enabledTools: List<ToolSpecification>, thinkingBudget: ThinkingBudgetValue, temperature: Float?,
                 callback: StreamingCallback
             ) {
-                description = enabledTools.single { it.name == ToolRegistry.PYTHON_INTERPRETER }.description
-                val parameters = buildJsonObject {
-                    put("code", "import pandas")
-                    put("files_to_include", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("data.csv")) })
-                }
+                // Enabled by its id (the request says python_interpreter), declared under its new name
+                description = enabledTools.single { it.name == ToolRegistry.WORKSPACE_SANDBOX_NAME }.description
+                val parameters = buildJsonObject { put("code", "import pandas") }
                 val call = ToolCall(id = "call-1", toolId = ToolRegistry.PYTHON_INTERPRETER, parameters = parameters, provider = "poe")
                 val result = callback.onToolCall(call, "")
                 results += result
@@ -419,12 +417,16 @@ class AttachmentStoreRunsTest {
             assertEquals(202, started.status, started.body)
             client.awaitRun("run-1")
 
-            // The executor got the store's bytes of the input file
-            assertTrue(description.contains("data.csv"), description)
+            // The executor got the store's bytes of the conversation's file, unasked by the model:
+            // named in the manifest, uploaded when the executor said it did not hold it
+            assertFalse(description.contains("data.csv"), "the declaration does not follow the chat's files")
             val call = executor.calls.single()
             assertEquals("import pandas", call.code)
+            assertEquals(seed.chatId, call.chatId, "the session is the chat")
             assertEquals(listOf("data.csv"), call.files.keys.toList())
             assertTrue(csv.contentEquals(call.files.getValue("data.csv")))
+            assertEquals(setOf("data.csv"), call.uploaded)
+            assertEquals(2, executor.requests.get(), "the manifest alone, then with the body")
 
             // The generated file is in the user's store, committed
             val stored = store.files(TEST_USERNAME)[chartSha]
@@ -453,6 +455,60 @@ class AttachmentStoreRunsTest {
             val fetched = client.bytes("GET", "/api/files/$chartSha?mime=image/png&name=chart.png")
             assertEquals(200, fetched.statusCode())
             assertTrue(chart.contentEquals(fetched.body()))
+        }
+    }
+
+    @Test
+    fun `the python tool fails by name on a file the store does not have and uploads a held file only once`() {
+        val csv = "a,b\n1,2\n".toByteArray()
+        val csvSha = store.put(TEST_USERNAME, csv)
+        val held = Attachment(local_file_path = "/data/user/0/app/data.csv", file_name = "data.csv", mime_type = "text/csv", sha256 = csvSha, size = csv.size.toLong())
+        // Recorded on the message by another device, but never arrived in the store
+        val lost = Attachment(local_file_path = "/data/user/0/app/lost.xlsx", file_name = "lost.xlsx", mime_type = "application/octet-stream", sha256 = "ab".repeat(32), size = 7)
+        val seed = seed(Message(role = "user", text = "Plot it", attachments = listOf(held.copy(file_POE_url = "https://poe/f"))))
+        seed.repo.addApiKey(TEST_USERNAME, ApiKey(id = "k2", provider = "poe", key = "poe-key", isActive = true))
+
+        val results = CopyOnWriteArrayList<ToolExecutionResult>()
+        val engine = object : ChatEngine {
+            override suspend fun send(
+                provider: Provider, modelName: String, messages: List<Message>, systemPrompt: String,
+                username: String, chatId: String, projectAttachments: List<Attachment>, webSearchEnabled: Boolean,
+                enabledTools: List<ToolSpecification>, thinkingBudget: ThinkingBudgetValue, temperature: Float?,
+                callback: StreamingCallback
+            ) {
+                repeat(2) { i ->
+                    results += callback.onToolCall(
+                        ToolCall(id = "call-$i", toolId = ToolRegistry.PYTHON_INTERPRETER, parameters = buildJsonObject { put("code", "step $i") }, provider = "poe"), ""
+                    )
+                }
+                callback.onComplete("done")
+            }
+        }
+        live(seed, engine).use { server ->
+            val client = server.client()
+            val python = listOf(ToolRegistry.PYTHON_INTERPRETER)
+            assertEquals(202, client.post("/api/runs", runBody("run-1", seed.chatId, seed.path(), provider = "poe", enabledToolIds = python)).status)
+            client.awaitRun("run-1")
+
+            // Two calls of one chat: the file went up once
+            assertEquals(listOf("step 0", "step 1"), executor.calls.map { it.code })
+            assertEquals(listOf(setOf("data.csv"), emptySet()), executor.calls.map { it.uploaded })
+            assertTrue(executor.calls.all { csv.contentEquals(it.files.getValue("data.csv")) })
+            assertEquals(3, executor.requests.get())
+            assertTrue(results.all { it is ToolExecutionResult.Success })
+
+            // A file the store does not have: the executor asks for it, it cannot be had, nothing runs
+            results.clear()
+            seed.repo.updateChatHistory(TEST_USERNAME) { h ->
+                h.copy(chat_history = h.chat_history.map { c ->
+                    c.copy(messages = c.messages + Message(role = "user", text = "And this", attachments = listOf(lost.copy(file_POE_url = "https://poe/g"))))
+                })
+            }
+            assertEquals(202, client.post("/api/runs", runBody("run-2", seed.chatId, seed.path(), provider = "poe", enabledToolIds = python)).status)
+            client.awaitRun("run-2")
+            assertEquals(2, executor.calls.size, "nothing ran")
+            val error = (results.first() as ToolExecutionResult.Error).error
+            assertTrue("\"lost.xlsx\"" in error && "Nothing was run" in error, error)
         }
     }
 

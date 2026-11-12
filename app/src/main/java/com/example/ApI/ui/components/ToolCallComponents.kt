@@ -539,8 +539,11 @@ fun ToolCallBubble(
                         }
 
                         // Check for output files from Python interpreter
-                        val outputFiles = (toolCallInfo.result as? ToolExecutionResult.Success)?.details
-                            ?.get("output_files")?.jsonArray
+                        // (also of a run that failed or timed out: its files are attached all the same)
+                        val outputFiles = when (val result = toolCallInfo.result) {
+                            is ToolExecutionResult.Success -> result.details
+                            is ToolExecutionResult.Error -> result.details
+                        }?.get("output_files") as? kotlinx.serialization.json.JsonArray
 
                         if (!outputFiles.isNullOrEmpty()) {
                             Spacer(modifier = Modifier.height(8.dp))

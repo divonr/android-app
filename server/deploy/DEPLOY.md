@@ -36,6 +36,12 @@ Required fields to set:
 - `WEB_UI_SESSION_SECRET` — a long random secret for signing session cookies
 - `GOOGLE_OAUTH_CLIENT_ID` — Google OAuth client ID (see Step 5 below)
 - `GOOGLE_OAUTH_CLIENT_SECRET` — Google OAuth client secret
+- `SANDBOX_API_KEY` — the key of the code executor (`~/python-server`, its `SANDBOX_API_KEY`).
+  Needed for the Python tool of cloud runs; without it the tool answers with a configuration
+  error. `SANDBOX_EXECUTOR_URL` is where the executor listens (default
+  `http://127.0.0.1:8000/v2/execute`, the executor on this machine). Neither value is in the
+  sources; the Android and desktop builds take theirs from `local.properties` (`sandbox.apiKey`,
+  optional `sandbox.executorUrl`) or from the same two environment variables at build time.
 
 Generate a random secret:
 ```bash

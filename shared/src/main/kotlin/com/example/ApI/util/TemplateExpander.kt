@@ -262,7 +262,7 @@ object TemplateExpander {
                     val toolCall = message.toolCall
                     if (toolCallField != null && toolCall != null) {
                         val toolCallJson = toolCallField.template
-                            .replace(BodyTemplatePlaceholders.TOOL_NAME, escapeJsonString(toolCall.toolId))
+                            .replace(BodyTemplatePlaceholders.TOOL_NAME, escapeJsonString(com.example.ApI.tools.ToolRegistry.modelNameForToolId(toolCall.toolId)))
                             .replace(BodyTemplatePlaceholders.TOOL_ID, escapeJsonString(message.toolCallId ?: ""))
                             .replace(BodyTemplatePlaceholders.TOOL_PARAMETERS, toolCall.parameters.toString())
                         messagesByPath.getOrPut(toolCallField.path) { mutableListOf() }.add(toolCallJson)

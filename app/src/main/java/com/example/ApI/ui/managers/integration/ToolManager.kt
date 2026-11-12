@@ -85,6 +85,7 @@ class ToolManager(
                 platformStorage = AndroidPlatformStorage(deps.context),
                 currentChat = currentChat,
                 currentGroup = currentGroup,
+                sandbox = sandboxConfig,
                 files = pythonToolFiles()
             )
             specifications.add(pythonTool.getSpecification(currentProvider))
@@ -92,6 +93,12 @@ class ToolManager(
 
         return specifications
     }
+
+    /** The remote executor and its key, as this build was given them (app/build.gradle.kts). */
+    private val sandboxConfig = com.example.ApI.tools.SandboxConfig(
+        executorUrl = com.example.ApI.BuildConfig.SANDBOX_EXECUTOR_URL,
+        apiKey = com.example.ApI.BuildConfig.SANDBOX_API_KEY
+    )
 
     /**
      * With sync on, the Python tool also reads attachments of other devices (from the account's
@@ -109,6 +116,8 @@ class ToolManager(
      * Handles special tools like group_conversations that need dynamic context.
      */
     suspend fun executeToolCall(toolCall: ToolCall): ToolExecutionResult {
+        // The providers hand over tool IDs; a name the model was given is taken too
+        val toolCall = toolCall.copy(toolId = ToolRegistry.toolIdForModelName(toolCall.toolId))
         if (toolCall.toolId == "get_current_group_conversations") {
             val currentChat = deps.uiState.value.currentChat
             val groups = deps.uiState.value.groups
@@ -146,6 +155,7 @@ class ToolManager(
                 platformStorage = AndroidPlatformStorage(deps.context),
                 currentChat = currentChat,
                 currentGroup = currentGroup,
+                sandbox = sandboxConfig,
                 files = pythonToolFiles()
             )
             return pythonTool.execute(toolCall.parameters)

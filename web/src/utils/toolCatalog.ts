@@ -11,7 +11,10 @@ export const GROUP_CONVERSATIONS_TOOL_ID = 'get_current_group_conversations'
 
 const TOOL_NAMES: Record<string, string> = {
   get_date_time: 'Get Date and Time',
-  python_interpreter: 'Python Code Interpreter',
+  // The code sandbox: its id (settings, stored tool calls) is still python_interpreter;
+  // workspace_sandbox is the name the models call it by
+  python_interpreter: 'Workspace Sandbox',
+  workspace_sandbox: 'Workspace Sandbox',
   [GROUP_CONVERSATIONS_TOOL_ID]: 'Other conversations in group',
   // GitHub
   github_read_file: 'Read GitHub File',
@@ -52,7 +55,8 @@ export function getIntegrationTitle(toolId: string): string {
   if (
     toolId === 'get_date_time' ||
     toolId === GROUP_CONVERSATIONS_TOOL_ID ||
-    toolId === 'python_interpreter'
+    toolId === 'python_interpreter' ||
+    toolId === 'workspace_sandbox'
   ) return 'Built-in Tools'
   return 'Other'
 }

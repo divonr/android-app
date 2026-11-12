@@ -306,7 +306,7 @@ class CohereProvider() : BaseProvider() {
 
                             detectedToolCall = ToolCall(
                                 id = currentToolCallId!!,
-                                toolId = currentToolName!!,
+                                toolId = com.example.ApI.tools.ToolRegistry.toolIdForModelName(currentToolName!!),
                                 parameters = toolInputJson,
                                 provider = "cohere"
                             )
@@ -390,7 +390,7 @@ class CohereProvider() : BaseProvider() {
         return handler.getResult()
     }
 
-    private suspend fun buildMessages(messages: List<Message>, systemPrompt: String): List<JsonObject> = withContext(Dispatchers.IO) {
+    internal suspend fun buildMessages(messages: List<Message>, systemPrompt: String): List<JsonObject> = withContext(Dispatchers.IO) {
         val cohereMessages = mutableListOf<JsonObject>()
 
         if (systemPrompt.isNotBlank()) {
@@ -455,7 +455,7 @@ class CohereProvider() : BaseProvider() {
                                         put("id", nextMessage.toolCallId ?: "")
                                         put("type", "function")
                                         put("function", buildJsonObject {
-                                            put("name", toolCall.toolId)
+                                            put("name", com.example.ApI.tools.ToolRegistry.modelNameForToolId(toolCall.toolId))
                                             put("arguments", toolCall.parameters.toString())
                                         })
                                     })
@@ -486,7 +486,7 @@ class CohereProvider() : BaseProvider() {
                                     put("id", message.toolCallId ?: "")
                                     put("type", "function")
                                     put("function", buildJsonObject {
-                                        put("name", toolCall.toolId)
+                                        put("name", com.example.ApI.tools.ToolRegistry.modelNameForToolId(toolCall.toolId))
                                         put("arguments", toolCall.parameters.toString())
                                     })
                                 })

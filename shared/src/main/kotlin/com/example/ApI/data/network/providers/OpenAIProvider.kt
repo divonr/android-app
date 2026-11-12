@@ -403,7 +403,7 @@ class OpenAIProvider() : BaseProvider() {
                 AppLogger.d("[TOOL_CALL_DEBUG] Streaming: Detected tool call in output_item.done")
                 return ToolCall(
                     id = callId,
-                    toolId = name,
+                    toolId = com.example.ApI.tools.ToolRegistry.toolIdForModelName(name),
                     parameters = paramsJson,
                     provider = "openai"
                 )
@@ -430,7 +430,7 @@ class OpenAIProvider() : BaseProvider() {
                         AppLogger.d("[TOOL_CALL_DEBUG] Streaming: Detected tool call in response.completed")
                         return ToolCall(
                             id = callId,
-                            toolId = name,
+                            toolId = com.example.ApI.tools.ToolRegistry.toolIdForModelName(name),
                             parameters = paramsJson,
                             provider = "openai"
                         )
@@ -444,7 +444,7 @@ class OpenAIProvider() : BaseProvider() {
     /**
      * Builds the input array for OpenAI API request
      */
-    private fun buildInput(messages: List<Message>, systemPrompt: String): List<JsonObject> {
+    internal fun buildInput(messages: List<Message>, systemPrompt: String): List<JsonObject> {
         val conversationInput = mutableListOf<JsonObject>()
 
         // Add system prompt
@@ -470,7 +470,7 @@ class OpenAIProvider() : BaseProvider() {
                 "tool_call" -> {
                     conversationInput.add(buildJsonObject {
                         put("type", "function_call")
-                        put("name", message.toolCall?.toolId ?: "unknown")
+                        put("name", message.toolCall?.toolId?.let { com.example.ApI.tools.ToolRegistry.modelNameForToolId(it) } ?: "unknown")
                         put("arguments", message.toolCall?.parameters?.toString() ?: "{}")
                         put("call_id", message.toolCallId ?: "")
                     })
@@ -775,7 +775,7 @@ class OpenAIProvider() : BaseProvider() {
                                 val paramsJson = json.parseToJsonElement(arguments).jsonObject
                                 toolCall = ToolCall(
                                     id = callId,
-                                    toolId = name,
+                                    toolId = com.example.ApI.tools.ToolRegistry.toolIdForModelName(name),
                                     parameters = paramsJson,
                                     provider = "openai"
                                 )

@@ -67,7 +67,8 @@ class ToolManager(
             val pythonTool = PythonInterpreterTool(
                 platformStorage = DesktopPlatformStorage(deps.context.filesDir),
                 currentChat = currentChat,
-                currentGroup = currentGroup
+                currentGroup = currentGroup,
+                sandbox = sandboxConfig
             )
             specifications.add(pythonTool.getSpecification(currentProvider))
         }
@@ -75,7 +76,15 @@ class ToolManager(
         return specifications
     }
 
+    /** The remote executor and its key, as this build was given them (desktop/build.gradle.kts). */
+    private val sandboxConfig = com.example.ApI.tools.SandboxConfig(
+        executorUrl = com.example.ApI.desktop.SandboxBuildConfig.EXECUTOR_URL,
+        apiKey = com.example.ApI.desktop.SandboxBuildConfig.API_KEY
+    )
+
     suspend fun executeToolCall(toolCall: ToolCall): ToolExecutionResult {
+        // The providers hand over tool IDs; a name the model was given is taken too
+        val toolCall = toolCall.copy(toolId = ToolRegistry.toolIdForModelName(toolCall.toolId))
         if (toolCall.toolId == "get_current_group_conversations") {
             val currentChat = deps.uiState.value.currentChat
             val groups = deps.uiState.value.groups
@@ -107,7 +116,8 @@ class ToolManager(
             val pythonTool = PythonInterpreterTool(
                 platformStorage = DesktopPlatformStorage(deps.context.filesDir),
                 currentChat = currentChat,
-                currentGroup = currentGroup
+                currentGroup = currentGroup,
+                sandbox = sandboxConfig
             )
             return pythonTool.execute(toolCall.parameters)
         }

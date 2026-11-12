@@ -8,14 +8,17 @@ import com.example.ApI.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
-import okhttp3.MediaType.Companion.toMediaType
+import com.example.ApI.data.attachments.AttachmentHash
+import com.example.ApI.data.attachments.FileDigest
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
@@ -24,7 +27,7 @@ import java.util.concurrent.TimeUnit
  * attachments' `local_file_path`, as on the device.
  */
 interface PythonToolFiles {
-    /** Whether [attachment]'s file can be offered to the model as an input file. */
+    /** Whether [attachment]'s file can be had here at all, and so belongs to the tool's input files. */
     fun isAvailable(attachment: Attachment): Boolean
 
     /** The file of [attachment] (fetched if needed), or null when it cannot be had. */
@@ -38,61 +41,106 @@ interface PythonToolFiles {
 }
 
 /**
- * Python Interpreter tool - shared implementation.
- * Uses file-based session persistence via PlatformStorage.
+ * Where the remote executor is and the key it is called with. Neither is in the sources: the
+ * platform layer passes them in (Android: BuildConfig, from `local.properties` or the build's
+ * environment; desktop: a constant generated the same way; the web server: its environment).
+ */
+data class SandboxConfig(val executorUrl: String, val apiKey: String) {
+    /** null when the tool can be used, else the error it reports instead of running anything. */
+    val configurationError: String?
+        get() = when {
+            executorUrl.isBlank() -> "The code sandbox is not configured: this build has no executor URL."
+            apiKey.isBlank() -> "The code sandbox is not configured: this build has no API key for the executor " +
+                "(sandbox.apiKey in local.properties or SANDBOX_API_KEY in the environment). Tell the user; retrying will not help."
+            else -> null
+        }
+
+    // The key must not end up in a log line or an error message
+    override fun toString(): String = "SandboxConfig(executorUrl=$executorUrl, apiKey=${if (apiKey.isBlank()) "<none>" else "<set>"})"
+}
+
+/**
+ * The code sandbox (`workspace_sandbox` to the models; its ID is still `python_interpreter`,
+ * see [ToolRegistry.PYTHON_INTERPRETER]) - shared implementation, speaking the executor's v2 protocol
+ * (`POST /v2/execute`):
  *
- * @param files       how input files are found and output files kept (null: the device's own
- *                    files, by `local_file_path`).
- * @param executorUrl the remote executor (tests point it at a fake).
+ *  - the session is the chat: `chat_id` is the chat's id, and the executor keeps one container
+ *    per chat. Without a chat it is `nochat-<id of this install>` (kept in `sandbox_install_id`
+ *    under the files dir), so such calls share one container per install;
+ *  - every call names ALL the files of the conversation in `input_manifest` (name, size,
+ *    SHA-256): the attachments of the chat's messages and of its group / project that can be
+ *    had here. The model does not choose files; the executor puts them in `/app/input`. A file
+ *    whose content is nowhere this machine can reach (never hashed, not on this machine) is
+ *    left out and named in the result; a file that should be reachable but cannot be fetched
+ *    when the executor asks for it fails the call, naming the file;
+ *  - the first request carries no file bodies. The executor answers `missing_files` with the
+ *    names it does not hold yet (or holds with another hash) and the same request is sent once
+ *    more with those bodies. A file is therefore uploaded once per container, not per call;
+ *  - the tool's result is the run's whole output: nothing is cut on this side.
+ *
+ * @param files   how input files are found and output files kept (null: the device's own
+ *                files, by `local_file_path`).
+ * @param sandbox the remote executor and its key (tests point it at a fake).
  */
 class PythonInterpreterTool(
     private val platformStorage: PlatformStorage,
     private val currentChat: Chat?,
     private val currentGroup: ChatGroup?,
-    private val files: PythonToolFiles? = null,
-    private val executorUrl: String = SERVER_URL
+    private val sandbox: SandboxConfig,
+    private val files: PythonToolFiles? = null
 ) : Tool {
 
-    override val id = "python_interpreter"
-    override val name = "Python Code Interpreter"
-    override val description: String get() {
-        val availableFiles = getAvailableFiles().map { it.file_name }
-        return buildDescription(
-            if (availableFiles.isEmpty()) "No files currently available in conversation."
-            else "Available files: ${availableFiles.joinToString(", ")}"
-        )
+    // The ID the settings and the stored calls know the tool by (ToolRegistry.PYTHON_INTERPRETER);
+    // the models are told ToolRegistry.WORKSPACE_SANDBOX_NAME
+    override val id = ToolRegistry.PYTHON_INTERPRETER
+    override val name = "Workspace Sandbox"
+
+    // The same on every request, whatever the chat's files: a provider's prompt cache covers
+    // the tool declarations
+    override val description: String get() = DESCRIPTION
+
+    /** One entry of `input_manifest`: [name] is the file's name in `/app/input`. */
+    class InputFile internal constructor(
+        val name: String,
+        val attachment: Attachment,
+        internal var digest: FileDigest,
+        internal var file: File?
+    ) {
+        val sha256: String get() = digest.sha256
+        val size: Long get() = digest.size
     }
 
-    /**
-     * [description] with the file list replaced by where the conversation itself names the
-     * files, so the declaration is the same on every request (see [ToolSpecification.stableDescription]).
-     */
-    val stableDescription: String get() = buildDescription(STABLE_FILES_LINE)
-
-    private fun buildDescription(filesList: String): String {
-        return """
-Consider using this tool for data processing, analysis, or when generating files (Word, PowerPoint, Excel, PDF, images, etc.) would benefit the user's request.
-
-Packages: pandas, numpy, matplotlib, scipy, seaborn, openpyxl, python-pptx, python-docx, Pillow, fpdf, networkx. Internet access available — pip install additional packages if needed.
-
-Input files: specify EXACT filenames (without paths) in 'files_to_include', read from ./data/{file_name}.
-$filesList
-
-Output: print() for text. Save files to working directory (e.g., plt.savefig('chart.png')). Generated files are displayed to the user as message attachments.
-
-Limits: 5 min timeout, 2GB RAM.
-        """.trimIndent()
+    /** [files]: the manifest. [unavailable]: names of conversation files that cannot be had here at all. */
+    class InputManifest internal constructor(val files: List<InputFile>, val unavailable: List<String>) {
+        fun toJson(): JsonArray = buildJsonArray {
+            files.forEach { add(buildJsonObject { put("name", it.name); put("size", it.size); put("sha256", it.sha256) }) }
+        }
     }
+
+    /** A conversation file whose bytes could not be had although they should be there. */
+    private class InputFileUnavailable(val fileName: String, val reason: String) : Exception()
 
     companion object {
-        const val SERVER_URL = "https://api-divonr.xyz/execute"
-        const val API_KEY = "Ato01g?4:elop-ef,kq32"
-        const val MAX_FILE_SIZE = 10 * 1024 * 1024L
+        /** What the models are told about the tool. Raw text: no indentation is stripped. */
+        val DESCRIPTION: String = """
+Execute Python 3.11 code inside a persistent, full-featured Debian Linux container (root access) to perform data analysis, complex calculations, web scraping, system tasks (via subprocess/bash), and file/document generation (PDF, Word, Excel, PowerPoint, charts, archives).
 
-        // "not available" is the one not-sent note (GoogleProvider) whose file this tool cannot read either
-        const val STABLE_FILES_LINE = "Available files: every file attached in this conversation, named where it is " +
-            "attached (also when a note there says it was not sent to you, unless the note says the file is not " +
-            "available), and every file generated by earlier runs of this tool, named in their results."
+ARCHITECTURE & PERSISTENCE:
+1. Container vs. Process Lifecycle:
+   - FILESYSTEM IS PERSISTENT across tool calls within the active conversation. Files saved in `/app`, installed `pip` packages, and `apt-get` system packages remain available in subsequent calls (Caveat: After two hours of inactivity, the cloud container will terminate and reset).
+   - PYTHON MEMORY IS STATELESS between calls. Each tool call executes as a fresh `python3` process. In-memory variables do NOT persist automatically—save intermediate data (e.g., DataFrames, state) to disk (`/app/temp.parquet`, `.pkl`, or `.sqlite`) if needed across steps.
+2. Directory Structure & File Export:
+   - Working Directory: `/app` (use for intermediate files, subdirectories, and temporary work).
+   - Input Files: Any conversation files (user attachments) are placed in `/app/input/{file_name}` (also symlinked at `./data/{file_name}`). If two different files share a name, the later one is stored as `name (2).ext`.
+   - Output / User Attachments: ONLY files saved directly inside `/app/output/` (e.g., `/app/output/report.pdf`, `/app/output/chart.png`) will be automatically attached and sent to the user in the chat interface. Do not place intermediate files in `/app/output/`.
+
+ENVIRONMENT & PRE-INSTALLED TOOLS:
+- Privileges & Network: Running as `root` (`uid=0`) with full outbound internet access. You can run shell commands via `subprocess.run(...)` and install missing packages via `pip` or `apt-get`.
+- Hebrew & RTL Support: Full Hebrew font packages (`fonts-culmus`, `fonts-noto`, `fonts-dejavu`), `python-bidi`, and `arabic-reshaper` are pre-installed.
+  * Note for Matplotlib/ReportLab/FPDF2 in Hebrew: Always load a TrueType font from `/usr/share/fonts/truetype/` and apply `bidi.algorithm.get_display(arabic_reshaper.reshape(text))` when rendering static images/PDFs that lack native BiDi shaping, or generate HTML+CSS (`dir="rtl"`) and convert to PDF via `weasyprint` / `wkhtmltopdf` / `libreoffice --headless --convert-to pdf`.
+- Pre-installed Stack: pandas, numpy, scipy, scikit-learn, duckdb, matplotlib, seaborn, plotly, openpyxl, python-docx, python-pptx, fpdf2, reportlab, weasyprint, pdfplumber, pypdf, pillow, beautifulsoup4, requests, git, curl, jq, sqlite3, ffmpeg, libreoffice, pandoc.
+- Limits: 4 vCPUs, 2GB RAM, 512MB `/dev/shm`, 5-minute timeout per call. Use `print()` to return text output to yourself.
+""".trim('\n')
 
         /**
          * The files a run of the tool generated, as attachments, from the `output_files` of its
@@ -114,7 +162,7 @@ Limits: 5 min timeout, 2GB RAM.
                     val mimeType = obj["mime_type"]?.jsonPrimitive?.contentOrNull ?: "application/octet-stream"
                     val localPath = obj["local_file_path"]?.jsonPrimitive?.contentOrNull
                     val sha256 = obj["sha256"]?.jsonPrimitive?.contentOrNull
-                        ?.takeIf { com.example.ApI.data.attachments.AttachmentHash.isValid(it) }
+                        ?.takeIf { AttachmentHash.isValid(it) }
                     if (localPath == null && sha256 == null) return@mapNotNull null
                     Attachment(
                         local_file_path = localPath,
@@ -128,97 +176,281 @@ Limits: 5 min timeout, 2GB RAM.
                 }
             }
         }
+
+        /**
+         * The name a conversation file gets in `/app/input`: a plain file name (no path
+         * separators, nothing a multipart header cannot carry as it is).
+         */
+        fun inputFileName(fileName: String): String {
+            val clean = fileName
+                .map { c -> if (c == '/' || c == '\\' || c.isISOControl()) '_' else if (c == '"') '\'' else c }
+                .joinToString("").trim()
+            return if (clean.isEmpty() || clean == "." || clean == "..") "file" else clean
+        }
+
+        /** `name (2).ext`, `name (3).ext`…: what a file is called when [name] is taken by another file. */
+        private fun numbered(name: String, n: Int): String {
+            val dot = name.lastIndexOf('.')
+            return if (dot <= 0) "$name ($n)" else "${name.substring(0, dot)} ($n)${name.substring(dot)}"
+        }
+
+        private class CachedDigest(val length: Long, val lastModified: Long, val digest: FileDigest)
+
+        /** Hashes of files already hashed in this process, by path; valid while size and time are the same. */
+        private val digestCache = ConcurrentHashMap<String, CachedDigest>()
+
+        /** How many files were actually hashed (tests). */
+        internal val hashedFiles = java.util.concurrent.atomic.AtomicInteger()
+
+        private suspend fun digestOf(file: File): FileDigest {
+            val path = file.absolutePath
+            val length = file.length()
+            val modified = file.lastModified()
+            digestCache[path]?.takeIf { it.length == length && it.lastModified == modified }?.let { return it.digest }
+            val digest = AttachmentHash.of(file)
+            hashedFiles.incrementAndGet()
+            digestCache[path] = CachedDigest(length, modified, digest)
+            return digest
+        }
+
+        private val json = Json { ignoreUnknownKeys = true }
     }
 
+    // Read: the executor runs code for up to 300 s, then collects the files. Write: per write
+    // to the socket, not per upload, so a large file takes as long as it needs.
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(330, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(420, TimeUnit.SECONDS)
+        .writeTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    // File-based session persistence
-    private val sessionPrefsFile = File(platformStorage.filesDir, "python_sessions.json")
-
-    private fun loadSessionMap(): MutableMap<String, String> {
-        if (!sessionPrefsFile.exists()) return mutableMapOf()
-        return try {
-            val obj = Json.parseToJsonElement(sessionPrefsFile.readText()).jsonObject
-            obj.entries.associate { it.key to it.value.jsonPrimitive.content }.toMutableMap()
-        } catch (e: Exception) { mutableMapOf() }
+    /** The executor's session key: the chat, or this install when there is no chat. */
+    internal fun sessionKey(): String {
+        currentChat?.chat_id?.takeIf { it.isNotBlank() }?.let { return it }
+        val file = File(platformStorage.filesDir, "sandbox_install_id")
+        val saved = try { file.takeIf { it.exists() }?.readText()?.trim() } catch (e: Exception) { null }
+        if (!saved.isNullOrBlank()) return "nochat-$saved"
+        val created = UUID.randomUUID().toString()
+        try { file.writeText(created) } catch (e: Exception) { /* a new one next time */ }
+        return "nochat-$created"
     }
 
-    private fun loadSessionId(chatKey: String): String? = loadSessionMap()[chatKey]
+    /**
+     * Every file of the conversation, as the executor is told about it. Order: the chat's
+     * messages, then the group's files. Names: the attachment's own name; the same name with
+     * the same content is one file, with another content it is `name (2).ext`, `name (3).ext`…
+     * in that order — so a file keeps its name from call to call as the chat grows.
+     */
+    internal suspend fun inputManifest(): InputManifest {
+        val usable: (Attachment) -> Boolean = this.files?.let { hooks -> { a: Attachment -> hooks.isAvailable(a) } }
+            ?: { a: Attachment -> a.local_file_path != null }
+        val all = currentChat?.messages.orEmpty().flatMap { it.attachments } + currentGroup?.group_attachments.orEmpty()
 
-    private fun saveSessionId(chatKey: String, sessionId: String) {
-        val map = loadSessionMap()
-        map[chatKey] = sessionId
-        val jsonObj = buildJsonObject { map.forEach { (k, v) -> put(k, v) } }
-        sessionPrefsFile.writeText(jsonObj.toString())
+        val entries = mutableListOf<InputFile>()
+        val byName = HashMap<String, InputFile>()
+        val unavailable = all.filterNot(usable).map { it.file_name }.toMutableList()
+        for (attachment in all.filter(usable)) {
+            // The recorded identity is taken as it is (no fetch of a file the executor may already
+            // hold); should its file not be had when the executor asks for it, the call fails
+            val recorded = attachment.sha256?.takeIf(AttachmentHash::isValid)
+                ?.let { sha -> attachment.size?.takeIf { it >= 0 }?.let { FileDigest(sha, it) } }
+            var file: File? = null
+            val digest = recorded ?: try {
+                file = localFile(attachment)
+                digestOf(file)
+            } catch (e: InputFileUnavailable) {
+                // Never hashed and not on this machine: nothing can fetch it
+                unavailable += attachment.file_name
+                continue
+            } catch (e: java.io.IOException) {
+                unavailable += attachment.file_name
+                continue
+            }
+
+            val base = inputFileName(attachment.file_name)
+            var name = base
+            var n = 2
+            var duplicate = false
+            while (true) {
+                val taken = byName[name] ?: break
+                if (taken.sha256 == digest.sha256) { duplicate = true; break }
+                name = numbered(base, n++)
+            }
+            if (duplicate) continue
+            InputFile(name, attachment, digest, file).also { entries += it; byName[name] = it }
+        }
+        return InputManifest(entries, unavailable.distinct().filter { inputFileName(it) !in byName })
+    }
+
+    /** The attachment's file on this machine (fetched if needed); fails naming the file. */
+    private suspend fun localFile(attachment: Attachment): File {
+        val file = try {
+            if (files != null) files.inputFile(attachment) else attachment.local_file_path?.let { File(it) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw InputFileUnavailable(attachment.file_name, e.message ?: e::class.java.simpleName)
+        }
+        if (file == null || !file.isFile) {
+            throw InputFileUnavailable(attachment.file_name, "its content is not on this machine and could not be fetched")
+        }
+        return file
     }
 
     override suspend fun execute(parameters: JsonObject): ToolExecutionResult {
         AppLogger.i("[PythonTool] execute() called")
         val code = parameters["code"]?.jsonPrimitive?.contentOrNull
             ?: return ToolExecutionResult.Error("Parameter 'code' is required")
-
-        val filesToInclude = parameters["files_to_include"]?.jsonArray
-            ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
-        val resolvedFiles = resolveFiles(filesToInclude)
-
-        val chatKey = currentChat?.id ?: "default_session"
-        val savedSessionId = loadSessionId("python_session_$chatKey")
-
-        val multipartBuilder = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("code", code)
-            .addFormDataPart("kill_session", "false")
-        if (savedSessionId != null) multipartBuilder.addFormDataPart("session_id", savedSessionId)
-        resolvedFiles.forEach { file ->
-            multipartBuilder.addFormDataPart("files", file.name, file.bytes.toRequestBody(file.mimeType.toMediaType()))
-        }
+        sandbox.configurationError?.let { return ToolExecutionResult.Error(it) }
 
         return withContext(Dispatchers.IO) {
             try {
-                val request = Request.Builder()
-                    .url(executorUrl)
-                    .header("X-Api-Key", API_KEY)
-                    .post(multipartBuilder.build())
-                    .build()
-                val response = client.newCall(request).execute()
-                if (!response.isSuccessful) {
-                    val errorBody = response.body?.string() ?: "No response body"
-                    return@withContext ToolExecutionResult.Error("Server error ${response.code}: ${errorBody.take(500)}")
+                val manifest = inputManifest()
+                val chatId = sessionKey()
+
+                // Handshake: first without bodies, then once with the bodies the executor asked for
+                var response = post(code, chatId, manifest, emptyList())
+                if (response.status == "missing_files") {
+                    val wanted = response.missing
+                    val unknown = wanted.filter { name -> manifest.files.none { it.name == name } }
+                    if (unknown.isNotEmpty()) {
+                        return@withContext ToolExecutionResult.Error(
+                            "The sandbox asked for files that are not part of this conversation: ${unknown.joinToString(", ")}. Nothing was run."
+                        )
+                    }
+                    val upload = manifest.files.filter { it.name in wanted }
+                    for (entry in upload) {
+                        val file = entry.file ?: localFile(entry.attachment).also { entry.file = it }
+                        // What is sent must be what the manifest says
+                        val actual = try { digestOf(file) } catch (e: java.io.IOException) {
+                            throw InputFileUnavailable(entry.attachment.file_name, "it could not be read")
+                        }
+                        entry.digest = actual
+                    }
+                    AppLogger.i("[PythonTool] uploading ${upload.size} input file(s) the sandbox does not hold")
+                    response = post(code, chatId, manifest, upload)
+                    if (response.status == "missing_files") {
+                        return@withContext ToolExecutionResult.Error(
+                            "The sandbox did not accept these input files after they were uploaded: " +
+                                "${response.missing.joinToString(", ")}. Nothing was run."
+                        )
+                    }
                 }
-                val responseBody = response.body?.string()
-                    ?: return@withContext ToolExecutionResult.Error("Empty response from Python executor")
-                parseResponse(responseBody, chatKey)
+                response.failure?.let { return@withContext ToolExecutionResult.Error(it) }
+                toResult(response.body!!, manifest)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: InputFileUnavailable) {
+                ToolExecutionResult.Error(
+                    "The conversation file \"${e.fileName}\" could not be given to the sandbox: ${e.reason}. Nothing was run. " +
+                        "Tell the user; the file may need to be attached again."
+                )
+            } catch (e: java.net.SocketTimeoutException) {
+                ToolExecutionResult.Error("The sandbox did not answer in time (${e.message ?: "timeout"}). The code may still have run.")
             } catch (e: Exception) {
                 ToolExecutionResult.Error("Failed to execute Python code: ${e::class.java.simpleName}: ${e.message ?: "no message"}")
             }
         }
     }
 
-    private suspend fun parseResponse(responseBody: String, chatKey: String): ToolExecutionResult {
-        val json = Json.parseToJsonElement(responseBody).jsonObject
-        json["session_id"]?.jsonPrimitive?.contentOrNull?.let { sessionId ->
-            saveSessionId("python_session_$chatKey", sessionId)
+    /** One answer of the executor: its JSON [body], or why there is none ([failure]). */
+    private class ExecutorResponse(val body: JsonObject?, val failure: String?) {
+        val status: String? get() = body?.get("status")?.jsonPrimitive?.contentOrNull
+        val missing: List<String>
+            get() = (body?.get("missing") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+    }
+
+    private fun post(code: String, chatId: String, manifest: InputManifest, bodies: List<InputFile>): ExecutorResponse {
+        val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("code", code)
+            .addFormDataPart("chat_id", chatId)
+            .addFormDataPart("input_manifest", manifest.toJson().toString())
+        bodies.forEach { entry ->
+            val type = entry.attachment.mime_type.toMediaTypeOrNull() ?: "application/octet-stream".toMediaTypeOrNull()
+            multipart.addFormDataPart("files", entry.name, entry.file!!.asRequestBody(type))
         }
-        val status = json["status"]?.jsonPrimitive?.contentOrNull ?: "error"
-        if (status == "timeout") return ToolExecutionResult.Error("Python execution timed out (5 minute limit exceeded)")
-        if (status == "error") {
-            val message = json["message"]?.jsonPrimitive?.contentOrNull ?: "Unknown server error"
-            return ToolExecutionResult.Error("Server error: $message")
+        val request = Request.Builder()
+            .url(sandbox.executorUrl)
+            .header("X-Api-Key", sandbox.apiKey)
+            .post(multipart.build())
+            .build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                return ExecutorResponse(
+                    null,
+                    when (response.code) {
+                        401, 403 -> "The sandbox refused this app's API key (HTTP ${response.code}). Tell the user; retrying will not help."
+                        // Cloudflare, in front of the executor for a device: no answer within about 100 s
+                        524 -> "The route to the sandbox gave up waiting for the answer (HTTP 524): on this device a call " +
+                            "cannot take longer than about 100 seconds. The code was not stopped and may still be running; " +
+                            "its output is lost. Split the work into shorter calls, or run a long job in the background " +
+                            "(e.g. subprocess.Popen with its output redirected to a file under /app) and read its result in a later call."
+                        else -> "Sandbox error: HTTP ${response.code}" + if (text.isBlank()) "" else ": $text"
+                    }
+                )
+            }
+            val body = try { json.parseToJsonElement(text) as? JsonObject } catch (e: Exception) { null }
+                ?: return ExecutorResponse(null, "The sandbox sent an answer that is not JSON" + if (text.isBlank()) " (empty)." else ": $text")
+            return ExecutorResponse(body, null)
         }
-        val logs = json["logs"]?.jsonPrimitive?.contentOrNull ?: ""
-        val exitCode = json["exit_code"]?.jsonObject?.get("StatusCode")?.jsonPrimitive?.intOrNull ?: 0
-        val artifactsJson = json["artifacts"]?.jsonArray ?: JsonArray(emptyList())
-        val savedAttachments = saveOutputFiles(artifactsJson)
-        val resultText = buildString {
-            if (logs.isNotBlank()) { appendLine("**Output:**"); appendLine("```"); appendLine(logs.trim()); appendLine("```") }
-            if (exitCode != 0) appendLine("\n**Exit code:** $exitCode")
-            if (savedAttachments.isNotEmpty()) { appendLine("\n**Generated Files:**"); savedAttachments.forEach { appendLine("- ${it.file_name}") } }
+    }
+
+    private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+
+    /** The model's view of a run: everything the code printed, how it ended and what it left. */
+    private suspend fun toResult(body: JsonObject, manifest: InputManifest): ToolExecutionResult {
+        val status = body.string("status") ?: "error"
+        if (status != "success" && status != "timeout") {
+            return ToolExecutionResult.Error("Sandbox error: ${body.string("message") ?: "unknown error (status \"$status\")"}")
         }
+        val timedOut = status == "timeout"
+        val stdout = body.string("stdout").orEmpty()
+        val stderr = body.string("stderr").orEmpty()
+        val exitCode = (body["exit_code"] as? JsonPrimitive)?.intOrNull
+        val truncated = (body["truncated"] as? JsonPrimitive)?.booleanOrNull == true
+        val freshReason = body.string("fresh_reason")
+            ?.takeIf { (body["fresh_container"] as? JsonPrimitive)?.booleanOrNull == true }
+
+        val (savedAttachments, unsaved) = saveOutputFiles((body["artifacts"] as? JsonArray) ?: JsonArray(emptyList()))
+
+        val sections = mutableListOf<String>()
+        when (freshReason) {
+            "expired" -> "the previous one was removed after two hours without a call"
+            "lost" -> "the previous one is gone"
+            else -> null
+        }?.let { why ->
+            sections += "[Sandbox notice: this call ran in a new container ($why). Files created by earlier calls and " +
+                "packages installed with pip or apt-get are gone; the conversation's files are in /app/input again.]"
+        }
+        if (manifest.unavailable.isNotEmpty()) {
+            sections += "[Sandbox notice: these conversation files are NOT in /app/input, because their content is not " +
+                "available where this tool runs: ${manifest.unavailable.joinToString(", ")}]"
+        }
+        val failed = timedOut || (exitCode != null && exitCode != 0)
+        // Whole, whatever their length
+        if (stdout.isNotBlank()) sections += "**stdout:**\n```\n${stdout.trimEnd('\n', '\r')}\n```"
+        if (stderr.isNotBlank()) sections += "**stderr:**\n```\n${stderr.trimEnd('\n', '\r')}\n```"
+        if (stdout.isBlank() && stderr.isBlank() && !failed) sections += "Code executed successfully (no output)"
+        if (exitCode != null && exitCode != 0) sections += "**Exit code:** $exitCode"
+        if (timedOut) {
+            sections += "**Timed out:** " + (body.string("message")?.takeIf { it.isNotBlank() }
+                ?: "the process was killed after the 5 minute limit; what it printed until then is above.")
+        }
+        if (truncated) {
+            sections += "**Note:** the sandbox truncated this output (more than 10 MB in a stream): its start and its end are above, the middle is missing."
+        }
+        if (savedAttachments.isNotEmpty()) {
+            sections += "**Generated Files:**\n" + savedAttachments.joinToString("\n") { "- ${it.file_name}" }
+        }
+        if (unsaved.isNotEmpty()) {
+            sections += "**Note:** these files in /app/output could not be attached to the chat: ${unsaved.joinToString(", ")}"
+        }
+
         val details = buildJsonObject {
-            put("stdout", logs); put("stderr", ""); put("exit_code", exitCode)
+            // The output itself is the result's text: it is not stored a second time
+            put("exit_code", exitCode?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("timed_out", timedOut)
             put("output_files", buildJsonArray {
                 savedAttachments.forEach { att ->
                     add(buildJsonObject {
@@ -232,58 +464,39 @@ Limits: 5 min timeout, 2GB RAM.
                 }
             })
         }
-        return if (exitCode != 0 && logs.isNotBlank()) ToolExecutionResult.Error(resultText.ifBlank { "Code execution failed with exit code $exitCode" }, details)
-        else ToolExecutionResult.Success(resultText.ifBlank { "Code executed successfully (no output)" }, details)
+        val text = sections.joinToString("\n\n")
+        return if (failed) ToolExecutionResult.Error(text, details) else ToolExecutionResult.Success(text, details)
     }
 
-    private fun getAvailableFiles(): List<Attachment> {
-        val files = mutableListOf<Attachment>()
-        val usable: (Attachment) -> Boolean = this.files?.let { hooks -> { a: Attachment -> hooks.isAvailable(a) } }
-            ?: { a: Attachment -> a.local_file_path != null }
-        currentChat?.messages?.forEach { msg -> msg.attachments.filter(usable).forEach { files.add(it) } }
-        currentGroup?.group_attachments?.filter(usable)?.forEach { files.add(it) }
-        return files.distinctBy { it.file_name }
-    }
-
-    private suspend fun resolveFiles(fileNames: List<String>): List<ResolvedFile> {
-        val available = getAvailableFiles()
-        return fileNames.mapNotNull { fileName ->
-            val clean = fileName.substringAfterLast("/")
-            available.find { it.file_name.equals(clean, ignoreCase = true) }?.let { att ->
-                try {
-                    val file = (if (files != null) files.inputFile(att) else att.local_file_path?.let { File(it) })
-                        ?: return@let null
-                    if (!file.exists() || file.length() > MAX_FILE_SIZE) return@let null
-                    ResolvedFile(att.file_name, file.readBytes(), att.mime_type)
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) { null }
-            }
-        }
-    }
-
-    private suspend fun saveOutputFiles(artifactsJson: JsonArray): List<Attachment> {
+    /** The artifacts as attachments, and the names of the ones that could not be kept. */
+    private suspend fun saveOutputFiles(artifactsJson: JsonArray): Pair<List<Attachment>, List<String>> {
         val attachmentsDir = File(platformStorage.filesDir, "attachments").apply { mkdirs() }
-        return artifactsJson.mapNotNull { fileJson ->
+        val unsaved = mutableListOf<String>()
+        val saved = artifactsJson.mapNotNull { fileJson ->
+            val name = ((fileJson as? JsonObject)?.get("name") as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
             try {
-                val obj = fileJson.jsonObject
-                val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                val contentBase64 = obj["content_base64"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val contentBase64 = fileJson.jsonObject["content_base64"]?.jsonPrimitive?.contentOrNull
+                    ?: return@mapNotNull null.also { unsaved += name }
                 val ext = name.substringAfterLast('.', "").lowercase()
                 val mimeType = getMimeType(ext)
                 val bytes = Base64.getDecoder().decode(contentBase64)
-                if (files != null) return@mapNotNull files.saveOutput(name, mimeType, bytes)
-                val localFile = File(attachmentsDir, "${UUID.randomUUID()}_$name")
+                if (files != null) return@mapNotNull files.saveOutput(name, mimeType, bytes) ?: null.also { unsaved += name }
+                val localFile = File(attachmentsDir, "${UUID.randomUUID()}_${inputFileName(name)}")
                 localFile.writeBytes(bytes)
                 Attachment(local_file_path = localFile.absolutePath, file_name = name, mime_type = mimeType)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (e: Exception) { null }
+            } catch (e: Exception) {
+                unsaved += name
+                null
+            }
         }
+        return saved to unsaved
     }
 
     private fun getMimeType(ext: String) = when (ext) {
         "png" -> "image/png"; "jpg", "jpeg" -> "image/jpeg"; "gif" -> "image/gif"; "svg" -> "image/svg+xml"
+        "webp" -> "image/webp"
         "pdf" -> "application/pdf"; "csv" -> "text/csv"
         "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         "xls" -> "application/vnd.ms-excel"
@@ -291,6 +504,7 @@ Limits: 5 min timeout, 2GB RAM.
         "doc" -> "application/msword"
         "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         "json" -> "application/json"; "txt" -> "text/plain"; "html", "htm" -> "text/html"
+        "md" -> "text/markdown"
         "xml" -> "application/xml"; "zip" -> "application/zip"
         "mp4" -> "video/mp4"; "mp3" -> "audio/mpeg"; "wav" -> "audio/wav"
         else -> "application/octet-stream"
@@ -298,19 +512,12 @@ Limits: 5 min timeout, 2GB RAM.
 
     override fun getSpecification(provider: String): ToolSpecification {
         val isGoogle = provider == "google"
-        return ToolSpecification(name = id, description = description, stableDescription = stableDescription, parameters = buildJsonObject {
+        return ToolSpecification(name = ToolRegistry.WORKSPACE_SANDBOX_NAME, description = description, parameters = buildJsonObject {
             put("type", if (isGoogle) "OBJECT" else "object")
             put("properties", buildJsonObject {
                 put("code", buildJsonObject { put("type", if (isGoogle) "STRING" else "string"); put("description", "Python code to execute") })
-                put("files_to_include", buildJsonObject {
-                    put("type", if (isGoogle) "ARRAY" else "array")
-                    put("items", buildJsonObject { put("type", if (isGoogle) "STRING" else "string") })
-                    put("description", "Exact filenames from conversation to include. They will be placed in the ./data/ directory.")
-                })
             })
-            put("required", buildJsonArray { add("code"); if (!isGoogle) add("files_to_include") })
+            put("required", buildJsonArray { add("code") })
         })
     }
-
-    private data class ResolvedFile(val name: String, val bytes: ByteArray, val mimeType: String)
 }

@@ -11,6 +11,10 @@ Branch: `web-ui`
 
 ---
 
+## R15 — Code sandbox renamed for the models (2026-11-12)
+
+- [x] **`workspace_sandbox`** — the Python tool is declared to the models as `workspace_sandbox` and speaks the executor's v2 protocol (CLOUD_RUNS_PLAN.md, "Code sandbox v2"); its id stays `python_interpreter`, so the web's enabled / excluded tool lists, the Integrations toggle and stored tool calls are untouched. Web changes are labels only: `utils/toolCatalog.ts` names both the id and `workspace_sandbox` "Workspace Sandbox" (group "Built-in Tools"), `i18n/he.ts` has the new Integrations title and description. The web never has the executor's key: llm-web reads it from its environment. Test: `toolCatalog.test.ts` (2).
+
 ## R14 — Vertex prompt caching: real history on send + token usage (2026-11-11)
 
 - [x] **A web send to vertex replays the stored history** — `ChatPage.tsx` posts every history message to `POST /api/chat/send` as role, text and attachments only, and the route gave that list to the provider as it was: a stored tool call arrived without its arguments, call id, output and thought signature (Gemini got `functionCall{name:"unknown"}` and an empty `functionResponse`), and the request no longer started like the turn's follow-up requests or a resend — a miss of the provider's prompt cache (a prefix match) from the first tool step on. For provider `vertex`, `SendRoute.kt` now hands the run the server's stored messages of the chat's path (`storedRequestMessages`: up to the saved user message; the whole path in multi-message mode) whenever the client's list is that path message for message (same roles, texts, attached file names), for the run's messages, its tools and its attachment files alike; any other list (another branch, an older state of the chat) is sent as the client gave it, as before, and other providers keep getting the web's own list. The web's payload is unchanged. Tests: `WebSendHistoryTest.kt`.

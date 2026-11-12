@@ -45,7 +45,8 @@ abstract class BaseProvider() {
         toolCall: ToolCall,
         toolResult: ToolExecutionResult
     ): Message {
-        val toolDisplayName = toolCall.toolId
+        // Shown under the name the model called it by; the stored ID is the tool's own
+        val toolDisplayName = com.example.ApI.tools.ToolRegistry.modelNameForToolId(toolCall.toolId)
 
         return Message(
             role = "tool_call",

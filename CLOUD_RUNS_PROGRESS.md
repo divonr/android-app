@@ -449,3 +449,41 @@ Notes / open
   delete or the commit route; the pending store copy is then open to the 24 h sweep while the
   server keeps its cache copy (as before A6).
 - Nothing was seen in a browser or run against the live store.
+
+## SB — code sandbox v2: key out of the sources, manifest protocol, `workspace_sandbox` (2026-11-12; committed on `main`, not deployed, not installed on a device)
+
+Plan: CLOUD_RUNS_PLAN.md, "Code sandbox v2". Three commits.
+- **A — configuration.** The executor's key and URL left `PythonInterpreterTool`; `SandboxConfig`
+  is passed in by the platform (Android `BuildConfig` and desktop `SandboxBuildConfig`, generated
+  from `local.properties` / the build's environment; llm-web `SANDBOX_API_KEY` /
+  `SANDBOX_EXECUTOR_URL`, documented in `llm-web.env.example` and `DEPLOY.md`). `module(...)` /
+  `UserRegistry` / `UserTools`: `sandbox` replaces `pythonExecutorUrl`.
+- **B — protocol.** `chat_id` session (no stored session id, no `kill_session`), `input_manifest`
+  of all conversation files with stable de-duplicated names, the `missing_files` handshake (one
+  retry), the v2 response (stdout / stderr / exit code / timeout with partial output / truncated /
+  fresh container), run against the live executor over loopback, no client-side cut of the output (the one found, 500 characters of an HTTP
+  error body, is gone), read timeout 420 s. `ToolCallComponents` (Android, desktop) show the
+  generated files of a failed run too.
+- **C — name.** Declared as `workspace_sandbox` with the new description; id unchanged; name ↔ id
+  mapping in every provider's parser and serialiser (`GoogleProvider`, `OpenAIProvider`,
+  `OpenAICompatibleProvider`, `AnthropicProvider`, `CohereProvider`, `PoeProvider`,
+  `FullDynamicCustomProvider`, `TemplateExpander`), `ToolRegistry.executeTool`, both
+  `ToolManager`s and `CloudRunManager` (the ids a device sends with a cloud run). UI labels
+  (Android, desktop, web `he.ts`, `toolCatalog.ts`).
+
+Tests: shared `PythonInterpreterToolTest` (19, against `FakeSandboxExecutor`),
+`WorkspaceSandboxNameTest` (4), `GoogleProviderTest` (+1); server `AttachmentStoreRunsTest` (+1;
+`FakePythonExecutor` speaks v2), `CloudRunToolsTest`; web `toolCatalog.test.ts` (2).
+
+Notes / open
+- Deploy: the executor's v2 endpoint first, then llm-web (restart) and the APK. An APK from
+  before this change keeps using the executor's legacy `/execute` with the old key.
+- On a device the executor is reached through the Cloudflare tunnel, which gives up after about
+  100 s without a response byte: a 130 s run through `https://api-divonr.xyz/v2/execute` ended in
+  HTTP 524 after 126 s (measured 2026-11-12; over loopback the same executor ran its full 300 s
+  and returned the partial output). So a device call cannot take longer than that until the
+  executor answers in a way the tunnel tolerates; the tool reports the 524 to the model as such.
+  A cloud run (loopback) is not affected. The tunnel's request size limit applies to uploads
+  from a device (not measured).
+- A chat's generated files are attached to the chat, so they are in the next call's manifest too
+  and are uploaded back to `/app/input` once.

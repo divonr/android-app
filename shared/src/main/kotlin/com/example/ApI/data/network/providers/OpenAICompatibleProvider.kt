@@ -346,7 +346,7 @@ abstract class OpenAICompatibleProvider() : BaseProvider() {
 
                             detectedToolCall = ToolCall(
                                 id = firstBuilder.id!!,
-                                toolId = firstBuilder.name!!,
+                                toolId = com.example.ApI.tools.ToolRegistry.toolIdForModelName(firstBuilder.name!!),
                                 parameters = paramsJson,
                                 provider = providerName
                             )
@@ -456,7 +456,7 @@ abstract class OpenAICompatibleProvider() : BaseProvider() {
         return handler.getResult()
     }
 
-    private fun buildMessages(messages: List<Message>, systemPrompt: String): JsonArray {
+    internal fun buildMessages(messages: List<Message>, systemPrompt: String): JsonArray {
         return buildJsonArray {
             // Add system prompt if provided
             if (systemPrompt.isNotBlank()) {
@@ -538,7 +538,7 @@ abstract class OpenAICompatibleProvider() : BaseProvider() {
                                     put("id", message.toolCallId ?: "")
                                     put("type", "function")
                                     put("function", buildJsonObject {
-                                        put("name", message.toolCall?.toolId ?: "")
+                                        put("name", message.toolCall?.toolId?.let { com.example.ApI.tools.ToolRegistry.modelNameForToolId(it) } ?: "")
                                         put("arguments", message.toolCall?.parameters?.toString() ?: "{}")
                                     })
                                 })

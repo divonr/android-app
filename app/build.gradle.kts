@@ -1,9 +1,22 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// The code sandbox's key and URL are not in the sources: they come from local.properties
+// (gitignored: sandbox.apiKey, sandbox.executorUrl) or from the build's environment. A build
+// without the key succeeds; the tool then reports that it is not configured.
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+fun sandboxSetting(property: String, env: String, default: String = ""): String =
+    (localProperties.getProperty(property) ?: System.getenv(env) ?: default).trim()
+fun String.asJavaLiteral(): String = "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
     namespace = "com.example.ApI"
@@ -17,6 +30,12 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "SANDBOX_API_KEY", sandboxSetting("sandbox.apiKey", "SANDBOX_API_KEY").asJavaLiteral())
+        buildConfigField(
+            "String", "SANDBOX_EXECUTOR_URL",
+            sandboxSetting("sandbox.executorUrl", "SANDBOX_EXECUTOR_URL", "https://api-divonr.xyz/v2/execute").asJavaLiteral()
+        )
     }
 
     signingConfigs {
@@ -51,6 +70,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     
     packaging {

@@ -363,14 +363,14 @@ private fun PythonInterpreterToolItem(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "מפרש Python",
+                    text = "ארגז חול לקוד (Workspace Sandbox)",
                     style = MaterialTheme.typography.bodyMedium,
                     color = OnSurface,
                     fontWeight = FontWeight.Medium
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "הרצת קוד Python עם pandas, numpy, matplotlib לניתוח נתונים",
+                    text = "הרצת קוד Python במכולת Linux שנשמרת לאורך השיחה: ניתוח נתונים, גישה לרשת והפקת קבצים (PDF, Word, Excel, מצגות, תרשימים)",
                     style = MaterialTheme.typography.bodySmall,
                     color = OnSurface.copy(alpha = 0.7f),
                     lineHeight = 16.sp
