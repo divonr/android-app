@@ -167,7 +167,7 @@ abstract class OpenAICompatibleProvider() : BaseProvider() {
 
             connection.doOutput = true
 
-            val apiMessages = buildMessages(messages, systemPrompt)
+            val apiMessages = buildMessages(messages, systemPrompt, sandboxNotes(messages, enabledTools))
             val requestBody = buildRequestBody(
                 modelName, apiMessages, enabledTools, thinkingBudget, temperature
             )
@@ -456,7 +456,18 @@ abstract class OpenAICompatibleProvider() : BaseProvider() {
         return handler.getResult()
     }
 
-    internal fun buildMessages(messages: List<Message>, systemPrompt: String): JsonArray {
+    /**
+     * Only images are sent; with the code sandbox among this request's tools the model is told
+     * where the sandbox has the other files.
+     */
+    internal suspend fun sandboxNotes(messages: List<Message>, enabledTools: List<ToolSpecification>): Map<Attachment, String> =
+        sandboxFileNotes(messages, enabledTools) { !it.mime_type.startsWith("image/") }
+
+    internal fun buildMessages(
+        messages: List<Message>,
+        systemPrompt: String,
+        sandboxNotes: Map<Attachment, String> = emptyMap()
+    ): JsonArray {
         return buildJsonArray {
             // Add system prompt if provided
             if (systemPrompt.isNotBlank()) {
@@ -474,13 +485,16 @@ abstract class OpenAICompatibleProvider() : BaseProvider() {
                             it.mime_type.startsWith("image/")
                         }
 
+                        // A turn without images stays one string, as every such API takes it
+                        val fileNotes = message.attachments.mapNotNull { sandboxNotes[it] }
+
                         if (hasImages) {
                             add(buildJsonObject {
                                 put("role", "user")
                                 put("content", buildJsonArray {
                                     add(buildJsonObject {
                                         put("type", "text")
-                                        put("text", message.text)
+                                        put("text", textWithNotes(message.text, fileNotes))
                                     })
                                     message.attachments.filter {
                                         it.mime_type.startsWith("image/")
@@ -500,7 +514,7 @@ abstract class OpenAICompatibleProvider() : BaseProvider() {
                         } else {
                             add(buildJsonObject {
                                 put("role", "user")
-                                put("content", message.text)
+                                put("content", textWithNotes(message.text, fileNotes).ifEmpty { message.text })
                             })
                         }
                     }

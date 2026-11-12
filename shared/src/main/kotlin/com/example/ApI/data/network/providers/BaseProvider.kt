@@ -139,6 +139,30 @@ abstract class BaseProvider() {
         return notes
     }
 
+    /** [text] followed by [notes], for a provider whose user turn is one string. */
+    protected fun textWithNotes(text: String, notes: List<String>): String =
+        (listOf(text).filter { it.isNotBlank() } + notes).joinToString("\n\n")
+
+    /**
+     * Whether [attachment]'s file can be put in the prompt as text ([readTextFileContent]): it
+     * is here, within that function's size limit, and its bytes are text - no NUL byte, and
+     * either declared as text or valid UTF-8. An office document, an archive or any other
+     * binary file is not.
+     */
+    protected fun isInlineableTextFile(attachment: Attachment): Boolean {
+        val file = attachment.local_file_path?.let { java.io.File(it) }?.takeIf { it.isFile } ?: return false
+        if (file.length() > MAX_INLINE_TEXT_FILE_BYTES) return false
+        val bytes = try { file.readBytes() } catch (e: Exception) { return false }
+        if (bytes.any { it == 0.toByte() }) return false
+        if (attachment.mime_type.lowercase().startsWith("text/")) return true
+        return try {
+            Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes))
+            true
+        } catch (e: java.nio.charset.CharacterCodingException) {
+            false
+        }
+    }
+
     /**
      * Reads a file from disk and encodes it as Base64.
      * Returns null if the file doesn't exist or cannot be read.
@@ -174,7 +198,7 @@ abstract class BaseProvider() {
             val file = java.io.File(filePath)
             if (!file.exists()) return null
             // Limit file size to 100KB to avoid very large payloads
-            if (file.length() > 100 * 1024) {
+            if (file.length() > MAX_INLINE_TEXT_FILE_BYTES) {
                 return "[File too large to include inline. Size: ${file.length() / 1024}KB]"
             }
             file.readText()
@@ -340,5 +364,8 @@ abstract class BaseProvider() {
 
     companion object {
         const val MAX_TOOL_DEPTH = 25
+
+        /** The largest file [readTextFileContent] puts in the prompt as text. */
+        const val MAX_INLINE_TEXT_FILE_BYTES = 100 * 1024
     }
 }

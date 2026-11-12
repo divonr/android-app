@@ -37,6 +37,7 @@ import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * What a request says of an attachment it does not send to the model: where the code sandbox
@@ -313,5 +314,180 @@ class SandboxFileNotesTest {
         val anthropicBefore = anthropicUserContent(early, listOf(sandbox(early, "anthropic")))
         val anthropicAfter = anthropicUserContent(later, listOf(sandbox(later, "anthropic")))
         assertEquals(anthropicBefore[0], anthropicAfter[0])
+    }
+
+    // ── The providers that otherwise drop such a file without a word ─────────
+
+    private val docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    /** A user turn with an image, two sheets of one name and a document; and the sandbox's declaration for it. */
+    private fun mixedTurn(): List<Message> = listOf(
+        userTurn(
+            "Compare", attached("report.xlsx", xlsx, "one"), attached("chart.png", "image/png", "png"),
+            attached("report.xlsx", xlsx, "two"), attached("brief.docx", docx, "doc")
+        )
+    )
+
+    private val mixedNotes = listOf(
+        available("report.xlsx"), available("report.xlsx", "report (2).xlsx"), available("brief.docx")
+    )
+
+    private fun JsonObject.role() = getValue("role").jsonPrimitive.content
+
+    @Test
+    fun `the OpenAI-compatible providers name the sandbox's files in the turn's text and keep a turn without images a string`() {
+        val messages = mixedTurn()
+        val filesOnly = listOf(userTurn("Read it", attached("brief.docx", docx, "doc")))
+        for (provider in listOf(OpenRouterProvider(), LLMStatsProvider())) runBlocking<Unit> {
+            val notes = provider.sandboxNotes(messages, listOf(sandbox(messages, "openai")))
+            val content = provider.buildMessages(messages, "", notes).single().jsonObject.getValue("content").jsonArray.map { it.jsonObject }
+            assertEquals(listOf("text", "image_url"), content.map { it.getValue("type").jsonPrimitive.content })
+            assertEquals((listOf("Compare") + mixedNotes).joinToString("\n\n"), content.first().getValue("text").jsonPrimitive.content)
+
+            val plainNotes = provider.sandboxNotes(filesOnly, listOf(sandbox(filesOnly, "openai")))
+            assertEquals(
+                "Read it\n\n" + available("brief.docx"),
+                provider.buildMessages(filesOnly, "", plainNotes).single().jsonObject.getValue("content").jsonPrimitive.content
+            )
+
+            // Without the sandbox among the tools: as before
+            val other = listOf(DateTimeTool().getSpecification("openai"))
+            assertEquals(emptyMap(), provider.sandboxNotes(messages, other))
+            assertEquals(provider.buildMessages(messages, ""), provider.buildMessages(messages, "", provider.sandboxNotes(messages, other)))
+            assertEquals("Read it", provider.buildMessages(filesOnly, "").single().jsonObject.getValue("content").jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun `Cohere names the sandbox's files in place of the files it drops`() = runBlocking<Unit> {
+        val messages = mixedTurn()
+        val content = CohereProvider().buildMessages(messages, "", listOf(sandbox(messages, "cohere")))
+            .single().getValue("content").jsonArray.map { it.jsonObject }
+        assertEquals(listOf("text", "text", "image_url", "text", "text"), content.map { it.getValue("type").jsonPrimitive.content })
+        assertEquals(listOf("Compare") + mixedNotes, content.texts())
+
+        val plain = CohereProvider().buildMessages(messages, "")
+        assertEquals(plain, CohereProvider().buildMessages(messages, "", listOf(DateTimeTool().getSpecification("cohere"))))
+        assertEquals(
+            listOf("text", "image_url"),
+            plain.single().getValue("content").jsonArray.map { it.jsonObject.getValue("type").jsonPrimitive.content }
+        )
+    }
+
+    @Test
+    fun `OpenAI names the sandbox's file for a binary or oversized file and still inlines a text file`() = runBlocking<Unit> {
+        val binary = File(dir, "bin/book.xlsx").apply { parentFile.mkdirs(); writeBytes(byteArrayOf(80, 75, 3, 4, 0, 0, -1, -2)) }
+        val sheet = Attachment(local_file_path = binary.absolutePath, file_name = "book.xlsx", mime_type = xlsx)
+        val latin = File(dir, "bin/legacy.dat").apply { writeBytes(byteArrayOf(72, 105, -23, -1)) }
+        val notUtf8 = Attachment(local_file_path = latin.absolutePath, file_name = "legacy.dat", mime_type = "application/octet-stream")
+        val csv = attached("data.csv", "text/csv", "a,b\n1,2\n")
+        val json = attached("config.json", "application/json", "{\"a\": 1}")
+        val big = attached("big.log", "text/plain", "x".repeat(100 * 1024 + 1))
+        val image = attached("chart.png", "image/png", "png").copy(file_OPENAI_id = "file-1")
+        val messages = listOf(userTurn("Look", sheet, csv, notUtf8, json, big, image))
+        val openai = OpenAIProvider()
+
+        val notes = openai.sandboxNotes(messages, listOf(sandbox(messages, "openai")))
+        val content = openai.buildInput(messages, "", notes).single().getValue("content").jsonArray.map { it.jsonObject }
+        val texts = content.texts()
+        assertEquals("Look", texts[0])
+        assertEquals(available("book.xlsx"), texts[1])
+        assertEquals("[ATTACHED FILE: data.csv]\n[MIME TYPE: text/csv]\n[CONTENT START]\na,b\n1,2\n\n[CONTENT END]", texts[2])
+        assertEquals(available("legacy.dat"), texts[3])
+        assertTrue(texts[4].startsWith("[ATTACHED FILE: config.json]") && "{\"a\": 1}" in texts[4], texts[4])
+        assertEquals(available("big.log"), texts[5])
+        assertEquals("input_image", content.last().getValue("type").jsonPrimitive.content)
+        assertEquals(setOf(sheet, notUtf8, big), notes.keys)
+
+        // Without the sandbox: every such file is put in the prompt as it was
+        val before = openai.buildInput(messages, "")
+        assertEquals(before, openai.buildInput(messages, "", openai.sandboxNotes(messages, emptyList())))
+        val beforeTexts = before.single().getValue("content").jsonArray.map { it.jsonObject }.texts()
+        assertTrue(beforeTexts[1].startsWith("[ATTACHED FILE: book.xlsx]"), beforeTexts[1])
+        assertTrue("[File too large to include inline." in beforeTexts[5], beforeTexts[5].take(200))
+    }
+
+    @Test
+    fun `Poe names the sandbox's file only for a file it has no URL for`() = runBlocking<Unit> {
+        val uploaded = attached("report.xlsx", xlsx, "one").copy(file_POE_url = "https://poe/f")
+        val failed = attached("brief.docx", docx, "doc")
+        val messages = listOf(userTurn("Read them", uploaded, failed))
+        val poe = PoeProvider()
+
+        val notes = poe.sandboxNotes(messages, listOf(sandbox(messages, "poe")))
+        val turn = poe.buildMessages(messages, "", false, ThinkingBudgetValue.None, sandboxNotes = notes).single()
+        assertEquals("Read them\n\n" + available("brief.docx"), turn.getValue("content").jsonPrimitive.content)
+        assertEquals(
+            listOf("https://poe/f"),
+            turn.getValue("attachments").jsonArray.map { it.jsonObject.getValue("url").jsonPrimitive.content }
+        )
+
+        assertEquals(emptyMap(), poe.sandboxNotes(messages, emptyList()))
+        val before = poe.buildMessages(messages, "", false, ThinkingBudgetValue.None).single()
+        assertEquals("Read them", before.getValue("content").jsonPrimitive.content)
+        assertEquals(2, before.getValue("attachments").jsonArray.size)
+    }
+
+    @Test
+    fun `a template provider names the sandbox's files only when its template declares the tools`() = runBlocking<Unit> {
+        val messages = mixedTurn() + Message(role = "assistant", text = "Done")
+        val field = com.example.ApI.data.model.MessageFieldConfig("messages", """{"role":"user","content":"{prompt}"}""")
+        fun provider(toolField: com.example.ApI.data.model.MessageFieldConfig?) = FullDynamicCustomProvider(
+            com.example.ApI.data.model.FullCustomProviderConfig(
+                name = "Mine", providerKey = "fullcustom_mine", baseUrl = "http://127.0.0.1:1", defaultModel = "m",
+                bodyTemplate = "{}",
+                messageFields = com.example.ApI.data.model.MessageFieldsConfig(userField = field, toolDefinitionField = toolField)
+            )
+        )
+        val tools = listOf(sandbox(messages, "openai"))
+
+        val noted = provider(field).withSandboxNotes(messages, tools)
+        assertEquals(
+            listOf("Compare", mixedNotes[0], available("chart.png"), mixedNotes[1], mixedNotes[2]),
+            noted.first().text.split("\n\n")
+        )
+        assertEquals(messages.drop(1), noted.drop(1))
+
+        assertEquals(messages, provider(field).withSandboxNotes(messages, emptyList()))
+        assertEquals(messages, provider(null).withSandboxNotes(messages, tools))
+    }
+
+    @Test
+    fun `AI Studio names the sandbox's file for a file without a Files API URI`() {
+        val uploaded = attached("scan.pdf", "application/pdf", "pdf").copy(file_GOOGLE_uri = "https://files.example/1")
+        val messages = listOf(userTurn("Read them", uploaded, attached("report.xlsx", xlsx, "one"), attached("report.xlsx", xlsx, "two")))
+
+        fun userParts(tools: List<ToolSpecification>): List<JsonObject> = runBlocking {
+            bodies.clear()
+            val provider = Provider(
+                provider = "google", models = emptyList(),
+                request = ApiRequest(
+                    request_type = "POST",
+                    base_url = "http://127.0.0.1:${server.address.port}/v1/models/{model_name}:generateContent",
+                    headers = emptyMap()
+                ),
+                response_important_fields = ResponseFields()
+            )
+            GoogleProvider(GooglePlatform.AI_STUDIO).sendMessage(
+                provider = provider, modelName = "gemini-fake", messages = messages, systemPrompt = "",
+                apiKey = "FAKE-KEY", webSearchEnabled = false, enabledTools = tools,
+                thinkingBudget = ThinkingBudgetValue.None, temperature = null,
+                callback = object : StreamingCallback {
+                    override fun onPartialResponse(text: String) {}
+                    override fun onComplete(fullText: String) {}
+                    override fun onError(error: String) = throw AssertionError(error)
+                }
+            )
+            bodies.single().getValue("contents").jsonArray.map { it.jsonObject }.single { it.role() == "user" }
+                .getValue("parts").jsonArray.map { it.jsonObject }
+        }
+
+        val parts = userParts(listOf(sandbox(messages, "google")))
+        assertEquals(listOf("Read them", available("report.xlsx"), available("report.xlsx", "report (2).xlsx")), parts.texts())
+        assertEquals(1, parts.count { "file_data" in it })
+
+        val before = userParts(emptyList())
+        assertEquals(listOf("Read them"), before.texts())
+        assertEquals(before, userParts(listOf(DateTimeTool().getSpecification("google"))))
     }
 }

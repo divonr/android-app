@@ -133,7 +133,7 @@ class OpenAIProvider() : BaseProvider() {
             connection.doOutput = true
 
             // Build conversation input
-            val conversationInput = buildInput(messages, systemPrompt)
+            val conversationInput = buildInput(messages, systemPrompt, sandboxNotes(messages, enabledTools))
 
             // Build request body with streaming enabled
             val requestBody = buildRequestBody(
@@ -444,7 +444,23 @@ class OpenAIProvider() : BaseProvider() {
     /**
      * Builds the input array for OpenAI API request
      */
-    internal fun buildInput(messages: List<Message>, systemPrompt: String): List<JsonObject> {
+    /**
+     * What is said of the files that would not reach the model as they are when the code
+     * sandbox has them: a file that is not an image or a PDF is put in the prompt as text, which
+     * is right for a text file only - a binary one (a spreadsheet, a document, an archive)
+     * would be unreadable bytes, a large one a remark about its size, a missing one nothing.
+     */
+    internal suspend fun sandboxNotes(messages: List<Message>, enabledTools: List<ToolSpecification>): Map<Attachment, String> =
+        sandboxFileNotes(messages, enabledTools) { attachment ->
+            !attachment.mime_type.startsWith("image/") && attachment.mime_type != "application/pdf" &&
+                !isInlineableTextFile(attachment)
+        }
+
+    internal fun buildInput(
+        messages: List<Message>,
+        systemPrompt: String,
+        sandboxNotes: Map<Attachment, String> = emptyMap()
+    ): List<JsonObject> {
         val conversationInput = mutableListOf<JsonObject>()
 
         // Add system prompt
@@ -459,7 +475,7 @@ class OpenAIProvider() : BaseProvider() {
         messages.forEach { message ->
             when (message.role) {
                 "user" -> {
-                    conversationInput.add(buildUserMessage(message))
+                    conversationInput.add(buildUserMessage(message, sandboxNotes))
                 }
                 "assistant" -> {
                     conversationInput.add(buildJsonObject {
@@ -488,7 +504,7 @@ class OpenAIProvider() : BaseProvider() {
         return conversationInput
     }
 
-    private fun buildUserMessage(message: Message): JsonObject {
+    private fun buildUserMessage(message: Message, sandboxNotes: Map<Attachment, String>): JsonObject {
         return if (message.attachments.isEmpty()) {
             buildJsonObject {
                 put("role", "user")
@@ -519,6 +535,12 @@ class OpenAIProvider() : BaseProvider() {
                                 add(buildJsonObject {
                                     put("type", "input_file")
                                     put("file_id", attachment.file_OPENAI_id ?: "{file_ID}")
+                                })
+                            }
+                            sandboxNotes[attachment] != null -> {
+                                add(buildJsonObject {
+                                    put("type", "input_text")
+                                    put("text", sandboxNotes.getValue(attachment))
                                 })
                             }
                             else -> {
@@ -705,7 +727,7 @@ class OpenAIProvider() : BaseProvider() {
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
 
-            val conversationInput = buildInput(messages, systemPrompt)
+            val conversationInput = buildInput(messages, systemPrompt, sandboxNotes(messages, enabledTools))
 
             val requestBody = buildJsonObject {
                 put("model", modelName)

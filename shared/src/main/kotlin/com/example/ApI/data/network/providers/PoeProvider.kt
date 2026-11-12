@@ -194,7 +194,9 @@ class PoeProvider() : BaseProvider() {
             connection.setRequestProperty("Accept", "application/json")
             connection.doOutput = true
 
-            val conversationMessages = buildMessages(messages, systemPrompt, webSearchEnabled, thinkingBudget)
+            val conversationMessages = buildMessages(
+                messages, systemPrompt, webSearchEnabled, thinkingBudget, sandboxNotes = sandboxNotes(messages, enabledTools)
+            )
             val requestBody = buildRequestBody(conversationMessages, enabledTools)
             val requestBodyString = json.encodeToString(requestBody)
 
@@ -255,7 +257,10 @@ class PoeProvider() : BaseProvider() {
             connection.setRequestProperty("Accept", "application/json")
             connection.doOutput = true
 
-            val conversationMessages = buildMessages(messages, systemPrompt, webSearchEnabled, ThinkingBudgetValue.None, skipToolMessages = true)
+            val conversationMessages = buildMessages(
+                messages, systemPrompt, webSearchEnabled, ThinkingBudgetValue.None, skipToolMessages = true,
+                sandboxNotes = sandboxNotes(messages, enabledTools)
+            )
             val requestBody = buildRequestBodyWithToolResults(conversationMessages, enabledTools, toolCall, toolResult)
             val requestBodyString = json.encodeToString(requestBody)
 
@@ -651,12 +656,21 @@ class PoeProvider() : BaseProvider() {
         return handler.getResult()
     }
 
-    private fun buildMessages(
+    /**
+     * Poe is given every file by its URL; only a file that has none (its upload failed) does
+     * not reach the bot, and with the code sandbox among this request's tools the model is
+     * told where the sandbox has it.
+     */
+    internal suspend fun sandboxNotes(messages: List<Message>, enabledTools: List<ToolSpecification>): Map<Attachment, String> =
+        sandboxFileNotes(messages, enabledTools) { it.file_POE_url.isNullOrBlank() }
+
+    internal fun buildMessages(
         messages: List<Message>,
         systemPrompt: String,
         webSearchEnabled: Boolean,
         thinkingBudget: ThinkingBudgetValue,
-        skipToolMessages: Boolean = false
+        skipToolMessages: Boolean = false,
+        sandboxNotes: Map<Attachment, String> = emptyMap()
     ): List<JsonObject> {
         val conversationMessages = mutableListOf<JsonObject>()
 
@@ -673,9 +687,11 @@ class PoeProvider() : BaseProvider() {
         messages.forEachIndexed { index, message ->
             when (message.role) {
                 "user" -> {
+                    val fileNotes = message.attachments.mapNotNull { sandboxNotes[it] }
+                    val sent = message.attachments.filter { it !in sandboxNotes }
                     val messageObj = buildJsonObject {
                         put("role", "user")
-                        put("content", message.text)
+                        put("content", textWithNotes(message.text, fileNotes).ifEmpty { message.text })
                         put("content_type", "text/markdown")
 
                         if (webSearchEnabled && index == lastUserMessageIndex) {
@@ -692,9 +708,9 @@ class PoeProvider() : BaseProvider() {
                             })
                         }
 
-                        if (message.attachments.isNotEmpty()) {
+                        if (sent.isNotEmpty()) {
                             put("attachments", buildJsonArray {
-                                message.attachments.forEach { attachment ->
+                                sent.forEach { attachment ->
                                     add(buildJsonObject {
                                         put("url", attachment.file_POE_url ?: "{file_URL}")
                                         put("content_type", attachment.mime_type)
