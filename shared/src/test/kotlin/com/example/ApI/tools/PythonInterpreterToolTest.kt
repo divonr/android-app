@@ -407,6 +407,30 @@ class PythonInterpreterToolTest {
     }
 
     @Test
+    fun `the executor's keep-alive whitespace before the answer is not part of it`() {
+        val a = attached("a.txt", "alpha")
+        executor.heartbeats = 5
+        executor.heartbeatMillis = 150
+        executor.stdout = "שלום after a long run\n"
+        executor.artifacts = mapOf("out.txt" to "made".toByteArray())
+
+        // Both rounds of the handshake are answered that way
+        val started = System.nanoTime()
+        val result = run(tool(chat(a)))
+        val took = (System.nanoTime() - started) / 1_000_000
+        assertIs<ToolExecutionResult.Success>(result)
+        assertTrue(took >= 2 * 5 * 150, "took $took ms")
+        assertEquals(2, executor.calls.size)
+        assertEquals(1, executor.runs.size)
+        assertEquals("**stdout:**\n```\nשלום after a long run\n```\n\n**Generated Files:**\n- out.txt", result.result)
+        assertEquals("made", File(PythonInterpreterTool.outputAttachments(result).single().local_file_path!!).readText())
+
+        // An error status is still read from the status line, and whitespace alone is no answer
+        executor.rawAnswer = 200 to "   \n "
+        assertTrue("not JSON" in run(tool(chat(a))).text())
+    }
+
+    @Test
     fun `a refused key, an executor error and an unreadable answer are clear errors`() {
         val refused = run(tool(sandbox = SandboxConfig(executor.url, "wrong")))
         assertIs<ToolExecutionResult.Error>(refused)
@@ -419,9 +443,12 @@ class PythonInterpreterToolTest {
         executor.rawAnswer = 422 to """{"detail":"chat_id missing"}"""
         assertEquals("""Sandbox error: HTTP 422: {"detail":"chat_id missing"}""", run(tool()).text())
 
-        // The public route's own time limit (shorter than the executor's)
+        // The public route giving up on the executor
         executor.rawAnswer = 524 to "error code: 524"
-        assertTrue("about 100 seconds" in run(tool()).text() && "may still be running" in run(tool()).text())
+        assertEquals(
+            "The route to the sandbox gave up waiting for the answer (HTTP 524). The code was not stopped and may still be running; its output is lost.",
+            run(tool()).text()
+        )
 
         executor.rawAnswer = 200 to "<html>gateway</html>"
         assertTrue("not JSON" in run(tool()).text())

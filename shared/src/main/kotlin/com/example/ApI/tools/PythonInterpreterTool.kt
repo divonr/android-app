@@ -216,8 +216,11 @@ ENVIRONMENT & PRE-INSTALLED TOOLS:
         private val json = Json { ignoreUnknownKeys = true }
     }
 
-    // Read: the executor runs code for up to 300 s, then collects the files. Write: per write
-    // to the socket, not per upload, so a large file takes as long as it needs.
+    // Read: the longest silence between two reads, not the length of the call. The executor
+    // answers HTTP 200 at once and sends a whitespace byte every 12 s until its JSON is ready
+    // (up to 300 s of code, then the files), so the limit is only reached if something on the
+    // way holds those bytes back - and then it still covers a whole run. No call timeout.
+    // Write: per write to the socket, not per upload, so a large file takes as long as it needs.
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(420, TimeUnit.SECONDS)
@@ -381,15 +384,14 @@ ENVIRONMENT & PRE-INSTALLED TOOLS:
                     null,
                     when (response.code) {
                         401, 403 -> "The sandbox refused this app's API key (HTTP ${response.code}). Tell the user; retrying will not help."
-                        // Cloudflare, in front of the executor for a device: no answer within about 100 s
-                        524 -> "The route to the sandbox gave up waiting for the answer (HTTP 524): on this device a call " +
-                            "cannot take longer than about 100 seconds. The code was not stopped and may still be running; " +
-                            "its output is lost. Split the work into shorter calls, or run a long job in the background " +
-                            "(e.g. subprocess.Popen with its output redirected to a file under /app) and read its result in a later call."
+                        // Cloudflare, in front of the executor for a device, lost patience with it
+                        524 -> "The route to the sandbox gave up waiting for the answer (HTTP 524). The code was not " +
+                            "stopped and may still be running; its output is lost."
                         else -> "Sandbox error: HTTP ${response.code}" + if (text.isBlank()) "" else ": $text"
                     }
                 )
             }
+            // The JSON document comes after the executor's keep-alive whitespace
             val body = try { json.parseToJsonElement(text) as? JsonObject } catch (e: Exception) { null }
                 ?: return ExecutorResponse(null, "The sandbox sent an answer that is not JSON" + if (text.isBlank()) " (empty)." else ": $text")
             return ExecutorResponse(body, null)
