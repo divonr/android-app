@@ -122,7 +122,9 @@ private const val SSE_PING = ": ping\n\n"
  * ends the stream quietly: whatever feeds it lives on elsewhere.
  */
 internal suspend fun ApplicationCall.respondSse(block: suspend (send: suspend (String) -> Unit) -> Unit) {
-    response.headers.append(HttpHeaders.CacheControl, "no-cache")
+    // no-transform: a proxy on the way (Cloudflare) must not compress the stream, which would
+    // hold the events back until enough of them filled a block
+    response.headers.append(HttpHeaders.CacheControl, "no-cache, no-transform")
     response.headers.append(HttpHeaders.Connection, "keep-alive")
     response.headers.append("X-Accel-Buffering", "no")
     respondBytesWriter(contentType = ContentType.Text.EventStream) {
