@@ -172,7 +172,11 @@ class GoogleProvider(
                 )
                 writeAgentPlatformBody(connection, baseUrl, contents, requestBody)
             } else {
-                val contents = buildContents(messages, systemPrompt)
+                // AI Studio is given a file by its Files API URI; one without it is not sent
+                val contents = buildContents(
+                    messages, systemPrompt,
+                    sandboxNotes = sandboxFileNotes(messages, enabledTools) { !hasFilesApiUri(it) }
+                )
                 val requestBody = buildRequestBody(modelName, contents, webSearchEnabled, enabledTools, thinkingBudget, temperature)
                 val requestBodyJson = json.encodeToString(requestBody)
 
@@ -489,6 +493,9 @@ class GoogleProvider(
         }
     }
 
+    private fun hasFilesApiUri(attachment: Attachment): Boolean =
+        !attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}"
+
     private fun buildContents(
         messages: List<Message>,
         systemPrompt: String,
@@ -528,13 +535,17 @@ class GoogleProvider(
                     message.attachments.forEach { attachment ->
                         if (isAgentPlatform) {
                             parts.addAll(buildAgentPlatformAttachmentParts(attachment, inlineAttachments, sandboxNotes))
-                        } else if (!attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}") {
+                        } else if (hasFilesApiUri(attachment)) {
                             parts.add(buildJsonObject {
                                 put("file_data", buildJsonObject {
                                     put("mime_type", attachment.mime_type)
                                     put("file_uri", attachment.file_GOOGLE_uri)
                                 })
                             })
+                        } else {
+                            sandboxNotes[attachment]?.let { note ->
+                                parts.add(buildJsonObject { put("text", note) })
+                            }
                         }
                     }
 

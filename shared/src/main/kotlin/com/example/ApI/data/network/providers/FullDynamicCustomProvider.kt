@@ -103,6 +103,21 @@ class FullDynamicCustomProvider(
         }
     }
 
+    /**
+     * A template has no place for files, so none is sent. Where the template declares the
+     * tools (only its tool definition field does) and the code sandbox is one of them, each
+     * user turn's text ends with where the sandbox has that turn's files.
+     */
+    internal suspend fun withSandboxNotes(messages: List<Message>, enabledTools: List<ToolSpecification>): List<Message> {
+        if (config.messageFields?.toolDefinitionField == null) return messages
+        val notes = sandboxFileNotes(messages, enabledTools) { true }
+        if (notes.isEmpty()) return messages
+        return messages.map { message ->
+            val fileNotes = if (message.role == "user") message.attachments.mapNotNull { notes[it] } else emptyList()
+            if (fileNotes.isEmpty()) message else message.copy(text = textWithNotes(message.text, fileNotes))
+        }
+    }
+
     private suspend fun makeStreamingRequest(
         modelName: String,
         messages: List<Message>,
@@ -151,7 +166,7 @@ class FullDynamicCustomProvider(
                     messageFields = messageFields,
                     apiKey = apiKey,
                     model = modelName,
-                    messages = messages,
+                    messages = withSandboxNotes(messages, enabledTools),
                     systemPrompt = systemPrompt,
                     tools = enabledTools
                 )

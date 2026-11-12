@@ -111,7 +111,7 @@ class CohereProvider() : BaseProvider() {
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
 
-            val cohereMessages = buildMessages(messages, systemPrompt)
+            val cohereMessages = buildMessages(messages, systemPrompt, enabledTools)
             val requestBody = buildRequestBody(modelName, cohereMessages, enabledTools, webSearchEnabled, temperature)
 
             // Log request details
@@ -390,7 +390,14 @@ class CohereProvider() : BaseProvider() {
         return handler.getResult()
     }
 
-    internal suspend fun buildMessages(messages: List<Message>, systemPrompt: String): List<JsonObject> = withContext(Dispatchers.IO) {
+    internal suspend fun buildMessages(
+        messages: List<Message>,
+        systemPrompt: String,
+        enabledTools: List<ToolSpecification> = emptyList()
+    ): List<JsonObject> = withContext(Dispatchers.IO) {
+        // Only images are sent; with the code sandbox among this request's tools the model is
+        // told where the sandbox has the other files
+        val sandboxNotes = sandboxFileNotes(messages, enabledTools) { !it.mime_type.startsWith("image/") }
         val cohereMessages = mutableListOf<JsonObject>()
 
         if (systemPrompt.isNotBlank()) {
@@ -422,6 +429,12 @@ class CohereProvider() : BaseProvider() {
                                     })
                                 }
                                 message.attachments.forEach { attachment ->
+                                    sandboxNotes[attachment]?.let { note ->
+                                        add(buildJsonObject {
+                                            put("type", "text")
+                                            put("text", note)
+                                        })
+                                    }
                                     if (attachment.mime_type.startsWith("image/")) {
                                         val dataUrl = createDataUrl(attachment.local_file_path, attachment.mime_type)
                                         if (dataUrl != null) {
