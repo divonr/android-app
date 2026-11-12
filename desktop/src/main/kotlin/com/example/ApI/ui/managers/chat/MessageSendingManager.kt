@@ -65,7 +65,8 @@ class MessageSendingManager(
 
             val userMessage = Message(
                 role = "user",
-                text = if (message.isNotEmpty()) message else "[Attached file]",
+                // Files without a text: the text is empty
+                text = message,
                 attachments = deps.uiState.value.selectedFiles.map { file ->
                     Attachment(
                         local_file_path = file.localPath,

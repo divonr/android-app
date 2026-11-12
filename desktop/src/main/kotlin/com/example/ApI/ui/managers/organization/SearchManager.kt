@@ -1,5 +1,6 @@
 package com.example.ApI.ui.managers.organization
 
+import com.example.ApI.data.model.displayText
 import com.example.ApI.data.model.*
 import com.example.ApI.ui.managers.ManagerDependencies
 
@@ -59,10 +60,10 @@ class SearchManager(
         val searchResults = mutableListOf<SearchResult>()
         currentChat.messages.forEachIndexed { messageIndex, message ->
             val highlightRanges = mutableListOf<IntRange>()
-            if (message.text.contains(query, ignoreCase = true)) {
+            if (message.displayText.contains(query, ignoreCase = true)) {
                 var startIndex = 0
                 while (true) {
-                    val index = message.text.indexOf(query, startIndex, ignoreCase = true)
+                    val index = message.displayText.indexOf(query, startIndex, ignoreCase = true)
                     if (index == -1) break
                     highlightRanges.add(IntRange(index, index + query.length - 1))
                     startIndex = index + 1

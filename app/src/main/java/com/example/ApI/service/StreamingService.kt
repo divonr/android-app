@@ -397,7 +397,8 @@ class StreamingService : Service() {
                         // Save response to repository directly (survives ViewModel death)
                         val assistantMessage = Message(
                             role = "assistant",
-                            text = fullText.ifBlank { if (pendingToolOutputAttachments.isNotEmpty()) "[קובץ מצורף]" else "" },
+                            // A reply that only carries generated files has no text
+                            text = fullText.ifBlank { "" },
                             attachments = pendingToolOutputAttachments.toList(),
                             model = modelName,
                             datetime = Instant.now().toString(),
@@ -471,7 +472,8 @@ class StreamingService : Service() {
                     // Save preceding text AND thoughts as assistant message if either exists OR if there are pending attachments
                     val hasPrecedingText = precedingText.isNotBlank() || thoughtsData != null
                     if (hasPrecedingText || pendingToolOutputAttachments.isNotEmpty()) {
-                        val displayPrecedingText = precedingText.ifBlank { if (pendingToolOutputAttachments.isNotEmpty()) "[קובץ מצורף]" else "" }
+                        // A message that only carries generated files has no text
+                        val displayPrecedingText = precedingText.ifBlank { "" }
                         val precedingMessage = Message(
                             role = "assistant",
                             text = displayPrecedingText,

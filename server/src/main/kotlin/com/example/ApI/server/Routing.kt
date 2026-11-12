@@ -1,5 +1,6 @@
 package com.example.ApI.server
 
+import com.example.ApI.data.model.previewText
 import com.example.ApI.data.model.ApiKey
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.server.auth.SYNC_BEARER_AUTH
@@ -544,7 +545,7 @@ fun Route.apiRoutes() {
                 matchType = sr.matchType.name,
                 messageIndex = sr.messageIndex,
                 snippet = if (sr.messageIndex >= 0)
-                    sr.chat.messages.getOrNull(sr.messageIndex)?.text?.take(200) ?: ""
+                    sr.chat.messages.getOrNull(sr.messageIndex)?.previewText?.take(200) ?: ""
                 else
                     sr.chat.preview_name
             )

@@ -35,7 +35,7 @@ class MessageEditingManager(
     }
 
     fun startEditingMessage(message: Message) {
-        deps.updateUiState(deps.uiState.value.copy(editingMessage = message, isEditMode = true, currentMessage = message.text))
+        deps.updateUiState(deps.uiState.value.copy(editingMessage = message, isEditMode = true, currentMessage = message.displayText))
     }
 
     fun finishEditingMessage() {

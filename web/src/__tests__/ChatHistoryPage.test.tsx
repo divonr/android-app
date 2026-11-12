@@ -121,6 +121,28 @@ describe('ChatHistoryPage', () => {
     })
   })
 
+  // ── 0. The preview line of a chat whose last message only carries files ──
+
+  it('previews a last message that only carries files by the names of the files, never a stand-in text', () => {
+    const fileOnly = (id: string, text: string) => ({
+      ...SAMPLE_HISTORY.chat_history[0],
+      chat_id: id,
+      preview_name: `Chat ${id}`,
+      messages: [{
+        id: `${id}-m`, role: 'assistant', text, thoughtsStatus: 'NONE' as const,
+        attachments: [{ file_name: `${id}.csv`, mime_type: 'text/csv', sha256: 'a'.repeat(64), size: 3 }],
+      }],
+    })
+    chatStoreModule.useChatStore.setState({
+      history: { ...SAMPLE_HISTORY, chat_history: [fileOnly('new', ''), fileOnly('legacy', '[קובץ מצורף]')] },
+    })
+    const { container } = renderPage()
+
+    expect(screen.getByText('📎 new.csv')).toBeInTheDocument()
+    expect(screen.getByText('📎 legacy.csv')).toBeInTheDocument()
+    expect(container.textContent).not.toContain('קובץ מצורף')
+  })
+
   // ── 1. Top-bar icon buttons replace the old "Chats" heading ───────────────
 
   it('renders the top bar with search and navigation icon buttons', () => {

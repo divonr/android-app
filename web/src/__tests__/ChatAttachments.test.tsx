@@ -333,7 +333,7 @@ describe('ChatPage — a message with files and no text', () => {
     await act(async () => { uploads[index].resolve(stored(uploads[index].file, sha)) })
   }
 
-  it('is sent with the stand-in text Android uses, by the button', async () => {
+  it('is sent with an empty text and no stand-in for it, by the button', async () => {
     renderChatPage()
     expect(sendButton()).toBeDisabled()
     attach(textFile())
@@ -347,7 +347,7 @@ describe('ChatPage — a message with files and no text', () => {
     const req = vi.mocked(streamModule.sendStream).mock.calls[0][0]
     expect(req.messages[req.messages.length - 1]).toEqual({
       role: 'user',
-      text: '[קובץ מצורף]',
+      text: '',
       attachments: [{ file_name: 'notes.txt', mime_type: 'text/plain', sha256: SHA_A, size: 5 }],
     })
     expect(drafts()).toHaveLength(0)
@@ -364,7 +364,7 @@ describe('ChatPage — a message with files and no text', () => {
 
     expect(streamModule.sendStream).toHaveBeenCalledTimes(1)
     const req = vi.mocked(streamModule.sendStream).mock.calls[0][0]
-    expect(req.messages[req.messages.length - 1].text).toBe('[קובץ מצורף]')
+    expect(req.messages[req.messages.length - 1].text).toBe('')
     expect(screen.getByPlaceholderText('הקלד הודעה...')).toHaveValue('')
   })
 
@@ -428,7 +428,7 @@ describe('ChatPage — a message with files and no text', () => {
     expect(streamModule.sendStream).not.toHaveBeenCalled()
     expect(mAdd).toHaveBeenCalledWith('c1', {
       role: 'user',
-      text: '[קובץ מצורף]',
+      text: '',
       attachments: [{ file_name: 'notes.txt', mime_type: 'text/plain', sha256: SHA_A, size: 5 }],
     })
   })

@@ -60,7 +60,7 @@ class MessageEditingManager(
         deps.updateUiState(deps.uiState.value.copy(
             editingMessage = message,
             isEditMode = true,
-            currentMessage = message.text
+            currentMessage = message.displayText
         ))
     }
 
@@ -76,7 +76,7 @@ class MessageEditingManager(
         if (newText.isEmpty()) return
 
         // If text hasn't changed, just exit edit mode
-        if (newText == editingMessage.text) {
+        if (newText == editingMessage.displayText) {
             deps.updateUiState(deps.uiState.value.copy(
                 editingMessage = null,
                 isEditMode = false,

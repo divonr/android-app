@@ -419,9 +419,7 @@ class CohereProvider() : BaseProvider() {
                             put("content", message.text)
                         })
                     } else {
-                        cohereMessages.add(buildJsonObject {
-                            put("role", "user")
-                            put("content", buildJsonArray {
+                        val content = buildJsonArray {
                                 if (message.text.isNotBlank()) {
                                     add(buildJsonObject {
                                         put("type", "text")
@@ -447,6 +445,15 @@ class CohereProvider() : BaseProvider() {
                                         }
                                     }
                                 }
+                        }
+                        cohereMessages.add(buildJsonObject {
+                            put("role", "user")
+                            // Files only, and none of them is sent: the turn names them
+                            put("content", if (content.isNotEmpty()) content else buildJsonArray {
+                                add(buildJsonObject {
+                                    put("type", "text")
+                                    put("text", fileNamesNote(message))
+                                })
                             })
                         })
                     }
@@ -476,6 +483,9 @@ class CohereProvider() : BaseProvider() {
                             })
                         })
                         i += 2  // Skip both messages
+                    } else if (message.text.isBlank()) {
+                        // A turn without text is left out
+                        i++
                     } else {
                         // Regular assistant message
                         cohereMessages.add(buildJsonObject {

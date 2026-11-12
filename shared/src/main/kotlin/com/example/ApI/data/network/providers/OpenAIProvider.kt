@@ -478,10 +478,13 @@ class OpenAIProvider() : BaseProvider() {
                     conversationInput.add(buildUserMessage(message, sandboxNotes))
                 }
                 "assistant" -> {
-                    conversationInput.add(buildJsonObject {
-                        put("role", "assistant")
-                        put("content", message.text)
-                    })
+                    // A turn without text is left out
+                    if (message.text.isNotBlank()) {
+                        conversationInput.add(buildJsonObject {
+                            put("role", "assistant")
+                            put("content", message.text)
+                        })
+                    }
                 }
                 "tool_call" -> {
                     conversationInput.add(buildJsonObject {
@@ -516,13 +519,14 @@ class OpenAIProvider() : BaseProvider() {
                 })
             }
         } else {
-            buildJsonObject {
-                put("role", "user")
-                put("content", buildJsonArray {
-                    add(buildJsonObject {
-                        put("type", "input_text")
-                        put("text", message.text)
-                    })
+            val content = buildJsonArray {
+                    // Files without a text: no empty text part
+                    if (message.text.isNotBlank()) {
+                        add(buildJsonObject {
+                            put("type", "input_text")
+                            put("text", message.text)
+                        })
+                    }
                     message.attachments.forEach { attachment ->
                         when {
                             attachment.mime_type.startsWith("image/") -> {
@@ -554,6 +558,15 @@ class OpenAIProvider() : BaseProvider() {
                             }
                         }
                     }
+            }
+            buildJsonObject {
+                put("role", "user")
+                // Files only, and none of them is sent: the turn names them
+                put("content", if (content.isNotEmpty()) content else buildJsonArray {
+                    add(buildJsonObject {
+                        put("type", "input_text")
+                        put("text", fileNamesNote(message))
+                    })
                 })
             }
         }

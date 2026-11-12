@@ -614,7 +614,7 @@ fun GroupChatHistoryItem(
                 val lastMessage = chat.messages.lastOrNull()
                 if (lastMessage != null) {
                     Text(
-                        text = lastMessage.content.take(100),
+                        text = lastMessage.previewText.take(100),
                         color = OnSurfaceVariant,
                         fontSize = 14.sp,
                         maxLines = 1,

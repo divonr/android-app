@@ -417,7 +417,7 @@ class AnthropicProvider() : BaseProvider() {
 
             when (message.role) {
                 "user" -> {
-                    val contentArray = buildJsonArray {
+                    var contentArray = buildJsonArray {
                         if (message.text.isNotBlank()) {
                             add(buildJsonObject {
                                 put("type", "text")
@@ -458,6 +458,16 @@ class AnthropicProvider() : BaseProvider() {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // Files only, and none of them is sent: the turn names them
+                    if (contentArray.isEmpty() && message.attachments.isNotEmpty()) {
+                        contentArray = buildJsonArray {
+                            add(buildJsonObject {
+                                put("type", "text")
+                                put("text", fileNamesNote(message))
+                            })
                         }
                     }
 
@@ -502,6 +512,10 @@ class AnthropicProvider() : BaseProvider() {
                             put("content", contentArray)
                         })
                         i += 2  // Skip both messages
+                    } else if (message.text.isBlank()) {
+                        // A turn without text is left out: an empty text block is rejected,
+                        // and so is a turn that ends with a thinking block
+                        i++
                     } else {
                         // Regular assistant message (may have thoughts from extended thinking)
                         val contentArray = buildJsonArray {

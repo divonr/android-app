@@ -25,6 +25,7 @@ import BranchNavigator from './BranchNavigator'
 import AttachmentView from './AttachmentView'
 import { MdContentCopy, MdEdit, MdRefresh, MdDelete } from '../../ui/icons'
 import { getModelInitial, getModelLogoPath } from '../../utils/chatUtils'
+import { messageDisplayText } from '../../utils/attachments'
 import { t } from '../../i18n/he'
 import type { Chat, Message, BranchInfo } from '../../api/types'
 import type { TextDirectionMode } from './QuickSettingsBar'
@@ -300,7 +301,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     )
   }
 
-  const dir = resolveDir(msg.text, textDirectionMode)
+  // A message that only carries files has no text (and no stand-in for one)
+  const text = messageDisplayText(msg)
+  const dir = resolveDir(text, textDirectionMode)
   const timeStr = formatTime(msg.datetime)
   const modelInitial = getModelInitial(msg.model)
   const modelLogoPath = getModelLogoPath(msg.model)
@@ -429,22 +432,24 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           )}
 
           {/* Message content */}
-          <div dir={dir}>
-            {isUser ? (
-              /* Android: fontSize 15.sp, lineHeight 18.sp */
-              <span style={{ whiteSpace: 'pre-wrap', fontSize: 15, lineHeight: '18px' }}>
-                {msg.text}
-              </span>
-            ) : (
-              <Markdown content={msg.text} />
-            )}
-          </div>
+          {text && (
+            <div dir={dir} data-testid="message-text">
+              {isUser ? (
+                /* Android: fontSize 15.sp, lineHeight 18.sp */
+                <span style={{ whiteSpace: 'pre-wrap', fontSize: 15, lineHeight: '18px' }}>
+                  {text}
+                </span>
+              ) : (
+                <Markdown content={text} />
+              )}
+            </div>
+          )}
 
           {/* Attachments */}
           {msg.attachments && msg.attachments.length > 0 && (
             <div
               style={{
-                marginTop: 8,
+                marginTop: text ? 8 : 0,
                 display: 'flex',
                 flexWrap: 'wrap',
                 gap: 6,
@@ -490,7 +495,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           x={menuPos.x}
           y={menuPos.y}
           isUser={isUser}
-          onCopy={() => onCopy(msg.text)}
+          onCopy={() => onCopy(text)}
           onEdit={isUser ? () => onEdit(msg) : undefined}
           onRegenerate={!isUser ? () => onRegenerate(msg) : undefined}
           onDelete={() => onDelete(msg.id)}

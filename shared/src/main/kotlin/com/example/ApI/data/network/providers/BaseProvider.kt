@@ -139,6 +139,15 @@ abstract class BaseProvider() {
         return notes
     }
 
+    /**
+     * What a user turn says when the user wrote nothing and none of its files reaches the
+     * model in the request: the names of the files, so that the turn is not empty (an API
+     * rejects an empty turn). Empty for a message without files. Never used for an assistant
+     * turn - that one is left out instead.
+     */
+    protected fun fileNamesNote(message: Message): String =
+        message.attachments.joinToString("\n") { "[Attached file: \"${it.file_name}\"]" }
+
     /** [text] followed by [notes], for a provider whose user turn is one string. */
     protected fun textWithNotes(text: String, notes: List<String>): String =
         (listOf(text).filter { it.isNotBlank() } + notes).joinToString("\n\n")

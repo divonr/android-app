@@ -118,6 +118,19 @@ class FullDynamicCustomProvider(
         }
     }
 
+    /**
+     * The messages a template is filled with: a template has one text per turn, so a user turn
+     * with files and no text names the files, and an assistant turn without text is left out.
+     */
+    internal fun templateMessages(messages: List<Message>): List<Message> = messages.mapNotNull { message ->
+        when {
+            message.role == "assistant" && message.text.isBlank() -> null
+            message.role == "user" && message.text.isBlank() && message.attachments.isNotEmpty() ->
+                message.copy(text = fileNamesNote(message))
+            else -> message
+        }
+    }
+
     private suspend fun makeStreamingRequest(
         modelName: String,
         messages: List<Message>,
@@ -166,7 +179,7 @@ class FullDynamicCustomProvider(
                     messageFields = messageFields,
                     apiKey = apiKey,
                     model = modelName,
-                    messages = withSandboxNotes(messages, enabledTools),
+                    messages = templateMessages(withSandboxNotes(messages, enabledTools)),
                     systemPrompt = systemPrompt,
                     tools = enabledTools
                 )
@@ -175,7 +188,7 @@ class FullDynamicCustomProvider(
                     template = config.bodyTemplate,
                     apiKey = apiKey,
                     model = modelName,
-                    messages = messages,
+                    messages = templateMessages(messages),
                     systemPrompt = systemPrompt,
                     tools = enabledTools
                 )

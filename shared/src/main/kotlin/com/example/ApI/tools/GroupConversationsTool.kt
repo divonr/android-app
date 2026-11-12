@@ -2,6 +2,7 @@ package com.example.ApI.tools
 
 import com.example.ApI.data.model.Chat
 import com.example.ApI.data.model.UserChatHistory
+import com.example.ApI.data.model.displayText
 import kotlinx.serialization.json.*
 
 /**
@@ -57,7 +58,7 @@ class GroupConversationsTool(
                         chat.messages.map { message ->
                             buildJsonObject {
                                 put("role", message.role)
-                                put("content", message.text)
+                                put("content", message.displayText)
                                 message.datetime?.let { put("datetime", it) }
                                 message.model?.let { put("model", it) }
                                 if (message.attachments.isNotEmpty()) {
@@ -104,7 +105,7 @@ class GroupConversationsTool(
                                 appendLine("  - ${attachment.file_name} (${attachment.mime_type})")
                             }
                         }
-                        appendLine("Content: ${message.text}")
+                        appendLine("Content: ${message.displayText}")
                         appendLine()
                     }
                 }

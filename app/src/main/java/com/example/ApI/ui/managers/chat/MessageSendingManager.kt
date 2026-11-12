@@ -86,7 +86,8 @@ class MessageSendingManager(
 
             val userMessage = Message(
                 role = "user",
-                text = if (message.isNotEmpty()) message else "[קובץ מצורף]",
+                // Files without a text: the text is empty
+                text = message,
                 attachments = filesToSend.map { file ->
                     // With sync on: the file's hash + size (known once it is hashed, the upload
                     // may still be running) and a commit of the file in the account's store

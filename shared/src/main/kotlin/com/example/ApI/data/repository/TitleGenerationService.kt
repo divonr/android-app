@@ -172,7 +172,7 @@ class TitleGenerationService(
             val messagesJson = messages.map { message ->
                 buildJsonObject {
                     put("role", message.role)
-                    put("text", message.text)
+                    put("text", message.displayText)
                     if (message.attachments.isNotEmpty()) {
                         put("attachments", buildJsonArray {
                             message.attachments.forEach { attachment ->

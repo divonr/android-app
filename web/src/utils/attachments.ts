@@ -4,17 +4,37 @@
  * An attachment with a `sha256` is in the account's store and can be shown / downloaded on the
  * web whichever device attached it; one without exists only on the device that attached it.
  */
-import type { Attachment } from '../api/types'
+import type { Attachment, Message } from '../api/types'
 import { t } from '../i18n/he'
 
 /** The store's limit for one file (the public URL is behind a proxy that caps a body at 100 MB). */
 export const MAX_FILE_BYTES = 95 * 1024 * 1024
 
 /**
- * The text of a message that was sent with files only. The same stored text as Android's
- * (`MessageSendingManager.sendMessage`) — data shared by every device, not a UI string.
+ * The stand-in texts older versions stored in a message that only carries files (the same list
+ * as the app's `FileOnlyMessages.LEGACY_PLACEHOLDERS`). Such a message has an empty text now;
+ * chats saved before that, or written by a device on an older version, still have a stand-in.
  */
-export const FILE_ONLY_MESSAGE_TEXT = '[קובץ מצורף]'
+export const LEGACY_FILE_ONLY_TEXTS: readonly string[] = ['[קובץ מצורף]', '[Attached file]']
+
+type TextAndFiles = Pick<Message, 'role' | 'text' | 'attachments'>
+
+/** The message's own text: empty for a message that only carries files (never a stand-in). */
+export function messageDisplayText(msg: TextAndFiles): string {
+  const text = msg.text ?? ''
+  const fileOnly = (msg.attachments?.length ?? 0) > 0 &&
+    (msg.role === 'user' || msg.role === 'assistant') &&
+    LEGACY_FILE_ONLY_TEXTS.includes(text.trim())
+  return fileOnly ? '' : text
+}
+
+/** One line for a list of chats: the text, else the names of the message's files. */
+export function messagePreviewText(msg: TextAndFiles): string {
+  const text = messageDisplayText(msg)
+  if (text.trim()) return text
+  const names = (msg.attachments ?? []).map((a) => a.file_name)
+  return names.length > 0 ? `📎 ${names.join(', ')}` : ''
+}
 
 /**
  * The image types the server serves inline (`Content-Disposition: inline`, their own type).

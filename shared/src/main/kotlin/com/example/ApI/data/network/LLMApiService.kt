@@ -122,6 +122,10 @@ class LLMApiService() {
         temperature: Float? = null,
         callback: StreamingCallback
     ): Unit = withContext(Dispatchers.IO) {
+        // No provider is told a stand-in text, or given an assistant turn that says nothing
+        @Suppress("NAME_SHADOWING")
+        val messages = messages.forProvider()
+
         // Get the API key for this provider
         val apiKey = apiKeys[provider.provider]
 

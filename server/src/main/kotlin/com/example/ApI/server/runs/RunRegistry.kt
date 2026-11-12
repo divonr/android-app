@@ -164,9 +164,6 @@ class RunRegistry(
         const val TITLE_TIMEOUT_MS = 20_000L
         const val SHUTDOWN_TIMEOUT_MS = 5_000L
         private val EMPTY = JsonObject(emptyMap())
-
-        /** The text of an assistant message that only carries files (the same as Android's). */
-        const val ATTACHED_FILE_TEXT = "[קובץ מצורף]"
     }
 
     private class Run(val ctx: UserContext, val spec: RunSpec, var state: RunState) {
@@ -565,8 +562,8 @@ class RunRegistry(
 
     private fun assistantMessage(spec: RunSpec, text: String, thoughts: Thoughts?, files: List<Attachment> = emptyList()) = Message(
         role = "assistant",
-        // A message that only carries generated files gets Android's placeholder text
-        text = text.ifBlank { if (files.isNotEmpty()) ATTACHED_FILE_TEXT else "" },
+        // A message that only carries generated files has no text
+        text = text.ifBlank { "" },
         attachments = files,
         model = spec.modelName,
         datetime = Instant.now().toString(),

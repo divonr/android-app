@@ -8,6 +8,7 @@ import React from 'react'
 import type { Chat } from '../../api/types'
 import { MdForum } from '../../ui/icons'
 import { getModelInitial, getModelLogoPath, formatTimestamp } from '../../utils/chatUtils'
+import { messagePreviewText } from '../../utils/attachments'
 import { t } from '../../i18n/he'
 import styles from '../../pages/ChatHistoryPage.module.css'
 
@@ -58,7 +59,7 @@ export const ChatRowBody: React.FC<{ chat: Chat; isAIRenaming?: boolean }> = ({ 
         <span className={styles.chatTitle}>{chatTitle(chat)}</span>
         {lastMsg && (
           <span className={styles.chatPreview}>
-            {lastMsg.text?.slice(0, 100)}
+            {messagePreviewText(lastMsg).slice(0, 100)}
           </span>
         )}
       </div>
