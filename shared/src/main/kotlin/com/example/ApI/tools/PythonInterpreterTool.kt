@@ -136,9 +136,9 @@ ARCHITECTURE & PERSISTENCE:
 
 ENVIRONMENT & PRE-INSTALLED TOOLS:
 - Privileges & Network: Running as `root` (`uid=0`) with full outbound internet access. You can run shell commands via `subprocess.run(...)` and install missing packages via `pip` or `apt-get`.
-- Hebrew & RTL Support: Full Hebrew font packages (`fonts-culmus`, `fonts-noto`, `fonts-dejavu`), `python-bidi`, and `arabic-reshaper` are pre-installed.
-  * Note for Matplotlib/ReportLab/FPDF2 in Hebrew: Always load a TrueType font from `/usr/share/fonts/truetype/` and apply `bidi.algorithm.get_display(arabic_reshaper.reshape(text))` when rendering static images/PDFs that lack native BiDi shaping, or generate HTML+CSS (`dir="rtl"`) and convert to PDF via `weasyprint` / `wkhtmltopdf` / `libreoffice --headless --convert-to pdf`.
-- Pre-installed Stack: pandas, numpy, scipy, scikit-learn, duckdb, matplotlib, seaborn, plotly, openpyxl, python-docx, python-pptx, fpdf2, reportlab, weasyprint, pdfplumber, pypdf, pillow, beautifulsoup4, requests, git, curl, jq, sqlite3, ffmpeg, libreoffice, pandoc.
+- Hebrew & RTL Support: Full Hebrew font packages (`culmus`, `fonts-noto-core`, `fonts-dejavu`), `python-bidi`, and `arabic-reshaper` are pre-installed (list them with `fc-list :lang=he`).
+  * Note for Matplotlib/ReportLab/FPDF2 in Hebrew: Always load a TrueType font that has both Hebrew and Latin glyphs from `/usr/share/fonts/truetype/`, e.g. `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf` (sans) or `/usr/share/fonts/truetype/culmus/FrankRuehlCLM-Medium.ttf` (serif); avoid the Noto Hebrew fonts for mixed text (they have no Latin letters or digits) and the `.otf` Culmus files such as `DavidCLM-Medium.otf` in ReportLab (it cannot load them). Apply `bidi.algorithm.get_display(arabic_reshaper.reshape(text))` when rendering static images/PDFs that lack native BiDi shaping, or generate HTML+CSS (`dir="rtl"`) and convert to PDF via `weasyprint` / `wkhtmltopdf` / `libreoffice --headless --convert-to pdf`.
+- Pre-installed Stack: pandas, numpy, scipy, scikit-learn, duckdb, matplotlib, seaborn, plotly, openpyxl, python-docx, python-pptx, fpdf2, reportlab, weasyprint, pdfplumber, pypdf, pillow, beautifulsoup4, requests, git, curl, jq, sqlite3, ffmpeg, libreoffice, pandoc, wkhtmltopdf, chromium (headless; Plotly static image export with `fig.write_image(...)` works through kaleido).
 - Limits: 4 vCPUs, 2GB RAM, 512MB `/dev/shm`, 5-minute timeout per call. Use `print()` to return text output to yourself.
 """.trim('\n')
 
@@ -216,8 +216,11 @@ ENVIRONMENT & PRE-INSTALLED TOOLS:
         private val json = Json { ignoreUnknownKeys = true }
     }
 
-    // Read: the executor runs code for up to 300 s, then collects the files. Write: per write
-    // to the socket, not per upload, so a large file takes as long as it needs.
+    // Read: the longest silence between two reads, not the length of the call. The executor
+    // answers HTTP 200 at once and sends a whitespace byte every 12 s until its JSON is ready
+    // (up to 300 s of code, then the files), so the limit is only reached if something on the
+    // way holds those bytes back - and then it still covers a whole run. No call timeout.
+    // Write: per write to the socket, not per upload, so a large file takes as long as it needs.
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(420, TimeUnit.SECONDS)
@@ -381,15 +384,14 @@ ENVIRONMENT & PRE-INSTALLED TOOLS:
                     null,
                     when (response.code) {
                         401, 403 -> "The sandbox refused this app's API key (HTTP ${response.code}). Tell the user; retrying will not help."
-                        // Cloudflare, in front of the executor for a device: no answer within about 100 s
-                        524 -> "The route to the sandbox gave up waiting for the answer (HTTP 524): on this device a call " +
-                            "cannot take longer than about 100 seconds. The code was not stopped and may still be running; " +
-                            "its output is lost. Split the work into shorter calls, or run a long job in the background " +
-                            "(e.g. subprocess.Popen with its output redirected to a file under /app) and read its result in a later call."
+                        // Cloudflare, in front of the executor for a device, lost patience with it
+                        524 -> "The route to the sandbox gave up waiting for the answer (HTTP 524). The code was not " +
+                            "stopped and may still be running; its output is lost."
                         else -> "Sandbox error: HTTP ${response.code}" + if (text.isBlank()) "" else ": $text"
                     }
                 )
             }
+            // The JSON document comes after the executor's keep-alive whitespace
             val body = try { json.parseToJsonElement(text) as? JsonObject } catch (e: Exception) { null }
                 ?: return ExecutorResponse(null, "The sandbox sent an answer that is not JSON" + if (text.isBlank()) " (empty)." else ": $text")
             return ExecutorResponse(body, null)

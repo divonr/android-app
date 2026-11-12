@@ -63,6 +63,13 @@ class FakeSandboxExecutor(private val apiKey: String = KEY) {
     /** Names reported missing whatever was uploaded (a broken executor). */
     @Volatile var alwaysMissing: List<String> = emptyList()
 
+    /**
+     * As the real executor does while code runs: an HTTP 200 answer starts at once and this many
+     * single spaces, [heartbeatMillis] apart, come before the JSON document.
+     */
+    @Volatile var heartbeats = 0
+    @Volatile var heartbeatMillis = 0L
+
     /** Answer every request with this status and body instead. */
     @Volatile var rawAnswer: Pair<Int, String>? = null
 
@@ -75,8 +82,19 @@ class FakeSandboxExecutor(private val apiKey: String = KEY) {
                 val (code, body) = rawAnswer ?: answer(call)
                 val bytes = body.toByteArray(Charsets.UTF_8)
                 exchange.responseHeaders.add("Content-Type", "application/json")
-                exchange.sendResponseHeaders(code, bytes.size.toLong())
-                exchange.responseBody.use { it.write(bytes) }
+                if (code == 200 && heartbeats > 0) {
+                    exchange.sendResponseHeaders(200, 0)   // chunked: the length is not known yet
+                    exchange.responseBody.use { out ->
+                        repeat(heartbeats) {
+                            out.write(' '.code); out.flush()
+                            Thread.sleep(heartbeatMillis)
+                        }
+                        out.write(bytes)
+                    }
+                } else {
+                    exchange.sendResponseHeaders(code, bytes.size.toLong())
+                    exchange.responseBody.use { it.write(bytes) }
+                }
             } catch (_: Throwable) {
                 runCatching { exchange.close() }
             }

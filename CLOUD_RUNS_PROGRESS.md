@@ -479,10 +479,13 @@ Notes / open
 - Deploy: the executor's v2 endpoint first, then llm-web (restart) and the APK. An APK from
   before this change keeps using the executor's legacy `/execute` with the old key.
 - On a device the executor is reached through the Cloudflare tunnel, which gives up after about
-  100 s without a response byte: a 130 s run through `https://api-divonr.xyz/v2/execute` ended in
-  HTTP 524 after 126 s (measured 2026-11-12; over loopback the same executor ran its full 300 s
-  and returned the partial output). So a device call cannot take longer than that until the
-  executor answers in a way the tunnel tolerates; the tool reports the 524 to the model as such.
+  100 s without a response byte (a 130 s run ended in HTTP 524 after 126 s, measured 2026-11-12).
+  Fixed the same day on the executor: `/v2/execute` answers HTTP 200 at once and sends a
+  whitespace byte immediately and every 12 s until its JSON document is ready (leading whitespace,
+  so the body parses as before; 401 / 422 are still decided before the stream starts). Measured
+  through `https://api-divonr.xyz`: a 150 s run and a 300 s timeout with partial output both came
+  back whole, the former also through this tool (`SandboxLiveTest`, opt-in). The tool keeps a
+  short generic message for a 524.
   A cloud run (loopback) is not affected. The tunnel's request size limit applies to uploads
   from a device (not measured).
 - A chat's generated files are attached to the chat, so they are in the next call's manifest too
