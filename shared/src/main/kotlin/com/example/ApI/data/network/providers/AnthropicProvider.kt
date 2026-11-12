@@ -128,7 +128,7 @@ class AnthropicProvider() : BaseProvider() {
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
 
-            val anthropicMessages = buildMessages(messages)
+            val anthropicMessages = buildMessages(messages, enabledTools)
 
             // Calculate max_tokens based on thinking budget
             val maxTokens = when (thinkingBudget) {
@@ -400,7 +400,15 @@ class AnthropicProvider() : BaseProvider() {
         return handler.getResult()
     }
 
-    internal suspend fun buildMessages(messages: List<Message>): List<JsonObject> = withContext(Dispatchers.IO) {
+    internal suspend fun buildMessages(
+        messages: List<Message>,
+        enabledTools: List<ToolSpecification> = emptyList()
+    ): List<JsonObject> = withContext(Dispatchers.IO) {
+        // A file that is not an image or a PDF is not sent; with the code sandbox among this
+        // request's tools the model is told where the sandbox has it
+        val sandboxNotes = sandboxFileNotes(messages, enabledTools) { attachment ->
+            !attachment.mime_type.startsWith("image/") && attachment.mime_type != "application/pdf"
+        }
         val anthropicMessages = mutableListOf<JsonObject>()
         var i = 0
 
@@ -418,6 +426,13 @@ class AnthropicProvider() : BaseProvider() {
                         }
 
                         message.attachments.forEach { attachment ->
+                            sandboxNotes[attachment]?.let { note ->
+                                add(buildJsonObject {
+                                    put("type", "text")
+                                    put("text", note)
+                                })
+                                return@forEach
+                            }
                             val base64Data = readFileAsBase64(attachment.local_file_path)
                             if (base64Data != null) {
                                 when {

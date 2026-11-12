@@ -102,6 +102,44 @@ abstract class BaseProvider() {
     }
 
     /**
+     * The notes for the attachments this request does not send to the model itself but the
+     * code sandbox has, by attachment. Empty unless the sandbox is one of [offeredTools] - the
+     * tools this very request declares - and only for files of the sandbox's own manifest,
+     * under the name they have there; any other attachment keeps what the provider says of it.
+     *
+     * The text depends on the attachment's name, its content and the files before it in the
+     * conversation, so it is the same on every later request (a prompt cache's prefix).
+     *
+     * @param notSent the attachments the provider is not going to send
+     */
+    protected suspend fun sandboxFileNotes(
+        messages: List<Message>,
+        offeredTools: List<ToolSpecification>,
+        notSent: (Attachment) -> Boolean
+    ): Map<Attachment, String> {
+        val sandboxId = com.example.ApI.tools.ToolRegistry.PYTHON_INTERPRETER
+        val sandbox = com.example.ApI.tools.ToolRegistry.specificationOf(sandboxId, offeredTools) ?: return emptyMap()
+        val inputFiles = sandbox.inputFiles ?: return emptyMap()
+        val candidates = messages.filter { it.role == "user" }.flatMap { it.attachments }.filter(notSent).distinct()
+        if (candidates.isEmpty()) return emptyMap()
+
+        val paths = try {
+            inputFiles.paths()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLogger.w("Could not tell which attachments the code sandbox has: ${e.message}")
+            return emptyMap()
+        }
+        val notes = HashMap<Attachment, String>()
+        for (attachment in candidates) {
+            val path = paths.pathOf(attachment) ?: continue
+            notes[attachment] = "[User attached file \"${attachment.file_name}\" — available inside ${sandbox.name} at $path]"
+        }
+        return notes
+    }
+
+    /**
      * Reads a file from disk and encodes it as Base64.
      * Returns null if the file doesn't exist or cannot be read.
      */

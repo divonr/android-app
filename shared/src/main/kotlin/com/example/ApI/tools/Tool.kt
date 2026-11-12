@@ -62,8 +62,31 @@ data class ToolSpecification(
      * [description] without per-request content, for providers whose prompt cache covers the
      * tool declarations. null when [description] is already stable.
      */
-    val stableDescription: String? = null
-)
+    val stableDescription: String? = null,
+    /**
+     * Set by a tool that is given the conversation's files itself (the code sandbox): where a
+     * request finds out which of its attachments the tool has. Not part of what is declared.
+     */
+    @kotlinx.serialization.Transient
+    val inputFiles: ToolInputFiles? = null
+) {
+    // Two specifications are the same when they declare the same tool; [inputFiles] is not declared
+    override fun equals(other: Any?): Boolean = other is ToolSpecification && name == other.name &&
+        description == other.description && parameters == other.parameters &&
+        providerSpecific == other.providerSpecific && stableDescription == other.stableDescription
+
+    override fun hashCode(): Int = listOf(name, description, parameters, providerSpecific, stableDescription).hashCode()
+}
+
+/** The conversation's files as a tool has them; asked once per request that needs to know. */
+fun interface ToolInputFiles {
+    suspend fun paths(): ToolInputPaths
+}
+
+/** The path the tool has [attachment]'s file under, or null when the tool does not have it. */
+fun interface ToolInputPaths {
+    fun pathOf(attachment: com.example.ApI.data.model.Attachment): String?
+}
 
 /**
  * Information about a tool call made by a model

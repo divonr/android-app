@@ -163,7 +163,10 @@ class GoogleProvider(
             connection.doOutput = true
 
             if (isAgentPlatform) {
-                val contents = buildContents(messages, systemPrompt = "")
+                val contents = buildContents(
+                    messages, systemPrompt = "",
+                    sandboxNotes = agentPlatformSandboxNotes(messages, webSearchEnabled, enabledTools)
+                )
                 val requestBody = buildAgentPlatformRequestBody(
                     modelName, contents, systemPrompt, webSearchEnabled, enabledTools, thinkingBudget, temperature
                 )
@@ -469,7 +472,28 @@ class GoogleProvider(
         }
     }
 
-    private fun buildContents(messages: List<Message>, systemPrompt: String): List<JsonObject> {
+    /**
+     * What is said of the attachments Agent Platform is not sent when the code sandbox has
+     * them. The sandbox counts only when this request declares it: the search toggle keeps
+     * the function tools out (see [buildAgentPlatformRequestBody]).
+     */
+    private suspend fun agentPlatformSandboxNotes(
+        messages: List<Message>,
+        webSearchEnabled: Boolean,
+        enabledTools: List<ToolSpecification>
+    ): Map<Attachment, String> {
+        if (webSearchEnabled) return emptyMap()
+        val inlineAttachments = selectInlineAttachments(messages)
+        return sandboxFileNotes(messages, enabledTools) { attachment ->
+            agentPlatformMimeType(attachment.mime_type) == null || attachment !in inlineAttachments
+        }
+    }
+
+    private fun buildContents(
+        messages: List<Message>,
+        systemPrompt: String,
+        sandboxNotes: Map<Attachment, String> = emptyMap()
+    ): List<JsonObject> {
         val contents = mutableListOf<JsonObject>()
         val inlineAttachments = if (isAgentPlatform) selectInlineAttachments(messages) else emptySet()
 
@@ -503,7 +527,7 @@ class GoogleProvider(
 
                     message.attachments.forEach { attachment ->
                         if (isAgentPlatform) {
-                            parts.addAll(buildAgentPlatformAttachmentParts(attachment, inlineAttachments))
+                            parts.addAll(buildAgentPlatformAttachmentParts(attachment, inlineAttachments, sandboxNotes))
                         } else if (!attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}") {
                             parts.add(buildJsonObject {
                                 put("file_data", buildJsonObject {
@@ -686,13 +710,19 @@ class GoogleProvider(
     }
 
     /**
-     * The file's name and its inlineData part, or a text note telling the model why this file
-     * isn't there. The name is what the code sandbox has the file under in its input directory; saying it here, not in the
+     * The file's name and its inlineData part, or a text note for a file that isn't there:
+     * where the code sandbox has it ([sandboxNotes]: only when this request offers the sandbox
+     * and the file is one of its input files), else why it was not sent. The name is what the
+     * code sandbox has the file under in its input directory; saying it here, not in the
      * tool's description, keeps it the same on every later request.
      */
-    private fun buildAgentPlatformAttachmentParts(attachment: Attachment, inlineAttachments: Set<Attachment>): List<JsonObject> {
+    private fun buildAgentPlatformAttachmentParts(
+        attachment: Attachment,
+        inlineAttachments: Set<Attachment>,
+        sandboxNotes: Map<Attachment, String>
+    ): List<JsonObject> {
         fun note(reason: String) = listOf(buildJsonObject {
-            put("text", "[Attachment \"${attachment.file_name}\" was not sent: $reason]")
+            put("text", sandboxNotes[attachment] ?: "[Attachment \"${attachment.file_name}\" was not sent: $reason]")
         })
 
         val mimeType = agentPlatformMimeType(attachment.mime_type)
