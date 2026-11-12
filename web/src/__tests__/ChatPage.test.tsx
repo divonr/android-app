@@ -20,6 +20,17 @@ vi.mock('../components/Markdown.module.css', () => ({
 
 // ─── Mock modules ─────────────────────────────────────────────────────────────
 
+// The real renderer, counting how often a message's Markdown is parsed
+const markdownRenders = vi.hoisted(() => ({ count: 0 }))
+vi.mock('react-markdown', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-markdown')>()
+  const Counted = (props: React.ComponentProps<typeof actual.default>) => {
+    markdownRenders.count++
+    return React.createElement(actual.default, props)
+  }
+  return { ...actual, default: Counted }
+})
+
 vi.mock('../api/stream', async () => ({
   sendStream: vi.fn(() => ({ abort: vi.fn(), done: Promise.resolve() })),
   resendStream: vi.fn(() => ({ abort: vi.fn(), done: Promise.resolve() })),
@@ -334,6 +345,37 @@ describe('ChatPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/once upon a time/i)).toBeInTheDocument()
     })
+  })
+
+  it('does not render the saved messages again for a delta or a keystroke', async () => {
+    let cbs: StreamCallbacks | null = null
+    vi.mocked(streamModule.sendStream).mockImplementation((_req, callbacks) => {
+      cbs = callbacks
+      return { abort: vi.fn(), done: new Promise(() => {}) }
+    })
+
+    renderChatPage()
+    await waitFor(() => expect(screen.getByText('Hi there! How can I help?')).toBeInTheDocument())
+    // Settled: the page's own first loads (models, settings) are done
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
+    const parsed = markdownRenders.count
+    expect(parsed).toBeGreaterThan(0)
+
+    const input = screen.getByPlaceholderText(/הקלד הודעה/i)
+    fireEvent.change(input, { target: { value: 'Tell' } })
+    fireEvent.change(input, { target: { value: 'Tell me a story' } })
+    fireEvent.click(screen.getByLabelText(/send message/i))
+
+    // Every delta is on screen before the next one arrives
+    let text = ''
+    for (const delta of ['Once', ' upon', ' a', ' time']) {
+      text += delta
+      await act(async () => { cbs?.onPartial?.({ text: delta }) })
+      expect(screen.getByText(text)).toBeInTheDocument()
+    }
+
+    // … and none of it parsed a saved message's Markdown again
+    expect(markdownRenders.count).toBe(parsed)
   })
 
   it('shows thinking indicator during thinking phase', async () => {

@@ -102,4 +102,6 @@ const Markdown: React.FC<MarkdownProps> = ({ content, className }) => {
   )
 }
 
-export default Markdown
+// Parsing and highlighting are costly: only when the text changes, not whenever a parent
+// re-renders (a streaming reply re-renders the page with every delta)
+export default React.memo(Markdown)

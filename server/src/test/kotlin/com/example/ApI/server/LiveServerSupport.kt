@@ -46,10 +46,12 @@ internal class LiveServer(
     providerFileUploader: com.example.ApI.server.runs.ProviderFileUploader = NO_PROVIDER_UPLOADS,
     pythonExecutorUrl: String = UNREACHABLE_PYTHON_EXECUTOR,
     sandboxKey: String = TEST_SANDBOX_KEY,
-    maxFileBytes: Long = com.example.ApI.data.attachments.AttachmentStoreClient.DEFAULT_MAX_FILE_BYTES
+    maxFileBytes: Long = com.example.ApI.data.attachments.AttachmentStoreClient.DEFAULT_MAX_FILE_BYTES,
+    // 0: any free port
+    port: Int = 0
 ) : AutoCloseable {
 
-    private val server = embeddedServer(Netty, port = 0, host = "127.0.0.1") {
+    private val server = embeddedServer(Netty, port = port, host = "127.0.0.1") {
         module(
             storage,
             oauthExchanger = FakeGoogleLoginExchanger(),
@@ -158,6 +160,13 @@ internal class LiveClient(private val baseUrl: String, private val token: String
 
     fun post(path: String, body: String? = null): LiveResponse = raw("POST", path, body).let { LiveResponse(it.statusCode(), it.body()) }
 
+    /** The response headers of a stream that is opened and closed at once. */
+    fun streamHeaders(path: String): java.net.http.HttpHeaders {
+        val response = http.send(request("GET", path, null, token), HttpResponse.BodyHandlers.ofInputStream())
+        response.body().close()
+        return response.headers()
+    }
+
     /** Open an SSE response and read it as it comes. */
     fun sse(path: String, method: String = "GET", body: String? = null): LiveSse {
         val response = http.send(request(method, path, body, token), HttpResponse.BodyHandlers.ofInputStream())
@@ -182,6 +191,9 @@ internal class LiveSse(val status: Int, val contentType: String, private val inp
     /** Every raw line read so far (to assert on ping comments). */
     val lines = java.util.concurrent.CopyOnWriteArrayList<String>()
 
+    /** Every event read so far with the time (`System.nanoTime`) its frame was complete here. */
+    val arrivals = java.util.concurrent.CopyOnWriteArrayList<Pair<String, Long>>()
+
     private val reader = Thread {
         try {
             input.bufferedReader().use { r ->
@@ -194,7 +206,10 @@ internal class LiveSse(val status: Int, val contentType: String, private val inp
                         line.startsWith("event: ") -> event = line.removePrefix("event: ")
                         line.startsWith("data: ") -> data = line.removePrefix("data: ")
                         line.isEmpty() -> {
-                            if (event != null && data != null) queue += (event to Json.parseToJsonElement(data).jsonObject)
+                            if (event != null && data != null) {
+                                arrivals += (event to System.nanoTime())
+                                queue += (event to Json.parseToJsonElement(data).jsonObject)
+                            }
                             event = null
                             data = null
                         }

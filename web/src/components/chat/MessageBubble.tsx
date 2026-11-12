@@ -501,4 +501,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   )
 }
 
-export default MessageBubble
+// A saved message is drawn again only when it (or the chat) changes: the chat page re-renders
+// with every delta of a streaming reply and every keystroke in the composer
+export default React.memo(MessageBubble)
