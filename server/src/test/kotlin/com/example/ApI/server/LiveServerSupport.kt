@@ -45,6 +45,7 @@ internal class LiveServer(
     // Never a real provider / the real Python executor from a test
     providerFileUploader: com.example.ApI.server.runs.ProviderFileUploader = NO_PROVIDER_UPLOADS,
     pythonExecutorUrl: String = UNREACHABLE_PYTHON_EXECUTOR,
+    sandboxKey: String = TEST_SANDBOX_KEY,
     maxFileBytes: Long = com.example.ApI.data.attachments.AttachmentStoreClient.DEFAULT_MAX_FILE_BYTES
 ) : AutoCloseable {
 
@@ -65,7 +66,7 @@ internal class LiveServer(
             titleGeneratorFactory = { _ -> titleGenerator },
             runRegistry = runRegistry,
             providerFileUploader = providerFileUploader,
-            sandbox = com.example.ApI.tools.SandboxConfig(pythonExecutorUrl, TEST_SANDBOX_KEY),
+            sandbox = com.example.ApI.tools.SandboxConfig(pythonExecutorUrl, sandboxKey),
             maxFileBytes = maxFileBytes,
             chatEngineFactory = { _ -> engine }
         )
