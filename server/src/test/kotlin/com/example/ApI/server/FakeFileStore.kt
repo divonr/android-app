@@ -13,6 +13,9 @@ import java.util.concurrent.Executors
 /** Nothing listens there: a Python tool of a test never reaches the real executor. */
 const val UNREACHABLE_PYTHON_EXECUTOR = "http://127.0.0.1:9/execute"
 
+/** The key the tests' executor expects (nothing real). */
+const val TEST_SANDBOX_KEY = "test-sandbox-key"
+
 /** The default of every server test: no file is ever uploaded to a real provider. */
 val NO_PROVIDER_UPLOADS = ProviderFileUploader { _, _, _, _, _ -> null }
 

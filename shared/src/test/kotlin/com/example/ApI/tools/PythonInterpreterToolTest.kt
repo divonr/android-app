@@ -26,7 +26,8 @@ class PythonInterpreterToolTest {
             chat_id = "chat", preview_name = "chat",
             messages = listOf(Message(role = "user", text = "hi", attachments = attachments.toList()))
         ),
-        currentGroup = null
+        currentGroup = null,
+        sandbox = SandboxConfig("http://127.0.0.1:9/execute", "test-key")
     )
 
     private val csv = Attachment(local_file_path = "/device/a.csv", file_name = "a.csv", mime_type = "text/csv")

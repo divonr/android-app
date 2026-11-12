@@ -77,7 +77,7 @@ data class UserContext(
  * @param integrationTools     Creates the GitHub / Google Workspace tools of a user's runs.
  * @param googleTokenRefresher Refreshes a user's Google Workspace access token.
  * @param providerFileUploaderFactory Creates the uploader of a user's files to a provider.
- * @param pythonExecutorUrl    The remote executor of the Python tool.
+ * @param sandbox              The remote executor of the Python tool and its key.
  * @param maxFileBytes         The largest attachment file accepted (the store's limit).
  */
 class UserRegistry(
@@ -95,7 +95,7 @@ class UserRegistry(
     private val integrationTools: IntegrationTools = RealIntegrationTools,
     private val googleTokenRefresher: GoogleTokenRefresher = RealGoogleTokenRefresher(),
     private val providerFileUploaderFactory: (DataRepository) -> ProviderFileUploader = { repo -> RepositoryProviderFileUploader(repo) },
-    private val pythonExecutorUrl: String = com.example.ApI.tools.PythonInterpreterTool.SERVER_URL,
+    private val sandbox: com.example.ApI.tools.SandboxConfig = resolveSandboxConfig(),
     private val maxFileBytes: Long = com.example.ApI.data.attachments.AttachmentStoreClient.DEFAULT_MAX_FILE_BYTES
 ) {
     companion object {
@@ -160,7 +160,7 @@ class UserRegistry(
             providerFiles = providerFileUploaderFactory(repository),
             tools = UserTools(
                 username, repository, integrationTools, googleTokenRefresher,
-                storage = storage, attachments = attachments, pythonExecutorUrl = pythonExecutorUrl
+                storage = storage, attachments = attachments, sandbox = sandbox
             )
         )
     }
@@ -383,3 +383,12 @@ private const val APP_SETTINGS_FILE = "app_settings.json"
 /** The sync server URL from `SYNC_SERVER_URL` (default: the local sync server). */
 fun resolveSyncServerUrl(): String =
     System.getenv("SYNC_SERVER_URL")?.takeIf { it.isNotBlank() } ?: "http://localhost:8090"
+
+/**
+ * The executor of the Python tool, from `SANDBOX_EXECUTOR_URL` (default: the executor on this
+ * machine) and `SANDBOX_API_KEY`. Without the key the tool answers with a configuration error.
+ */
+fun resolveSandboxConfig(): com.example.ApI.tools.SandboxConfig = com.example.ApI.tools.SandboxConfig(
+    executorUrl = System.getenv("SANDBOX_EXECUTOR_URL")?.takeIf { it.isNotBlank() } ?: "http://127.0.0.1:8000/v2/execute",
+    apiKey = System.getenv("SANDBOX_API_KEY")?.trim().orEmpty()
+)

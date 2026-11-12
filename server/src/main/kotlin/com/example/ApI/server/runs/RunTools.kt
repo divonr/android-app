@@ -19,6 +19,7 @@ import com.example.ApI.server.oauth.RealGoogleTokenRefresher
 import com.example.ApI.tools.GroupConversationsTool
 import com.example.ApI.tools.PythonInterpreterTool
 import com.example.ApI.tools.PythonToolFiles
+import com.example.ApI.tools.SandboxConfig
 import com.example.ApI.tools.ToolCall
 import com.example.ApI.tools.ToolExecutionResult
 import com.example.ApI.tools.ToolRegistry
@@ -113,7 +114,8 @@ class UserTools(
     /** The user's storage and attachment files; without them there is no Python tool. */
     private val storage: ServerPlatformStorage? = null,
     private val attachments: UserAttachments? = null,
-    private val pythonExecutorUrl: String = PythonInterpreterTool.SERVER_URL
+    /** The remote executor of the Python tool and its key. */
+    private val sandbox: SandboxConfig = SandboxConfig("", "")
 ) {
     private val log = LoggerFactory.getLogger(UserTools::class.java)
 
@@ -254,7 +256,7 @@ class UserTools(
                 return Attachment(file_name = fileName, mime_type = mimeType, sha256 = digest.sha256, size = digest.size)
             }
         }
-        return PythonInterpreterTool(storage, chat, group, files, pythonExecutorUrl)
+        return PythonInterpreterTool(storage, chat, group, sandbox, files)
     }
 
     /** The user's Google Workspace connection with a valid access token (refreshed if needed). */

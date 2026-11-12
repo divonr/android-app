@@ -136,7 +136,7 @@ fun ApplicationTestBuilder.startWithFakeGoogleAuth(
             googleTokenRefresher = FakeGoogleTokenRefresher(),
             // …nor a real provider's file upload or the real Python executor
             providerFileUploader = NO_PROVIDER_UPLOADS,
-            pythonExecutorUrl = UNREACHABLE_PYTHON_EXECUTOR,
+            sandbox = com.example.ApI.tools.SandboxConfig(UNREACHABLE_PYTHON_EXECUTOR, TEST_SANDBOX_KEY),
             maxFileBytes = maxFileBytes,
             chatEngineFactory = chatEngineFactory,
             titleGeneratorFactory = titleGeneratorFactory

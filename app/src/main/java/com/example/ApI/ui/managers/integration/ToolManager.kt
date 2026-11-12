@@ -85,6 +85,7 @@ class ToolManager(
                 platformStorage = AndroidPlatformStorage(deps.context),
                 currentChat = currentChat,
                 currentGroup = currentGroup,
+                sandbox = sandboxConfig,
                 files = pythonToolFiles()
             )
             specifications.add(pythonTool.getSpecification(currentProvider))
@@ -92,6 +93,12 @@ class ToolManager(
 
         return specifications
     }
+
+    /** The remote executor and its key, as this build was given them (app/build.gradle.kts). */
+    private val sandboxConfig = com.example.ApI.tools.SandboxConfig(
+        executorUrl = com.example.ApI.BuildConfig.SANDBOX_EXECUTOR_URL,
+        apiKey = com.example.ApI.BuildConfig.SANDBOX_API_KEY
+    )
 
     /**
      * With sync on, the Python tool also reads attachments of other devices (from the account's
@@ -146,6 +153,7 @@ class ToolManager(
                 platformStorage = AndroidPlatformStorage(deps.context),
                 currentChat = currentChat,
                 currentGroup = currentGroup,
+                sandbox = sandboxConfig,
                 files = pythonToolFiles()
             )
             return pythonTool.execute(toolCall.parameters)

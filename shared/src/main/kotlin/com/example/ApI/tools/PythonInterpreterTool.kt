@@ -38,19 +38,38 @@ interface PythonToolFiles {
 }
 
 /**
+ * Where the remote executor is and the key it is called with. Neither is in the sources: the
+ * platform layer passes them in (Android: BuildConfig, from `local.properties` or the build's
+ * environment; desktop: a constant generated the same way; the web server: its environment).
+ */
+data class SandboxConfig(val executorUrl: String, val apiKey: String) {
+    /** null when the tool can be used, else the error it reports instead of running anything. */
+    val configurationError: String?
+        get() = when {
+            executorUrl.isBlank() -> "The code sandbox is not configured: this build has no executor URL."
+            apiKey.isBlank() -> "The code sandbox is not configured: this build has no API key for the executor " +
+                "(sandbox.apiKey in local.properties or SANDBOX_API_KEY in the environment). Tell the user; retrying will not help."
+            else -> null
+        }
+
+    // The key must not end up in a log line or an error message
+    override fun toString(): String = "SandboxConfig(executorUrl=$executorUrl, apiKey=${if (apiKey.isBlank()) "<none>" else "<set>"})"
+}
+
+/**
  * Python Interpreter tool - shared implementation.
  * Uses file-based session persistence via PlatformStorage.
  *
  * @param files       how input files are found and output files kept (null: the device's own
  *                    files, by `local_file_path`).
- * @param executorUrl the remote executor (tests point it at a fake).
+ * @param sandbox     the remote executor and its key (tests point it at a fake).
  */
 class PythonInterpreterTool(
     private val platformStorage: PlatformStorage,
     private val currentChat: Chat?,
     private val currentGroup: ChatGroup?,
-    private val files: PythonToolFiles? = null,
-    private val executorUrl: String = SERVER_URL
+    private val sandbox: SandboxConfig,
+    private val files: PythonToolFiles? = null
 ) : Tool {
 
     override val id = "python_interpreter"
@@ -85,8 +104,6 @@ Limits: 5 min timeout, 2GB RAM.
     }
 
     companion object {
-        const val SERVER_URL = "https://api-divonr.xyz/execute"
-        const val API_KEY = "Ato01g?4:elop-ef,kq32"
         const val MAX_FILE_SIZE = 10 * 1024 * 1024L
 
         // "not available" is the one not-sent note (GoogleProvider) whose file this tool cannot read either
@@ -160,6 +177,7 @@ Limits: 5 min timeout, 2GB RAM.
         AppLogger.i("[PythonTool] execute() called")
         val code = parameters["code"]?.jsonPrimitive?.contentOrNull
             ?: return ToolExecutionResult.Error("Parameter 'code' is required")
+        sandbox.configurationError?.let { return ToolExecutionResult.Error(it) }
 
         val filesToInclude = parameters["files_to_include"]?.jsonArray
             ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
@@ -179,8 +197,8 @@ Limits: 5 min timeout, 2GB RAM.
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
-                    .url(executorUrl)
-                    .header("X-Api-Key", API_KEY)
+                    .url(sandbox.executorUrl)
+                    .header("X-Api-Key", sandbox.apiKey)
                     .post(multipartBuilder.build())
                     .build()
                 val response = client.newCall(request).execute()

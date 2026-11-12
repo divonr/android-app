@@ -65,7 +65,7 @@ internal class LiveServer(
             titleGeneratorFactory = { _ -> titleGenerator },
             runRegistry = runRegistry,
             providerFileUploader = providerFileUploader,
-            pythonExecutorUrl = pythonExecutorUrl,
+            sandbox = com.example.ApI.tools.SandboxConfig(pythonExecutorUrl, TEST_SANDBOX_KEY),
             maxFileBytes = maxFileBytes,
             chatEngineFactory = { _ -> engine }
         )

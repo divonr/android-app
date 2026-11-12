@@ -126,7 +126,8 @@ fun main() {
  * @param googleTokenRefresher  Refreshes a Google Workspace access token.  Tests pass a fake.
  * @param runRegistry           Owns the runs.  Tests may pass one with short timeouts.
  * @param providerFileUploader  Uploads a run's attachment files to a provider.  Tests pass a fake.
- * @param pythonExecutorUrl     The remote executor of the Python tool.  Tests pass a fake's URL.
+ * @param sandbox               The remote executor of the Python tool and its key (from the
+ *                              environment).  Tests pass a fake's URL.
  * @param maxFileBytes          The largest attachment file accepted (default: the store's 95 MB).
  */
 fun Application.module(
@@ -147,7 +148,7 @@ fun Application.module(
     googleTokenRefresher: com.example.ApI.server.oauth.GoogleTokenRefresher? = null,
     runRegistry: RunRegistry = RunRegistry(),
     providerFileUploader: com.example.ApI.server.runs.ProviderFileUploader? = null,
-    pythonExecutorUrl: String = com.example.ApI.tools.PythonInterpreterTool.SERVER_URL,
+    sandbox: com.example.ApI.tools.SandboxConfig = resolveSandboxConfig(),
     maxFileBytes: Long = com.example.ApI.data.attachments.AttachmentStoreClient.DEFAULT_MAX_FILE_BYTES,
     // Keep last so that `module(storage, authConfig) { repo -> engine }` trailing-lambda syntax works.
     chatEngineFactory: ((DataRepository) -> com.example.ApI.server.streaming.ChatEngine)? = null
@@ -171,7 +172,7 @@ fun Application.module(
         googleTokenRefresher = googleTokenRefresher ?: com.example.ApI.server.oauth.RealGoogleTokenRefresher(),
         providerFileUploaderFactory = providerFileUploader?.let { uploader -> { _ -> uploader } }
             ?: { repo -> com.example.ApI.server.runs.RepositoryProviderFileUploader(repo) },
-        pythonExecutorUrl = pythonExecutorUrl,
+        sandbox = sandbox,
         maxFileBytes = maxFileBytes
     )
 
