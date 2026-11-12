@@ -459,6 +459,49 @@ class AttachmentStoreRunsTest {
     }
 
     @Test
+    fun `a run's sandbox declaration tells where the sandbox has the request's attachments, by the manifest's names`() {
+        val one = "a,b\n1,2\n".toByteArray()
+        val two = "a,b\n3,4\n".toByteArray()
+        fun stored(bytes: ByteArray) = Attachment(
+            local_file_path = "/data/user/0/app/data.csv", file_name = "data.csv", mime_type = "text/csv",
+            sha256 = store.put(TEST_USERNAME, bytes), size = bytes.size.toLong(), file_POE_url = "https://poe/f"
+        )
+        // Never hashed and only on the device: the sandbox cannot have it
+        val deviceOnly = Attachment(
+            local_file_path = "/data/user/0/app/lost.zip", file_name = "lost.zip", mime_type = "application/zip",
+            file_POE_url = "https://poe/z"
+        )
+        val seed = seed(Message(role = "user", text = "Compare", attachments = listOf(stored(one), stored(two), deviceOnly)))
+        seed.repo.addApiKey(TEST_USERNAME, ApiKey(id = "k2", provider = "poe", key = "poe-key", isActive = true))
+
+        val paths = CopyOnWriteArrayList<String?>()
+        val engine = object : ChatEngine {
+            override suspend fun send(
+                provider: Provider, modelName: String, messages: List<Message>, systemPrompt: String,
+                username: String, chatId: String, projectAttachments: List<Attachment>, webSearchEnabled: Boolean,
+                enabledTools: List<ToolSpecification>, thinkingBudget: ThinkingBudgetValue, temperature: Float?,
+                callback: StreamingCallback
+            ) {
+                val sandbox = ToolRegistry.specificationOf(ToolRegistry.PYTHON_INTERPRETER, enabledTools)!!
+                val inputPaths = sandbox.inputFiles!!.paths()
+                messages.flatMap { it.attachments }.forEach { paths += inputPaths.pathOf(it) }
+                callback.onPartialResponse("Done")
+                callback.onComplete("Done")
+            }
+        }
+        live(seed, engine).use { server ->
+            val client = server.client()
+            val started = client.post(
+                "/api/runs",
+                runBody("run-1", seed.chatId, seed.path(), provider = "poe", enabledToolIds = listOf(ToolRegistry.PYTHON_INTERPRETER))
+            )
+            assertEquals(202, started.status, started.body)
+            client.awaitRun("run-1")
+            assertEquals(listOf("/app/input/data.csv", "/app/input/data (2).csv", null), paths.toList())
+        }
+    }
+
+    @Test
     fun `the python tool fails by name on a file the store does not have and uploads a held file only once`() {
         val csv = "a,b\n1,2\n".toByteArray()
         val csvSha = store.put(TEST_USERNAME, csv)

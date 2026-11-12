@@ -111,9 +111,29 @@ class PythonInterpreterTool(
     }
 
     /** [files]: the manifest. [unavailable]: names of conversation files that cannot be had here at all. */
-    class InputManifest internal constructor(val files: List<InputFile>, val unavailable: List<String>) {
+    class InputManifest internal constructor(
+        val files: List<InputFile>,
+        val unavailable: List<String>,
+        private val placed: List<InputFile> = files
+    ) {
         fun toJson(): JsonArray = buildJsonArray {
             files.forEach { add(buildJsonObject { put("name", it.name); put("size", it.size); put("sha256", it.sha256) }) }
+        }
+
+        /**
+         * The name [attachment]'s file has in `/app/input`, or null when it is not one of the
+         * manifest's files. The attachment may be another copy of the chat's (a request's copy
+         * has provider ids and a path on this machine), so it is found by what names a file
+         * here: its name and its content, or its name and the path it was hashed from.
+         */
+        fun nameOf(attachment: Attachment): String? {
+            val base = inputFileName(attachment.file_name)
+            val sameName = placed.filter { inputFileName(it.attachment.file_name) == base }
+            val sha = attachment.sha256?.takeIf(AttachmentHash::isValid)
+            val found = if (sha != null) sameName.firstOrNull { it.sha256 == sha } else null
+            return (found ?: attachment.local_file_path?.let { path ->
+                sameName.firstOrNull { it.attachment.local_file_path == path }
+            })?.name
         }
     }
 
@@ -176,6 +196,9 @@ ENVIRONMENT & PRE-INSTALLED TOOLS:
                 }
             }
         }
+
+        /** The directory of the sandbox the executor puts the conversation's files in. */
+        const val INPUT_DIR = "/app/input"
 
         /**
          * The name a conversation file gets in `/app/input`: a plain file name (no path
@@ -250,6 +273,8 @@ ENVIRONMENT & PRE-INSTALLED TOOLS:
         val all = currentChat?.messages.orEmpty().flatMap { it.attachments } + currentGroup?.group_attachments.orEmpty()
 
         val entries = mutableListOf<InputFile>()
+        // Every usable attachment with the name its content has, the repeats of a file included
+        val placed = mutableListOf<InputFile>()
         val byName = HashMap<String, InputFile>()
         val unavailable = all.filterNot(usable).map { it.file_name }.toMutableList()
         for (attachment in all.filter(usable)) {
@@ -279,10 +304,12 @@ ENVIRONMENT & PRE-INSTALLED TOOLS:
                 if (taken.sha256 == digest.sha256) { duplicate = true; break }
                 name = numbered(base, n++)
             }
+            val entry = InputFile(name, attachment, digest, file).also { placed += it }
             if (duplicate) continue
-            InputFile(name, attachment, digest, file).also { entries += it; byName[name] = it }
+            entries += entry
+            byName[name] = entry
         }
-        return InputManifest(entries, unavailable.distinct().filter { inputFileName(it) !in byName })
+        return InputManifest(entries, unavailable.distinct().filter { inputFileName(it) !in byName }, placed)
     }
 
     /** The attachment's file on this machine (fetched if needed); fails naming the file. */
@@ -520,6 +547,12 @@ ENVIRONMENT & PRE-INSTALLED TOOLS:
                 put("code", buildJsonObject { put("type", if (isGoogle) "STRING" else "string"); put("description", "Python code to execute") })
             })
             put("required", buildJsonArray { add("code") })
-        })
+        }, inputFiles = inputFiles)
+    }
+
+    /** Where a request is told its attachments are: the manifest's own names, under [INPUT_DIR]. */
+    private val inputFiles = ToolInputFiles {
+        val manifest = inputManifest()
+        ToolInputPaths { attachment -> manifest.nameOf(attachment)?.let { "$INPUT_DIR/$it" } }
     }
 }

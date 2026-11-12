@@ -79,6 +79,13 @@ class ToolRegistry {
         fun modelNameForToolId(toolId: String): String =
             if (toolId == PYTHON_INTERPRETER) WORKSPACE_SANDBOX_NAME else toolId
 
+        /**
+         * The declaration of the tool [toolId] among the tools a request offers the model, or
+         * null when the request does not offer it.
+         */
+        fun specificationOf(toolId: String, offered: List<ToolSpecification>): ToolSpecification? =
+            offered.firstOrNull { toolIdForModelName(it.name) == toolId }
+
         // Skills tool IDs
         const val SKILL_READ = "read_skill"
         const val SKILL_READ_FILE = "read_skill_file"
