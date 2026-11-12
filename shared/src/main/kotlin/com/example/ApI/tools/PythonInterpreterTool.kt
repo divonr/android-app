@@ -136,9 +136,9 @@ ARCHITECTURE & PERSISTENCE:
 
 ENVIRONMENT & PRE-INSTALLED TOOLS:
 - Privileges & Network: Running as `root` (`uid=0`) with full outbound internet access. You can run shell commands via `subprocess.run(...)` and install missing packages via `pip` or `apt-get`.
-- Hebrew & RTL Support: Full Hebrew font packages (`fonts-culmus`, `fonts-noto`, `fonts-dejavu`), `python-bidi`, and `arabic-reshaper` are pre-installed.
-  * Note for Matplotlib/ReportLab/FPDF2 in Hebrew: Always load a TrueType font from `/usr/share/fonts/truetype/` and apply `bidi.algorithm.get_display(arabic_reshaper.reshape(text))` when rendering static images/PDFs that lack native BiDi shaping, or generate HTML+CSS (`dir="rtl"`) and convert to PDF via `weasyprint` / `wkhtmltopdf` / `libreoffice --headless --convert-to pdf`.
-- Pre-installed Stack: pandas, numpy, scipy, scikit-learn, duckdb, matplotlib, seaborn, plotly, openpyxl, python-docx, python-pptx, fpdf2, reportlab, weasyprint, pdfplumber, pypdf, pillow, beautifulsoup4, requests, git, curl, jq, sqlite3, ffmpeg, libreoffice, pandoc.
+- Hebrew & RTL Support: Full Hebrew font packages (`culmus`, `fonts-noto-core`, `fonts-dejavu`), `python-bidi`, and `arabic-reshaper` are pre-installed (list them with `fc-list :lang=he`).
+  * Note for Matplotlib/ReportLab/FPDF2 in Hebrew: Always load a TrueType font that has both Hebrew and Latin glyphs from `/usr/share/fonts/truetype/`, e.g. `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf` (sans) or `/usr/share/fonts/truetype/culmus/FrankRuehlCLM-Medium.ttf` (serif); avoid the Noto Hebrew fonts for mixed text (they have no Latin letters or digits) and the `.otf` Culmus files such as `DavidCLM-Medium.otf` in ReportLab (it cannot load them). Apply `bidi.algorithm.get_display(arabic_reshaper.reshape(text))` when rendering static images/PDFs that lack native BiDi shaping, or generate HTML+CSS (`dir="rtl"`) and convert to PDF via `weasyprint` / `wkhtmltopdf` / `libreoffice --headless --convert-to pdf`.
+- Pre-installed Stack: pandas, numpy, scipy, scikit-learn, duckdb, matplotlib, seaborn, plotly, openpyxl, python-docx, python-pptx, fpdf2, reportlab, weasyprint, pdfplumber, pypdf, pillow, beautifulsoup4, requests, git, curl, jq, sqlite3, ffmpeg, libreoffice, pandoc, wkhtmltopdf, chromium (headless; Plotly static image export with `fig.write_image(...)` works through kaleido).
 - Limits: 4 vCPUs, 2GB RAM, 512MB `/dev/shm`, 5-minute timeout per call. Use `print()` to return text output to yourself.
 """.trim('\n')
 

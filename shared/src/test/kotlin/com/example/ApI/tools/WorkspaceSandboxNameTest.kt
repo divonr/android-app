@@ -54,7 +54,12 @@ class WorkspaceSandboxNameTest {
         assertTrue("\n1. Container vs. Process Lifecycle:\n   - FILESYSTEM IS PERSISTENT" in description)
         assertTrue("ONLY files saved directly inside `/app/output/`" in description)
         assertTrue("`/app/input/{file_name}` (also symlinked at `./data/{file_name}`)" in description)
-        for (gone in listOf("python_interpreter", "files_to_include", "working directory (e.g.", "Available files")) {
+        // Checked against the image: the package and the files that are really there
+        assertTrue("(`culmus`, `fonts-noto-core`, `fonts-dejavu`)" in description)
+        assertTrue("`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`" in description)
+        assertTrue("`/usr/share/fonts/truetype/culmus/FrankRuehlCLM-Medium.ttf`" in description)
+        assertTrue("pandoc, wkhtmltopdf, chromium (headless; Plotly static image export" in description)
+        for (gone in listOf("python_interpreter", "files_to_include", "working directory (e.g.", "Available files", "fonts-culmus")) {
             assertFalse(gone in description, gone)
         }
     }
