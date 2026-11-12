@@ -496,7 +496,7 @@ class GoogleProvider(
     private fun hasFilesApiUri(attachment: Attachment): Boolean =
         !attachment.file_GOOGLE_uri.isNullOrBlank() && attachment.file_GOOGLE_uri != "{file_URI}"
 
-    private fun buildContents(
+    internal fun buildContents(
         messages: List<Message>,
         systemPrompt: String,
         sandboxNotes: Map<Attachment, String> = emptyMap()
@@ -553,6 +553,11 @@ class GoogleProvider(
                         parts.add(buildJsonObject {
                             put("text", message.text)
                         })
+                    }
+
+                    // Files only, and none of them is sent: the turn names them
+                    if (parts.isEmpty() && message.attachments.isNotEmpty()) {
+                        parts.add(buildJsonObject { put("text", fileNamesNote(message)) })
                     }
 
                     if (parts.isNotEmpty()) {

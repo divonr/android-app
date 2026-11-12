@@ -65,7 +65,7 @@ data class DesktopChatState(
             if (query.isEmpty()) return chats
             return chats.filter { chat ->
                 chat.preview_name.contains(query, ignoreCase = true) ||
-                    visibleMessages(chat).any { it.text.contains(query, ignoreCase = true) }
+                    visibleMessages(chat).any { it.displayText.contains(query, ignoreCase = true) }
             }
         }
 }

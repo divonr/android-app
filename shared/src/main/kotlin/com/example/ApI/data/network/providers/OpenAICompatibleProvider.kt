@@ -492,29 +492,33 @@ abstract class OpenAICompatibleProvider() : BaseProvider() {
                             add(buildJsonObject {
                                 put("role", "user")
                                 put("content", buildJsonArray {
-                                    add(buildJsonObject {
-                                        put("type", "text")
-                                        put("text", textWithNotes(message.text, fileNotes))
-                                    })
-                                    message.attachments.filter {
-                                        it.mime_type.startsWith("image/")
-                                    }.forEach { attachment ->
-                                        val base64Data = readFileAsBase64(attachment.local_file_path)
-                                        if (base64Data != null) {
-                                            add(buildJsonObject {
-                                                put("type", "image_url")
-                                                put("image_url", buildJsonObject {
-                                                    put("url", "data:${attachment.mime_type};base64,$base64Data")
-                                                })
-                                            })
+                                    // Images without a text: no empty text part
+                                    val text = textWithNotes(message.text, fileNotes)
+                                    val images = message.attachments.filter { it.mime_type.startsWith("image/") }
+                                        .mapNotNull { attachment ->
+                                            readFileAsBase64(attachment.local_file_path)?.let { attachment to it }
                                         }
+                                    if (text.isNotBlank() || images.isEmpty()) {
+                                        add(buildJsonObject {
+                                            put("type", "text")
+                                            put("text", text.ifBlank { fileNamesNote(message) })
+                                        })
+                                    }
+                                    images.forEach { (attachment, base64Data) ->
+                                        add(buildJsonObject {
+                                            put("type", "image_url")
+                                            put("image_url", buildJsonObject {
+                                                put("url", "data:${attachment.mime_type};base64,$base64Data")
+                                            })
+                                        })
                                     }
                                 })
                             })
                         } else {
                             add(buildJsonObject {
                                 put("role", "user")
-                                put("content", textWithNotes(message.text, fileNotes).ifEmpty { message.text })
+                                // Files only, and none of them is sent: the turn names them
+                                put("content", textWithNotes(message.text, fileNotes).ifEmpty { fileNamesNote(message) }.ifEmpty { message.text })
                             })
                         }
                     }
@@ -525,6 +529,8 @@ abstract class OpenAICompatibleProvider() : BaseProvider() {
 
                         if (nextMessage?.role == "tool_call" && nextMessage.toolCall != null) {
                             // Skip - will be handled when we encounter tool_call
+                        } else if (message.text.isBlank()) {
+                            // A turn without text is left out
                         } else {
                             add(buildJsonObject {
                                 put("role", "assistant")

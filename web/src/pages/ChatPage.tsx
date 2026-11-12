@@ -35,7 +35,7 @@ import { cancelRun } from '../api/runs'
 import { useRunsStore, selectForeignRun } from '../stores/runsStore'
 import { useDraftAttachments } from '../hooks/useDraftAttachments'
 import { clearForwardedFile, peekForwardedFile } from '../utils/forwardedFile'
-import { FILE_ONLY_MESSAGE_TEXT } from '../utils/attachments'
+import { messageDisplayText } from '../utils/attachments'
 import {
   EMPTY_STREAM,
   dropSettled,
@@ -482,8 +482,8 @@ const ChatPage: React.FC = () => {
 
     // From here the files belong to the message: the server commits them when it saves it
     const atts = draft.takeForSend()
-    // Files without a text go out with Android's stand-in text (MessageSendingManager.sendMessage)
-    const text = inputText.trim() ? inputText : FILE_ONLY_MESSAGE_TEXT
+    // Files without a text: the text is empty
+    const text = inputText.trim() ? inputText : ''
     if (multiMessageMode) {
       bufferMessage(text, atts)
     } else {
@@ -680,7 +680,7 @@ const ChatPage: React.FC = () => {
 
   const startEditing = useCallback((msg: Message) => {
     setEditingMsg(msg)
-    setInputText(msg.text)
+    setInputText(messageDisplayText(msg))
     setTimeout(() => textareaRef.current?.focus(), 50)
   }, [])
 

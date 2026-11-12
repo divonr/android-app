@@ -393,7 +393,9 @@ fun MessageBubble(
                 }
 
                 // Text and non-image content with padding
-                val hasText = message.text.isNotEmpty() && message.text != "[קובץ מצורף]"
+                // A message that only carries files has no text (FileOnlyMessages)
+                val messageText = message.displayText
+                val hasText = messageText.isNotEmpty()
                 if (hasText || nonImageAttachments.isNotEmpty() || timeString != null) {
                     Column(
                         modifier = Modifier.padding(
@@ -406,7 +408,7 @@ fun MessageBubble(
                             if (searchHighlight != null) {
                                 // Show highlighted text for search results
                                 val highlightedText = createHighlightedText(
-                                    text = message.text,
+                                    text = messageText,
                                     highlightRanges = searchHighlight.highlightRanges,
                                     highlightColor = AccentBlue
                                 )
@@ -422,7 +424,7 @@ fun MessageBubble(
                             } else {
                                 // Normal markdown rendering
                                 MarkdownText(
-                                    markdown = message.text,
+                                    markdown = messageText,
                                     style = TextStyle(
                                         color = if (isUser) Color.White else OnSurface,
                                         fontSize = 15.sp,
@@ -536,7 +538,7 @@ fun MessageBubble(
                         )
                     },
                     onClick = {
-                        clipboardManager.setText(AnnotatedString(message.text))
+                        clipboardManager.setText(AnnotatedString(message.displayText))
                         showContextMenu = false
                     }
                 )

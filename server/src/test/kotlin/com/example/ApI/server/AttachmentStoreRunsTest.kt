@@ -3,6 +3,7 @@ package com.example.ApI.server
 import com.example.ApI.data.model.ApiKey
 import com.example.ApI.data.model.AppSettings
 import com.example.ApI.data.model.Attachment
+import com.example.ApI.data.model.FileOnlyMessages
 import com.example.ApI.data.model.Message
 import com.example.ApI.data.model.Provider
 import com.example.ApI.data.model.StreamingCallback
@@ -555,43 +556,46 @@ class AttachmentStoreRunsTest {
         }
     }
 
+    /** An engine that calls the code sandbox twice, with [preceding] before the second call, and ends with [finalText]. */
+    private fun twoSandboxCalls(preceding: String, finalText: String) = object : ChatEngine {
+        override suspend fun send(
+            provider: Provider, modelName: String, messages: List<Message>, systemPrompt: String,
+            username: String, chatId: String, projectAttachments: List<Attachment>, webSearchEnabled: Boolean,
+            enabledTools: List<ToolSpecification>, thinkingBudget: ThinkingBudgetValue, temperature: Float?,
+            callback: StreamingCallback
+        ) {
+            repeat(2) { i ->
+                val text = if (i == 1) preceding else ""
+                val parameters = buildJsonObject { put("code", "step $i") }
+                val result = callback.onToolCall(
+                    ToolCall(id = "call-$i", toolId = ToolRegistry.PYTHON_INTERPRETER, parameters = parameters, provider = "openai"), text
+                )
+                callback.onSaveToolMessages(
+                    Message(
+                        role = "tool_call", text = "python",
+                        toolCall = ToolCallInfo(ToolRegistry.PYTHON_INTERPRETER, "Python", parameters, result, java.time.Instant.now().toString())
+                    ),
+                    Message(role = "tool_response", text = "ok", toolResponseCallId = "call-$i", toolResponseOutput = "ok"),
+                    text
+                )
+            }
+            callback.onComplete(finalText)
+        }
+    }
+
     @Test
-    fun `generated files of a tool call that is not followed by text get their own message`() {
+    fun `generated files of a tool call that is not followed by text get a message of their own without any text`() {
         val chart = "chart".toByteArray()
         executor.artifacts = mapOf("out.csv" to chart)
         val seed = seed(Message(role = "user", text = "Make a file"))
-        val engine = object : ChatEngine {
-            override suspend fun send(
-                provider: Provider, modelName: String, messages: List<Message>, systemPrompt: String,
-                username: String, chatId: String, projectAttachments: List<Attachment>, webSearchEnabled: Boolean,
-                enabledTools: List<ToolSpecification>, thinkingBudget: ThinkingBudgetValue, temperature: Float?,
-                callback: StreamingCallback
-            ) {
-                repeat(2) { i ->
-                    val parameters = buildJsonObject { put("code", "step $i") }
-                    val result = callback.onToolCall(
-                        ToolCall(id = "call-$i", toolId = ToolRegistry.PYTHON_INTERPRETER, parameters = parameters, provider = "openai"), ""
-                    )
-                    callback.onSaveToolMessages(
-                        Message(
-                            role = "tool_call", text = "python",
-                            toolCall = ToolCallInfo(ToolRegistry.PYTHON_INTERPRETER, "Python", parameters, result, java.time.Instant.now().toString())
-                        ),
-                        Message(role = "tool_response", text = "ok", toolResponseCallId = "call-$i", toolResponseOutput = "ok"),
-                        ""
-                    )
-                }
-                callback.onComplete("")
-            }
-        }
-        live(seed, engine).use { server ->
+        live(seed, twoSandboxCalls(preceding = "", finalText = "")).use { server ->
             val client = server.client()
             val started = client.post("/api/runs", runBody("run-1", seed.chatId, seed.path(), enabledToolIds = listOf(ToolRegistry.PYTHON_INTERPRETER)))
             assertEquals(202, started.status, started.body)
             client.awaitRun("run-1")
 
             // Like Android's service: the files wait for the next assistant message; with no text
-            // it is a message of its own with the placeholder text
+            // it is a message of its own, and its text is empty - no stand-in is stored
             val messages = seed.chat().messages
             assertEquals(
                 listOf("user", "tool_call", "tool_response", "assistant", "tool_call", "tool_response", "assistant"),
@@ -599,11 +603,35 @@ class AttachmentStoreRunsTest {
             )
             val sha = FakeFileStore.sha256(chart)
             for (index in listOf(3, 6)) {
-                assertEquals(RunRegistry.ATTACHED_FILE_TEXT, messages[index].text)
+                assertEquals("", messages[index].text)
                 assertEquals(listOf(sha), messages[index].attachments.map { it.sha256 })
                 assertEquals(listOf<String?>(null), messages[index].attachments.map { it.local_file_path })
             }
+            assertTrue(messages.none { FileOnlyMessages.isPlaceholder(it.text) })
             seed.assertNoServerPath()
+        }
+    }
+
+    @Test
+    fun `generated files that are followed by text are attached to that text as it is`() {
+        val chart = "chart".toByteArray()
+        executor.artifacts = mapOf("out.csv" to chart)
+        val seed = seed(Message(role = "user", text = "Make a file"))
+        live(seed, twoSandboxCalls(preceding = "One more step", finalText = "Here it is")).use { server ->
+            val client = server.client()
+            val started = client.post("/api/runs", runBody("run-1", seed.chatId, seed.path(), enabledToolIds = listOf(ToolRegistry.PYTHON_INTERPRETER)))
+            assertEquals(202, started.status, started.body)
+            client.awaitRun("run-1")
+
+            val messages = seed.chat().messages
+            assertEquals(
+                listOf("user", "tool_call", "tool_response", "assistant", "tool_call", "tool_response", "assistant"),
+                messages.map { it.role }
+            )
+            val sha = FakeFileStore.sha256(chart)
+            assertEquals("One more step", messages[3].text)
+            assertEquals("Here it is", messages[6].text)
+            for (index in listOf(3, 6)) assertEquals(listOf(sha), messages[index].attachments.map { it.sha256 })
         }
     }
 }

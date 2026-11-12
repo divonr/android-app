@@ -4,6 +4,7 @@ import com.example.ApI.data.model.Chat
 import com.example.ApI.data.model.SearchResult
 import com.example.ApI.data.model.SearchMatchType
 import com.example.ApI.data.model.UserChatHistory
+import com.example.ApI.data.model.displayText
 
 /**
  * Service for searching chats by title, content, and file names.
@@ -48,7 +49,7 @@ class ChatSearchService(
                     var foundInThisMessage = false
 
                     // Check message text
-                    val messageLowercase = message.text.lowercase()
+                    val messageLowercase = message.displayText.lowercase()
                     if (messageLowercase.contains(lowercaseQuery)) {
                         val highlightRanges = findAllOccurrences(messageLowercase, lowercaseQuery)
                         contentMatches.add(SearchResult(

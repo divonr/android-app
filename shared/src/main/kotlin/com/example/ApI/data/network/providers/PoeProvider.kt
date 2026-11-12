@@ -691,7 +691,8 @@ class PoeProvider() : BaseProvider() {
                     val sent = message.attachments.filter { it !in sandboxNotes }
                     val messageObj = buildJsonObject {
                         put("role", "user")
-                        put("content", textWithNotes(message.text, fileNotes).ifEmpty { message.text })
+                        // Files without a text: the turn names them (it is never an empty string)
+                        put("content", textWithNotes(message.text, fileNotes).ifEmpty { fileNamesNote(message) }.ifEmpty { message.text })
                         put("content_type", "text/markdown")
 
                         if (webSearchEnabled && index == lastUserMessageIndex) {
@@ -725,11 +726,14 @@ class PoeProvider() : BaseProvider() {
                     conversationMessages.add(messageObj)
                 }
                 "assistant" -> {
-                    conversationMessages.add(buildJsonObject {
-                        put("role", "bot")
-                        put("content", message.text)
-                        put("content_type", "text/markdown")
-                    })
+                    // A turn without text is left out
+                    if (message.text.isNotBlank()) {
+                        conversationMessages.add(buildJsonObject {
+                            put("role", "bot")
+                            put("content", message.text)
+                            put("content_type", "text/markdown")
+                        })
+                    }
                 }
                 "tool_call", "tool_response" -> {
                     if (!skipToolMessages) {

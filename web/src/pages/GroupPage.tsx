@@ -19,6 +19,7 @@ import {
 import ScreenTopBar from '../components/ScreenTopBar'
 import { t } from '../i18n/he'
 import { apiErrorMessage } from '../utils/apiErrors'
+import { messagePreviewText } from '../utils/attachments'
 import styles from './GroupPage.module.css'
 import { SYNC_CHANGED_EVENT } from '../hooks/useSyncRefresh'
 
@@ -279,7 +280,7 @@ const ChatItem: React.FC<ChatItemProps> = ({ chat, onClick }) => {
         <p className={styles.chatTitle}>{chat.preview_name || t('new_chat')}</p>
         {lastMsg && (
           <p className={styles.chatSnippet}>
-            {lastMsg.text.slice(0, 100)}
+            {messagePreviewText(lastMsg).slice(0, 100)}
           </p>
         )}
       </div>
