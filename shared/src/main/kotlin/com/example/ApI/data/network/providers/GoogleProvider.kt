@@ -310,7 +310,7 @@ class GoogleProvider(
                                     val toolCall = ToolCall(
                                         // Parallel calls can share a millisecond; replay matches by this id
                                         id = "google_${System.currentTimeMillis()}_${detectedToolCalls.size}",
-                                        toolId = name,
+                                        toolId = com.example.ApI.tools.ToolRegistry.toolIdForModelName(name),
                                         parameters = args,
                                         provider = toolCallProviderName,
                                         thoughtSignature = thoughtSignature
@@ -578,14 +578,14 @@ class GoogleProvider(
     /**
      * The output a function response is replayed with. Agent Platform: a list sent by the web
      * keeps a tool result only as the message's text, and the files a run generated are named
-     * there, where the Python tool's declaration says to look for them.
+     * there (the code sandbox's result lists them).
      */
     private fun toolResponseResult(message: Message): String =
         message.toolResponseOutput ?: message.text.takeIf { isAgentPlatform } ?: ""
 
     private fun findToolNameByCallId(messages: List<Message>, callId: String): String? {
         return messages.find { it.role == "tool_call" && it.toolCallId == callId }
-            ?.toolCall?.toolId
+            ?.toolCall?.toolId?.let { com.example.ApI.tools.ToolRegistry.modelNameForToolId(it) }
     }
 
     /**
@@ -633,7 +633,7 @@ class GoogleProvider(
                 calls.forEach { call ->
                     add(buildJsonObject {
                         put("functionCall", buildJsonObject {
-                            put("name", call.toolCall?.toolId ?: "unknown")
+                            put("name", call.toolCall?.toolId?.let { com.example.ApI.tools.ToolRegistry.modelNameForToolId(it) } ?: "unknown")
                             put("args", call.toolCall?.parameters ?: buildJsonObject {})
                         })
                         call.toolCall?.thoughtSignature?.let { signature ->
@@ -687,7 +687,7 @@ class GoogleProvider(
 
     /**
      * The file's name and its inlineData part, or a text note telling the model why this file
-     * isn't there. The name is what a tool taking file names needs; saying it here, not in the
+     * isn't there. The name is what the code sandbox has the file under in its input directory; saying it here, not in the
      * tool's description, keeps it the same on every later request.
      */
     private fun buildAgentPlatformAttachmentParts(attachment: Attachment, inlineAttachments: Set<Attachment>): List<JsonObject> {

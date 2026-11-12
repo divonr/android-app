@@ -142,9 +142,9 @@ class PoeProvider() : BaseProvider() {
                     // For Poe: Add tool result as a bot message
                     val toolResultText = when (nextToolResult) {
                         is ToolExecutionResult.Success ->
-                            "Tool ${currentResponse.toolCall.toolId} result: ${nextToolResult.result}"
+                            "Tool ${com.example.ApI.tools.ToolRegistry.modelNameForToolId(currentResponse.toolCall.toolId)} result: ${nextToolResult.result}"
                         is ToolExecutionResult.Error ->
-                            "Tool ${currentResponse.toolCall.toolId} error: ${nextToolResult.error}"
+                            "Tool ${com.example.ApI.tools.ToolRegistry.modelNameForToolId(currentResponse.toolCall.toolId)} error: ${nextToolResult.error}"
                     }
                     currentMessages = currentMessages + Message(
                         role = "assistant",
@@ -494,7 +494,7 @@ class PoeProvider() : BaseProvider() {
                                         val paramsJson = json.parseToJsonElement(toolArguments).jsonObject
                                         detectedToolCall = ToolCall(
                                             id = toolId,
-                                            toolId = toolName,
+                                            toolId = com.example.ApI.tools.ToolRegistry.toolIdForModelName(toolName),
                                             parameters = paramsJson,
                                             provider = "poe"
                                         )
@@ -798,7 +798,7 @@ class PoeProvider() : BaseProvider() {
                     put("id", toolCall.id)
                     put("type", "function")
                     put("function", buildJsonObject {
-                        put("name", toolCall.toolId)
+                        put("name", com.example.ApI.tools.ToolRegistry.modelNameForToolId(toolCall.toolId))
                         put("arguments", json.encodeToString(toolCall.parameters))
                     })
                 })
@@ -808,7 +808,7 @@ class PoeProvider() : BaseProvider() {
             put("tool_results", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "tool")
-                    put("name", toolCall.toolId)
+                    put("name", com.example.ApI.tools.ToolRegistry.modelNameForToolId(toolCall.toolId))
                     put("tool_call_id", toolCall.id)
                     put("content", when (toolResult) {
                         is ToolExecutionResult.Success -> toolResult.result

@@ -419,6 +419,10 @@ class PythonInterpreterToolTest {
         executor.rawAnswer = 422 to """{"detail":"chat_id missing"}"""
         assertEquals("""Sandbox error: HTTP 422: {"detail":"chat_id missing"}""", run(tool()).text())
 
+        // The public route's own time limit (shorter than the executor's)
+        executor.rawAnswer = 524 to "error code: 524"
+        assertTrue("about 100 seconds" in run(tool()).text() && "may still be running" in run(tool()).text())
+
         executor.rawAnswer = 200 to "<html>gateway</html>"
         assertTrue("not JSON" in run(tool()).text())
 

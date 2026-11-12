@@ -299,7 +299,7 @@ class AnthropicProvider() : BaseProvider() {
 
                             detectedToolCall = ToolCall(
                                 id = currentToolUseId!!,
-                                toolId = currentToolName!!,
+                                toolId = com.example.ApI.tools.ToolRegistry.toolIdForModelName(currentToolName!!),
                                 parameters = toolInputJson,
                                 provider = "anthropic"
                             )
@@ -400,7 +400,7 @@ class AnthropicProvider() : BaseProvider() {
         return handler.getResult()
     }
 
-    private suspend fun buildMessages(messages: List<Message>): List<JsonObject> = withContext(Dispatchers.IO) {
+    internal suspend fun buildMessages(messages: List<Message>): List<JsonObject> = withContext(Dispatchers.IO) {
         val anthropicMessages = mutableListOf<JsonObject>()
         var i = 0
 
@@ -477,7 +477,7 @@ class AnthropicProvider() : BaseProvider() {
                                 add(buildJsonObject {
                                     put("type", "tool_use")
                                     put("id", nextMessage.toolCallId ?: "")
-                                    put("name", toolCall.toolId)
+                                    put("name", com.example.ApI.tools.ToolRegistry.modelNameForToolId(toolCall.toolId))
                                     put("input", toolCall.parameters)
                                 })
                             }
@@ -532,7 +532,7 @@ class AnthropicProvider() : BaseProvider() {
                             add(buildJsonObject {
                                 put("type", "tool_use")
                                 put("id", message.toolCallId ?: "")
-                                put("name", toolCall.toolId)
+                                put("name", com.example.ApI.tools.ToolRegistry.modelNameForToolId(toolCall.toolId))
                                 put("input", toolCall.parameters)
                             })
                         }

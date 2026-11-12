@@ -589,8 +589,9 @@ class CloudRunToolsTest {
             stream.nextOf("complete")
             assertNull(stream.nextOrNull(), "the per-request stream ends with the terminal event")
         }
-        // Skills and Gmail (no connection) are dropped; the Python tool runs here now (the user has a store)
-        assertEquals(listOf("get_date_time", GITHUB_TOOL, GROUP_TOOL, "python_interpreter"), engine.offered[ALICE])
+        // Skills and Gmail (no connection) are dropped; the Python tool runs here now (the user has a
+        // store): enabled by its id, python_interpreter, and offered to the model as workspace_sandbox
+        assertEquals(listOf("get_date_time", GITHUB_TOOL, GROUP_TOOL, "workspace_sandbox"), engine.offered[ALICE])
         assertEquals(listOf(FakeIntegrationTools.Execution(GITHUB_TOOL, "github:alice-gh:gh-alice")), tools.executions.toList())
     }
 

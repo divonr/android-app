@@ -221,8 +221,9 @@ class CloudRunManager(
             messages = prepared.messages,
             systemPrompt = systemPrompt,
             webSearchEnabled = webSearchEnabled,
-            // A tool's specification is named by its id in the tool registry
-            enabledToolIds = enabledTools.map { it.name },
+            // A tool's specification is named by its id in the tool registry (the code sandbox:
+            // by the name the model is given)
+            enabledToolIds = enabledTools.map { com.example.ApI.tools.ToolRegistry.toolIdForModelName(it.name) },
             thinkingBudget = ThinkingBudgetWire.encode(thinkingBudget),
             temperature = temperature,
             projectAttachments = prepared.projectAttachments,

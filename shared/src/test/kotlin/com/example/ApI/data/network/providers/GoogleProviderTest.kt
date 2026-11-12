@@ -36,6 +36,7 @@ import java.net.InetSocketAddress
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -517,6 +518,35 @@ class GoogleProviderTest {
         assertEquals(baseLast.dropLast(1), editedLast.dropLast(1))
         assertEquals("Now explain why", baseLast.last().string("text"))
         assertEquals("Now explain why, in one sentence", editedLast.last().string("text"))
+    }
+
+    @Test
+    fun `the code sandbox is called and replayed as workspace_sandbox while its stored id stays python_interpreter`() {
+        val sandboxCall = "data: " + """{"candidates":[{"content":{"role":"model","parts":[
+            {"functionCall":{"name":"workspace_sandbox","args":{"code":"print(2)"}},"thoughtSignature":"SIG-2"}]},"finishReason":"STOP"}]}""".replace("\n", "") + "\n\n"
+        for (platform in listOf(GooglePlatform.AGENT_PLATFORM to VERTEX_PROVIDER, GooglePlatform.AI_STUDIO to "google")) {
+            exchanges.clear()
+            replies = listOf(sandboxCall, text)
+            val r = Recorder()
+            // The history holds a call saved before the rename
+            send(platform.first, platform.second, r, messages = conversation("Run it again"), tools = listOf(tool("workspace_sandbox")))
+
+            // The tool loop, the settings and the saved message get the id
+            assertEquals(listOf("python_interpreter"), r.calls.map { it.toolId })
+
+            // Every request names the stored call, its response and the new call as declared
+            for (exchange in exchanges) {
+                val body = exchange.body.toString()
+                assertFalse("\"name\":\"python_interpreter\"" in body, body)
+                assertEquals(listOf("workspace_sandbox"), declarations(exchange.body).map { it.string("name") })
+            }
+            fun names(exchange: Exchange, part: String) = contents(exchange).flatMap { parts(it) }
+                .mapNotNull { it[part]?.jsonObject?.string("name") }
+            assertEquals(listOf("workspace_sandbox"), names(exchanges[0], "functionCall"))
+            assertEquals(listOf("workspace_sandbox"), names(exchanges[0], "functionResponse"))
+            assertEquals(listOf("workspace_sandbox", "workspace_sandbox"), names(exchanges[1], "functionCall"))
+            assertEquals(listOf("workspace_sandbox", "workspace_sandbox"), names(exchanges[1], "functionResponse"))
+        }
     }
 
     @Test

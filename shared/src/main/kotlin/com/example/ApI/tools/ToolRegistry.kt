@@ -53,8 +53,31 @@ class ToolRegistry {
         const val DRIVE_CREATE_FOLDER = "drive_create_folder"
         const val DRIVE_DELETE_FILE = "drive_delete_file"
 
-        // Python Interpreter tool ID
+        /**
+         * The code sandbox's tool ID: what the enabled-tools settings (global, per chat, per
+         * group) and every stored tool call say, on every app version. It did not change when
+         * the tool the models see was renamed ([WORKSPACE_SANDBOX_NAME]).
+         */
         const val PYTHON_INTERPRETER = "python_interpreter"
+
+        /** The name the code sandbox is declared to the models with. */
+        const val WORKSPACE_SANDBOX_NAME = "workspace_sandbox"
+
+        /**
+         * The tool ID of the tool a model called by [modelName]. Only the code sandbox's name
+         * differs from its ID; a model that still says the old name (it read it in an old part
+         * of the conversation) reaches the same tool.
+         */
+        fun toolIdForModelName(modelName: String): String =
+            if (modelName == WORKSPACE_SANDBOX_NAME) PYTHON_INTERPRETER else modelName
+
+        /**
+         * The name a provider is told for the tool [toolId] — in the declarations and when a
+         * stored call is replayed, so that calls saved before the rename (and the ones saved
+         * since, which keep the ID) match the one declared name.
+         */
+        fun modelNameForToolId(toolId: String): String =
+            if (toolId == PYTHON_INTERPRETER) WORKSPACE_SANDBOX_NAME else toolId
 
         // Skills tool IDs
         const val SKILL_READ = "read_skill"
@@ -316,7 +339,7 @@ class ToolRegistry {
      * @return The tool's display name, or the toolId if tool not found
      */
     fun getToolDisplayName(toolId: String): String {
-        return tools[toolId]?.name ?: toolId
+        return tools[toolIdForModelName(toolId)]?.name ?: toolId
     }
 
     /**
@@ -352,6 +375,9 @@ class ToolRegistry {
      * @param enabledToolIds List of tool IDs that are currently enabled
      */
     suspend fun executeTool(toolCall: ToolCall, enabledToolIds: List<String>): ToolExecutionResult {
+        // Whatever the caller knows the tools by (IDs, or the names the model is given)
+        val toolCall = toolCall.copy(toolId = toolIdForModelName(toolCall.toolId))
+        val enabledToolIds = enabledToolIds.map { toolIdForModelName(it) }
         // Check if tool is enabled
         if (toolCall.toolId !in enabledToolIds) {
             return ToolExecutionResult.Error("Tool '${toolCall.toolId}' is not enabled")

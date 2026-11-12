@@ -260,6 +260,9 @@ enables one of its ids. A run keeps the tools (and tokens) it started with until
   request. Needs skill-folder sync first.
 - **Python (A2, was device-only in S5):** `PythonInterpreterTool` is never in a process registry —
   Android builds it per request from the open chat; the server builds it per run (round 2, Server).
+  Since 2026-11-12 the models know it as `workspace_sandbox`; its tool id — `enabledToolIds`,
+  the enabled / excluded tool settings, `toolCall.toolId` of stored calls — is still
+  `python_interpreter` on every client and here (see "Code sandbox v2").
 
 ## Attachments (v1) — superseded by "Attachment store (round 2)"; `unservableAttachment` is gone
 Device-local attachment files are not on the server. The server answers
@@ -515,7 +518,8 @@ upload, hash, state or network call happens and the app behaves as before.
   type) — never a path, and never over a hash recorded meanwhile.
 - **Python tool on the device** (`ToolManager`): with sync on it gets `DeviceAttachments.pythonFiles`
   — input files also from the store; generated files saved in `files/attachments` as always, with
-  `sha256` + `size`, and uploaded + committed in the background. With sync off: unchanged.
+  `sha256` + `size`, and uploaded + committed in the background. With sync off: the device's own
+  files by path. Which files go to the executor and when: "Code sandbox v2".
 - **Lifetime**: uploads / downloads belong to the process, not to a screen: they survive rotation
   and leaving the chat, and go on while the app is in the background as long as the process lives
   (there is no foreground service for them). After a process death a draft's pending file is swept
@@ -599,8 +603,10 @@ Per user (`UserContext.attachments`, `server/.../attachments/UserAttachments.kt`
   periodic re-commit.
 - **Python tool** (`UserTools.pythonTool`): built per run when the request enables it and the user
   has a store. Input files: the attachments of the request and of the server copy's chat and group
-  that have a hash (or are the user's own file here), fetched through the resolver when the code
-  asks for them by name. Generated files: written to the user's cache under their hash, uploaded
+  that have a hash (or are the user's own file here) — all of them, named to the executor in the
+  call's manifest by the hash and size recorded on them; one is fetched through the resolver and
+  uploaded (loopback) only when the executor answers that it does not hold it ("Code sandbox
+  v2"). Generated files: written to the user's cache under their hash, uploaded
   and committed (`AttachmentUploader.ensureStored`; retried in the background when the store
   cannot be reached) and described by `file_name`, `mime_type`, `sha256`, `size` — no path. As in
   Android's `StreamingService`, they are attached to the **next assistant message** the run saves
@@ -608,8 +614,48 @@ Per user (`UserContext.attachments`, `server/.../attachments/UserAttachments.kt`
   on a cancel with `keepPartial` they are kept with the partial reply). The tool's result
   (`toolCall.result.details.output_files`, stored in the tool-call message) now carries `sha256` /
   `size` and has `local_file_path` only on a device; `PythonInterpreterTool.outputAttachments` is
-  the one parser (used by the service and the server). The server's Python session is its own
-  (`python_sessions.json` in the user's dir), not the device's.
+  the one parser (used by the service and the server). The executor's session is the chat (its
+  `chat_id`), so a chat's device runs and cloud runs share one container; there is no stored
+  session id any more (`python_sessions.json` is unused).
+
+## Code sandbox v2 (2026-11-12) — `PythonInterpreterTool`, all platforms
+Contract with the executor (`~/python-server`, `POST /v2/execute`): multipart `code`, `chat_id`,
+`input_manifest` (JSON array of `{name,size,sha256}`), `files` parts; header `X-Api-Key`.
+- **Key and URL** are not in the sources. Android: `BuildConfig.SANDBOX_API_KEY` /
+  `SANDBOX_EXECUTOR_URL` from `local.properties` (`sandbox.apiKey`, `sandbox.executorUrl`) or the
+  build's environment (`SANDBOX_API_KEY`, `SANDBOX_EXECUTOR_URL`); desktop: a generated
+  `SandboxBuildConfig` from the same; llm-web: the two environment variables
+  (`resolveSandboxConfig`, default URL `http://127.0.0.1:8000/v2/execute`). The platform passes a
+  `SandboxConfig` into the tool; without a key the tool answers with a configuration error. The
+  web frontend never sees the key (it only talks to llm-web).
+- **Session** = the chat id. Without a chat: `nochat-<uuid>`, the uuid kept in
+  `sandbox_install_id` under the files dir (one container per install for such calls).
+- **Input files**: the model chooses nothing (`files_to_include` is gone). Every call's manifest
+  names every attachment of the chat's messages (current path, in order) and then of its group /
+  project that can be had on this machine. Size and hash: the ones recorded on the attachment,
+  else the file is hashed (cached per path + size + mtime for the life of the process). Names:
+  the attachment's name made a plain file name; the same name with the same content is one entry,
+  with another content it is `name (2).ext`, `name (3).ext`… in that order.
+- **Handshake**: the first request has no bodies; on `{"status":"missing_files","missing":[…]}`
+  the same request is sent once more with those bodies (streamed from the files); a second
+  `missing_files` is an error. A file with a recorded hash that cannot be fetched then fails the
+  call and names the file ("…could not be given to the sandbox… Nothing was run"); a file with
+  no hash that is not on this machine is left out of the manifest and named in a notice at the
+  top of the result.
+- **Result** (the model's text; nothing is cut on the client): optional notice that the container
+  is new because the old one `expired` / was `lost` (not for `new`), `**stdout:**` and
+  `**stderr:**` blocks (empty ones left out), `**Exit code:**` when not 0, `**Timed out:**` with
+  the executor's message after the partial output, a note when the executor reports `truncated`,
+  the generated files. Error result: non-zero exit code or timeout (its `details` still carry
+  `output_files`, which the clients attach and show). `details` = `exit_code`, `timed_out`,
+  `output_files`; the output itself is only in the result text.
+- **Name**: the tool is declared to every provider as `workspace_sandbox` with one fixed
+  description (`PythonInterpreterTool.DESCRIPTION`, no per-request content, so Vertex's cached
+  prefix holds); its id stays `python_interpreter`. `ToolRegistry.toolIdForModelName` is applied
+  where a provider parses a call (the tool loop, the saved message and the settings only ever see
+  the id) and `modelNameForToolId` where a stored call is serialised for a provider (so calls
+  saved before the rename replay under the declared name). A device on an older app version keeps
+  working with the same synced chats and settings: it declares and replays `python_interpreter`.
 
 ## Web file routes (llm-web, under `/api`, session cookie or sync bearer) — A2
 The browser cannot talk to the sync server; these routes work on the authenticated user's store

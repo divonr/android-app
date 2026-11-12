@@ -57,7 +57,7 @@ fun ToolToggleDropdown(
             } else if (toolId == ToolRegistry.PYTHON_INTERPRETER) {
                 ToolItem(
                     id = toolId,
-                    name = "Python Code Interpreter",
+                    name = "Workspace Sandbox",
                     integrationTitle = getIntegrationTitle(toolId)
                 )
             } else {

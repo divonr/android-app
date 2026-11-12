@@ -60,7 +60,8 @@ data class SandboxConfig(val executorUrl: String, val apiKey: String) {
 }
 
 /**
- * Python Interpreter tool - shared implementation, speaking the executor's v2 protocol
+ * The code sandbox (`workspace_sandbox` to the models; its ID is still `python_interpreter`,
+ * see [ToolRegistry.PYTHON_INTERPRETER]) - shared implementation, speaking the executor's v2 protocol
  * (`POST /v2/execute`):
  *
  *  - the session is the chat: `chat_id` is the chat's id, and the executor keeps one container
@@ -89,21 +90,14 @@ class PythonInterpreterTool(
     private val files: PythonToolFiles? = null
 ) : Tool {
 
-    override val id = "python_interpreter"
-    override val name = "Python Code Interpreter"
+    // The ID the settings and the stored calls know the tool by (ToolRegistry.PYTHON_INTERPRETER);
+    // the models are told ToolRegistry.WORKSPACE_SANDBOX_NAME
+    override val id = ToolRegistry.PYTHON_INTERPRETER
+    override val name = "Workspace Sandbox"
 
-    // The same on every request: a provider's prompt cache covers the tool declarations
-    override val description: String = """
-Consider using this tool for data processing, analysis, or when generating files (Word, PowerPoint, Excel, PDF, images, etc.) would benefit the user's request.
-
-Packages: pandas, numpy, matplotlib, scipy, seaborn, openpyxl, python-pptx, python-docx, Pillow, fpdf, networkx. Internet access available — pip install additional packages if needed.
-
-Input files: every file attached in this conversation is in ./data/{file_name}.
-
-Output: print() for text. Save files for the user to /app/output/ (e.g., plt.savefig('/app/output/chart.png')). Files saved there are displayed to the user as message attachments.
-
-Limits: 5 min timeout, 2GB RAM.
-    """.trimIndent()
+    // The same on every request, whatever the chat's files: a provider's prompt cache covers
+    // the tool declarations
+    override val description: String get() = DESCRIPTION
 
     /** One entry of `input_manifest`: [name] is the file's name in `/app/input`. */
     class InputFile internal constructor(
@@ -127,6 +121,27 @@ Limits: 5 min timeout, 2GB RAM.
     private class InputFileUnavailable(val fileName: String, val reason: String) : Exception()
 
     companion object {
+        /** What the models are told about the tool. Raw text: no indentation is stripped. */
+        val DESCRIPTION: String = """
+Execute Python 3.11 code inside a persistent, full-featured Debian Linux container (root access) to perform data analysis, complex calculations, web scraping, system tasks (via subprocess/bash), and file/document generation (PDF, Word, Excel, PowerPoint, charts, archives).
+
+ARCHITECTURE & PERSISTENCE:
+1. Container vs. Process Lifecycle:
+   - FILESYSTEM IS PERSISTENT across tool calls within the active conversation. Files saved in `/app`, installed `pip` packages, and `apt-get` system packages remain available in subsequent calls (Caveat: After two hours of inactivity, the cloud container will terminate and reset).
+   - PYTHON MEMORY IS STATELESS between calls. Each tool call executes as a fresh `python3` process. In-memory variables do NOT persist automatically—save intermediate data (e.g., DataFrames, state) to disk (`/app/temp.parquet`, `.pkl`, or `.sqlite`) if needed across steps.
+2. Directory Structure & File Export:
+   - Working Directory: `/app` (use for intermediate files, subdirectories, and temporary work).
+   - Input Files: Any conversation files (user attachments) are placed in `/app/input/{file_name}` (also symlinked at `./data/{file_name}`). If two different files share a name, the later one is stored as `name (2).ext`.
+   - Output / User Attachments: ONLY files saved directly inside `/app/output/` (e.g., `/app/output/report.pdf`, `/app/output/chart.png`) will be automatically attached and sent to the user in the chat interface. Do not place intermediate files in `/app/output/`.
+
+ENVIRONMENT & PRE-INSTALLED TOOLS:
+- Privileges & Network: Running as `root` (`uid=0`) with full outbound internet access. You can run shell commands via `subprocess.run(...)` and install missing packages via `pip` or `apt-get`.
+- Hebrew & RTL Support: Full Hebrew font packages (`fonts-culmus`, `fonts-noto`, `fonts-dejavu`), `python-bidi`, and `arabic-reshaper` are pre-installed.
+  * Note for Matplotlib/ReportLab/FPDF2 in Hebrew: Always load a TrueType font from `/usr/share/fonts/truetype/` and apply `bidi.algorithm.get_display(arabic_reshaper.reshape(text))` when rendering static images/PDFs that lack native BiDi shaping, or generate HTML+CSS (`dir="rtl"`) and convert to PDF via `weasyprint` / `wkhtmltopdf` / `libreoffice --headless --convert-to pdf`.
+- Pre-installed Stack: pandas, numpy, scipy, scikit-learn, duckdb, matplotlib, seaborn, plotly, openpyxl, python-docx, python-pptx, fpdf2, reportlab, weasyprint, pdfplumber, pypdf, pillow, beautifulsoup4, requests, git, curl, jq, sqlite3, ffmpeg, libreoffice, pandoc.
+- Limits: 4 vCPUs, 2GB RAM, 512MB `/dev/shm`, 5-minute timeout per call. Use `print()` to return text output to yourself.
+""".trim('\n')
+
         /**
          * The files a run of the tool generated, as attachments, from the `output_files` of its
          * result's details: each with its `local_file_path` (a file on this device) and / or its
@@ -366,6 +381,11 @@ Limits: 5 min timeout, 2GB RAM.
                     null,
                     when (response.code) {
                         401, 403 -> "The sandbox refused this app's API key (HTTP ${response.code}). Tell the user; retrying will not help."
+                        // Cloudflare, in front of the executor for a device: no answer within about 100 s
+                        524 -> "The route to the sandbox gave up waiting for the answer (HTTP 524): on this device a call " +
+                            "cannot take longer than about 100 seconds. The code was not stopped and may still be running; " +
+                            "its output is lost. Split the work into shorter calls, or run a long job in the background " +
+                            "(e.g. subprocess.Popen with its output redirected to a file under /app) and read its result in a later call."
                         else -> "Sandbox error: HTTP ${response.code}" + if (text.isBlank()) "" else ": $text"
                     }
                 )
@@ -415,8 +435,7 @@ Limits: 5 min timeout, 2GB RAM.
         if (exitCode != null && exitCode != 0) sections += "**Exit code:** $exitCode"
         if (timedOut) {
             sections += "**Timed out:** " + (body.string("message")?.takeIf { it.isNotBlank() }
-                ?: "the process was killed after the 5 minute limit.") +
-                " Whatever it printed until then is above; nothing printed later exists."
+                ?: "the process was killed after the 5 minute limit; what it printed until then is above.")
         }
         if (truncated) {
             sections += "**Note:** the sandbox truncated this output (more than 10 MB in a stream): its start and its end are above, the middle is missing."
@@ -493,7 +512,7 @@ Limits: 5 min timeout, 2GB RAM.
 
     override fun getSpecification(provider: String): ToolSpecification {
         val isGoogle = provider == "google"
-        return ToolSpecification(name = id, description = description, parameters = buildJsonObject {
+        return ToolSpecification(name = ToolRegistry.WORKSPACE_SANDBOX_NAME, description = description, parameters = buildJsonObject {
             put("type", if (isGoogle) "OBJECT" else "object")
             put("properties", buildJsonObject {
                 put("code", buildJsonObject { put("type", if (isGoogle) "STRING" else "string"); put("description", "Python code to execute") })

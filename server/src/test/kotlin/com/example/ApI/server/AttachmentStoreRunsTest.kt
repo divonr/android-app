@@ -387,7 +387,8 @@ class AttachmentStoreRunsTest {
                 enabledTools: List<ToolSpecification>, thinkingBudget: ThinkingBudgetValue, temperature: Float?,
                 callback: StreamingCallback
             ) {
-                description = enabledTools.single { it.name == ToolRegistry.PYTHON_INTERPRETER }.description
+                // Enabled by its id (the request says python_interpreter), declared under its new name
+                description = enabledTools.single { it.name == ToolRegistry.WORKSPACE_SANDBOX_NAME }.description
                 val parameters = buildJsonObject { put("code", "import pandas") }
                 val call = ToolCall(id = "call-1", toolId = ToolRegistry.PYTHON_INTERPRETER, parameters = parameters, provider = "poe")
                 val result = callback.onToolCall(call, "")

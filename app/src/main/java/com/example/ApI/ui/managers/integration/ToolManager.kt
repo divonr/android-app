@@ -116,6 +116,8 @@ class ToolManager(
      * Handles special tools like group_conversations that need dynamic context.
      */
     suspend fun executeToolCall(toolCall: ToolCall): ToolExecutionResult {
+        // The providers hand over tool IDs; a name the model was given is taken too
+        val toolCall = toolCall.copy(toolId = ToolRegistry.toolIdForModelName(toolCall.toolId))
         if (toolCall.toolId == "get_current_group_conversations") {
             val currentChat = deps.uiState.value.currentChat
             val groups = deps.uiState.value.groups
